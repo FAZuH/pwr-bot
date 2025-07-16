@@ -1,9 +1,9 @@
 use async_trait::async_trait;
-use crate::event::new_chapter_event::NewChapterEvent;
+use crate::event::manga_update_event::MangaUpdateEvent;
 use std::any::Any;
 
 #[async_trait]
 pub trait Action: Send + Sync {
-    async fn run(&self, event: &NewChapterEvent) -> anyhow::Result<()>;
+    async fn run(&self, event: &MangaUpdateEvent) -> anyhow::Result<()>;
     fn as_any(&self) -> &dyn Any;
 }

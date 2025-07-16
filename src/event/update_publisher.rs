@@ -1,44 +1,54 @@
-use async_trait::async_trait;
 use sqlx::{SqlitePool, sqlite::SqliteRow, Row};
 use tokio::sync::RwLock;
 use std::sync::Arc;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 use crate::action::action::Action;
 use crate::config::Config;
-use crate::listener::listener::Listener;
-use crate::source::source::UpdateSource;
+use crate::source::source::Source;
 
-pub struct PollingListener {
+pub struct UpdatePublisher {
     db: SqlitePool,
-    sources: HashMap<String, Arc<dyn UpdateSource>>,
-    subscribers: Arc<RwLock<HashMap<(String, String), Vec<Box<dyn Action>>>>>,
+    sources: HashSet<Source>,
+    subscribers: Arc<RwLock<HashMap<(String, String), HashSet<Box<dyn Action>>>>>,
     running: bool,
     interval: Duration
 }
 
-impl PollingListener {
+impl UpdatePublisher {
     pub async fn new(config: Config) -> anyhow::Result<Self> {
         // Create db file if not exists
         if !std::fs::exists(&config.db_path).unwrap_or(false) {
             std::fs::write(&config.db_path, "")?;
         }
         // Get db pool
-        let db_url = format!("sqlite://{}", config.db_path);
-        let db = SqlitePool::connect(&db_url).await?;
+        let db = SqlitePool::connect(&format!("sqlite://{}", config.db_path)).await?;
         // Init db tables
-        PollingListener::create_tables(&db).await?;
+        UpdatePublisher::create_tables(&db).await?;
         Ok(Self {
             db,
-            sources: HashMap::new(),
+            sources: HashSet::<Source>::new(),
             subscribers: Arc::new(RwLock::new(HashMap::new())),
             running: false,
             interval: Duration::from_secs(config.poll_interval)
         })
     }
 
-    pub fn register_source(&mut self, series_type: String, source: Arc<dyn UpdateSource>) {
-        self.sources.insert(series_type, source);
+    pub fn register_source(&mut self, source: Source) {
+        self.sources.insert(source);
+    }
+
+    pub fn start(&mut self) -> anyhow::Result<()> {
+        if !self.running {
+            self.running = true;
+            self.spawn_check_loop();
+        }
+        Ok(())
+    }
+
+    pub fn stop(&mut self) -> anyhow::Result<()> {
+        self.running = false;
+        Ok(())
     }
 
     async fn create_tables(db: &SqlitePool) -> anyhow::Result<()> {
@@ -77,13 +87,14 @@ impl PollingListener {
         let db = self.db.clone();
         let sources = self.sources.clone();
         let actions = self.subscribers.clone();
-        let interval_duration = self.interval.clone();
+        let interval_duration = self.interval;  // Duration implements Copy, no need to clone
 
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(interval_duration);
             loop {
                 interval.tick().await;
-                if let Err(e) = Self::check_updates(db.clone(), sources.clone(), actions.clone()).await {
+                // Pass references instead of cloning every iteration
+                if let Err(e) = Self::check_updates(&db, &sources, &actions).await {
                     eprintln!("Error checking updates: {}", e);
                 }
             }
@@ -91,13 +102,13 @@ impl PollingListener {
     }
 
     async fn check_updates(
-        db: SqlitePool,
-        sources: HashMap<String, Arc<dyn UpdateSource>>,
-        actions: Arc<RwLock<HashMap<(String, String), Vec<Box<dyn Action>>>>>,
+        db: &SqlitePool,
+        sources: &HashSet<Source>,
+        actions: &Arc<RwLock<HashMap<(String, String), HashSet<Box<dyn Action>>>>>,
     ) -> anyhow::Result<()> {
         let subscriptions: Vec<SqliteRow> =
             sqlx::query("SELECT DISTINCT user_id, series_id, series_type FROM subscriptions")
-                .fetch_all(&db)
+                .fetch_all(db)
                 .await?;
 
         for sub in subscriptions {
@@ -105,45 +116,45 @@ impl PollingListener {
             let series_id: String = sub.get("series_id");
             let series_type: String = sub.get("series_type");
 
-            let source = sources
-                .get(&series_type)
+            let source = series_type
+                .parse::<Source>()
+                .ok()
+                .and_then(|s| sources.get(&s))
                 .ok_or_else(|| anyhow::anyhow!("No source for {}", series_type))?;
 
-            if let Some(event) = source.check_update(&series_id).await? {
-                let last_update: Option<SqliteRow> = sqlx::query(
-                    "SELECT last_chapter_id FROM last_updates WHERE series_id = ?",
-                )
+            let latest_id: Option<String> = match source {
+                Source::Anime(anime) => anime.get_latest(series_id.as_str()).await?.map(|series| series.series_id),
+                Source::Manga(manga) => manga.get_latest(series_id.as_str()).await?.map(|series| series.series_id),
+            };
+            let Some(latest_id) = latest_id else { continue; };
+            // latest_id is not None
+
+            let last_update: Option<SqliteRow> = sqlx::query(
+                "SELECT last_chapter_id FROM last_updates WHERE series_id = ?",
+            )
+            .bind(&series_id)
+            .fetch_optional(db)
+            .await?;
+
+            // Possibilities:
+            // 1. last_chapter_id is None. update db & publish event
+            // 2. last_chapter_id != latest_id. update db & publish event
+            // 3. last_chapter_id == latest_id. continue
+
+            let last_chapter_id: Option<String> = last_update.map(|row| row.get("last_chapter_id"));
+
+            sqlx::query("INSERT OR REPLACE INTO last_updates (series_id, series_type, last_chapter_id, last_updated) VALUES (?, ?, ?, ?)")
                 .bind(&series_id)
-                .fetch_optional(&db)
+                .bind(&series_type)
+                .bind(&latest_id)
+                .bind(chrono::Utc::now().to_rfc3339())
+                .execute(db)
                 .await?;
-
-                let last_chapter_id = last_update.map(|row| row.get("last_chapter_id"));
-
-                if last_chapter_id.as_ref() != Some(&event.content_id) {
-                    let read_actions = actions.read().await;
-                    if let Some(action_list) = read_actions.get(&(user_id.clone(), series_id.clone())) {
-                        for action in action_list {
-                            action.run(&event).await?;
-                        }
-                    }
-
-                    sqlx::query("INSERT OR REPLACE INTO last_updates (series_id, series_type, last_chapter_id, last_updated) VALUES (?, ?, ?, ?)")
-                        .bind(&series_id)
-                        .bind(&series_type)
-                        .bind(&event.content_id)
-                        .bind(chrono::Utc::now().to_rfc3339())
-                        .execute(&db)
-                        .await?;
-                }
-            }
         }
 
         Ok(())
     }
-}
 
-#[async_trait]
-impl Listener for PollingListener {
     async fn subscribe(&mut self, user_id: String, series_id: String, series_type: String, webhook_url: String) -> anyhow::Result<()> {
         let action_type = std::any::type_name::<Box<dyn Action>>().to_string();
         sqlx::query("INSERT OR REPLACE INTO subscriptions VALUES (?, ?, ?, ?, ?)")
@@ -166,16 +177,4 @@ impl Listener for PollingListener {
         Ok(())
     }
 
-    fn start(&mut self) -> anyhow::Result<()> {
-        if !self.running {
-            self.running = true;
-            self.spawn_check_loop();
-        }
-        Ok(())
-    }
-
-    fn stop(&mut self) -> anyhow::Result<()> {
-        self.running = false;
-        Ok(())
-    }
 }

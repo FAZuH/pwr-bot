@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use serenity::{http::Http, model::webhook::Webhook, builder::ExecuteWebhook};
 use std::sync::Arc;
 use crate::action::action::Action;
-use crate::event::new_chapter_event::NewChapterEvent;
+use crate::event::manga_update_event::MangaUpdateEvent;
 
 pub struct DiscordWebhookAction {
     pub webhook: Webhook,
@@ -20,7 +20,7 @@ impl DiscordWebhookAction {
 
 #[async_trait]
 impl Action for DiscordWebhookAction {
-    async fn run(&self, event: &NewChapterEvent) -> anyhow::Result<()> {
+    async fn run(&self, event: &MangaUpdateEvent) -> anyhow::Result<()> {
         let message = format!(
             "New {} update for **{}**! {} {}: {}",
             event.series_type,

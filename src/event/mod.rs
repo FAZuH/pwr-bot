@@ -1,7 +1,8 @@
-pub mod new_chapter_event;
-pub mod new_episode_event;
-pub mod new_event;
+pub mod manga_update_event;
+pub mod anime_update_event;
+pub mod update_event;
+pub mod update_publisher;
 
-pub use new_chapter_event::NewChapterEvent;
-pub use new_episode_event::NewEpisodeEvent;
-pub use new_event::NewEvent;
+// pub use manga_update_event::MangaUpdateEvent;
+// pub use anime_update_event::AnimeUpdateEvent;
+// pub use new_event::UpdateEvent;

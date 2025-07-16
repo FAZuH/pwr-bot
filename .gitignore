@@ -24,3 +24,4 @@ target
 /.vscode
 /logs
 /tmp
+.env

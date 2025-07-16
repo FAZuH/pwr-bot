@@ -1,5 +1,5 @@
 #[derive(Clone)]
-pub struct NewEpisodeEvent {
+pub struct AnimeUpdateEvent {
     pub series_id: String,
     pub series_type: String,
     pub title: String,
