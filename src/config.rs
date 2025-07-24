@@ -1,7 +1,5 @@
 #[derive(Clone, Default)]
 pub struct Config {
-    pub mangadex_api_url: String,
-    pub anilist_api_url: String,
     pub poll_interval: u64,
     pub db_path: String,
     pub discord_token: String,
@@ -11,8 +9,6 @@ pub struct Config {
 impl Config {
     pub fn new() -> Self {
         Self {
-            mangadex_api_url: "https://api.mangadex.org".to_string(),
-            anilist_api_url: "https://graphql.anilist.co".to_string(),
             poll_interval: std::env::var("POLL_INTERVAL")
                 .unwrap_or("180".to_string())
                 .parse::<u64>()

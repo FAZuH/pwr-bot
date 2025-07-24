@@ -1,7 +1,6 @@
 pub mod manga_update_event;
 pub mod anime_update_event;
 pub mod update_event;
-pub mod update_publisher;
 pub mod event_bus;
 pub mod event;
 

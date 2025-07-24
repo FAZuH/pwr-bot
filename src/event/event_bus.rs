@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 use super::event::Event;
 
-struct EventBus {
+pub struct EventBus {
     subscribers: HashMap<TypeId, Vec<Box<dyn Fn(&dyn Any) + Send + Sync>>>,
 }
 
