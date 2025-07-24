@@ -16,7 +16,9 @@ impl SubscribersTable {
     }
 
     pub async fn select_all_by_type(&self, r#type: &str) -> anyhow::Result<Vec<SubscribersModel>> {
-        let ret = sqlx::query_as::<_, SubscribersModel>("SELECT id, subscriber_type, subscriber_id FROM subscribers WHERE subscriber_type = ?")
+        let ret = sqlx::query_as::<_, SubscribersModel>(
+            "SELECT id, subscriber_type, subscriber_id FROM subscribers WHERE subscriber_type = ?",
+        )
         .bind(r#type)
         .fetch_all(&self.base.pool)
         .await?;
@@ -30,8 +32,12 @@ impl SubscribersTable {
                 subscriber_type = ? AND 
                 subscriber_id = ? AND
                 latest_update_id = ?
-            "#
-        ).bind(model.subscriber_type).bind(model.subscriber_id).execute(&self.base.pool).await?;
+            "#,
+        )
+        .bind(model.subscriber_type)
+        .bind(model.subscriber_id)
+        .execute(&self.base.pool)
+        .await?;
         Ok(())
     }
 }
@@ -61,7 +67,9 @@ impl Table<SubscribersModel, u32> for SubscribersTable {
     }
 
     async fn select_all(&self) -> anyhow::Result<Vec<SubscribersModel>> {
-        let ret = sqlx::query_as::<_, SubscribersModel>("SELECT id, subscriber_type, subscriber_id FROM subscribers")
+        let ret = sqlx::query_as::<_, SubscribersModel>(
+            "SELECT id, subscriber_type, subscriber_id FROM subscribers",
+        )
         .fetch_all(&self.base.pool)
         .await?;
         Ok(ret)
@@ -85,25 +93,22 @@ impl Table<SubscribersModel, u32> for SubscribersTable {
     }
 
     async fn insert(&self, model: &SubscribersModel) -> anyhow::Result<u32> {
-        let res = sqlx::query(
-            "INSERT INTO subscribers (subscriber_type, subscriber_id) VALUES (?, ?)",
-        )
-        .bind(&model.subscriber_type)
-        .bind(&model.subscriber_id)
-        .execute(&self.base.pool)
-        .await?;
+        let res =
+            sqlx::query("INSERT INTO subscribers (subscriber_type, subscriber_id) VALUES (?, ?)")
+                .bind(&model.subscriber_type)
+                .bind(&model.subscriber_id)
+                .execute(&self.base.pool)
+                .await?;
         Ok(res.last_insert_rowid().try_into()?)
     }
 
     async fn update(&self, model: &SubscribersModel) -> anyhow::Result<()> {
-        sqlx::query(
-            "UPDATE subscribers SET subscriber_type = ?, subscriber_id = ? WHERE id = ?",
-        )
-        .bind(&model.subscriber_type)
-        .bind(&model.subscriber_id)
-        .bind(model.id)
-        .execute(&self.base.pool)
-        .await?;
+        sqlx::query("UPDATE subscribers SET subscriber_type = ?, subscriber_id = ? WHERE id = ?")
+            .bind(&model.subscriber_type)
+            .bind(&model.subscriber_id)
+            .bind(model.id)
+            .execute(&self.base.pool)
+            .await?;
         Ok(())
     }
 

@@ -8,5 +8,5 @@ pub struct Manga {
     pub chapter: String,
     pub chapter_id: String,
     pub url: String,
-    pub published: DateTime<Utc>
+    pub published: DateTime<Utc>,
 }

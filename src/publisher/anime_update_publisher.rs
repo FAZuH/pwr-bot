@@ -1,29 +1,33 @@
-use std::collections::HashSet;
-use std::sync::Arc;
-use std::time::Duration;
 use crate::config::Config;
 use crate::database::database::Database;
 use crate::database::table::table::Table;
 use crate::event::anime_update_event::AnimeUpdateEvent;
-use crate::source::ani_list_source::AniListSource;
 use crate::event::event_bus::EventBus;
+use crate::source::ani_list_source::AniListSource;
+use std::collections::HashSet;
+use std::sync::Arc;
+use std::time::Duration;
 
 pub struct AnimeUpdatePublisher {
     db: Arc<Database>,
     event_bus: Arc<EventBus>,
     source: AniListSource,
     running: bool,
-    interval: Duration
+    interval: Duration,
 }
 
 impl AnimeUpdatePublisher {
-    pub async fn new(config: &Config, db: Arc<Database>, event_bus: Arc<EventBus>) -> anyhow::Result<Self> {
+    pub async fn new(
+        config: &Config,
+        db: Arc<Database>,
+        event_bus: Arc<EventBus>,
+    ) -> anyhow::Result<Self> {
         Ok(Self {
             db,
             event_bus,
             source: AniListSource::new(),
             running: false,
-            interval: Duration::new(config.poll_interval, 0)
+            interval: Duration::new(config.poll_interval, 0),
         })
     }
 
@@ -55,9 +59,7 @@ impl AnimeUpdatePublisher {
         });
     }
 
-    async fn check_updates(
-        &self
-    ) -> anyhow::Result<()> {
+    async fn check_updates(&self) -> anyhow::Result<()> {
         // Init step
         // 1. Get subscriptions from database
         let db = &self.db;
@@ -68,12 +70,17 @@ impl AnimeUpdatePublisher {
         let mut latest_update_ids = HashSet::<u32>::new();
         for subs in subscribers {
             if latest_update_ids.insert(subs.latest_updates_id) {
-                let mut prev_check = db.latest_updates_table.select(&subs.latest_updates_id).await?;
+                let mut prev_check = db
+                    .latest_updates_table
+                    .select(&subs.latest_updates_id)
+                    .await?;
                 // Check step
                 // 3. Fetch latest anime chapters from sources using the unique anime ids
                 if let Some(curr) = source.get_latest(&prev_check.series_id).await? {
                     // 4. Compare chapters
-                    if curr.episode_id == prev_check.series_latest { continue; }
+                    if curr.episode_id == prev_check.series_latest {
+                        continue;
+                    }
 
                     // Handle update event
                     // 5. Insert new updates into database

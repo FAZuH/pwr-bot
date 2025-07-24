@@ -1,5 +1,5 @@
-use async_trait::async_trait;
 use crate::event::manga_update_event::MangaUpdateEvent;
+use async_trait::async_trait;
 use std::any::Any;
 
 #[async_trait]

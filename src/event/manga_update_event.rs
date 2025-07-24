@@ -1,8 +1,8 @@
 use crate::source::manga::Manga;
 use chrono::{DateTime, Utc};
 
-use std::any::Any;
 use super::event::Event;
+use std::any::Any;
 
 #[derive(Clone)]
 pub struct MangaUpdateEvent {
@@ -12,7 +12,7 @@ pub struct MangaUpdateEvent {
     pub chapter: String,
     pub chapter_id: String,
     pub url: String,
-    pub published: DateTime<Utc>
+    pub published: DateTime<Utc>,
 }
 
 impl From<Manga> for MangaUpdateEvent {

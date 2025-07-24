@@ -1,6 +1,8 @@
 use sqlx::SqlitePool;
 
-use crate::database::table::{latest_updates_table::LatestUpdatesTable, subscribers_table::SubscribersTable, table::Table};
+use crate::database::table::{
+    latest_updates_table::LatestUpdatesTable, subscribers_table::SubscribersTable, table::Table,
+};
 
 pub struct Database {
     pub pool: SqlitePool,

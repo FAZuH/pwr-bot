@@ -8,5 +8,5 @@ pub struct Anime {
     pub episode: String,
     pub episode_id: String,
     pub url: String,
-    pub published: DateTime<Utc>
+    pub published: DateTime<Utc>,
 }

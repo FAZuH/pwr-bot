@@ -1,29 +1,33 @@
-use std::collections::HashSet;
-use std::sync::Arc;
-use std::time::Duration;
 use crate::config::Config;
 use crate::database::database::Database;
 use crate::database::table::table::Table;
+use crate::event::event_bus::EventBus;
 use crate::event::manga_update_event::MangaUpdateEvent;
 use crate::source::manga_dex_source::MangaDexSource;
-use crate::event::event_bus::EventBus;
+use std::collections::HashSet;
+use std::sync::Arc;
+use std::time::Duration;
 
 pub struct MangaUpdatePublisher {
     db: Arc<Database>,
     event_bus: Arc<EventBus>,
     source: MangaDexSource,
     running: bool,
-    interval: Duration
+    interval: Duration,
 }
 
 impl MangaUpdatePublisher {
-    pub async fn new(config: &Config, db: Arc<Database>, event_bus: Arc<EventBus>) -> anyhow::Result<Self> {
+    pub async fn new(
+        config: &Config,
+        db: Arc<Database>,
+        event_bus: Arc<EventBus>,
+    ) -> anyhow::Result<Self> {
         Ok(Self {
             db,
             event_bus,
             source: MangaDexSource::new(),
             running: false,
-            interval: Duration::new(config.poll_interval, 0)
+            interval: Duration::new(config.poll_interval, 0),
         })
     }
 
@@ -55,9 +59,7 @@ impl MangaUpdatePublisher {
         });
     }
 
-    async fn check_updates(
-        &self
-    ) -> anyhow::Result<()> {
+    async fn check_updates(&self) -> anyhow::Result<()> {
         // Init step
         // 1. Get subscriptions from databaes
         let db = &self.db;
@@ -68,12 +70,17 @@ impl MangaUpdatePublisher {
         let mut latest_update_ids = HashSet::<u32>::new();
         for subs in subscribers {
             if latest_update_ids.insert(subs.latest_updates_id) {
-                let mut prev_check = db.latest_updates_table.select(&subs.latest_updates_id).await?;
+                let mut prev_check = db
+                    .latest_updates_table
+                    .select(&subs.latest_updates_id)
+                    .await?;
                 // Check step
                 // 3. Fetch latest manga chapters from sources using the unique manga ids
                 if let Some(curr) = source.get_latest(&prev_check.series_id).await? {
                     // 4. Compare chapters
-                    if curr.chapter_id == prev_check.series_latest { continue; }
+                    if curr.chapter_id == prev_check.series_latest {
+                        continue;
+                    }
 
                     // Handle update event
                     // 5. Insert new updates into database

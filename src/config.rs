@@ -18,8 +18,7 @@ impl Config {
             db_path: std::env::var("DB_PATH").unwrap_or("data.db".to_string()),
             discord_token: std::env::var("DISCORD_TOKEN")
                 .expect("Expected DISCORD_TOKEN in environment"),
-            webhook_url: std::env::var("WEBHOOK_URL")
-                .expect("Expected WEBHOOK_URL in environment"),
+            webhook_url: std::env::var("WEBHOOK_URL").expect("Expected WEBHOOK_URL in environment"),
         }
     }
 }

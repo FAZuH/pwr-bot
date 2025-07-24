@@ -1,6 +1,6 @@
-use reqwest::Client;
 use super::anime::Anime;
 use chrono::{DateTime, Utc};
+use reqwest::Client;
 
 use std::hash::{Hash, Hasher};
 
@@ -28,7 +28,14 @@ impl AniListSource {
         }
         "#;
         let json = serde_json::json!({ "query": query, "variables": { "id": series_id } });
-        let response = self.client.post(self.api_url).json(&json).send().await?.json::<serde_json::Value>().await?;
+        let response = self
+            .client
+            .post(self.api_url)
+            .json(&json)
+            .send()
+            .await?
+            .json::<serde_json::Value>()
+            .await?;
         let episode = response["data"]["Media"]["nextAiringEpisode"].as_object();
         if episode.is_none() {
             return Ok(None);
@@ -37,9 +44,16 @@ impl AniListSource {
         Ok(Some(Anime {
             series_id: series_id.to_string(),
             series_type: "anime".to_string(),
-            title: response["data"]["Media"]["title"]["romaji"].as_str().unwrap_or("Unknown").to_string(),
+            title: response["data"]["Media"]["title"]["romaji"]
+                .as_str()
+                .unwrap_or("Unknown")
+                .to_string(),
             episode: episode["episode"].as_i64().unwrap_or(0).to_string(),
-            episode_id: format!("{}_{}", &series_id, episode["episode"].as_i64().unwrap_or(0)),
+            episode_id: format!(
+                "{}_{}",
+                &series_id,
+                episode["episode"].as_i64().unwrap_or(0)
+            ),
             url: format!("https://anilist.co/anime/{}", series_id),
             published: DateTime::from_timestamp(episode["airingAt"].as_i64().unwrap_or(0), 0)
                 .unwrap_or(Utc::now()),
@@ -72,18 +86,17 @@ mod tests {
         let server = MockServer::start();
         let mock = server.mock(|when, then| {
             when.method(POST);
-            then.status(200)
-                .json_body(serde_json::json!({
-                    "data": {
-                        "Media": {
-                            "title": { "romaji": "Test Anime" },
-                            "nextAiringEpisode": {
-                                "airingAt": 1234567890,
-                                "episode": 5
-                            }
+            then.status(200).json_body(serde_json::json!({
+                "data": {
+                    "Media": {
+                        "title": { "romaji": "Test Anime" },
+                        "nextAiringEpisode": {
+                            "airingAt": 1234567890,
+                            "episode": 5
                         }
                     }
-                }));
+                }
+            }));
         });
 
         let source = AniListSource::new();
@@ -104,15 +117,14 @@ mod tests {
         let server = MockServer::start();
         let mock = server.mock(|when, then| {
             when.method(POST);
-            then.status(200)
-                .json_body(serde_json::json!({
-                    "data": {
-                        "Media": {
-                            "title": { "romaji": "Test Anime" },
-                            "nextAiringEpisode": null
-                        }
+            then.status(200).json_body(serde_json::json!({
+                "data": {
+                    "Media": {
+                        "title": { "romaji": "Test Anime" },
+                        "nextAiringEpisode": null
                     }
-                }));
+                }
+            }));
         });
 
         let source = AniListSource::new();
@@ -127,18 +139,17 @@ mod tests {
         let server = MockServer::start();
         let mock = server.mock(|when, then| {
             when.method(POST);
-            then.status(200)
-                .json_body(serde_json::json!({
-                    "data": {
-                        "Media": {
-                            "title": {},
-                            "nextAiringEpisode": {
-                                "airingAt": 1234567890,
-                                "episode": 7
-                            }
+            then.status(200).json_body(serde_json::json!({
+                "data": {
+                    "Media": {
+                        "title": {},
+                        "nextAiringEpisode": {
+                            "airingAt": 1234567890,
+                            "episode": 7
                         }
                     }
-                }));
+                }
+            }));
         });
 
         let source = AniListSource::new();
@@ -156,8 +167,7 @@ mod tests {
         let server = MockServer::start();
         let mock = server.mock(|when, then| {
             when.method(POST);
-            then.status(200)
-                .body("not a json");
+            then.status(200).body("not a json");
         });
 
         let source = AniListSource::new();
@@ -167,4 +177,3 @@ mod tests {
         mock.assert();
     }
 }
-

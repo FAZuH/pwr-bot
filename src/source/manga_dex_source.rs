@@ -1,9 +1,8 @@
-use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
+use super::manga::Manga;
 use chrono::{DateTime, Utc};
 use reqwest::Client;
-use super::manga::Manga;
+use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
 use std::hash::{Hash, Hasher};
-
 
 #[derive(Clone)]
 pub struct MangaDexSource {
@@ -28,11 +27,16 @@ impl MangaDexSource {
     }
 
     pub async fn get_latest(&self, series_id: &str) -> anyhow::Result<Option<Manga>> {
-        let url = format!("{}/manga/{}/feed?order[createdAt]=desc&limit=1&translatedLanguage[]=en&translatedLanguage[]=id", self.api_url, series_id);
+        let url = format!(
+            "{}/manga/{}/feed?order[createdAt]=desc&limit=1&translatedLanguage[]=en&translatedLanguage[]=id",
+            self.api_url, series_id
+        );
         let response = self.client.get(&url).send().await?;
         let body = response.text().await?;
         let response_json: serde_json::Value = serde_json::from_str(&body)?;
-        let chapters = response_json["data"].as_array().ok_or_else(|| anyhow::anyhow!("No chapters found"))?;
+        let chapters = response_json["data"]
+            .as_array()
+            .ok_or_else(|| anyhow::anyhow!("No chapters found"))?;
         if chapters.is_empty() {
             return Ok(None);
         }
@@ -40,13 +44,26 @@ impl MangaDexSource {
         let ret = chapter.map(|c| Manga {
             series_id: series_id.to_string(),
             series_type: "manga".to_string(),
-            title: c["attributes"]["title"].as_str().unwrap_or("Unknown").to_string(),
-            chapter: c["attributes"]["chapter"].as_str().unwrap_or("0").to_string(),
+            title: c["attributes"]["title"]
+                .as_str()
+                .unwrap_or("Unknown")
+                .to_string(),
+            chapter: c["attributes"]["chapter"]
+                .as_str()
+                .unwrap_or("0")
+                .to_string(),
             chapter_id: c["id"].as_str().unwrap_or("").to_string(),
-            url: format!("https://mangadex.org/chapter/{}", c["id"].as_str().unwrap_or("")),
-            published: DateTime::parse_from_rfc3339(c["attributes"]["publishAt"].as_str().unwrap_or("1970-01-01T00:00:00Z"))
-                .map(|dt| dt.with_timezone(&Utc))
-                .unwrap_or(Utc::now()),
+            url: format!(
+                "https://mangadex.org/chapter/{}",
+                c["id"].as_str().unwrap_or("")
+            ),
+            published: DateTime::parse_from_rfc3339(
+                c["attributes"]["publishAt"]
+                    .as_str()
+                    .unwrap_or("1970-01-01T00:00:00Z"),
+            )
+            .map(|dt| dt.with_timezone(&Utc))
+            .unwrap_or(Utc::now()),
         });
         Ok(ret)
     }
@@ -111,7 +128,10 @@ mod tests {
         assert_eq!(manga.title, "Latest Chapter");
         assert_eq!(manga.chapter, "42");
         assert_eq!(manga.chapter_id, chapter_id);
-        assert_eq!(manga.url, format!("https://mangadex.org/chapter/{}", chapter_id));
+        assert_eq!(
+            manga.url,
+            format!("https://mangadex.org/chapter/{}", chapter_id)
+        );
     }
 
     #[tokio::test]

@@ -16,12 +16,17 @@ impl LatestUpdatesTable {
         }
     }
 
-    pub async fn select_by_model(&self, model: LatestUpdatesModel) -> anyhow::Result<LatestUpdatesModel> {
-        let res = sqlx::query_as::<_, LatestUpdatesModel>("SELECT FROM latest_updates WHERE type = ? AND series_id = ?")
-            .bind(model.r#type)
-            .bind(model.series_id)
-            .fetch_one(&self.base.pool)
-            .await?;
+    pub async fn select_by_model(
+        &self,
+        model: LatestUpdatesModel,
+    ) -> anyhow::Result<LatestUpdatesModel> {
+        let res = sqlx::query_as::<_, LatestUpdatesModel>(
+            "SELECT FROM latest_updates WHERE type = ? AND series_id = ?",
+        )
+        .bind(model.r#type)
+        .bind(model.series_id)
+        .fetch_one(&self.base.pool)
+        .await?;
         Ok(res)
     }
 }
@@ -54,7 +59,9 @@ impl Table<LatestUpdatesModel, u32> for LatestUpdatesTable {
     }
 
     async fn select_all(&self) -> anyhow::Result<Vec<LatestUpdatesModel>> {
-        let ret = sqlx::query_as::<_, LatestUpdatesModel>("SELECT id, type, series_id, series_latest, series_published FROM latest_updates")
+        let ret = sqlx::query_as::<_, LatestUpdatesModel>(
+            "SELECT id, type, series_id, series_latest, series_published FROM latest_updates",
+        )
         .fetch_all(&self.base.pool)
         .await?;
         Ok(ret)

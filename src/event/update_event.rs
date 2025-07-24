@@ -3,5 +3,5 @@ use super::manga_update_event::MangaUpdateEvent;
 
 pub enum UpdateEvent {
     Manga(MangaUpdateEvent),
-    Anime(AnimeUpdateEvent)
+    Anime(AnimeUpdateEvent),
 }

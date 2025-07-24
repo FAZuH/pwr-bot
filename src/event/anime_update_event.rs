@@ -1,5 +1,5 @@
-use std::any::Any;
 use chrono::{DateTime, Utc};
+use std::any::Any;
 
 use crate::source::anime::Anime;
 
@@ -13,7 +13,7 @@ pub struct AnimeUpdateEvent {
     pub chapter: String,
     pub chapter_id: String,
     pub url: String,
-    pub published: DateTime<Utc>
+    pub published: DateTime<Utc>,
 }
 
 impl From<Anime> for AnimeUpdateEvent {
