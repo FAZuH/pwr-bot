@@ -22,8 +22,8 @@ impl From<Anime> for AnimeUpdateEvent {
             series_id: anime.series_id,
             series_type: anime.series_type,
             title: anime.title,
-            chapter: anime.chapter,
-            chapter_id: anime.chapter_id,
+            chapter: anime.episode,
+            chapter_id: anime.episode_id,
             url: anime.url,
             published: anime.published,
         }

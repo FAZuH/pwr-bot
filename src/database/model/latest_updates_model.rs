@@ -7,5 +7,4 @@ pub struct LatestUpdatesModel {
     pub r#type: String,         // Anime/Manga
     pub series_id: String,      // Series identifier eg Frieren
     pub series_latest: String,  // Latest of series identifer eg S2E1
-    pub series_published: DateTime<Utc>
-}
+    pub series_published: DateTime<Utc> }

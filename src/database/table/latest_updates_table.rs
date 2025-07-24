@@ -15,6 +15,15 @@ impl LatestUpdatesTable {
             base: BaseTable::new(pool),
         }
     }
+
+    pub async fn select_by_model(&self, model: LatestUpdatesModel) -> anyhow::Result<LatestUpdatesModel> {
+        let res = sqlx::query_as::<_, LatestUpdatesModel>("SELECT FROM latest_updates WHERE type = ? AND series_id = ?")
+            .bind(model.r#type)
+            .bind(model.series_id)
+            .fetch_one(&self.base.pool)
+            .await?;
+        Ok(res)
+    }
 }
 
 #[async_trait]
@@ -23,7 +32,7 @@ impl Table<LatestUpdatesModel, u32> for LatestUpdatesTable {
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS latest_updates (
-                id INTEGER PRIMARY KEY,
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
                 type TEXT NOT NULL,
                 series_id TEXT NOT NULL,
                 series_latest TEXT NOT NULL,
@@ -68,8 +77,8 @@ impl Table<LatestUpdatesModel, u32> for LatestUpdatesTable {
         Ok(model)
     }
 
-    async fn insert(&self, model: &LatestUpdatesModel) -> anyhow::Result<()> {
-        sqlx::query(
+    async fn insert(&self, model: &LatestUpdatesModel) -> anyhow::Result<u32> {
+        let res = sqlx::query(
             "INSERT INTO latest_updates (id, type, series_id, series_latest, series_published) VALUES (?, ?, ?, ?, ?)",
         )
         .bind(model.id)
@@ -79,7 +88,7 @@ impl Table<LatestUpdatesModel, u32> for LatestUpdatesTable {
         .bind(model.series_published)
         .execute(&self.base.pool)
         .await?;
-        Ok(())
+        Ok(res.last_insert_rowid().try_into()?)
     }
 
     async fn update(&self, model: &LatestUpdatesModel) -> anyhow::Result<()> {

@@ -38,8 +38,8 @@ impl AniListSource {
             series_id: series_id.to_string(),
             series_type: "anime".to_string(),
             title: response["data"]["Media"]["title"]["romaji"].as_str().unwrap_or("Unknown").to_string(),
-            chapter: episode["episode"].as_i64().unwrap_or(0).to_string(),
-            chapter_id: format!("{}_{}", &series_id, episode["episode"].as_i64().unwrap_or(0)),
+            episode: episode["episode"].as_i64().unwrap_or(0).to_string(),
+            episode_id: format!("{}_{}", &series_id, episode["episode"].as_i64().unwrap_or(0)),
             url: format!("https://anilist.co/anime/{}", series_id),
             published: DateTime::from_timestamp(episode["airingAt"].as_i64().unwrap_or(0), 0)
                 .unwrap_or(Utc::now()),
@@ -93,8 +93,8 @@ mod tests {
         let anime = result.unwrap();
         assert_eq!(anime.series_id, "123");
         assert_eq!(anime.title, "Test Anime");
-        assert_eq!(anime.chapter, "5");
-        assert_eq!(anime.chapter_id, "123_5");
+        assert_eq!(anime.episode, "5");
+        assert_eq!(anime.episode_id, "123_5");
         assert_eq!(anime.url, "https://anilist.co/anime/123");
         mock.assert();
     }
@@ -147,7 +147,7 @@ mod tests {
         assert!(result.is_some());
         let anime = result.unwrap();
         assert_eq!(anime.title, "Unknown");
-        assert_eq!(anime.chapter, "7");
+        assert_eq!(anime.episode, "7");
         mock.assert();
     }
 

@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use sqlx::SqlitePool;
 
 use super::{base_table::BaseTable, table::Table};
-use crate::database::model::subscribers_model::SubsribersModel;
+use crate::database::model::subscribers_model::SubscribersModel;
 
 pub struct SubscribersTable {
     base: BaseTable,
@@ -14,25 +14,35 @@ impl SubscribersTable {
             base: BaseTable::new(pool),
         }
     }
-}
 
-impl SubscribersTable {
-    pub async fn select_all_by_type(&self, r#type: &str) -> anyhow::Result<Vec<SubsribersModel>> {
-        let ret = sqlx::query_as::<_, SubsribersModel>("SELECT id, subscriber_type, subscriber_id FROM subscribers WHERE subscriber_type = ?")
+    pub async fn select_all_by_type(&self, r#type: &str) -> anyhow::Result<Vec<SubscribersModel>> {
+        let ret = sqlx::query_as::<_, SubscribersModel>("SELECT id, subscriber_type, subscriber_id FROM subscribers WHERE subscriber_type = ?")
         .bind(r#type)
         .fetch_all(&self.base.pool)
         .await?;
         Ok(ret)
     }
+
+    pub async fn delete_by_model(&self, model: SubscribersModel) -> anyhow::Result<()> {
+        sqlx::query(
+            r#"
+            DELETE FROM subscribers WHERE 
+                subscriber_type = ? AND 
+                subscriber_id = ? AND
+                latest_update_id = ?
+            "#
+        ).bind(model.subscriber_type).bind(model.subscriber_id).execute(&self.base.pool).await?;
+        Ok(())
+    }
 }
 
 #[async_trait]
-impl Table<SubsribersModel, u32> for SubscribersTable {
+impl Table<SubscribersModel, u32> for SubscribersTable {
     async fn create_table(&self) -> anyhow::Result<()> {
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS subscribers (
-                id INTEGER PRIMARY KEY,
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
                 subscriber_type TEXT NOT NULL,
                 subscriber_id TEXT NOT NULL
             )
@@ -50,8 +60,8 @@ impl Table<SubsribersModel, u32> for SubscribersTable {
         Ok(())
     }
 
-    async fn select_all(&self) -> anyhow::Result<Vec<SubsribersModel>> {
-        let ret = sqlx::query_as::<_, SubsribersModel>("SELECT id, subscriber_type, subscriber_id FROM subscribers")
+    async fn select_all(&self) -> anyhow::Result<Vec<SubscribersModel>> {
+        let ret = sqlx::query_as::<_, SubscribersModel>("SELECT id, subscriber_type, subscriber_id FROM subscribers")
         .fetch_all(&self.base.pool)
         .await?;
         Ok(ret)
@@ -64,8 +74,8 @@ impl Table<SubsribersModel, u32> for SubscribersTable {
         Ok(())
     }
 
-    async fn select(&self, id: &u32) -> anyhow::Result<SubsribersModel> {
-        let model = sqlx::query_as::<_, SubsribersModel>(
+    async fn select(&self, id: &u32) -> anyhow::Result<SubscribersModel> {
+        let model = sqlx::query_as::<_, SubscribersModel>(
             "SELECT id, subscriber_type, subscriber_id FROM subscribers WHERE id = ?",
         )
         .bind(id)
@@ -74,18 +84,18 @@ impl Table<SubsribersModel, u32> for SubscribersTable {
         Ok(model)
     }
 
-    async fn insert(&self, model: &SubsribersModel) -> anyhow::Result<()> {
-        sqlx::query(
+    async fn insert(&self, model: &SubscribersModel) -> anyhow::Result<u32> {
+        let res = sqlx::query(
             "INSERT INTO subscribers (subscriber_type, subscriber_id) VALUES (?, ?)",
         )
         .bind(&model.subscriber_type)
         .bind(&model.subscriber_id)
         .execute(&self.base.pool)
         .await?;
-        Ok(())
+        Ok(res.last_insert_rowid().try_into()?)
     }
 
-    async fn update(&self, model: &SubsribersModel) -> anyhow::Result<()> {
+    async fn update(&self, model: &SubscribersModel) -> anyhow::Result<()> {
         sqlx::query(
             "UPDATE subscribers SET subscriber_type = ?, subscriber_id = ? WHERE id = ?",
         )

@@ -73,7 +73,7 @@ impl AnimeUpdatePublisher {
                 // 3. Fetch latest anime chapters from sources using the unique anime ids
                 if let Some(curr) = source.get_latest(&prev_check.series_id).await? {
                     // 4. Compare chapters
-                    if curr.chapter_id == prev_check.series_latest { continue; }
+                    if curr.episode_id == prev_check.series_latest { continue; }
 
                     // Handle update event
                     // 5. Insert new updates into database
