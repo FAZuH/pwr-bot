@@ -1,3 +1,5 @@
+use chrono::{DateTime, Utc};
+
 #[derive(Clone)]
 pub struct Anime {
     pub series_id: String,
@@ -6,4 +8,5 @@ pub struct Anime {
     pub chapter: String,
     pub chapter_id: String,
     pub url: String,
+    pub published: DateTime<Utc>
 }

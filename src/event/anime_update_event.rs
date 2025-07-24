@@ -1,6 +1,7 @@
 use std::any::Any;
 use chrono::{DateTime, Utc};
-use crate::source::manga::Manga;
+
+use crate::source::anime::Anime;
 
 use super::event::Event;
 
@@ -15,19 +16,20 @@ pub struct AnimeUpdateEvent {
     pub published: DateTime<Utc>
 }
 
-impl From<Manga> for AnimeUpdateEvent {
-    fn from(manga: Manga) -> Self {
+impl From<Anime> for AnimeUpdateEvent {
+    fn from(anime: Anime) -> Self {
         AnimeUpdateEvent {
-            series_id: manga.series_id,
-            series_type: manga.series_type,
-            title: manga.title,
-            chapter: manga.chapter,
-            chapter_id: manga.chapter_id,
-            url: manga.url,
-            published: manga.published,
+            series_id: anime.series_id,
+            series_type: anime.series_type,
+            title: anime.title,
+            chapter: anime.chapter,
+            chapter_id: anime.chapter_id,
+            url: anime.url,
+            published: anime.published,
         }
     }
 }
+
 impl Event for AnimeUpdateEvent {
     fn as_any(&self) -> &dyn Any {
         self

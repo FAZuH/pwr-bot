@@ -1,19 +1,20 @@
 use reqwest::Client;
 use super::anime::Anime;
+use chrono::{DateTime, Utc};
 
 use std::hash::{Hash, Hasher};
 
 #[derive(Clone)]
 pub struct AniListSource {
     client: Client,
-    api_url: String,
+    api_url: &'static str,
 }
 
 impl AniListSource {
-    pub fn new(api_url: String) -> Self {
+    pub fn new() -> Self {
         Self {
             client: Client::new(),
-            api_url: api_url.clone(),
+            api_url: "https://graphql.anilist.co",
         }
     }
 
@@ -27,7 +28,7 @@ impl AniListSource {
         }
         "#;
         let json = serde_json::json!({ "query": query, "variables": { "id": series_id } });
-        let response = self.client.post(&self.api_url).json(&json).send().await?.json::<serde_json::Value>().await?;
+        let response = self.client.post(self.api_url).json(&json).send().await?.json::<serde_json::Value>().await?;
         let episode = response["data"]["Media"]["nextAiringEpisode"].as_object();
         if episode.is_none() {
             return Ok(None);
@@ -40,6 +41,8 @@ impl AniListSource {
             chapter: episode["episode"].as_i64().unwrap_or(0).to_string(),
             chapter_id: format!("{}_{}", &series_id, episode["episode"].as_i64().unwrap_or(0)),
             url: format!("https://anilist.co/anime/{}", series_id),
+            published: DateTime::from_timestamp(episode["airingAt"].as_i64().unwrap_or(0), 0)
+                .unwrap_or(Utc::now()),
         }))
     }
 }
@@ -61,17 +64,8 @@ impl Hash for AniListSource {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::Config;
     use httpmock::prelude::*;
     use tokio;
-
-    fn mock_config(api_url: &str) -> Config {
-        Config {
-            anilist_api_url: api_url.to_string(),
-            // fill other fields with dummy values if needed
-            ..Default::default()
-        }
-    }
 
     #[tokio::test]
     async fn test_get_latest_returns_anime_on_valid_response() {
@@ -92,7 +86,7 @@ mod tests {
                 }));
         });
 
-        let source = AniListSource::new(server.url("/graphql"));
+        let source = AniListSource::new();
 
         let result = source.get_latest("123").await.unwrap();
         assert!(result.is_some());
@@ -121,7 +115,7 @@ mod tests {
                 }));
         });
 
-        let source = AniListSource::new(server.url("/graphql"));
+        let source = AniListSource::new();
 
         let result = source.get_latest("456").await.unwrap();
         assert!(result.is_none());
@@ -147,7 +141,7 @@ mod tests {
                 }));
         });
 
-        let source = AniListSource::new(server.url("/graphql"));
+        let source = AniListSource::new();
 
         let result = source.get_latest("789").await.unwrap();
         assert!(result.is_some());
@@ -166,7 +160,7 @@ mod tests {
                 .body("not a json");
         });
 
-        let source = AniListSource::new(server.url("/graphql"));
+        let source = AniListSource::new();
 
         let result = source.get_latest("999").await;
         assert!(result.is_err());
