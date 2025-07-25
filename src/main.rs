@@ -1,31 +1,38 @@
 pub mod action;
-pub mod config;
-pub mod event;
-pub mod source;
 pub mod bot;
+pub mod config;
+pub mod database;
+pub mod event;
+pub mod publisher;
+pub mod source;
+pub mod subscriber;
 
 use crate::config::Config;
-use crate::source::manga_dex_source::MangaDexSource;
-use crate::source::ani_list_source::AniListSource;
-use crate::source::source::Source;
-use crate::event::update_publisher::UpdatePublisher;
-use crate::bot::{Handler};
+use crate::database::database::Database;
+use crate::event::event_bus::EventBus;
+use crate::publisher::anime_update_publisher::AnimeUpdatePublisher;
+use crate::publisher::manga_update_publisher::MangaUpdatePublisher;
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let config = Config::new();
+    let db = Arc::new(Database::new(&config.db_url, &config.db_path).await?);
+    let event_bus = Arc::new(EventBus::new());
 
-    // Setup listener
-    let mut publisher = UpdatePublisher::new(config.clone()).await?;
-    publisher.register_source(Source::Manga(MangaDexSource::new(&config)));
-    publisher.register_source(Source::Anime(AniListSource::new(&config)));
-    publisher.start()?;
+    // Setup publisher
+    let mut anime_publisher =
+        AnimeUpdatePublisher::new(db.clone(), event_bus.clone(), config.poll_interval.clone()).await?;
+    let mut manga_publisher =
+        MangaUpdatePublisher::new(db.clone(), event_bus.clone(), config.poll_interval.clone()).await?;
 
-    // Setup Discord bot
+    anime_publisher.start()?;
+    manga_publisher.start()?;
+
+    // Setup & start bot
+    bot::bot::start(Arc::new(config), db).await;
 
     // Listen for exit signal
     tokio::signal::ctrl_c().await?;
-    publisher.stop()?;
     Ok(())
 }
-

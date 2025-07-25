@@ -1,7 +1,9 @@
 use anyhow;
 use chrono::{DateTime, Utc};
 use poise::ChoiceParameter;
+use poise::serenity_prelude as serenity;
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::database::model::latest_updates_model::LatestUpdatesModel;
 use crate::database::model::subscribers_model::SubscribersModel;
@@ -10,7 +12,7 @@ use crate::source::ani_list_source::AniListSource;
 use crate::{Config, database::database::Database, source::manga_dex_source::MangaDexSource};
 
 struct Data {
-    config: &'static Config,
+    config: Arc<Config>,
     db: Arc<Database>,
     mangadex_source: MangaDexSource,
     anilist_source: AniListSource,
@@ -214,32 +216,42 @@ async fn help(
     Ok(())
 }
 
-// async fn get_client(config: Arc<Config>, listener: Arc<RwLock<PollingListener>>) {
-//     let config_clone = Arc::clone(&config);
-//     let framework = poise::Framework::builder()
-//         .options(poise::FrameworkOptions {
-//             commands: vec![subscribe(), unsubscribe(), help()],
-//             prefix_options: poise::PrefixFrameworkOptions {
-//                 prefix: Some("!".into()),
-//                 edit_tracker: Some(Arc::new(poise::EditTracker::for_timespan(
-//                     std::time::Duration::from_secs(3600),
-//                 ))),
-//                 ..Default::default()
-//             },
-//             ..Default::default()
-//         })
-//         .setup(|ctx, _ready, framework| {
-//             Box::pin(async move {
-//                 poise::builtins::register_globally(ctx, &framework.options().commands).await?;
-//                 Ok(Data {
-//                     listener,
-//                     config: config_clone
-//                 })
-//             })
-//         })
-//         .build();
-//
-//     let intents = serenity::GatewayIntents::non_privileged() | serenity::GatewayIntents::MESSAGE_CONTENT;
-//     let client = serenity::ClientBuilder::new(&config.discord_token, intents).framework(framework).await;
-//     client.unwrap().start().await.unwrap();
-// }
+#[poise::command(prefix_command)]
+async fn register(ctx: Context<'_>) -> Result<(), Error> {
+    poise::builtins::register_application_commands_buttons(ctx).await?;
+    Ok(())
+}
+
+pub async fn start(config: Arc<Config>, db: Arc<Database>) {
+    let options = poise::FrameworkOptions {
+        commands: vec![subscribe(), unsubscribe(), help(), register()],
+        prefix_options: poise::PrefixFrameworkOptions {
+            prefix: Some("!".into()),
+            edit_tracker: Some(Arc::new(poise::EditTracker::for_timespan(
+                Duration::from_secs(3600),
+            ))),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let data = Data {
+        config: config.clone(),
+        db: db,
+        mangadex_source: MangaDexSource::new(),
+        anilist_source: AniListSource::new()
+    };
+
+    let framework = poise::Framework::builder()
+        .options(options)
+        .setup(|ctx, _ready, framework| {
+            Box::pin(async move {
+                poise::builtins::register_globally(ctx, &framework.options().commands).await?;
+                Ok(data)
+            })
+        })
+        .build();
+
+    let intents = serenity::GatewayIntents::non_privileged() | serenity::GatewayIntents::MESSAGE_CONTENT;
+    let client = serenity::ClientBuilder::new(&config.discord_token, intents).framework(framework).await;
+    client.unwrap().start().await.unwrap();
+}

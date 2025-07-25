@@ -1,4 +1,3 @@
-use crate::config::Config;
 use crate::database::database::Database;
 use crate::database::table::table::Table;
 use crate::event::anime_update_event::AnimeUpdateEvent;
@@ -18,16 +17,16 @@ pub struct AnimeUpdatePublisher {
 
 impl AnimeUpdatePublisher {
     pub async fn new(
-        config: &Config,
         db: Arc<Database>,
         event_bus: Arc<EventBus>,
+        poll_interval: Duration,
     ) -> anyhow::Result<Self> {
         Ok(Self {
             db,
             event_bus,
             source: AniListSource::new(),
             running: false,
-            interval: Duration::new(config.poll_interval, 0),
+            interval: poll_interval,
         })
     }
 
