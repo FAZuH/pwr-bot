@@ -1,4 +1,5 @@
 use anyhow;
+use anyhow::Result;
 use chrono::{DateTime, Utc};
 use poise::ChoiceParameter;
 use poise::serenity_prelude as serenity;
@@ -87,7 +88,7 @@ async fn subscribe(
         SeriesType::Anime => {
             if let Some(res) = data.anilist_source.get_latest(&series_id).await? {
                 series_title = res.title;
-                series_latest = res.episode_id;
+                series_latest = res.episode;
                 series_published = res.published;
             } else {
                 ctx.say(format!(
@@ -225,33 +226,43 @@ async fn register(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-pub async fn start(config: Arc<Config>, db: Arc<Database>) {
-    let options = poise::FrameworkOptions {
-        commands: vec![subscribe(), unsubscribe(), help(), register()],
-        prefix_options: poise::PrefixFrameworkOptions {
-            prefix: Some("!".into()),
-            edit_tracker: Some(Arc::new(poise::EditTracker::for_timespan(
-                Duration::from_secs(3600),
-            ))),
+pub struct Bot { 
+    pub client: serenity::Client,
+}
+
+impl Bot {
+    pub async fn new(config: Arc<Config>, db: Arc<Database>) -> Result<Self> {
+        let options = poise::FrameworkOptions {
+            commands: vec![subscribe(), unsubscribe(), help(), register()],
+            prefix_options: poise::PrefixFrameworkOptions {
+                prefix: Some("!".into()),
+                edit_tracker: Some(Arc::new(poise::EditTracker::for_timespan(
+                    Duration::from_secs(3600),
+                ))),
+                ..Default::default()
+            },
             ..Default::default()
-        },
-        ..Default::default()
-    };
-    let data = Data {
-        config: config.clone(),
-        db: db,
-        mangadex_source: MangaDexSource::new(),
-        anilist_source: AniListSource::new()
-    };
-
-    let framework = poise::Framework::builder()
-        .options(options)
-        .setup(|_ctx, _ready, _framework| {
-            Box::pin(async move { Ok(data) })
+        };
+        let data = Data {
+            config: config.clone(),
+            db: db,
+            mangadex_source: MangaDexSource::new(),
+            anilist_source: AniListSource::new()
+        };
+        let framework = poise::Framework::builder()
+            .options(options)
+            .setup(|_ctx, _ready, _framework| {
+                Box::pin(async move { Ok(data) })
+            })
+            .build();
+        let intents = serenity::GatewayIntents::non_privileged() | serenity::GatewayIntents::MESSAGE_CONTENT;
+        let client = serenity::ClientBuilder::new(&config.discord_token, intents).framework(framework).await?;
+        Ok(Self {
+            client
         })
-        .build();
+    }
 
-    let intents = serenity::GatewayIntents::non_privileged() | serenity::GatewayIntents::MESSAGE_CONTENT;
-    let client = serenity::ClientBuilder::new(&config.discord_token, intents).framework(framework).await;
-    client.unwrap().start().await.unwrap();
+    pub async fn start(&mut self) {
+        self.client.start().await.unwrap();
+    }
 }

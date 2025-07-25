@@ -89,7 +89,7 @@ impl MangaUpdatePublisher {
 
                     // 6. Publish events to event bus
                     let event: MangaUpdateEvent = curr.into();
-                    self.event_bus.publish(&event);
+                    self.event_bus.publish(&event).await?;
                 }
             }
         }

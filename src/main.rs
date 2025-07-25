@@ -7,6 +7,7 @@ pub mod publisher;
 pub mod source;
 pub mod subscriber;
 
+use crate::bot::bot::Bot;
 use crate::config::Config;
 use dotenv::dotenv;
 use crate::database::database::Database;
@@ -19,22 +20,20 @@ use std::sync::Arc;
 async fn main() -> anyhow::Result<()> {
     dotenv().ok();
     let config = Config::new();
-    let db = Arc::new(Database::new(&config.db_url, &config.db_path).await?);
     let event_bus = Arc::new(EventBus::new());
 
+    // Setup database
+    let db = Arc::new(Database::new(&config.db_url, &config.db_path).await?);
     db.create_all_tables().await?;
 
     // Setup publisher
-    let mut anime_publisher =
-        AnimeUpdatePublisher::new(db.clone(), event_bus.clone(), config.poll_interval.clone()).await?;
-    let mut manga_publisher =
-        MangaUpdatePublisher::new(db.clone(), event_bus.clone(), config.poll_interval.clone()).await?;
+    AnimeUpdatePublisher::new(db.clone(), event_bus.clone(), config.poll_interval.clone()).await?.start()?;
+    MangaUpdatePublisher::new(db.clone(), event_bus.clone(), config.poll_interval.clone()).await?.start()?;
 
-    anime_publisher.start()?;
-    manga_publisher.start()?;
+    // Setup subscriber
 
     // Setup & start bot
-    bot::bot::start(Arc::new(config), db).await;
+    Bot::new(Arc::new(config), db).await?;
 
     // Listen for exit signal
     tokio::signal::ctrl_c().await?;

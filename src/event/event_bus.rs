@@ -1,6 +1,8 @@
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
 
+use anyhow::{Ok, Result};
+
 use super::event::Event;
 
 pub struct EventBus {
@@ -26,12 +28,13 @@ impl EventBus {
             .push(callb);
     }
 
-    pub fn publish(&self, event: &dyn Event) {
+    pub async fn publish(&self, event: &dyn Event) -> Result<()> {
         let event_any = event.as_any();
         if let Some(callbacks) = self.subscribers.get(&event_any.type_id()) {
             for callback in callbacks {
                 callback(event_any);
             }
         }
+        Ok(())
     }
 }

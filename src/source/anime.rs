@@ -6,7 +6,6 @@ pub struct Anime {
     pub series_type: String,
     pub title: String,
     pub episode: String,
-    pub episode_id: String,
     pub url: String,
     pub published: DateTime<Utc>,
 }

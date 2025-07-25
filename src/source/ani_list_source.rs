@@ -49,11 +49,6 @@ impl AniListSource {
                 .unwrap_or("Unknown")
                 .to_string(),
             episode: episode["episode"].as_i64().unwrap_or(0).to_string(),
-            episode_id: format!(
-                "{}_{}",
-                &series_id,
-                episode["episode"].as_i64().unwrap_or(0)
-            ),
             url: format!("https://anilist.co/anime/{}", series_id),
             published: DateTime::from_timestamp(episode["airingAt"].as_i64().unwrap_or(0), 0)
                 .unwrap_or(Utc::now()),
@@ -107,7 +102,6 @@ mod tests {
         assert_eq!(anime.series_id, "123");
         assert_eq!(anime.title, "Test Anime");
         assert_eq!(anime.episode, "5");
-        assert_eq!(anime.episode_id, "123_5");
         assert_eq!(anime.url, "https://anilist.co/anime/123");
         mock.assert();
     }

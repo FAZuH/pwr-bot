@@ -10,8 +10,7 @@ pub struct AnimeUpdateEvent {
     pub series_id: String,
     pub series_type: String,
     pub title: String,
-    pub chapter: String,
-    pub chapter_id: String,
+    pub episode: String,
     pub url: String,
     pub published: DateTime<Utc>,
 }
@@ -22,8 +21,7 @@ impl From<Anime> for AnimeUpdateEvent {
             series_id: anime.series_id,
             series_type: anime.series_type,
             title: anime.title,
-            chapter: anime.episode,
-            chapter_id: anime.episode_id,
+            episode: anime.episode,
             url: anime.url,
             published: anime.published,
         }

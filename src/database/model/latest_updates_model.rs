@@ -9,3 +9,15 @@ pub struct LatestUpdatesModel {
     pub series_latest: String, // Latest of series identifer eg S2E1
     pub series_published: DateTime<Utc>,
 }
+
+impl Default for LatestUpdatesModel {
+    fn default() -> Self {
+        Self {
+            id: 0,
+            r#type: String::new(),
+            series_id: String::new(),
+            series_latest: String::new(),
+            series_published: DateTime::<Utc>::MIN_UTC,
+        }
+    }
+}

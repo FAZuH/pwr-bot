@@ -67,6 +67,14 @@ impl MangaDexSource {
         });
         Ok(ret)
     }
+
+    pub async fn get_title(&self, series_id: &str) -> anyhow::Result<String> {
+        let url = format!("{}/manga/{}", self.api_url, series_id);
+        let body = self.client.get(&url).send().await?.text().await?;
+        let response_json: serde_json::Value = serde_json::from_str(&body)?;
+        let ret = response_json["data"]["attributes"]["title"]["en"].as_str().unwrap_or("Title not found").to_string();
+        Ok(ret)
+    }
 }
 
 impl PartialEq for MangaDexSource {
