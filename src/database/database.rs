@@ -20,6 +20,7 @@ impl Database {
 
         let latest_updates_table = LatestUpdatesTable::new(pool.clone());
         let subscribers_table = SubscribersTable::new(pool.clone());
+        sqlx::query("PRAGMA foreign_keys = ON").execute(&pool).await?;
 
         Ok(Self {
             pool,

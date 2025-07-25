@@ -18,13 +18,13 @@ impl LatestUpdatesTable {
 
     pub async fn select_by_model(
         &self,
-        model: LatestUpdatesModel,
+        model: &LatestUpdatesModel,
     ) -> anyhow::Result<LatestUpdatesModel> {
         let res = sqlx::query_as::<_, LatestUpdatesModel>(
-            "SELECT FROM latest_updates WHERE type = ? AND series_id = ?",
+            "SELECT * FROM latest_updates WHERE type = ? AND series_id = ?",
         )
-        .bind(model.r#type)
-        .bind(model.series_id)
+        .bind(&model.r#type)
+        .bind(&model.series_id)
         .fetch_one(&self.base.pool)
         .await?;
         Ok(res)
@@ -86,9 +86,8 @@ impl Table<LatestUpdatesModel, u32> for LatestUpdatesTable {
 
     async fn insert(&self, model: &LatestUpdatesModel) -> anyhow::Result<u32> {
         let res = sqlx::query(
-            "INSERT INTO latest_updates (id, type, series_id, series_latest, series_published) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO latest_updates (type, series_id, series_latest, series_published) VALUES (?, ?, ?, ?)",
         )
-        .bind(model.id)
         .bind(&model.r#type)
         .bind(&model.series_id)
         .bind(&model.series_latest)

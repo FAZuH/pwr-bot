@@ -17,7 +17,7 @@ impl SubscribersTable {
 
     pub async fn select_all_by_type(&self, r#type: &str) -> anyhow::Result<Vec<SubscribersModel>> {
         let ret = sqlx::query_as::<_, SubscribersModel>(
-            "SELECT id, subscriber_type, subscriber_id FROM subscribers WHERE subscriber_type = ?",
+            "SELECT id, subscriber_type, subscriber_id, latest_update_id FROM subscribers WHERE subscriber_type = ?",
         )
         .bind(r#type)
         .fetch_all(&self.base.pool)
@@ -36,9 +36,11 @@ impl SubscribersTable {
         )
         .bind(model.subscriber_type)
         .bind(model.subscriber_id)
+        .bind(model.latest_updates_id)
         .execute(&self.base.pool)
         .await?;
         Ok(())
+        // Ok(res.rows_affected() > 0)
     }
 }
 
@@ -50,7 +52,12 @@ impl Table<SubscribersModel, u32> for SubscribersTable {
             CREATE TABLE IF NOT EXISTS subscribers (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 subscriber_type TEXT NOT NULL,
-                subscriber_id TEXT NOT NULL
+                subscriber_id TEXT NOT NULL,
+                latest_update_id INTEGER,
+                UNIQUE(subscriber_type, subscriber_id, latest_update_id),
+                FOREIGN KEY (latest_update_id) REFERENCES latest_updates(id)
+                    ON DELETE CASCADE
+                    ON UPDATE CASCADE
             )
             "#,
         )
@@ -68,7 +75,7 @@ impl Table<SubscribersModel, u32> for SubscribersTable {
 
     async fn select_all(&self) -> anyhow::Result<Vec<SubscribersModel>> {
         let ret = sqlx::query_as::<_, SubscribersModel>(
-            "SELECT id, subscriber_type, subscriber_id FROM subscribers",
+            "SELECT id, subscriber_type, subscriber_id, latest_update_id FROM subscribers",
         )
         .fetch_all(&self.base.pool)
         .await?;
@@ -84,7 +91,7 @@ impl Table<SubscribersModel, u32> for SubscribersTable {
 
     async fn select(&self, id: &u32) -> anyhow::Result<SubscribersModel> {
         let model = sqlx::query_as::<_, SubscribersModel>(
-            "SELECT id, subscriber_type, subscriber_id FROM subscribers WHERE id = ?",
+            "SELECT id, subscriber_type, subscriber_id, latest_update_id FROM subscribers WHERE id = ?",
         )
         .bind(id)
         .fetch_one(&self.base.pool)
@@ -94,18 +101,20 @@ impl Table<SubscribersModel, u32> for SubscribersTable {
 
     async fn insert(&self, model: &SubscribersModel) -> anyhow::Result<u32> {
         let res =
-            sqlx::query("INSERT INTO subscribers (subscriber_type, subscriber_id) VALUES (?, ?)")
+            sqlx::query("INSERT INTO subscribers (subscriber_type, subscriber_id, latest_update_id) VALUES (?, ?, ?)")
                 .bind(&model.subscriber_type)
                 .bind(&model.subscriber_id)
+                .bind(&model.latest_updates_id)
                 .execute(&self.base.pool)
                 .await?;
         Ok(res.last_insert_rowid().try_into()?)
     }
 
     async fn update(&self, model: &SubscribersModel) -> anyhow::Result<()> {
-        sqlx::query("UPDATE subscribers SET subscriber_type = ?, subscriber_id = ? WHERE id = ?")
+        sqlx::query("UPDATE subscribers SET subscriber_type = ?, subscriber_id = ?, latest_update_id = ? WHERE id = ?")
             .bind(&model.subscriber_type)
             .bind(&model.subscriber_id)
+            .bind(&model.latest_updates_id)
             .bind(model.id)
             .execute(&self.base.pool)
             .await?;

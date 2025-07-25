@@ -65,17 +65,19 @@ async fn subscribe(
     let user_id = ctx.author().id.to_string();
     let data = ctx.data();
 
+    let series_title: String;
     let series_latest: String;
     let series_published: DateTime<Utc>;
 
     match series_type {
         SeriesType::Manga => {
-            if let Some(res) = ctx.data().mangadex_source.get_latest(&series_id).await? {
+            if let Some(res) = data.mangadex_source.get_latest(&series_id).await? {
+                series_title = res.title;
                 series_latest = res.chapter_id;
                 series_published = res.published;
             } else {
                 ctx.say(format!(
-                    "❌ Manga with series id {} not found on MangaDex",
+                    "❌ Manga with series id \"{}\" not found on MangaDex",
                     series_id
                 ))
                 .await?;
@@ -83,12 +85,13 @@ async fn subscribe(
             }
         }
         SeriesType::Anime => {
-            if let Some(res) = ctx.data().anilist_source.get_latest(&series_id).await? {
+            if let Some(res) = data.anilist_source.get_latest(&series_id).await? {
+                series_title = res.title;
                 series_latest = res.episode_id;
                 series_published = res.published;
             } else {
                 ctx.say(format!(
-                    "❌ Anime with series id {} not found on AniList",
+                    "❌ Anime with series id \"{}\" not found on AniList",
                     series_id
                 ))
                 .await?;
@@ -104,17 +107,22 @@ async fn subscribe(
         series_latest: series_latest,
         series_published: series_published,
     };
-    let latest_update_id = data
-        .db
-        .latest_updates_table
-        .insert(&latest_update)
-        .await?;
+    let latest_update_id = match data.db.latest_updates_table.insert(&latest_update).await {
+        Ok(id) => id,
+        Err(_) => {
+            data.db
+                .latest_updates_table
+                .select_by_model(&latest_update)
+                .await?
+                .id
+        }
+    };
 
     let subscriber = SubscribersModel {
         id: 0,
         subscriber_id: {
             if send_into.as_str() == "webhook" {
-                ctx.data().config.webhook_url.clone()
+                data.config.webhook_url.clone()
             } else {
                 user_id
             }
@@ -122,12 +130,16 @@ async fn subscribe(
         subscriber_type: send_into.as_str().to_string(),
         latest_updates_id: latest_update_id,
     };
-    ctx.data().db.subscribers_table.insert(&subscriber).await?;
+
+    if data.db.subscribers_table.insert(&subscriber).await.is_err() {
+        ctx.say(format!("You are already subscribed to this {}", series_type.as_str())).await?;
+        return Ok(());
+    };
 
     ctx.say(format!(
-        "✅ Successfully subscribed to {} series `{}`",
+        "✅ Successfully subscribed to \"{}\" series \"{}\"",
         series_type.as_str(),
-        series_id
+        series_title
     ))
     .await?;
 
@@ -144,7 +156,7 @@ async fn unsubscribe(
     let user_id = ctx.author().id.to_string();
     let data = ctx.data();
 
-    let latest_update_id = LatestUpdatesModel {
+    let latest_update = LatestUpdatesModel {
         id: 0,
         r#type: series_type.as_str().to_string(),
         series_id: series_id.clone(),
@@ -155,12 +167,12 @@ async fn unsubscribe(
     let latest_update_id = if let Ok(res) = data
         .db
         .latest_updates_table
-        .select_by_model(latest_update_id)
+        .select_by_model(&latest_update)
         .await
     {
         res.id
     } else {
-        ctx.say("❌ Not found").await?;
+        ctx.say(format!("❌ type \"{}\" and series_id \"{}\" not found in the database", latest_update.r#type, latest_update.series_id)).await?;
         return Ok(());
     };
 
@@ -169,7 +181,7 @@ async fn unsubscribe(
         subscriber_type: send_into.as_str().to_string(),
         subscriber_id: {
             if send_into.as_str() == "webhook" {
-                ctx.data().config.webhook_url.clone()
+                data.config.webhook_url.clone()
             } else {
                 user_id
             }
@@ -177,16 +189,7 @@ async fn unsubscribe(
         latest_updates_id: latest_update_id,
     };
 
-    if data
-        .db
-        .subscribers_table
-        .delete_by_model(subscriber)
-        .await
-        .is_err()
-    {
-        ctx.say("❌ Can't delete from 'subscribers' table").await?;
-        return Ok(());
-    }
+    data.db.subscribers_table.delete_by_model(subscriber).await?;
 
     ctx.say(format!(
         "✅ Successfully unsubscribed from {} series `{}`",
@@ -243,11 +246,8 @@ pub async fn start(config: Arc<Config>, db: Arc<Database>) {
 
     let framework = poise::Framework::builder()
         .options(options)
-        .setup(|ctx, _ready, framework| {
-            Box::pin(async move {
-                poise::builtins::register_globally(ctx, &framework.options().commands).await?;
-                Ok(data)
-            })
+        .setup(|_ctx, _ready, _framework| {
+            Box::pin(async move { Ok(data) })
         })
         .build();
 
