@@ -22,6 +22,8 @@ async fn main() -> anyhow::Result<()> {
     let db = Arc::new(Database::new(&config.db_url, &config.db_path).await?);
     let event_bus = Arc::new(EventBus::new());
 
+    db.create_all_tables().await?;
+
     // Setup publisher
     let mut anime_publisher =
         AnimeUpdatePublisher::new(db.clone(), event_bus.clone(), config.poll_interval.clone()).await?;
