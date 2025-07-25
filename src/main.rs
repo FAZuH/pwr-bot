@@ -8,6 +8,7 @@ pub mod source;
 pub mod subscriber;
 
 use crate::config::Config;
+use dotenv::dotenv;
 use crate::database::database::Database;
 use crate::event::event_bus::EventBus;
 use crate::publisher::anime_update_publisher::AnimeUpdatePublisher;
@@ -16,6 +17,7 @@ use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    dotenv().ok();
     let config = Config::new();
     let db = Arc::new(Database::new(&config.db_url, &config.db_path).await?);
     let event_bus = Arc::new(EventBus::new());
