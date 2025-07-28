@@ -14,8 +14,10 @@ use crate::event::event_bus::EventBus;
 use crate::event::manga_update_event::MangaUpdateEvent;
 use crate::publisher::anime_update_publisher::AnimeUpdatePublisher;
 use crate::publisher::manga_update_publisher::MangaUpdatePublisher;
+use crate::source::manga_dex_source::MangaDexSource;
 use crate::subscriber::discord_dm_subscriber::DiscordDmSubscriber;
 use crate::subscriber::discord_webhook_subscriber::DiscordWebhookSubscriber;
+use crate::source::ani_list_source::AniListSource;
 use dotenv::dotenv;
 use serenity::all::Webhook;
 use std::sync::Arc;
@@ -30,22 +32,28 @@ async fn main() -> anyhow::Result<()> {
     let shared_db = Arc::new(Database::new(&shared_config.db_url, &shared_config.db_path).await?);
     shared_db.create_all_tables().await?;
 
+    // Setup sources
+    let anime_source = Arc::new(AniListSource::new());
+    let manga_source = Arc::new(MangaDexSource::new());
+
     // Setup publishers
     AnimeUpdatePublisher::new(
         shared_db.clone(),
         shared_event_bus.clone(),
+        anime_source.clone(),
         shared_config.poll_interval,
     )
     .start()?;
     MangaUpdatePublisher::new(
         shared_db.clone(),
         shared_event_bus.clone(),
+        manga_source.clone(),
         shared_config.poll_interval,
     )
     .start()?;
 
     // Setup & start bot
-    let mut bot = Bot::new(shared_config.clone(), shared_db.clone()).await?;
+    let mut bot = Bot::new(shared_config.clone(), shared_db.clone(), anime_source.clone(), manga_source.clone()).await?;
     bot.start().await?;
     let shared_bot = Arc::new(bot);
 

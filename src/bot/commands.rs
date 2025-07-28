@@ -61,8 +61,9 @@ pub async fn subscribe(
 
     match series_type {
         SeriesType::Manga => {
-            if let Some(res) = data.mangadex_source.get_latest(&series_id).await? {
-                series_title = res.title;
+            if let Ok(res) = data.manga_source.get_latest(&series_id).await {
+                // Assumption: get_title returns Ok(Manga), if and only if get_latest returns Ok(Manga)
+                series_title = data.manga_source.get_title(&series_id).await?;
                 series_latest = res.chapter_id;
                 series_published = res.published;
             } else {
@@ -75,7 +76,7 @@ pub async fn subscribe(
             }
         }
         SeriesType::Anime => {
-            if let Some(res) = data.anilist_source.get_latest(&series_id).await? {
+            if let Ok(res) = data.anime_source.get_latest(&series_id).await {
                 series_title = res.title;
                 series_latest = res.episode;
                 series_published = res.published;
@@ -118,7 +119,7 @@ pub async fn subscribe(
             }
         },
         subscriber_type: send_into.as_str().to_string(),
-        latest_updates_id: latest_update_id,
+        latest_update_id: latest_update_id,
     };
 
     if data.db.subscribers_table.insert(&subscriber).await.is_err() {
@@ -185,7 +186,7 @@ pub async fn unsubscribe(
         id: 0,
         subscriber_type: send_into.as_str().to_string(),
         subscriber_id: subscriber_id.clone(),
-        latest_updates_id: latest_update_id,
+        latest_update_id: latest_update_id,
     };
 
     if data

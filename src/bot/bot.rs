@@ -6,13 +6,13 @@ use std::time::Duration;
 
 use super::commands::{help, register, subscribe, unsubscribe};
 use crate::source::ani_list_source::AniListSource;
-use crate::{Config, database::database::Database, source::manga_dex_source::MangaDexSource};
+use crate::{config::Config, database::database::Database, source::manga_dex_source::MangaDexSource};
 
 pub struct Data {
     pub config: Arc<Config>,
     pub db: Arc<Database>,
-    pub mangadex_source: MangaDexSource,
-    pub anilist_source: AniListSource,
+    pub manga_source: Arc<MangaDexSource>,
+    pub anime_source: Arc<AniListSource>,
 }
 
 pub struct Bot {
@@ -20,7 +20,7 @@ pub struct Bot {
 }
 
 impl Bot {
-    pub async fn new(config: Arc<Config>, db: Arc<Database>) -> Result<Self> {
+    pub async fn new(config: Arc<Config>, db: Arc<Database>, anime_source: Arc<AniListSource>, manga_source: Arc<MangaDexSource>) -> Result<Self> {
         let options = poise::FrameworkOptions {
             commands: vec![subscribe(), unsubscribe(), help(), register()],
             prefix_options: poise::PrefixFrameworkOptions {
@@ -34,9 +34,9 @@ impl Bot {
         };
         let data = Data {
             config: config.clone(),
-            db: db,
-            mangadex_source: MangaDexSource::new(),
-            anilist_source: AniListSource::new(),
+            db: db.clone(),
+            manga_source: manga_source.clone(),
+            anime_source: anime_source.clone(),
         };
         let framework = poise::Framework::builder()
             .options(options)

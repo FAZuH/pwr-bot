@@ -11,17 +11,17 @@ use std::time::Duration;
 pub struct MangaUpdatePublisher {
     db: Arc<Database>,
     event_bus: Arc<EventBus>,
-    source: MangaDexSource,
+    source: Arc<MangaDexSource>,
     running: AtomicBool,
     interval: Duration,
 }
 
 impl MangaUpdatePublisher {
-    pub fn new(db: Arc<Database>, event_bus: Arc<EventBus>, poll_interval: Duration) -> Arc<Self> {
+    pub fn new(db: Arc<Database>, event_bus: Arc<EventBus>, source: Arc<MangaDexSource>, poll_interval: Duration) -> Arc<Self> {
         Arc::new(Self {
             db,
             event_bus,
-            source: MangaDexSource::new(),
+            source,
             running: AtomicBool::new(false),
             interval: poll_interval,
         })
@@ -35,7 +35,7 @@ impl MangaUpdatePublisher {
         Ok(())
     }
 
-    pub fn stop(&mut self) -> anyhow::Result<()> {
+    pub fn stop(self: Arc<Self>) -> anyhow::Result<()> {
         self.running.store(false, Ordering::SeqCst);
         Ok(())
     }
@@ -57,38 +57,38 @@ impl MangaUpdatePublisher {
 
     async fn check_updates(&self) -> anyhow::Result<()> {
         // Init step
-        // 1. Get subscriptions from databaes
-        let db = &self.db;
-        let source = &self.source;
-        let subscribers = db.subscribers_table.select_all_by_type("manga").await?;
+        // 1. Get subscriptions from database
+        let subscribers = self.db.subscribers_table.select_all_by_type("manga").await?;
 
         // 2. Get unique manga ids to fetch
         let mut latest_update_ids = HashSet::<u32>::new();
         for subs in subscribers {
-            if latest_update_ids.insert(subs.latest_updates_id) {
-                let mut prev_check = db
-                    .latest_updates_table
-                    .select(&subs.latest_updates_id)
-                    .await?;
-                // Check step
-                // 3. Fetch latest manga chapters from sources using the unique manga ids
-                if let Some(curr) = source.get_latest(&prev_check.series_id).await? {
-                    // 4. Compare chapters
-                    if curr.chapter_id == prev_check.series_latest {
-                        continue;
-                    }
+            if !latest_update_ids.insert(subs.latest_update_id) {
+                continue;
+            };
 
-                    // Handle update event
-                    // 5. Insert new updates into database
-                    prev_check.series_latest = curr.series_id.clone();
-                    prev_check.series_published = curr.published;
-                    db.latest_updates_table.update(&prev_check).await?;
+            let mut prev_check = self.db
+                .latest_updates_table
+                .select(&subs.latest_update_id)
+                .await?;
 
-                    // 6. Publish events to event bus
-                    let event: MangaUpdateEvent = curr.into();
-                    self.event_bus.publish(event).await;
-                }
+            // Check step
+            // 3. Fetch latest manga chapters from sources using the unique manga ids
+            let curr = self.source.get_latest(&prev_check.series_id).await?;
+            // 4. Compare chapters
+            if curr.chapter_id == prev_check.series_latest {
+                continue;
             }
+
+            // Handle update event
+            // 5. Insert new updates into database
+            prev_check.series_latest = curr.chapter_id.clone();
+            prev_check.series_published = curr.published;
+            self.db.latest_updates_table.update(&prev_check).await?;
+
+            // 6. Publish events to event bus
+            let event: MangaUpdateEvent = curr.into();
+            self.event_bus.publish(event).await;
         }
         Ok(())
     }

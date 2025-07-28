@@ -57,7 +57,7 @@ impl SubscribersTable {
         )
         .bind(model.subscriber_type)
         .bind(model.subscriber_id)
-        .bind(model.latest_updates_id)
+        .bind(model.latest_update_id)
         .execute(&self.base.pool)
         .await?;
         Ok(res.rows_affected() > 0)
@@ -124,7 +124,7 @@ impl Table<SubscribersModel, u32> for SubscribersTable {
             sqlx::query("INSERT INTO subscribers (subscriber_type, subscriber_id, latest_update_id) VALUES (?, ?, ?)")
                 .bind(&model.subscriber_type)
                 .bind(&model.subscriber_id)
-                .bind(&model.latest_updates_id)
+                .bind(&model.latest_update_id)
                 .execute(&self.base.pool)
                 .await?;
         Ok(res.last_insert_rowid().try_into()?)
@@ -134,7 +134,7 @@ impl Table<SubscribersModel, u32> for SubscribersTable {
         sqlx::query("UPDATE subscribers SET subscriber_type = ?, subscriber_id = ?, latest_update_id = ? WHERE id = ?")
             .bind(&model.subscriber_type)
             .bind(&model.subscriber_id)
-            .bind(&model.latest_updates_id)
+            .bind(&model.latest_update_id)
             .bind(model.id)
             .execute(&self.base.pool)
             .await?;

@@ -21,6 +21,7 @@ target
 #.idea/
 
 /data.db
+/test.db
 /.vscode
 /logs
 /tmp

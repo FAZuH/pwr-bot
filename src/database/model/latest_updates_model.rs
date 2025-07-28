@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use sqlx::FromRow;
 
-#[derive(FromRow)]
+#[derive(FromRow, Debug)]
 pub struct LatestUpdatesModel {
     pub id: u32,
     pub r#type: String,        // Anime/Manga

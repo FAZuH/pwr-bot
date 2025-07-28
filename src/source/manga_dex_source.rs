@@ -7,11 +7,15 @@ use std::hash::{Hash, Hasher};
 #[derive(Clone)]
 pub struct MangaDexSource {
     client: Client,
-    api_url: &'static str,
+    api_url: String,
 }
 
 impl MangaDexSource {
     pub fn new() -> Self {
+        Self::new_with_url("https://api.mangadex.org".to_string())
+    }
+
+    pub fn new_with_url(api_url: String) -> Self {
         let mut headers = HeaderMap::new();
         headers.insert(USER_AGENT, HeaderValue::from_static("pwr-bot/0.1"));
 
@@ -20,13 +24,10 @@ impl MangaDexSource {
             .build()
             .expect("Failed to create client");
 
-        Self {
-            client: client,
-            api_url: "https://api.mangadex.org",
-        }
+        Self { client, api_url, }
     }
 
-    pub async fn get_latest(&self, series_id: &str) -> anyhow::Result<Option<Manga>> {
+    pub async fn get_latest(&self, series_id: &str) -> anyhow::Result<Manga> {
         let url = format!(
             "{}/manga/{}/feed?order[createdAt]=desc&limit=1&translatedLanguage[]=en&translatedLanguage[]=id",
             self.api_url, series_id
@@ -37,35 +38,34 @@ impl MangaDexSource {
         let chapters = response_json["data"]
             .as_array()
             .ok_or_else(|| anyhow::anyhow!("No chapters found"))?;
-        if chapters.is_empty() {
-            return Ok(None);
-        }
-        let chapter = chapters.get(0).cloned();
-        let ret = chapter.map(|c| Manga {
-            series_id: series_id.to_string(),
-            series_type: "manga".to_string(),
-            title: c["attributes"]["title"]
-                .as_str()
-                .unwrap_or("Unknown")
-                .to_string(),
-            chapter: c["attributes"]["chapter"]
-                .as_str()
-                .unwrap_or("0")
-                .to_string(),
-            chapter_id: c["id"].as_str().unwrap_or("").to_string(),
-            url: format!(
-                "https://mangadex.org/chapter/{}",
-                c["id"].as_str().unwrap_or("")
-            ),
-            published: DateTime::parse_from_rfc3339(
-                c["attributes"]["publishAt"]
+        if let Some(c) = chapters.get(0).cloned() {
+            Ok(Manga {
+                series_id: series_id.to_string(),
+                series_type: "manga".to_string(),
+                title: c["attributes"]["title"]
                     .as_str()
-                    .unwrap_or("1970-01-01T00:00:00Z"),
-            )
-            .map(|dt| dt.with_timezone(&Utc))
-            .unwrap_or(Utc::now()),
-        });
-        Ok(ret)
+                    .unwrap_or("Unknown")
+                    .to_string(),
+                chapter: c["attributes"]["chapter"]
+                    .as_str()
+                    .unwrap_or("0")
+                    .to_string(),
+                chapter_id: c["id"].as_str().unwrap_or("").to_string(),
+                url: format!(
+                    "https://mangadex.org/chapter/{}",
+                    c["id"].as_str().unwrap_or("")
+                ),
+                published: DateTime::parse_from_rfc3339(
+                    c["attributes"]["publishAt"]
+                        .as_str()
+                        .unwrap_or("1970-01-01T00:00:00Z"),
+                )
+                .map(|dt| dt.with_timezone(&Utc))
+                .unwrap_or(Utc::now()),
+            })
+        } else {
+            return Err(anyhow::anyhow!("No chapters found"))
+        }
     }
 
     pub async fn get_title(&self, series_id: &str) -> anyhow::Result<String> {
@@ -119,7 +119,7 @@ mod tests {
             ]
         });
 
-        let _mock = server.mock(|when, then| {
+        let mock = server.mock(|when, then| {
             when.method(GET)
                 .path(format!("/manga/{}/feed", series_id))
                 .query_param("order[createdAt]", "desc")
@@ -129,11 +129,9 @@ mod tests {
                 .json_body(mock_response.clone());
         });
 
-        let source = MangaDexSource::new();
+        let source = MangaDexSource::new_with_url(server.url(""));
 
-        let result = source.get_latest(series_id).await.unwrap();
-        assert!(result.is_some());
-        let manga = result.unwrap();
+        let manga = source.get_latest(series_id).await.unwrap();
         assert_eq!(manga.series_id, series_id);
         assert_eq!(manga.series_type, "manga");
         assert_eq!(manga.title, "Latest Chapter");
@@ -143,28 +141,7 @@ mod tests {
             manga.url,
             format!("https://mangadex.org/chapter/{}", chapter_id)
         );
-    }
-
-    #[tokio::test]
-    async fn test_get_latest_returns_none_when_no_chapters() {
-        let server = MockServer::start();
-        let series_id = "nochap";
-        let mock_response = json!({ "data": [] });
-
-        let _mock = server.mock(|when, then| {
-            when.method(GET)
-                .path(format!("/manga/{}/feed", series_id))
-                .query_param("order[createdAt]", "desc")
-                .query_param("limit", "1");
-            then.status(200)
-                .header("content-type", "application/json")
-                .json_body(mock_response.clone());
-        });
-
-        let source = MangaDexSource::new();
-
-        let result = source.get_latest(series_id).await.unwrap();
-        assert!(result.is_none());
+        mock.assert();
     }
 
     #[tokio::test]
@@ -181,7 +158,7 @@ mod tests {
             ]
         });
 
-        let _mock = server.mock(|when, then| {
+        let mock = server.mock(|when, then| {
             when.method(GET)
                 .path(format!("/manga/{}/feed", series_id))
                 .query_param("order[createdAt]", "desc")
@@ -191,13 +168,12 @@ mod tests {
                 .json_body(mock_response.clone());
         });
 
-        let source = MangaDexSource::new();
+        let source = MangaDexSource::new_with_url(server.url(""));
 
-        let result = source.get_latest(series_id).await.unwrap();
-        assert!(result.is_some());
-        let manga = result.unwrap();
+        let manga = source.get_latest(series_id).await.unwrap();
         assert_eq!(manga.title, "Unknown");
         assert_eq!(manga.chapter, "0");
         assert_eq!(manga.chapter_id, chapter_id);
+        mock.assert();
     }
 }

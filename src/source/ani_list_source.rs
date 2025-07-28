@@ -7,18 +7,22 @@ use std::hash::{Hash, Hasher};
 #[derive(Clone)]
 pub struct AniListSource {
     client: Client,
-    api_url: &'static str,
+    api_url: String,  // Changed from &'static str to String
 }
 
 impl AniListSource {
     pub fn new() -> Self {
+        Self::new_with_url("https://graphql.anilist.co".to_string())
+    }
+
+    pub fn new_with_url(api_url: String) -> Self {
         Self {
             client: Client::new(),
-            api_url: "https://graphql.anilist.co",
+            api_url,
         }
     }
 
-    pub async fn get_latest(&self, series_id: &str) -> anyhow::Result<Option<Anime>> {
+    pub async fn get_latest(&self, series_id: &str) -> anyhow::Result<Anime> {
         let query = r#"
         query ($id: Int) {
             Media(id: $id, type: ANIME) {
@@ -30,21 +34,22 @@ impl AniListSource {
         let json = serde_json::json!({ "query": query, "variables": { "id": series_id } });
         let response = self
             .client
-            .post(self.api_url)
+            .post(&self.api_url)  // Use reference to the String
             .json(&json)
             .send()
-            .await?
+            .await?;
+        let body = response
             .json::<serde_json::Value>()
             .await?;
-        let episode = response["data"]["Media"]["nextAiringEpisode"].as_object();
+        let episode = body["data"]["Media"]["nextAiringEpisode"].as_object();
         if episode.is_none() {
-            return Ok(None);
+            return Err(anyhow::anyhow!("Episode is empty"));
         }
         let episode = episode.unwrap();
-        Ok(Some(Anime {
+        Ok(Anime {
             series_id: series_id.to_string(),
             series_type: "anime".to_string(),
-            title: response["data"]["Media"]["title"]["romaji"]
+            title: body["data"]["Media"]["title"]["romaji"]
                 .as_str()
                 .unwrap_or("Unknown")
                 .to_string(),
@@ -52,7 +57,7 @@ impl AniListSource {
             url: format!("https://anilist.co/anime/{}", series_id),
             published: DateTime::from_timestamp(episode["airingAt"].as_i64().unwrap_or(0), 0)
                 .unwrap_or(Utc::now()),
-        }))
+        })
     }
 }
 
@@ -94,11 +99,9 @@ mod tests {
             }));
         });
 
-        let source = AniListSource::new();
+        let source = AniListSource::new_with_url(server.url(""));
 
-        let result = source.get_latest("123").await.unwrap();
-        assert!(result.is_some());
-        let anime = result.unwrap();
+        let anime = source.get_latest("123").await.unwrap();
         assert_eq!(anime.series_id, "123");
         assert_eq!(anime.title, "Test Anime");
         assert_eq!(anime.episode, "5");
@@ -107,7 +110,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_get_latest_returns_none_when_no_next_airing_episode() {
+    async fn test_get_latest_returns_error_when_no_next_airing_episode() {  // Fixed test name and logic
         let server = MockServer::start();
         let mock = server.mock(|when, then| {
             when.method(POST);
@@ -121,10 +124,10 @@ mod tests {
             }));
         });
 
-        let source = AniListSource::new();
+        let source = AniListSource::new_with_url(server.url(""));
 
-        let result = source.get_latest("456").await.unwrap();
-        assert!(result.is_none());
+        let result = source.get_latest("456").await;
+        assert!(result.is_err());  // Should return error when nextAiringEpisode is null
         mock.assert();
     }
 
@@ -146,11 +149,9 @@ mod tests {
             }));
         });
 
-        let source = AniListSource::new();
+        let source = AniListSource::new_with_url(server.url(""));
 
-        let result = source.get_latest("789").await.unwrap();
-        assert!(result.is_some());
-        let anime = result.unwrap();
+        let anime = source.get_latest("789").await.unwrap();
         assert_eq!(anime.title, "Unknown");
         assert_eq!(anime.episode, "7");
         mock.assert();
@@ -164,7 +165,7 @@ mod tests {
             then.status(200).body("not a json");
         });
 
-        let source = AniListSource::new();
+        let source = AniListSource::new_with_url(server.url(""));
 
         let result = source.get_latest("999").await;
         assert!(result.is_err());

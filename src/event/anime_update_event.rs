@@ -5,7 +5,7 @@ use crate::source::anime::Anime;
 
 use super::event::Event;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct AnimeUpdateEvent {
     pub series_id: String,
     pub series_type: String,

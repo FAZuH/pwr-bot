@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use super::event::Event;
 use std::any::Any;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct MangaUpdateEvent {
     pub series_id: String,
     pub series_type: String,

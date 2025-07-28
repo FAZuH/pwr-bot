@@ -11,19 +11,19 @@ use std::time::Duration;
 pub struct AnimeUpdatePublisher {
     db: Arc<Database>,
     event_bus: Arc<EventBus>,
-    source: AniListSource,
+    source: Arc<AniListSource>,
+    poll_interval: Duration,
     running: AtomicBool,
-    interval: Duration,
 }
 
 impl AnimeUpdatePublisher {
-    pub fn new(db: Arc<Database>, event_bus: Arc<EventBus>, poll_interval: Duration) -> Arc<Self> {
+    pub fn new(db: Arc<Database>, event_bus: Arc<EventBus>, source: Arc<AniListSource>, poll_interval: Duration) -> Arc<Self> {
         Arc::new(Self {
             db,
             event_bus,
-            source: AniListSource::new(),
+            source,
+            poll_interval,
             running: AtomicBool::new(false),
-            interval: poll_interval,
         })
     }
 
@@ -35,13 +35,13 @@ impl AnimeUpdatePublisher {
         Ok(())
     }
 
-    pub fn stop(&mut self) -> anyhow::Result<()> {
+    pub fn stop(self: Arc<Self>) -> anyhow::Result<()> {
         self.running.store(false, Ordering::SeqCst);
         Ok(())
     }
 
     fn spawn_check_loop(self: Arc<Self>) {
-        let mut interval = tokio::time::interval(self.interval);
+        let mut interval = tokio::time::interval(self.poll_interval);
         tokio::spawn(async move {
             loop {
                 interval.tick().await;
@@ -65,30 +65,33 @@ impl AnimeUpdatePublisher {
         // 2. Get unique anime ids to fetch
         let mut latest_update_ids = HashSet::<u32>::new();
         for subs in subscribers {
-            if latest_update_ids.insert(subs.latest_updates_id) {
-                let mut prev_check = db
-                    .latest_updates_table
-                    .select(&subs.latest_updates_id)
-                    .await?;
-                // Check step
-                // 3. Fetch latest anime chapters from sources using the unique anime ids
-                if let Some(curr) = source.get_latest(&prev_check.series_id).await? {
-                    // 4. Compare chapters
-                    if curr.episode == prev_check.series_latest {
-                        continue;
-                    }
-
-                    // Handle update event
-                    // 5. Insert new updates into database
-                    prev_check.series_latest = curr.series_id.clone();
-                    prev_check.series_published = curr.published;
-                    db.latest_updates_table.update(&prev_check).await?;
-
-                    // 6. Publish events to event bus
-                    let event: AnimeUpdateEvent = curr.into();
-                    self.event_bus.publish(event).await;
-                }
+            if !latest_update_ids.insert(subs.latest_update_id) {
+                continue;
             }
+
+            let mut prev_check = db
+                .latest_updates_table
+                .select(&subs.latest_update_id)
+                .await?;
+
+            // Check step
+            // 3. Fetch latest anime chapters from sources using the unique anime ids
+            let curr = source.get_latest(&prev_check.series_id).await?;
+            // 4. Compare chapters
+            if curr.episode == prev_check.series_latest {
+                continue;
+            }
+
+            // Handle update event
+            // 5. Insert new updates into database
+            prev_check.series_latest = curr.episode.clone();
+            prev_check.series_published = curr.published;
+            db.latest_updates_table.update(&prev_check).await?;
+
+            // 6. Publish events to event bus
+            let event: AnimeUpdateEvent = curr.into();
+            self.event_bus.publish(event).await;
+
         }
         Ok(())
     }
