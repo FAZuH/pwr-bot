@@ -46,8 +46,8 @@ impl SubscribersTable {
         Ok(ret)
     }
 
-    pub async fn delete_by_model(&self, model: SubscribersModel) -> anyhow::Result<()> {
-        sqlx::query(
+    pub async fn delete_by_model(&self, model: SubscribersModel) -> anyhow::Result<bool> {
+        let res = sqlx::query(
             r#"
             DELETE FROM subscribers WHERE 
                 subscriber_type = ? AND 
@@ -60,8 +60,7 @@ impl SubscribersTable {
         .bind(model.latest_updates_id)
         .execute(&self.base.pool)
         .await?;
-        Ok(())
-        // Ok(res.rows_affected() > 0)
+        Ok(res.rows_affected() > 0)
     }
 }
 

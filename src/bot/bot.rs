@@ -185,30 +185,35 @@ async fn unsubscribe(
         return Ok(());
     };
 
+    let subscriber_id = {
+        if send_into.as_str() == "webhook" {
+            data.config.webhook_url.clone()
+        } else {
+            user_id
+        }
+    };
     let subscriber = SubscribersModel {
         id: 0,
         subscriber_type: send_into.as_str().to_string(),
-        subscriber_id: {
-            if send_into.as_str() == "webhook" {
-                data.config.webhook_url.clone()
-            } else {
-                user_id
-            }
-        },
+        subscriber_id: subscriber_id.clone(),
         latest_updates_id: latest_update_id,
     };
 
-    data.db
+    if data
+        .db
         .subscribers_table
         .delete_by_model(subscriber)
+        .await?
+    {
+        ctx.say(format!(
+            "✅ Successfully unsubscribed from {} series `{}`",
+            series_type.as_str(),
+            series_id
+        ))
         .await?;
-
-    ctx.say(format!(
-        "✅ Successfully unsubscribed from {} series `{}`",
-        series_type.as_str(),
-        series_id
-    ))
-    .await?;
+    } else {
+        ctx.say("❌ You are not subscribed to this series").await?;
+    }
 
     Ok(())
 }
