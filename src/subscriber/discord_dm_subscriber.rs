@@ -3,7 +3,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use serenity::all::{CreateMessage, UserId};
 
-use crate::{bot::bot::Bot, database::{database::Database, model::latest_updates_model::LatestUpdatesModel}, event::{anime_update_event::AnimeUpdateEvent, manga_update_event::MangaUpdateEvent}};
+use crate::{bot::bot::Bot, database::{database::Database, model::latest_updates_model::LatestUpdatesModel}, event::{anime_update_event::AnimeUpdateEvent, manga_update_event::MangaUpdateEvent}, subscriber::subscriber::Subscriber};
 
 pub struct DiscordDmSubscriber {
     bot: Arc<Bot>,
@@ -11,17 +11,17 @@ pub struct DiscordDmSubscriber {
 }
 
 impl DiscordDmSubscriber {
-    pub fn new(&self, bot: Arc<Bot>, db: Arc<Database>) -> Self {
+    pub fn new(bot: Arc<Bot>, db: Arc<Database>) -> Self {
         Self { bot, db }
     }
 
-    pub async fn anime_event_callback(&self, event: &AnimeUpdateEvent) -> Result<()> {
+    pub async fn anime_event_callback(&self, event: AnimeUpdateEvent) -> Result<()> {
         let message = CreateMessage::new()
             .content(format!("🚨 New episode {} from anime {}! 🚨", event.episode, event.title));
         self.common(event.series_type.clone(), event.series_id.clone(), message).await
     }
 
-    pub async fn manga_event_callback(&self, event: &MangaUpdateEvent) -> Result<()> {
+    pub async fn manga_event_callback(&self, event: MangaUpdateEvent) -> Result<()> {
         let message = CreateMessage::new()
             .content(format!("🚨 New chapter {} from manga {}! 🚨", event.chapter, event.title));
         self.common(event.series_type.clone(), event.series_id.clone(), message).await
@@ -40,26 +40,55 @@ impl DiscordDmSubscriber {
         let subscribers = self.db.subscribers_table.select_all_by_type_and_latest_update("dm".to_string(), id).await?;
 
         for sub in subscribers {
-            // 4. Get all serenity::User by subscriber.id
             let user_id = if let Ok(id) = sub.subscriber_id.parse::<u64>() {
                 UserId::new(id)
             } else {
-                return Ok(())
+                continue; // Skip invalid IDs, don't return early
             };
 
-            // 5. Notify event to all serenity::User DMs
             let http = self.bot.client.http.clone();
             let message = message.clone();
-            // 5.1 Try getting user from cache first
-            // Note: User from cache and user from http has different type, so can't use Result.map()
-            if let Some(user) = self.bot.client.cache.user(user_id)  {
-                user.dm(http, message).await?;
+            
+            // Check cache first, but extract the data we need
+            let cached_user_exists = self.bot.client.cache.user(user_id).is_some();
+            
+            if cached_user_exists {
+                // User exists in cache, send DM directly using user_id
+                if let Err(e) = user_id.dm(&http, message).await {
+                    eprintln!("Failed to send DM to cached user {}: {}", user_id, e);
+                }
             } else {
-                // 5.2 If user not in cache, get from http
-                let user = self.bot.client.http.get_user(user_id).await?;
-                user.dm(http, message).await?;
+                // User not in cache, fetch from HTTP then send
+                match self.bot.client.http.get_user(user_id).await {
+                    Ok(user) => {
+                        if let Err(e) = user.dm(&http, message).await {
+                            eprintln!("Failed to send DM to fetched user {}: {}", user_id, e);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to fetch user {}: {}", user_id, e);
+                    }
+                }
             }
         }
         Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl Subscriber<AnimeUpdateEvent> for DiscordDmSubscriber {
+    async fn callback(&self, event: AnimeUpdateEvent) -> Result<()> {
+        DiscordDmSubscriber::new(self.bot.clone(), self.db.clone())
+            .anime_event_callback(event)
+            .await
+    }
+}
+
+#[async_trait::async_trait]
+impl Subscriber<MangaUpdateEvent> for DiscordDmSubscriber {
+    async fn callback(&self, event: MangaUpdateEvent) -> Result<()> {
+        DiscordDmSubscriber::new(self.bot.clone(), self.db.clone())
+            .manga_event_callback(event)
+            .await
     }
 }

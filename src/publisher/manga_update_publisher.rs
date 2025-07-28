@@ -4,6 +4,7 @@ use crate::event::event_bus::EventBus;
 use crate::event::manga_update_event::MangaUpdateEvent;
 use crate::source::manga_dex_source::MangaDexSource;
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -11,47 +12,47 @@ pub struct MangaUpdatePublisher {
     db: Arc<Database>,
     event_bus: Arc<EventBus>,
     source: MangaDexSource,
-    running: bool,
+    running: AtomicBool,
     interval: Duration,
 }
 
 impl MangaUpdatePublisher {
-    pub async fn new(
+    pub fn new(
         db: Arc<Database>,
         event_bus: Arc<EventBus>,
         poll_interval: Duration,
-    ) -> anyhow::Result<Self> {
-        Ok(Self {
+    ) -> Arc<Self> {
+        Arc::new(Self {
             db,
             event_bus,
             source: MangaDexSource::new(),
-            running: false,
+            running: AtomicBool::new(false),
             interval: poll_interval,
         })
     }
 
-    pub fn start(&mut self) -> anyhow::Result<()> {
-        if !self.running {
-            self.running = true;
+    pub fn start(self: Arc<Self>) -> anyhow::Result<()> {
+        if !self.running.load(Ordering::SeqCst) {
+            self.running.store(true, Ordering::SeqCst);
             self.spawn_check_loop();
         }
         Ok(())
     }
 
     pub fn stop(&mut self) -> anyhow::Result<()> {
-        self.running = false;
+        self.running.store(false, Ordering::SeqCst);
         Ok(())
     }
 
-    fn spawn_check_loop(&self) {
-        let interval_duration = self.interval;
-        let self_clone = self.clone();
-
+    fn spawn_check_loop(self: Arc<Self>) {
+        let mut interval = tokio::time::interval(self.interval);
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(interval_duration);
             loop {
                 interval.tick().await;
-                if let Err(e) = self_clone.check_updates().await {
+                if !self.running.load(Ordering::SeqCst) {
+                    break;
+                }
+                if let Err(e) = self.check_updates().await {
                     eprintln!("Error checking updates: {}", e);
                 }
             }
@@ -89,22 +90,10 @@ impl MangaUpdatePublisher {
 
                     // 6. Publish events to event bus
                     let event: MangaUpdateEvent = curr.into();
-                    self.event_bus.publish(&event).await?;
+                    self.event_bus.publish(event).await;
                 }
             }
         }
         Ok(())
-    }
-}
-
-impl Clone for MangaUpdatePublisher {
-    fn clone(&self) -> Self {
-        Self {
-            db: self.db.clone(),
-            event_bus: self.event_bus.clone(),
-            source: self.source.clone(),
-            running: self.running,
-            interval: self.interval,
-        }
     }
 }

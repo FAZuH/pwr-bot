@@ -9,7 +9,12 @@ pub mod subscriber;
 
 use crate::bot::bot::Bot;
 use crate::config::Config;
+use crate::event::anime_update_event::AnimeUpdateEvent;
+use crate::event::manga_update_event::MangaUpdateEvent;
+use crate::subscriber::discord_dm_subscriber::DiscordDmSubscriber;
+use crate::subscriber::discord_webhook_subscriber::DiscordWebhookSubscriber;
 use dotenv::dotenv;
+use serenity::all::Webhook;
 use crate::database::database::Database;
 use crate::event::event_bus::EventBus;
 use crate::publisher::anime_update_publisher::AnimeUpdatePublisher;
@@ -19,21 +24,36 @@ use std::sync::Arc;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenv().ok();
-    let config = Config::new();
-    let event_bus = Arc::new(EventBus::new());
+    let shared_config = Arc::new(Config::new());
+    let shared_event_bus = Arc::new(EventBus::new());
 
     // Setup database
-    let db = Arc::new(Database::new(&config.db_url, &config.db_path).await?);
-    db.create_all_tables().await?;
+    let shared_db = Arc::new(Database::new(&shared_config.db_url, &shared_config.db_path).await?);
+    shared_db.create_all_tables().await?;
 
-    // Setup publisher
-    AnimeUpdatePublisher::new(db.clone(), event_bus.clone(), config.poll_interval.clone()).await?.start()?;
-    MangaUpdatePublisher::new(db.clone(), event_bus.clone(), config.poll_interval.clone()).await?.start()?;
-
-    // Setup subscriber
+    // Setup publishers
+    AnimeUpdatePublisher::new(shared_db.clone(), shared_event_bus.clone(), shared_config.poll_interval).start()?;
+    MangaUpdatePublisher::new(shared_db.clone(), shared_event_bus.clone(), shared_config.poll_interval).start()?;
 
     // Setup & start bot
-    Bot::new(Arc::new(config), db).await?;
+    let mut bot = Bot::new(shared_config.clone(), shared_db.clone()).await?;
+    bot.start().await?;
+    let shared_bot = Arc::new(bot);
+
+    // Setup subscribers
+    let dm_subscriber = Arc::new(DiscordDmSubscriber::new(
+        shared_bot.clone(),
+        shared_db.clone()
+    ));
+    shared_event_bus.register_subcriber::<AnimeUpdateEvent, _>(dm_subscriber.clone()).await;
+    shared_event_bus.register_subcriber::<MangaUpdateEvent, _>(dm_subscriber).await;
+
+    let webhook_subscriber = Arc::new(DiscordWebhookSubscriber::new(
+        shared_bot.clone(),
+        Arc::new(Webhook::from_url(shared_bot.client.http.clone(), shared_config.webhook_url.clone().as_str()).await?)
+    ));
+    shared_event_bus.register_subcriber::<AnimeUpdateEvent, _>(webhook_subscriber.clone()).await;
+    shared_event_bus.register_subcriber::<MangaUpdateEvent, _>(webhook_subscriber).await;
 
     // Listen for exit signal
     tokio::signal::ctrl_c().await?;

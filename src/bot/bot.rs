@@ -226,7 +226,7 @@ async fn register(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-pub struct Bot { 
+pub struct Bot {
     pub client: serenity::Client,
 }
 
@@ -262,7 +262,8 @@ impl Bot {
         })
     }
 
-    pub async fn start(&mut self) {
-        self.client.start().await.unwrap();
+    pub async fn start(&mut self) -> Result<()> {
+        self.client.start().await?;
+        Ok(())
     }
 }
