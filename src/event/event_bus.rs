@@ -8,9 +8,8 @@ use tokio::sync::RwLock;
 
 use crate::subscriber::subscriber::Subscriber;
 
-type AsyncSubscriber<E> = Box<
-    dyn Fn(E) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> + Send + Sync
->;
+type AsyncSubscriber<E> =
+    Box<dyn Fn(E) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> + Send + Sync>;
 
 pub struct EventBus {
     subscribers: Arc<RwLock<HashMap<TypeId, Vec<Box<dyn Any + Send + Sync>>>>>,
@@ -30,17 +29,16 @@ impl EventBus {
         Fut: Future<Output = Result<()>> + Send + 'static,
     {
         let type_id = TypeId::of::<E>();
-        
-        let wrapped_sub: AsyncSubscriber<E> = Box::new(move |event| {
-            Box::pin(callback(event))
-        });
 
-        self.subscribers.write().await
+        let wrapped_sub: AsyncSubscriber<E> = Box::new(move |event| Box::pin(callback(event)));
+
+        self.subscribers
+            .write()
+            .await
             .entry(type_id)
             .or_insert_with(Vec::new)
             .push(Box::new(wrapped_sub));
     }
-
 
     pub async fn register_subcriber<E, S>(&self, subscriber: Arc<S>)
     where
@@ -49,10 +47,9 @@ impl EventBus {
     {
         self.register_callback(move |event: E| {
             let h = subscriber.clone();
-            async move {
-                h.callback(event).await
-            }
-        }).await;
+            async move { h.callback(event).await }
+        })
+        .await;
     }
 
     pub async fn publish<E>(&self, event: E)
@@ -81,4 +78,3 @@ impl Default for EventBus {
         Self::new()
     }
 }
-

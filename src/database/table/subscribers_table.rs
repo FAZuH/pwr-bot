@@ -25,7 +25,11 @@ impl SubscribersTable {
         Ok(ret)
     }
 
-    pub async fn select_all_by_type_and_latest_update(&self, subscriber_type: String, latest_update_id: u32) -> anyhow::Result<Vec<SubscribersModel>> {
+    pub async fn select_all_by_type_and_latest_update(
+        &self,
+        subscriber_type: String,
+        latest_update_id: u32,
+    ) -> anyhow::Result<Vec<SubscribersModel>> {
         let ret = sqlx::query_as::<_, SubscribersModel>(
             r#"
             SELECT id, subscriber_type, subscriber_id, latest_update_id

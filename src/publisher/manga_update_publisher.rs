@@ -4,8 +4,8 @@ use crate::event::event_bus::EventBus;
 use crate::event::manga_update_event::MangaUpdateEvent;
 use crate::source::manga_dex_source::MangaDexSource;
 use std::collections::HashSet;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 pub struct MangaUpdatePublisher {
@@ -17,11 +17,7 @@ pub struct MangaUpdatePublisher {
 }
 
 impl MangaUpdatePublisher {
-    pub fn new(
-        db: Arc<Database>,
-        event_bus: Arc<EventBus>,
-        poll_interval: Duration,
-    ) -> Arc<Self> {
+    pub fn new(db: Arc<Database>, event_bus: Arc<EventBus>, poll_interval: Duration) -> Arc<Self> {
         Arc::new(Self {
             db,
             event_bus,

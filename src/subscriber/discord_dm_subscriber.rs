@@ -3,11 +3,16 @@ use std::sync::Arc;
 use anyhow::Result;
 use serenity::all::{CreateMessage, UserId};
 
-use crate::{bot::bot::Bot, database::{database::Database, model::latest_updates_model::LatestUpdatesModel}, event::{anime_update_event::AnimeUpdateEvent, manga_update_event::MangaUpdateEvent}, subscriber::subscriber::Subscriber};
+use crate::{
+    bot::bot::Bot,
+    database::{database::Database, model::latest_updates_model::LatestUpdatesModel},
+    event::{anime_update_event::AnimeUpdateEvent, manga_update_event::MangaUpdateEvent},
+    subscriber::subscriber::Subscriber,
+};
 
 pub struct DiscordDmSubscriber {
     bot: Arc<Bot>,
-    db: Arc<Database>
+    db: Arc<Database>,
 }
 
 impl DiscordDmSubscriber {
@@ -16,28 +21,48 @@ impl DiscordDmSubscriber {
     }
 
     pub async fn anime_event_callback(&self, event: AnimeUpdateEvent) -> Result<()> {
-        let message = CreateMessage::new()
-            .content(format!("🚨 New episode {} from anime {}! 🚨", event.episode, event.title));
-        self.common(event.series_type.clone(), event.series_id.clone(), message).await
+        let message = CreateMessage::new().content(format!(
+            "🚨 New episode {} from anime {}! 🚨",
+            event.episode, event.title
+        ));
+        self.common(event.series_type.clone(), event.series_id.clone(), message)
+            .await
     }
 
     pub async fn manga_event_callback(&self, event: MangaUpdateEvent) -> Result<()> {
-        let message = CreateMessage::new()
-            .content(format!("🚨 New chapter {} from manga {}! 🚨", event.chapter, event.title));
-        self.common(event.series_type.clone(), event.series_id.clone(), message).await
+        let message = CreateMessage::new().content(format!(
+            "🚨 New chapter {} from manga {}! 🚨",
+            event.chapter, event.title
+        ));
+        self.common(event.series_type.clone(), event.series_id.clone(), message)
+            .await
     }
 
-    async fn common(&self, series_type: String, series_id: String, message: CreateMessage) -> Result<()> {
+    async fn common(
+        &self,
+        series_type: String,
+        series_id: String,
+        message: CreateMessage,
+    ) -> Result<()> {
         // 1. Get latest_update model by type and series_id
-        let model = LatestUpdatesModel { 
+        let model = LatestUpdatesModel {
             r#type: series_type,
             series_id: series_id,
             ..Default::default()
         };
-        let id = self.db.latest_updates_table.select_by_model(&model).await?.id;
+        let id = self
+            .db
+            .latest_updates_table
+            .select_by_model(&model)
+            .await?
+            .id;
 
         // 2. Get all subscribers by latest_update.id
-        let subscribers = self.db.subscribers_table.select_all_by_type_and_latest_update("dm".to_string(), id).await?;
+        let subscribers = self
+            .db
+            .subscribers_table
+            .select_all_by_type_and_latest_update("dm".to_string(), id)
+            .await?;
 
         for sub in subscribers {
             let user_id = if let Ok(id) = sub.subscriber_id.parse::<u64>() {
@@ -48,10 +73,10 @@ impl DiscordDmSubscriber {
 
             let http = self.bot.client.http.clone();
             let message = message.clone();
-            
+
             // Check cache first, but extract the data we need
             let cached_user_exists = self.bot.client.cache.user(user_id).is_some();
-            
+
             if cached_user_exists {
                 // User exists in cache, send DM directly using user_id
                 if let Err(e) = user_id.dm(&http, message).await {

@@ -72,7 +72,10 @@ impl MangaDexSource {
         let url = format!("{}/manga/{}", self.api_url, series_id);
         let body = self.client.get(&url).send().await?.text().await?;
         let response_json: serde_json::Value = serde_json::from_str(&body)?;
-        let ret = response_json["data"]["attributes"]["title"]["en"].as_str().unwrap_or("Title not found").to_string();
+        let ret = response_json["data"]["attributes"]["title"]["en"]
+            .as_str()
+            .unwrap_or("Title not found")
+            .to_string();
         Ok(ret)
     }
 }

@@ -133,7 +133,11 @@ async fn subscribe(
     };
 
     if data.db.subscribers_table.insert(&subscriber).await.is_err() {
-        ctx.say(format!("You are already subscribed to this {}", series_type.as_str())).await?;
+        ctx.say(format!(
+            "You are already subscribed to this {}",
+            series_type.as_str()
+        ))
+        .await?;
         return Ok(());
     };
 
@@ -173,7 +177,11 @@ async fn unsubscribe(
     {
         res.id
     } else {
-        ctx.say(format!("❌ type \"{}\" and series_id \"{}\" not found in the database", latest_update.r#type, latest_update.series_id)).await?;
+        ctx.say(format!(
+            "❌ type \"{}\" and series_id \"{}\" not found in the database",
+            latest_update.r#type, latest_update.series_id
+        ))
+        .await?;
         return Ok(());
     };
 
@@ -190,7 +198,10 @@ async fn unsubscribe(
         latest_updates_id: latest_update_id,
     };
 
-    data.db.subscribers_table.delete_by_model(subscriber).await?;
+    data.db
+        .subscribers_table
+        .delete_by_model(subscriber)
+        .await?;
 
     ctx.say(format!(
         "✅ Successfully unsubscribed from {} series `{}`",
@@ -247,19 +258,18 @@ impl Bot {
             config: config.clone(),
             db: db,
             mangadex_source: MangaDexSource::new(),
-            anilist_source: AniListSource::new()
+            anilist_source: AniListSource::new(),
         };
         let framework = poise::Framework::builder()
             .options(options)
-            .setup(|_ctx, _ready, _framework| {
-                Box::pin(async move { Ok(data) })
-            })
+            .setup(|_ctx, _ready, _framework| Box::pin(async move { Ok(data) }))
             .build();
-        let intents = serenity::GatewayIntents::non_privileged() | serenity::GatewayIntents::MESSAGE_CONTENT;
-        let client = serenity::ClientBuilder::new(&config.discord_token, intents).framework(framework).await?;
-        Ok(Self {
-            client
-        })
+        let intents =
+            serenity::GatewayIntents::non_privileged() | serenity::GatewayIntents::MESSAGE_CONTENT;
+        let client = serenity::ClientBuilder::new(&config.discord_token, intents)
+            .framework(framework)
+            .await?;
+        Ok(Self { client })
     }
 
     pub async fn start(&mut self) -> Result<()> {
