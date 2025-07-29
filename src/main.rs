@@ -21,10 +21,13 @@ use crate::source::ani_list_source::AniListSource;
 use dotenv::dotenv;
 use serenity::all::Webhook;
 use std::sync::Arc;
+use log::info;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenv().ok();
+    env_logger::init();
+    info!("Bot starting up...");
     let shared_config = Arc::new(Config::new());
     let shared_event_bus = Arc::new(EventBus::new());
 
@@ -87,6 +90,8 @@ async fn main() -> anyhow::Result<()> {
         .await;
 
     // Listen for exit signal
+    info!("Bot running. Press Ctrl+C to stop.");
     tokio::signal::ctrl_c().await?;
+    info!("Ctrl+C received, shutting down.");
     Ok(())
 }

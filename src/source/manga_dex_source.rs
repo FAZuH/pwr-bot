@@ -2,6 +2,7 @@ use super::manga::Manga;
 use chrono::{DateTime, Utc};
 use reqwest::Client;
 use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
+use log::{info, warn};
 use std::hash::{Hash, Hasher};
 
 #[derive(Clone)]
@@ -28,6 +29,7 @@ impl MangaDexSource {
     }
 
     pub async fn get_latest(&self, series_id: &str) -> anyhow::Result<Manga> {
+        info!("Fetching latest manga for series_id: {}", series_id);
         let url = format!(
             "{}/manga/{}/feed?order[createdAt]=desc&limit=1&translatedLanguage[]=en&translatedLanguage[]=id",
             self.api_url, series_id
@@ -37,8 +39,12 @@ impl MangaDexSource {
         let response_json: serde_json::Value = serde_json::from_str(&body)?;
         let chapters = response_json["data"]
             .as_array()
-            .ok_or_else(|| anyhow::anyhow!("No chapters found"))?;
+            .ok_or_else(|| {
+                warn!("No chapters array found in response for series_id: {}", series_id);
+                anyhow::anyhow!("No chapters found")
+            })?;
         if let Some(c) = chapters.get(0).cloned() {
+            info!("Successfully fetched latest manga for series_id: {}", series_id);
             Ok(Manga {
                 series_id: series_id.to_string(),
                 series_type: "manga".to_string(),
@@ -64,6 +70,7 @@ impl MangaDexSource {
                 .unwrap_or(Utc::now()),
             })
         } else {
+            warn!("No chapters found in data for series_id: {}", series_id);
             return Err(anyhow::anyhow!("No chapters found"))
         }
     }

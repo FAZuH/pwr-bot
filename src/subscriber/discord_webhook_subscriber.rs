@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use anyhow::{self, Result};
 use serenity::all::{ExecuteWebhook, Webhook};
+use log::{info, error};
 
 use crate::{
     bot::bot::Bot,
@@ -16,6 +17,7 @@ pub struct DiscordWebhookSubscriber {
 
 impl DiscordWebhookSubscriber {
     pub fn new(bot: Arc<Bot>, webhook: Arc<Webhook>) -> Self {
+        info!("Initializing DiscordWebhookSubscriber.");
         Self { bot, webhook }
     }
 
@@ -27,9 +29,14 @@ impl DiscordWebhookSubscriber {
         ));
 
         // 2. Notify event to all serenity::User DMs
-        self.webhook
+        info!("Attempting to execute webhook for anime update: {}", event.title);
+        if let Err(e) = self.webhook
             .execute(self.bot.client.http.clone(), false, message)
-            .await?;
+            .await {
+            error!("Failed to execute webhook for anime update: {}", e);
+            return Err(e.into());
+        }
+        info!("Successfully executed webhook for anime update: {}", event.title);
         Ok(())
     }
 
@@ -41,9 +48,14 @@ impl DiscordWebhookSubscriber {
         ));
 
         // 2. Notify event to all serenity::User DMs
-        self.webhook
+        info!("Attempting to execute webhook for manga update: {}", event.title);
+        if let Err(e) = self.webhook
             .execute(self.bot.client.http.clone(), false, message)
-            .await?;
+            .await {
+            error!("Failed to execute webhook for manga update: {}", e);
+            return Err(e.into());
+        }
+        info!("Successfully executed webhook for manga update: {}", event.title);
         Ok(())
     }
 }

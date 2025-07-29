@@ -1,6 +1,7 @@
 use super::anime::Anime;
 use chrono::{DateTime, Utc};
 use reqwest::Client;
+use log::{info, warn};
 
 use std::hash::{Hash, Hasher};
 
@@ -23,6 +24,7 @@ impl AniListSource {
     }
 
     pub async fn get_latest(&self, series_id: &str) -> anyhow::Result<Anime> {
+        info!("Fetching latest anime for series_id: {}", series_id);
         let query = r#"
         query ($id: Int) {
             Media(id: $id, type: ANIME) {
@@ -43,9 +45,11 @@ impl AniListSource {
             .await?;
         let episode = body["data"]["Media"]["nextAiringEpisode"].as_object();
         if episode.is_none() {
+            warn!("No next airing episode found for series_id: {}", series_id);
             return Err(anyhow::anyhow!("Episode is empty"));
         }
         let episode = episode.unwrap();
+        info!("Successfully fetched anime for series_id: {}", series_id);
         Ok(Anime {
             series_id: series_id.to_string(),
             series_type: "anime".to_string(),

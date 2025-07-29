@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use serenity::all::{CreateMessage, UserId};
+use log::{info, error};
 
 use crate::{
     bot::bot::Bot,
@@ -17,6 +18,7 @@ pub struct DiscordDmSubscriber {
 
 impl DiscordDmSubscriber {
     pub fn new(bot: Arc<Bot>, db: Arc<Database>) -> Self {
+        info!("Initializing DiscordDmSubscriber.");
         Self { bot, db }
     }
 
@@ -79,19 +81,26 @@ impl DiscordDmSubscriber {
 
             if cached_user_exists {
                 // User exists in cache, send DM directly using user_id
+                info!("Attempting to send DM to cached user {}.", user_id);
                 if let Err(e) = user_id.dm(&http, message).await {
-                    eprintln!("Failed to send DM to cached user {}: {}", user_id, e);
+                    error!("Failed to send DM to cached user {}: {}", user_id, e);
+                } else {
+                    info!("Successfully sent DM to cached user {}.", user_id);
                 }
             } else {
                 // User not in cache, fetch from HTTP then send
+                info!("User {} not in cache, attempting to fetch from HTTP.", user_id);
                 match self.bot.client.http.get_user(user_id).await {
                     Ok(user) => {
+                        info!("Successfully fetched user {}. Attempting to send DM.", user_id);
                         if let Err(e) = user.dm(&http, message).await {
-                            eprintln!("Failed to send DM to fetched user {}: {}", user_id, e);
+                            error!("Failed to send DM to fetched user {}: {}", user_id, e);
+                        } else {
+                            info!("Successfully sent DM to fetched user {}.", user_id);
                         }
                     }
                     Err(e) => {
-                        eprintln!("Failed to fetch user {}: {}", user_id, e);
+                        error!("Failed to fetch user {}: {}", user_id, e);
                     }
                 }
             }

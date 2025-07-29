@@ -7,6 +7,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
+use log::{info, error, debug};
 
 pub struct MangaUpdatePublisher {
     db: Arc<Database>,
@@ -18,6 +19,7 @@ pub struct MangaUpdatePublisher {
 
 impl MangaUpdatePublisher {
     pub fn new(db: Arc<Database>, event_bus: Arc<EventBus>, source: Arc<MangaDexSource>, poll_interval: Duration) -> Arc<Self> {
+        info!("Initializing MangaUpdatePublisher with poll interval {:?}", poll_interval);
         Arc::new(Self {
             db,
             event_bus,
@@ -30,12 +32,14 @@ impl MangaUpdatePublisher {
     pub fn start(self: Arc<Self>) -> anyhow::Result<()> {
         if !self.running.load(Ordering::SeqCst) {
             self.running.store(true, Ordering::SeqCst);
+            info!("Starting MangaUpdatePublisher check loop.");
             self.spawn_check_loop();
         }
         Ok(())
     }
 
     pub fn stop(self: Arc<Self>) -> anyhow::Result<()> {
+        info!("Stopping MangaUpdatePublisher check loop.");
         self.running.store(false, Ordering::SeqCst);
         Ok(())
     }
@@ -45,11 +49,13 @@ impl MangaUpdatePublisher {
         tokio::spawn(async move {
             loop {
                 interval.tick().await;
+                debug!("MangaUpdatePublisher: Tick.");
                 if !self.running.load(Ordering::SeqCst) {
+                    info!("MangaUpdatePublisher: Stopping check loop.");
                     break;
                 }
                 if let Err(e) = self.check_updates().await {
-                    eprintln!("Error checking updates: {}", e);
+                    error!("MangaUpdatePublisher: Error checking updates: {}", e);
                 }
             }
         });
