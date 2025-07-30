@@ -1,3 +1,5 @@
+use crate::source::error::SourceError;
+
 use super::manga::Manga;
 use chrono::{DateTime, Utc};
 use log::{info, warn};
@@ -29,56 +31,103 @@ impl MangaDexSource {
         }
     }
 
-    pub async fn get_latest(&self, series_id: &str) -> anyhow::Result<Manga> {
-        info!("Fetching latest manga for series_id: {}", series_id);
-        let url = format!(
-            "{}/manga/{}/feed?order[createdAt]=desc&limit=1&translatedLanguage[]=en&translatedLanguage[]=id",
-            self.base.api_url, series_id
-        );
-        let response = self.base.client.get(&url).send().await?;
-        let body = response.text().await?;
-        let response_json: serde_json::Value = serde_json::from_str(&body)?;
-        let chapters = response_json["data"].as_array().ok_or_else(|| {
-            warn!(
-                "No chapters array found in response for series_id: {}",
-                series_id
-            );
-            anyhow::anyhow!("No chapters found")
-        })?;
-        if let Some(c) = chapters.get(0).cloned() {
-            info!(
-                "Successfully fetched latest manga for series_id: {}",
-                series_id
-            );
-            Ok(Manga {
-                series_id: series_id.to_string(),
-                series_type: "manga".to_string(),
-                title: c["attributes"]["title"]
+pub async fn get_latest(&self, series_id: &str) -> Result<Manga, SourceError> {
+    info!("Fetching latest manga for series_id: {}", series_id);
+
+    // Validate series_id format (should be UUID for MangaDex)
+    if uuid::Uuid::parse_str(series_id).is_err() {
+        return Err(SourceError::InvalidSeriesId {
+            series_id: series_id.to_string(),
+        });
+    }
+
+    let url = format!(
+        "{}/manga/{}/feed?order[createdAt]=desc&limit=1&translatedLanguage[]=en&translatedLanguage[]=id",
+        self.base.api_url, series_id
+    );
+
+    let response = self.base.client.get(&url).send().await?; // Converts to SourceError::RequestFailed
+
+    let body = response.text().await?;
+    let response_json: serde_json::Value = serde_json::from_str(&body)?; // Converts to SourceError::JsonParseFailed
+
+    // Check for API errors
+    if let Some(errors) = response_json.get("errors") {
+        if let Some(error_array) = errors.as_array() {
+            if let Some(first_error) = error_array.first() {
+                let message = first_error["message"]
                     .as_str()
-                    .unwrap_or("Unknown")
-                    .to_string(),
-                chapter: c["attributes"]["chapter"]
-                    .as_str()
-                    .unwrap_or("0")
-                    .to_string(),
-                chapter_id: c["id"].as_str().unwrap_or("").to_string(),
-                url: format!(
-                    "https://mangadex.org/chapter/{}",
-                    c["id"].as_str().unwrap_or("")
-                ),
-                published: DateTime::parse_from_rfc3339(
-                    c["attributes"]["publishAt"]
-                        .as_str()
-                        .unwrap_or("1970-01-01T00:00:00Z"),
-                )
-                .map(|dt| dt.with_timezone(&Utc))
-                .unwrap_or(Utc::now()),
-            })
-        } else {
-            warn!("No chapters found in data for series_id: {}", series_id);
-            return Err(anyhow::anyhow!("No chapters found"));
+                    .unwrap_or("Unknown API error")
+                    .to_string();
+                return Err(SourceError::ApiError { message });
+            }
         }
     }
+
+    let chapters = response_json["data"].as_array().ok_or_else(|| {
+        warn!("No chapters array found in response for series_id: {}", series_id);
+        SourceError::SeriesNotFound {
+            series_id: series_id.to_string(),
+        }
+    })?;
+
+    if let Some(c) = chapters.first().cloned() {
+        // Extract chapter ID
+        let chapter_id = c["id"]
+            .as_str()
+            .ok_or_else(|| SourceError::MissingField {
+                field: "id".to_string(),
+            })?
+            .to_string();
+
+        // Extract title
+        let title = c["attributes"]["title"]
+            .as_str()
+            .ok_or_else(|| SourceError::MissingField {
+                field: "title".to_string(),
+            })?
+            .to_string();
+
+        // Extract chapter number
+        let chapter = c["attributes"]["chapter"]
+            .as_str()
+            .ok_or_else(|| SourceError::MissingField {
+                field: "chapter".to_string(),
+            })?
+            .to_string();
+
+        // Extract and validate timestamp
+        let publish_at = c["attributes"]["publishAt"]
+            .as_str()
+            .ok_or_else(|| SourceError::MissingField {
+                field: "publishAt".to_string(),
+            })?
+            .to_string();
+
+        let published = DateTime::parse_from_rfc3339(&publish_at)
+            .map(|dt| dt.with_timezone(&Utc))
+            .map_err(|_| SourceError::InvalidTime {
+                time: publish_at,
+            })?;
+
+        info!("Successfully fetched latest manga for series_id: {}", series_id);
+
+        Ok(Manga {
+            series_id: series_id.to_string(),
+            series_type: "manga".to_string(),
+            title,
+            chapter,
+            url: format!("https://mangadex.org/chapter/{chapter_id}"),
+            chapter_id,
+            published,
+        })
+    } else {
+        warn!("No chapters found in data for series_id: {}", series_id);
+        Err(SourceError::EmptySeries {
+            series_id: series_id.to_string(),
+        })
+    }
+}
 
     pub async fn get_title(&self, series_id: &str) -> anyhow::Result<String> {
         let url = format!("{}/manga/{}", self.base.api_url, series_id);
@@ -92,7 +141,7 @@ impl MangaDexSource {
     }
 
     pub fn get_id_from_url(&self, url: &String) -> Result<String, super::error::UrlParseError> {
-        self.base.get_nth_path_from_url(url, 2)
+        self.base.get_nth_path_from_url(url, 1)
     }
 }
 

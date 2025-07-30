@@ -1,7 +1,8 @@
 use super::anime::Anime;
-use chrono::{DateTime, Utc};
+use chrono::DateTime;
 use log::{info, warn};
 use reqwest::Client;
+use super::error::SourceError;
 
 use std::hash::{Hash, Hasher};
 
@@ -21,8 +22,15 @@ impl AniListSource {
         }
     }
 
-    pub async fn get_latest(&self, series_id: &str) -> anyhow::Result<Anime> {
+    pub async fn get_latest(&self, series_id: &str) -> Result<Anime, SourceError> {
         info!("Fetching latest anime for series_id: {}", series_id);
+        
+        // Validate series_id format (should be numeric for AniList)
+        let series_id_num = series_id.parse::<i32>()
+            .map_err(|_| SourceError::InvalidSeriesId { 
+                series_id: series_id.to_string() 
+            })?;
+        
         let query = r#"
         query ($id: Int) {
             Media(id: $id, type: ANIME) {
@@ -31,37 +39,94 @@ impl AniListSource {
             }
         }
         "#;
-        let json = serde_json::json!({ "query": query, "variables": { "id": series_id } });
+        
+        let json = serde_json::json!({ 
+            "query": query, 
+            "variables": { "id": series_id_num } 
+        });
+        
         let response = self.base
             .client
-            .post(&self.base.api_url) // Use reference to the String
+            .post(&self.base.api_url)
             .json(&json)
             .send()
-            .await?;
-        let body = response.json::<serde_json::Value>().await?;
-        let episode = body["data"]["Media"]["nextAiringEpisode"].as_object();
-        if episode.is_none() {
-            warn!("No next airing episode found for series_id: {}", series_id);
-            return Err(anyhow::anyhow!("Episode is empty"));
+            .await?; // Automatically converts to SourceError::RequestFailed
+        
+        let body = response.json::<serde_json::Value>().await?; // Automatically converts to SourceError::JsonParseFailed
+        
+        // Check for GraphQL errors
+        if let Some(errors) = body.get("errors") {
+            if let Some(error_array) = errors.as_array() {
+                if let Some(first_error) = error_array.first() {
+                    let message = first_error["message"]
+                        .as_str()
+                        .unwrap_or("Unknown API error")
+                        .to_string();
+                    return Err(SourceError::ApiError { message });
+                }
+            }
         }
-        let episode = episode.unwrap();
+        
+        // Check if Media exists and is not null
+        let media = body["data"]["Media"].as_object()
+            .ok_or_else(|| SourceError::SeriesNotFound { 
+                series_id: series_id.to_string() 
+            })?;
+        
+        // Check for next airing episode
+        let next_episode = media.get("nextAiringEpisode");
+        if next_episode.is_none() || next_episode.unwrap().is_null() {
+            warn!("No next airing episode found for series_id: {}", series_id);
+            return Err(SourceError::FinishedSeries { 
+                series_id: series_id.to_string() 
+            });
+        }
+        
+        let episode_obj = next_episode.unwrap().as_object()
+            .ok_or_else(|| SourceError::MissingField { 
+                field: "nextAiringEpisode".to_string() 
+            })?;
+        
+        // Extract episode number
+        let episode = episode_obj.get("episode")
+            .and_then(|e| e.as_i64())
+            .ok_or_else(|| SourceError::MissingField { 
+                field: "episode".to_string() 
+            })?.to_string();
+        
+        // Extract airing timestamp
+        let airing_timestamp = episode_obj.get("airingAt")
+            .and_then(|a| a.as_i64())
+            .ok_or_else(|| SourceError::MissingField { 
+                field: "airingAt".to_string() 
+            })?;
+        
+        // Validate timestamp
+        let published = DateTime::from_timestamp(airing_timestamp, 0)
+            .ok_or_else(|| SourceError::InvalidTimestamp { 
+                timestamp: airing_timestamp 
+            })?;
+        
+        // Extract title
+        let title = body["data"]["Media"]["title"]["romaji"]
+            .as_str()
+            .unwrap_or("Unknown")
+            .to_string();
+        
         info!("Successfully fetched anime for series_id: {}", series_id);
+        
         Ok(Anime {
             series_id: series_id.to_string(),
             series_type: "anime".to_string(),
-            title: body["data"]["Media"]["title"]["romaji"]
-                .as_str()
-                .unwrap_or("Unknown")
-                .to_string(),
-            episode: episode["episode"].as_i64().unwrap_or(0).to_string(),
+            title,
+            episode,
             url: format!("https://anilist.co/anime/{}", series_id),
-            published: DateTime::from_timestamp(episode["airingAt"].as_i64().unwrap_or(0), 0)
-                .unwrap_or(Utc::now()),
+            published,
         })
     }
 
     pub fn get_id_from_url(&self, url: &String) -> Result<String, super::error::UrlParseError> {
-        self.base.get_nth_path_from_url(url, 2)
+        self.base.get_nth_path_from_url(url, 1)
     }
 }
 

@@ -13,15 +13,15 @@ impl BaseSource {
     }
     pub fn get_nth_path_from_url(&self, url: &String, n: usize) -> Result<String, super::error::UrlParseError> {
         if !url.contains(&self.api_domain) {
-            return Err(UrlParseError::InvalidFormat);
+            return Err(UrlParseError::InvalidFormat { url: url.clone() });
         }
 
         let path_start = url.find(&self.api_domain)
-            .ok_or(UrlParseError::UnsupportedSite)?
+            .ok_or(UrlParseError::UnsupportedSite { site: self.api_domain.clone() })?
             + self.api_domain.len();
 
         if path_start >= url.len() {
-            return Err(UrlParseError::InvalidFormat);
+            return Err(UrlParseError::InvalidFormat { url: url.clone() });
         }
 
         let path = &url[path_start..];
@@ -30,6 +30,6 @@ impl BaseSource {
         segments.get(n)
             .filter(|s| !s.is_empty())
             .map(|&s| s.to_string())
-            .ok_or(UrlParseError::MissingId)
+            .ok_or(UrlParseError::MissingId { url: url.clone() })
     }
 }
