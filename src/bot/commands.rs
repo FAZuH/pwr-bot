@@ -1,4 +1,5 @@
 use anyhow::Result;
+use sqlx::error::ErrorKind;
 use chrono::{DateTime, Utc};
 use poise::{ChoiceParameter, CreateReply};
 use serenity::all::CreateAttachment;
@@ -50,57 +51,70 @@ impl SendInto {
 pub async fn subscribe(
     ctx: Context<'_>,
     #[description = "Type of series"] series_type: SeriesType,
-    #[description = "ID of the series"] series_id: String,
+    #[description = "ID/link of the series(s)"] series: String,
     #[description = "Where to send the notifications. Default to DM"] send_into: Option<SendInto>,
 ) -> Result<(), Error> {
+
+    // 1. Setup
     let user_id = ctx.author().id.to_string();
     let data = ctx.data();
     let send_into = send_into.unwrap_or(SendInto::DM);
 
+    // 2. Fetch latest update for the series
+    let series_id: String;
     let series_title: String;
     let series_latest: String;
     let series_published: DateTime<Utc>;
     match series_type {
         SeriesType::Manga => {
-            if let Ok(res) = data.manga_source.get_latest(&series_id).await {
-                // get_title returns Ok(Manga) <=> get_latest returns Ok(Manga)
-                series_title = data.manga_source.get_title(&series_id).await?;
-                series_latest = res.chapter;
-                series_published = res.published;
-            } else {
-                ctx.say(format!(
-                    "❌ Manga with series id \"{}\" not found on MangaDex",
-                    series_id
-                ))
-                .await?;
-                return Ok(());
+            series_id = data.manga_source.get_id_from_url(&series).unwrap_or(series);
+            match data.manga_source.get_latest(&series_id).await {
+                Ok(res) => {
+                    // get_title returns Ok(Manga) <=> get_latest returns Ok(Manga)
+                    series_title = data.manga_source.get_title(&series_id).await?;
+                    series_latest = res.chapter;
+                    series_published = res.published;
+                }
+                Err(err) => {
+                    ctx.reply(format!(
+                        "❌ Manga with series id \"{series_id}\" not found on https://{}: ({})",
+                        data.manga_source.base.api_domain, err
+                    ))
+                    .await?;
+                    return Ok(());
+                }
             }
         }
         SeriesType::Anime => {
-            if let Ok(res) = data.anime_source.get_latest(&series_id).await {
-                series_title = res.title;
-                series_latest = res.episode;
-                series_published = res.published;
-            } else {
-                ctx.say(format!(
-                    "❌ Anime with series id \"{}\" not found on AniList",
-                    series_id
-                ))
-                .await?;
-                return Ok(());
+            series_id = data.anime_source.get_id_from_url(&series).unwrap_or(series);
+            match data.anime_source.get_latest(&series_id).await {
+                Ok(res) => {
+                    // get_title returns Ok(Anime) <=> get_latest returns Ok(Anime)
+                    series_title = res.title;
+                    series_latest = res.episode;
+                    series_published = res.published;
+                }
+                Err(err) => {
+                    ctx.reply(format!(
+                        "❌ Anime with series id \"{series_id}\" not found on https://{} ({})",
+                        data.anime_source.base.api_domain, err
+                    ))
+                    .await?;
+                    return Ok(());
+                }
             }
         }
     }
 
-    // latest_update doesn't exist in db => insert it
+    // 3. latest_update doesn't exist in db => insert it
     // otherwise => get id
     let latest_update = LatestUpdatesModel {
-        id: 0,
         r#type: series_type.as_str().to_string(),
         series_id: series_id.clone(),
-        series_latest: series_latest,
+        series_latest,
         series_title: series_title.clone(),
-        series_published: series_published,
+        series_published,
+        ..Default::default()
     };
     let latest_update_id = match data.db.latest_updates_table.insert(&latest_update).await {
         Ok(id) => id,
@@ -113,8 +127,8 @@ pub async fn subscribe(
         }
     };
 
+    // 4. Insert subscriber into db
     let subscriber = SubscribersModel {
-        id: 0,
         subscriber_id: {
             if send_into.as_str() == "webhook" {
                 data.config.webhook_url.clone()
@@ -123,31 +137,26 @@ pub async fn subscribe(
             }
         },
         subscriber_type: send_into.as_str().to_string(),
-        latest_update_id: latest_update_id,
+        latest_update_id,
+        ..Default::default()
     };
-
-    // TODO: More robust handling needed
     if let Err(err) = data.db.subscribers_table.insert(&subscriber).await {
-        if err.to_string().contains("code: 2067") {
-            ctx.say(format!(
-                "You are already subscribed to this {} series",
-                series_type.as_str()
-            )).await?;
-        } else {
-            ctx.say(format!(
-                "An error occurred: {}",
-                err
-            )).await?;
+        if let Some(db_err) = err.into_database_error() {
+            if matches!(db_err.kind(), ErrorKind::UniqueViolation) {
+                ctx.reply(format!("You are already subscribed to {series_title}")).await?;
+            } else {
+                ctx.reply(format!("Unknown error: {db_err}")).await?;
+            }
         }
-        return Ok(());
-    };
-
-    ctx.say(format!(
-        "✅ Successfully subscribed to \"{}\" series \"{}",
-        series_type.as_str(),
-        series_title
-    ))
-    .await?;
+    } else {
+        ctx.reply(format!(
+            "✅ Successfully subscribed to \"{}\" series \"{}\". Notifications will be sent to {}",
+            series_type.as_str(),
+            series_title,
+            send_into.as_str()
+        ))
+        .await?;
+    }
 
     Ok(())
 }
@@ -157,19 +166,27 @@ pub async fn subscribe(
 pub async fn unsubscribe(
     ctx: Context<'_>,
     #[description = "Type of series"] series_type: SeriesType,
-    #[description = "ID of the series"] series_id: String,
+    #[description = "ID/link of the series(s)"] series: String,
     #[description = "Where to send the notifications. Default to DM"] send_into: Option<SendInto>,
 ) -> Result<(), Error> {
+
+    // 1. Setup
     let user_id = ctx.author().id.to_string();
     let data = ctx.data();
     let send_into = send_into.unwrap_or(SendInto::DM);
 
+    // 2. Get series_id from series link if needed
+    let series_id = match series_type {
+        SeriesType::Manga => data.manga_source.get_id_from_url(&series).unwrap_or(series),
+        SeriesType::Anime => data.anime_source.get_id_from_url(&series).unwrap_or(series),
+    };
+
+    // 3. Get latest update id from db
     let latest_update = LatestUpdatesModel {
         r#type: series_type.as_str().to_string(),
         series_id: series_id.clone(),
         ..Default::default()
     };
-
     let latest_update_id = if let Ok(res) = data
         .db
         .latest_updates_table
@@ -178,42 +195,38 @@ pub async fn unsubscribe(
     {
         res.id
     } else {
-        ctx.say(format!(
-            "❌ type \"{}\" and series_id \"{}\" not found in the. database",
+        ctx.reply(format!(
+            "❌ type \"{}\" and series_id \"{}\" not found in the database",
             latest_update.r#type, latest_update.series_id
         ))
         .await?;
         return Ok(());
     };
 
-    let subscriber_id = {
-        if send_into.as_str() == "webhook" {
-            data.config.webhook_url.clone()
-        } else {
-            user_id
-        }
-    };
+    // 4. Delete subscriber based on latest_update_id, subscriber_id, and subscriber_type
     let subscriber = SubscribersModel {
-        id: 0,
         subscriber_type: send_into.as_str().to_string(),
-        subscriber_id: subscriber_id.clone(),
-        latest_update_id: latest_update_id,
+        subscriber_id: {
+            if send_into.as_str() == "webhook" { data.config.webhook_url.clone() } else { user_id
+            }
+        },
+        latest_update_id,
+        ..Default::default()
     };
-
     if data
         .db
         .subscribers_table
         .delete_by_model(subscriber)
         .await?
     {
-        ctx.say(format!(
-            "✅ Successfully unsubscribed from {} series `{}`",
+        ctx.reply(format!(
+            "✅ Successfully unsubscribed from {} series {}",
             series_type.as_str(),
-            series_id
+            latest_update.series_title
         ))
         .await?;
     } else {
-        ctx.say("❌ You are not subscribed to this series").await?;
+        ctx.reply("❌ You are not subscribed to this series").await?;
     }
 
     Ok(())
@@ -232,7 +245,7 @@ pub async fn subscriptions(ctx: Context<'_>) -> Result<(), Error> {
         .await?;
 
     if subscriptions.is_empty() {
-        ctx.say("You are not subscribed to any series.").await?;
+        ctx.reply("You are not subscribed to any series.").await?;
         return Ok(());
     }
 
@@ -251,7 +264,7 @@ pub async fn subscriptions(ctx: Context<'_>) -> Result<(), Error> {
         ));
     }
 
-    ctx.say(message).await?;
+    ctx.reply(message).await?;
 
     Ok(())
 }
@@ -297,7 +310,7 @@ pub async fn dump_db(ctx: Context<'_>) -> Result<(), Error> {
         .attachment(CreateAttachment::bytes(latest_updates_json.as_bytes(), "latest_updates.json"));
 
     if let Err(e) = ctx.send(reply).await {
-        let _ = ctx.say(format!("Failed to send: {}", e)).await;
+        let _ = ctx.reply(format!("Failed to send: {}", e)).await;
     }
     Ok(())
 }
@@ -306,6 +319,6 @@ pub async fn dump_db(ctx: Context<'_>) -> Result<(), Error> {
 // pub async fn add_owner(ctx: Context<'_>) -> Result<(), Error> {
 //     let user_id = ctx.author().id.to_string();
 //     let data = ctx.data();
-//     ctx.say(format!("Successfully added {} as an owner.", user_id)).await?;
+//     ctx.reply(format!("Successfully added {} as an owner.", user_id)).await?;
 //     Ok(())
 // }
