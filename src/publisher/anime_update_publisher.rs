@@ -66,7 +66,9 @@ impl AnimeUpdatePublisher {
         // 1. Get subscriptions from database
         let db = &self.db;
         let source = &self.source;
+        debug!("AnimeUpdatePublisher: Checking for anime updates.");
         let subscribers = db.subscribers_table.select_all_by_type("anime").await?;
+        info!("AnimeUpdatePublisher: Found {} anime subscriptions.", subscribers.len());
 
         // 2. Get unique anime ids to fetch
         let mut latest_update_ids = HashSet::<u32>::new();
@@ -74,31 +76,38 @@ impl AnimeUpdatePublisher {
             if !latest_update_ids.insert(subs.latest_update_id) {
                 continue;
             }
+            debug!("AnimeUpdatePublisher: Checking for updates for subscription ID: {}", subs.latest_update_id);
 
             let mut prev_check = db
                 .latest_updates_table
                 .select(&subs.latest_update_id)
                 .await?;
+            debug!("AnimeUpdatePublisher: Previous check for series ID {}: episode {}", prev_check.series_id, prev_check.series_latest);
 
             // Check step
             // 3. Fetch latest anime chapters from sources using the unique anime ids
             let curr = source.get_latest(&prev_check.series_id).await?;
+            debug!("AnimeUpdatePublisher: Current latest for series ID {}: episode {}", prev_check.series_id, curr.episode);
             // 4. Compare chapters
             if curr.episode == prev_check.series_latest {
+                debug!("AnimeUpdatePublisher: No new episode for series ID {}.", prev_check.series_id);
                 continue;
             }
 
             // Handle update event
+            info!("AnimeUpdatePublisher: New episode found for series ID {}: {} -> {}. Updating database.", prev_check.series_id, prev_check.series_latest, curr.episode);
             // 5. Insert new updates into database
             prev_check.series_latest = curr.episode.clone();
             prev_check.series_published = curr.published;
             db.latest_updates_table.update(&prev_check).await?;
 
             // 6. Publish events to event bus
+            info!("AnimeUpdatePublisher: Publishing update event for series ID {}.", prev_check.series_id);
             let event: AnimeUpdateEvent = curr.into();
             self.event_bus.publish(event).await;
 
         }
+        debug!("AnimeUpdatePublisher: Finished checking for anime updates.");
         Ok(())
     }
 }

@@ -39,22 +39,6 @@ async fn main() -> anyhow::Result<()> {
     let anime_source = Arc::new(AniListSource::new());
     let manga_source = Arc::new(MangaDexSource::new());
 
-    // Setup publishers
-    AnimeUpdatePublisher::new(
-        shared_db.clone(),
-        shared_event_bus.clone(),
-        anime_source.clone(),
-        shared_config.poll_interval,
-    )
-    .start()?;
-    MangaUpdatePublisher::new(
-        shared_db.clone(),
-        shared_event_bus.clone(),
-        manga_source.clone(),
-        shared_config.poll_interval,
-    )
-    .start()?;
-
     // Setup & start bot
     let mut bot = Bot::new(shared_config.clone(), shared_db.clone(), anime_source.clone(), manga_source.clone()).await?;
     bot.start();
@@ -89,9 +73,25 @@ async fn main() -> anyhow::Result<()> {
         .register_subcriber::<MangaUpdateEvent, _>(webhook_subscriber)
         .await;
 
+    // Setup publishers
+    AnimeUpdatePublisher::new(
+        shared_db.clone(),
+        shared_event_bus.clone(),
+        anime_source.clone(),
+        shared_config.poll_interval,
+    ).start()?;
+    MangaUpdatePublisher::new(
+        shared_db.clone(),
+        shared_event_bus.clone(),
+        manga_source.clone(),
+        shared_config.poll_interval,
+    ).start()?;
+
     // Listen for exit signal
-    info!("Bot running. Press Ctrl+C to stop.");
+    info!("pwr-bot is up. Press Ctrl+C to stop.");
     tokio::signal::ctrl_c().await?;
     info!("Ctrl+C received, shutting down.");
+    // Stop publishers
+
     Ok(())
 }

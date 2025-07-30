@@ -49,7 +49,6 @@ impl MangaUpdatePublisher {
         tokio::spawn(async move {
             loop {
                 interval.tick().await;
-                debug!("MangaUpdatePublisher: Tick.");
                 if !self.running.load(Ordering::SeqCst) {
                     info!("MangaUpdatePublisher: Stopping check loop.");
                     break;
@@ -64,7 +63,9 @@ impl MangaUpdatePublisher {
     async fn check_updates(&self) -> anyhow::Result<()> {
         // Init step
         // 1. Get subscriptions from database
+        debug!("MangaUpdatePublisher: Checking for manga updates.");
         let subscribers = self.db.subscribers_table.select_all_by_type("manga").await?;
+        info!("MangaUpdatePublisher: Found {} manga subscriptions.", subscribers.len());
 
         // 2. Get unique manga ids to fetch
         let mut latest_update_ids = HashSet::<u32>::new();
@@ -72,21 +73,26 @@ impl MangaUpdatePublisher {
             if !latest_update_ids.insert(subs.latest_update_id) {
                 continue;
             };
+            debug!("MangaUpdatePublisher: Checking for updates for subscription ID: {}", subs.latest_update_id);
 
             let mut prev_check = self.db
                 .latest_updates_table
                 .select(&subs.latest_update_id)
                 .await?;
+            debug!("MangaUpdatePublisher: Previous check for series ID {}: chapter {}", prev_check.series_id, prev_check.series_latest);
 
             // Check step
             // 3. Fetch latest manga chapters from sources using the unique manga ids
             let curr = self.source.get_latest(&prev_check.series_id).await?;
+            debug!("MangaUpdatePublisher: Current latest for series ID {}: chapter {}", prev_check.series_id, curr.chapter_id);
             // 4. Compare chapters
             if curr.chapter_id == prev_check.series_latest {
+                debug!("MangaUpdatePublisher: No new chapter for series ID {}.", prev_check.series_id);
                 continue;
             }
 
             // Handle update event
+            info!("MangaUpdatePublisher: New chapter found for series ID {}: {} -> {}. Updating database.", prev_check.series_id, prev_check.series_latest, curr.chapter_id);
             // 5. Insert new updates into database
             prev_check.series_latest = curr.chapter_id.clone();
             prev_check.series_published = curr.published;
@@ -96,6 +102,7 @@ impl MangaUpdatePublisher {
             let event: MangaUpdateEvent = curr.into();
             self.event_bus.publish(event).await;
         }
+        debug!("MangaUpdatePublisher: Finished checking for manga updates.");
         Ok(())
     }
 }
