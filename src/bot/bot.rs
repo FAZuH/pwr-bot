@@ -6,7 +6,7 @@ use poise::serenity_prelude as serenity;
 use std::sync::Arc;
 use std::time::Duration;
 
-use super::commands::{help, register, subscribe, unsubscribe};
+use super::commands::{help, register, subscribe, subscriptions, unsubscribe};
 use crate::source::ani_list_source::AniListSource;
 use crate::{
     config::Config, database::database::Database, source::manga_dex_source::MangaDexSource,
@@ -34,7 +34,7 @@ impl Bot {
     ) -> Result<Self> {
         info!("Initializing bot...");
         let options = poise::FrameworkOptions {
-            commands: vec![subscribe(), unsubscribe(), help(), register()],
+            commands: vec![subscribe(), unsubscribe(), subscriptions(), help(), register()],
             prefix_options: poise::PrefixFrameworkOptions {
                 prefix: Some("!".into()),
                 edit_tracker: Some(Arc::new(poise::EditTracker::for_timespan(

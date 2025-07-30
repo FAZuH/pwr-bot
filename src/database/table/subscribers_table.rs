@@ -69,6 +69,18 @@ impl SubscribersTable {
         .await?;
         Ok(res.rows_affected() > 0)
     }
+
+    pub async fn select_all_by_subscriber_id(
+        &self,
+        subscriber_id: &str,
+    ) -> anyhow::Result<Vec<SubscribersModel>> {
+        let ret =
+            sqlx::query_as::<_, SubscribersModel>("SELECT * FROM subscribers WHERE subscriber_id = ?")
+                .bind(subscriber_id)
+                .fetch_all(&self.base.pool)
+                .await?;
+        Ok(ret)
+    }
 }
 
 #[async_trait]
@@ -124,7 +136,11 @@ impl Table<SubscribersModel, u32> for SubscribersTable {
 
     async fn insert(&self, model: &SubscribersModel) -> anyhow::Result<u32> {
         let res =
-            sqlx::query("INSERT INTO subscribers (subscriber_type, subscriber_id, latest_update_id) VALUES (?, ?, ?)")
+            sqlx::query(
+                r#"INSERT INTO subscribers
+                    (subscriber_type, subscriber_id, latest_update_id)
+                VALUES (?, ?, ?)"#
+            )
                 .bind(&model.subscriber_type)
                 .bind(&model.subscriber_id)
                 .bind(&model.latest_update_id)

@@ -58,11 +58,10 @@ pub async fn subscribe(
     let series_title: String;
     let series_latest: String;
     let series_published: DateTime<Utc>;
-
     match series_type {
         SeriesType::Manga => {
             if let Ok(res) = data.manga_source.get_latest(&series_id).await {
-                // Assumption: get_title returns Ok(Manga), if and only if get_latest returns Ok(Manga)
+                // get_title returns Ok(Manga) <=> get_latest returns Ok(Manga)
                 series_title = data.manga_source.get_title(&series_id).await?;
                 series_latest = res.chapter;
                 series_published = res.published;
@@ -91,11 +90,14 @@ pub async fn subscribe(
         }
     }
 
+    // latest_update doesn't exist in db => insert it
+    // otherwise => get id
     let latest_update = LatestUpdatesModel {
         id: 0,
         r#type: series_type.as_str().to_string(),
         series_id: series_id.clone(),
         series_latest: series_latest,
+        series_title: series_title.clone(),
         series_published: series_published,
     };
     let latest_update_id = match data.db.latest_updates_table.insert(&latest_update).await {
@@ -122,17 +124,24 @@ pub async fn subscribe(
         latest_update_id: latest_update_id,
     };
 
-    if data.db.subscribers_table.insert(&subscriber).await.is_err() {
-        ctx.say(format!(
-            "You are already subscribed to this {}",
-            series_type.as_str()
-        ))
-        .await?;
+    // TODO: More robust handling needed
+    if let Err(err) = data.db.subscribers_table.insert(&subscriber).await {
+        if err.to_string().contains("code: 2067") {
+            ctx.say(format!(
+                "You are already subscribed to this {} series",
+                series_type.as_str()
+            )).await?;
+        } else {
+            ctx.say(format!(
+                "An error occurred: {}",
+                err
+            )).await?;
+        }
         return Ok(());
     };
 
     ctx.say(format!(
-        "✅ Successfully subscribed to \"{}\" series \"{}\"",
+        "✅ Successfully subscribed to \"{}\" series \"{}",
         series_type.as_str(),
         series_title
     ))
@@ -152,11 +161,9 @@ pub async fn unsubscribe(
     let data = ctx.data();
 
     let latest_update = LatestUpdatesModel {
-        id: 0,
         r#type: series_type.as_str().to_string(),
         series_id: series_id.clone(),
-        series_latest: "".to_string(),
-        series_published: Utc::now(),
+        ..Default::default()
     };
 
     let latest_update_id = if let Ok(res) = data
@@ -168,7 +175,7 @@ pub async fn unsubscribe(
         res.id
     } else {
         ctx.say(format!(
-            "❌ type \"{}\" and series_id \"{}\" not found in the database",
+            "❌ type \"{}\" and series_id \"{}\" not found in the. database",
             latest_update.r#type, latest_update.series_id
         ))
         .await?;
@@ -204,6 +211,42 @@ pub async fn unsubscribe(
     } else {
         ctx.say("❌ You are not subscribed to this series").await?;
     }
+
+    Ok(())
+}
+
+#[poise::command(slash_command)]
+pub async fn subscriptions(ctx: Context<'_>) -> anyhow::Result<(), Error> {
+    let user_id = ctx.author().id.to_string();
+    let data = ctx.data();
+
+    let subscriptions = data
+        .db
+        .subscribers_table
+        .select_all_by_subscriber_id(&user_id)
+        .await?;
+
+    if subscriptions.is_empty() {
+        ctx.say("You are not subscribed to any series.").await?;
+        return Ok(());
+    }
+
+    let mut message = "You are subscribed to the following series:
+".to_string();
+    for subscription in subscriptions {
+        let latest_update = data
+            .db
+            .latest_updates_table
+            .select(&subscription.latest_update_id)
+            .await?;
+
+        message.push_str(&format!(
+            "- {} `{}` ({})\n",
+            latest_update.r#type, latest_update.series_title, latest_update.series_id
+        ));
+    }
+
+    ctx.say(message).await?;
 
     Ok(())
 }

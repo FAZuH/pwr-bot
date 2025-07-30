@@ -53,6 +53,7 @@ impl Table<LatestUpdatesModel, u32> for LatestUpdatesTable {
                 type TEXT NOT NULL,
                 series_id TEXT NOT NULL,
                 series_latest TEXT NOT NULL,
+                series_title TEXT NOT NULL,
                 series_published TIMESTAMP NOT NULL,
                 UNIQUE(type, series_id)
             )
@@ -72,7 +73,7 @@ impl Table<LatestUpdatesModel, u32> for LatestUpdatesTable {
 
     async fn select_all(&self) -> anyhow::Result<Vec<LatestUpdatesModel>> {
         let ret = sqlx::query_as::<_, LatestUpdatesModel>(
-            "SELECT id, type, series_id, series_latest, series_published FROM latest_updates",
+            "SELECT * FROM latest_updates",
         )
         .fetch_all(&self.base.pool)
         .await?;
@@ -88,7 +89,7 @@ impl Table<LatestUpdatesModel, u32> for LatestUpdatesTable {
 
     async fn select(&self, id: &u32) -> anyhow::Result<LatestUpdatesModel> {
         let model = sqlx::query_as::<_, LatestUpdatesModel>(
-            "SELECT id, type, series_id, series_latest, series_published FROM latest_updates WHERE id = ?",
+            "SELECT * FROM latest_updates WHERE id = ?",
         )
         .bind(id)
         .fetch_one(&self.base.pool)
@@ -98,11 +99,15 @@ impl Table<LatestUpdatesModel, u32> for LatestUpdatesTable {
 
     async fn insert(&self, model: &LatestUpdatesModel) -> anyhow::Result<u32> {
         let res = sqlx::query(
-            "INSERT INTO latest_updates (type, series_id, series_latest, series_published) VALUES (?, ?, ?, ?)",
+            r#"
+            INSERT INTO latest_updates
+                (type, series_id, series_latest, series_title, series_published) 
+            VALUES (?, ?, ?, ?, ?)"#
         )
         .bind(&model.r#type)
         .bind(&model.series_id)
         .bind(&model.series_latest)
+        .bind(&model.series_title)
         .bind(model.series_published)
         .execute(&self.base.pool)
         .await?;
@@ -111,11 +116,18 @@ impl Table<LatestUpdatesModel, u32> for LatestUpdatesTable {
 
     async fn update(&self, model: &LatestUpdatesModel) -> anyhow::Result<()> {
         sqlx::query(
-            "UPDATE latest_updates SET type = ?, series_id = ?, series_latest = ?, series_published = ? WHERE id = ?",
+            r#"UPDATE latest_updates 
+            SET type = ?,
+                series_id = ?,
+                series_latest = ?,
+                series_title = ?,
+                series_published = ?
+            WHERE id = ?"#,
         )
         .bind(&model.r#type)
         .bind(&model.series_id)
         .bind(&model.series_latest)
+        .bind(&model.series_title)
         .bind(model.series_published)
         .bind(model.id)
         .execute(&self.base.pool)
