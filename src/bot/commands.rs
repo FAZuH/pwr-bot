@@ -64,7 +64,7 @@ pub async fn subscribe(
             if let Ok(res) = data.manga_source.get_latest(&series_id).await {
                 // Assumption: get_title returns Ok(Manga), if and only if get_latest returns Ok(Manga)
                 series_title = data.manga_source.get_title(&series_id).await?;
-                series_latest = res.chapter_id;
+                series_latest = res.chapter;
                 series_published = res.published;
             } else {
                 ctx.say(format!(

@@ -16,6 +16,16 @@ impl LatestUpdatesTable {
         }
     }
 
+    pub async fn select_all_by_type(&self, r#type: &str) -> anyhow::Result<Vec<LatestUpdatesModel>> {
+        let ret = sqlx::query_as::<_, LatestUpdatesModel>(
+            "SELECT * FROM latest_updates WHERE type = ?",
+        )
+        .bind(r#type)
+        .fetch_all(&self.base.pool)
+        .await?;
+        Ok(ret)
+    }
+
     pub async fn select_by_model(
         &self,
         model: &LatestUpdatesModel,

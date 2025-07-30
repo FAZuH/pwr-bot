@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use anyhow::{self, Result};
 use serenity::all::{ExecuteWebhook, Webhook};
-use log::{info, error};
+use log::{debug, info};
 
 use crate::{
     bot::bot::Bot,
@@ -12,13 +12,13 @@ use crate::{
 
 pub struct DiscordWebhookSubscriber {
     bot: Arc<Bot>,
-    webhook: Arc<Webhook>,
+    webhook_url: String,
 }
 
 impl DiscordWebhookSubscriber {
-    pub fn new(bot: Arc<Bot>, webhook: Arc<Webhook>) -> Self {
+    pub fn new(bot: Arc<Bot>, webhook_url: String) -> Self {
         info!("Initializing DiscordWebhookSubscriber.");
-        Self { bot, webhook }
+        Self { bot, webhook_url }
     }
 
     pub async fn anime_event_callback(&self, event: AnimeUpdateEvent) -> anyhow::Result<()> {
@@ -29,13 +29,9 @@ impl DiscordWebhookSubscriber {
         ));
 
         // 2. Notify event to all serenity::User DMs
-        info!("Attempting to execute webhook for anime update: {}", event.title);
-        if let Err(e) = self.webhook
-            .execute(self.bot.client().await?.http.clone(), false, message)
-            .await {
-            error!("Failed to execute webhook for anime update: {}", e);
-            return Err(e.into());
-        }
+        debug!("Attempting to execute webhook for anime update: {}", event.title);
+        let webhook = Webhook::from_url(self.bot.http.clone(), self.webhook_url.as_str()).await?;
+        webhook.execute(self.bot.http.clone(), false, message).await?;
         info!("Successfully executed webhook for anime update: {}", event.title);
         Ok(())
     }
@@ -48,14 +44,10 @@ impl DiscordWebhookSubscriber {
         ));
 
         // 2. Notify event to all serenity::User DMs
-        info!("Attempting to execute webhook for manga update: {}", event.title);
-        if let Err(e) = self.webhook
-            .execute(self.bot.client().await?.http.clone(), false, message)
-            .await {
-            error!("Failed to execute webhook for manga update: {}", e);
-            return Err(e.into());
-        }
-        info!("Successfully executed webhook for manga update: {}", event.title);
+        debug!("Attempting to execute webhook for anime update: {}", event.title);
+        let webhook = Webhook::from_url(self.bot.http.clone(), self.webhook_url.as_str()).await?;
+        webhook.execute(self.bot.http.clone(), false, message).await?;
+        info!("Successfully executed webhook for anime update: {}", event.title);
         Ok(())
     }
 }
@@ -63,7 +55,7 @@ impl DiscordWebhookSubscriber {
 #[async_trait::async_trait]
 impl Subscriber<AnimeUpdateEvent> for DiscordWebhookSubscriber {
     async fn callback(&self, event: AnimeUpdateEvent) -> Result<()> {
-        DiscordWebhookSubscriber::new(self.bot.clone(), self.webhook.clone())
+        DiscordWebhookSubscriber::new(self.bot.clone(), self.webhook_url.clone())
             .anime_event_callback(event)
             .await
     }
@@ -72,7 +64,7 @@ impl Subscriber<AnimeUpdateEvent> for DiscordWebhookSubscriber {
 #[async_trait::async_trait]
 impl Subscriber<MangaUpdateEvent> for DiscordWebhookSubscriber {
     async fn callback(&self, event: MangaUpdateEvent) -> Result<()> {
-        DiscordWebhookSubscriber::new(self.bot.clone(), self.webhook.clone())
+        DiscordWebhookSubscriber::new(self.bot.clone(), self.webhook_url.clone())
             .manga_event_callback(event)
             .await
     }

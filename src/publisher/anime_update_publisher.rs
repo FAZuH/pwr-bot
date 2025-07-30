@@ -3,7 +3,6 @@ use crate::database::table::table::Table;
 use crate::event::anime_update_event::AnimeUpdateEvent;
 use crate::event::event_bus::EventBus;
 use crate::source::ani_list_source::AniListSource;
-use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -62,40 +61,31 @@ impl AnimeUpdatePublisher {
     }
 
     async fn check_updates(&self) -> anyhow::Result<()> {
-        // Init step
         // 1. Get subscriptions from database
         let db = &self.db;
         let source = &self.source;
         debug!("AnimeUpdatePublisher: Checking for anime updates.");
-        let subscribers = db.subscribers_table.select_all_by_type("anime").await?;
-        info!("AnimeUpdatePublisher: Found {} anime subscriptions.", subscribers.len());
+        let latest_updates = db.latest_updates_table.select_all_by_type("anime").await?;
+        info!("AnimeUpdatePublisher: Found {} anime subscriptions.", latest_updates.len());
 
-        // 2. Get unique anime ids to fetch
-        let mut latest_update_ids = HashSet::<u32>::new();
-        for subs in subscribers {
-            if !latest_update_ids.insert(subs.latest_update_id) {
+        for mut prev_check in latest_updates {
+            // 2. No subscribers to prev_check.id => Don't publish
+            if db.subscribers_table.select_all_by_latest_update(prev_check.id).await?.is_empty() {
                 continue;
             }
-            debug!("AnimeUpdatePublisher: Checking for updates for subscription ID: {}", subs.latest_update_id);
 
-            let mut prev_check = db
-                .latest_updates_table
-                .select(&subs.latest_update_id)
-                .await?;
-            debug!("AnimeUpdatePublisher: Previous check for series ID {}: episode {}", prev_check.series_id, prev_check.series_latest);
-
-            // Check step
-            // 3. Fetch latest anime chapters from sources using the unique anime ids
+            // 3. Fetch latest anime episodes from sources
             let curr = source.get_latest(&prev_check.series_id).await?;
             debug!("AnimeUpdatePublisher: Current latest for series ID {}: episode {}", prev_check.series_id, curr.episode);
+
             // 4. Compare chapters
             if curr.episode == prev_check.series_latest {
                 debug!("AnimeUpdatePublisher: No new episode for series ID {}.", prev_check.series_id);
                 continue;
             }
+            info!("AnimeUpdatePublisher: New episode found for series ID {}: {} -> {}. Updating database.", prev_check.series_id, prev_check.series_latest, curr.episode);
 
             // Handle update event
-            info!("AnimeUpdatePublisher: New episode found for series ID {}: {} -> {}. Updating database.", prev_check.series_id, prev_check.series_latest, curr.episode);
             // 5. Insert new updates into database
             prev_check.series_latest = curr.episode.clone();
             prev_check.series_published = curr.published;
@@ -105,8 +95,8 @@ impl AnimeUpdatePublisher {
             info!("AnimeUpdatePublisher: Publishing update event for series ID {}.", prev_check.series_id);
             let event: AnimeUpdateEvent = curr.into();
             self.event_bus.publish(event).await;
-
         }
+
         debug!("AnimeUpdatePublisher: Finished checking for anime updates.");
         Ok(())
     }

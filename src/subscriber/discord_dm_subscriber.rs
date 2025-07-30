@@ -73,11 +73,11 @@ impl DiscordDmSubscriber {
                 continue; // Skip invalid IDs, don't return early
             };
 
-            let http = self.bot.client().await?.http.clone();
+            let http = self.bot.http.clone();
             let message = message.clone();
 
             // Check cache first, but extract the data we need
-            let cached_user_exists = self.bot.client().await?.cache.user(user_id).is_some();
+            let cached_user_exists = self.bot.cache.user(user_id).is_some();
 
             if cached_user_exists {
                 // User exists in cache, send DM directly using user_id
@@ -90,7 +90,7 @@ impl DiscordDmSubscriber {
             } else {
                 // User not in cache, fetch from HTTP then send
                 info!("User {} not in cache, attempting to fetch from HTTP.", user_id);
-                match self.bot.client().await?.http.get_user(user_id).await {
+                match http.get_user(user_id).await {
                     Ok(user) => {
                         info!("Successfully fetched user {}. Attempting to send DM.", user_id);
                         if let Err(e) = user.dm(&http, message).await {
@@ -112,17 +112,33 @@ impl DiscordDmSubscriber {
 #[async_trait::async_trait]
 impl Subscriber<AnimeUpdateEvent> for DiscordDmSubscriber {
     async fn callback(&self, event: AnimeUpdateEvent) -> Result<()> {
-        DiscordDmSubscriber::new(self.bot.clone(), self.db.clone())
-            .anime_event_callback(event)
-            .await
+        let bot = self.bot.clone();
+        let db = self.db.clone();
+
+        tokio::spawn(async move {
+            let subscriber = DiscordDmSubscriber { bot, db };
+            if let Err(e) = subscriber.anime_event_callback(event).await {
+                error!("Error in spawned DM task: {}", e);
+            }
+        });
+
+        Ok(())
     }
 }
 
 #[async_trait::async_trait]
 impl Subscriber<MangaUpdateEvent> for DiscordDmSubscriber {
     async fn callback(&self, event: MangaUpdateEvent) -> Result<()> {
-        DiscordDmSubscriber::new(self.bot.clone(), self.db.clone())
-            .manga_event_callback(event)
-            .await
+        let bot = self.bot.clone();
+        let db = self.db.clone();
+
+        tokio::spawn(async move {
+            let subscriber = DiscordDmSubscriber { bot, db };
+            if let Err(e) = subscriber.manga_event_callback(event).await {
+                error!("Error in spawned manga DM task: {}", e);
+            }
+        });
+
+        Ok(())
     }
 }

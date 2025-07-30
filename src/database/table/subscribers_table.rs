@@ -17,9 +17,22 @@ impl SubscribersTable {
 
     pub async fn select_all_by_type(&self, r#type: &str) -> anyhow::Result<Vec<SubscribersModel>> {
         let ret = sqlx::query_as::<_, SubscribersModel>(
-            "SELECT id, subscriber_type, subscriber_id, latest_update_id FROM subscribers WHERE subscriber_type = ?",
+            "SELECT * FROM subscribers WHERE subscriber_type = ?",
         )
         .bind(r#type)
+        .fetch_all(&self.base.pool)
+        .await?;
+        Ok(ret)
+    }
+
+    pub async fn select_all_by_latest_update(
+        &self,
+        latest_update_id: u32,
+    ) -> anyhow::Result<Vec<SubscribersModel>> {
+        let ret = sqlx::query_as::<_, SubscribersModel>(
+            "SELECT * FROM subscribers WHERE latest_update_id = ?",
+        )
+        .bind(latest_update_id)
         .fetch_all(&self.base.pool)
         .await?;
         Ok(ret)
@@ -28,16 +41,10 @@ impl SubscribersTable {
     pub async fn select_all_by_type_and_latest_update(
         &self,
         subscriber_type: String,
-        latest_update_id: u32,
+        latest_update_id: u32
     ) -> anyhow::Result<Vec<SubscribersModel>> {
         let ret = sqlx::query_as::<_, SubscribersModel>(
-            r#"
-            SELECT id, subscriber_type, subscriber_id, latest_update_id
-            FROM subscribers 
-            WHERE 
-                subscriber_type = ? AND
-                latest_update_id = ?
-            "#,
+            "SELECT * FROM subscribers WHERE subscriber_type = ? AND latest_update_id = ?",
         )
         .bind(subscriber_type)
         .bind(latest_update_id)
@@ -95,7 +102,7 @@ impl Table<SubscribersModel, u32> for SubscribersTable {
 
     async fn select_all(&self) -> anyhow::Result<Vec<SubscribersModel>> {
         let ret = sqlx::query_as::<_, SubscribersModel>(
-            "SELECT id, subscriber_type, subscriber_id, latest_update_id FROM subscribers",
+            "SELECT * FROM subscribers",
         )
         .fetch_all(&self.base.pool)
         .await?;
@@ -111,7 +118,7 @@ impl Table<SubscribersModel, u32> for SubscribersTable {
 
     async fn select(&self, id: &u32) -> anyhow::Result<SubscribersModel> {
         let model = sqlx::query_as::<_, SubscribersModel>(
-            "SELECT id, subscriber_type, subscriber_id, latest_update_id FROM subscribers WHERE id = ?",
+            "SELECT * FROM subscribers WHERE id = ?",
         )
         .bind(id)
         .fetch_one(&self.base.pool)

@@ -1,10 +1,10 @@
 use anyhow;
 use anyhow::Result;
+use futures::lock::Mutex;
 use poise::serenity_prelude as serenity;
-use std::sync::Arc;
+use std::sync::{Arc};
 use std::time::Duration;
 use log::info;
-use tokio::sync::{RwLock, RwLockReadGuard};
 
 use super::commands::{help, register, subscribe, unsubscribe};
 use crate::source::ani_list_source::AniListSource;
@@ -18,7 +18,9 @@ pub struct Data {
 }
 
 pub struct Bot {
-    pub client: Arc<RwLock<serenity::Client>>,
+    client: Arc<Mutex<serenity::Client>>,
+    pub cache: Arc<serenity::Cache>,
+    pub http: Arc<serenity::Http>,
 }
 
 impl Bot {
@@ -47,10 +49,16 @@ impl Bot {
             .build();
         let intents =
             serenity::GatewayIntents::non_privileged() | serenity::GatewayIntents::MESSAGE_CONTENT;
+
         let client = serenity::ClientBuilder::new(&config.discord_token, intents)
             .framework(framework)
             .await?;
-        Ok(Self { client: Arc::new(RwLock::new(client)) })
+        
+        Ok(Self {
+            cache: client.cache.clone(),
+            http: client.http.clone(),
+            client: Arc::new(Mutex::new(client)),
+        })
     }
 
     pub fn start(&mut self) {
@@ -59,13 +67,10 @@ impl Bot {
         std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(async {
-                client.write().await.start().await.expect("Failed to start bot client");
+                client.lock().await.start().await.expect("Failed to start bot client");
             })
         });
         info!("Bot client started.");
     }
 
-    pub async fn client(&self) -> Result<RwLockReadGuard<serenity::Client>> {
-        Ok(self.client.read().await)
-    }
 }

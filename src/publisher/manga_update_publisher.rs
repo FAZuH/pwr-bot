@@ -3,7 +3,6 @@ use crate::database::table::table::Table;
 use crate::event::event_bus::EventBus;
 use crate::event::manga_update_event::MangaUpdateEvent;
 use crate::source::manga_dex_source::MangaDexSource;
-use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -61,47 +60,42 @@ impl MangaUpdatePublisher {
     }
 
     async fn check_updates(&self) -> anyhow::Result<()> {
-        // Init step
         // 1. Get subscriptions from database
+        let db = &self.db;
+        let source = &self.source;
         debug!("MangaUpdatePublisher: Checking for manga updates.");
-        let subscribers = self.db.subscribers_table.select_all_by_type("manga").await?;
-        info!("MangaUpdatePublisher: Found {} manga subscriptions.", subscribers.len());
+        let latest_updates = db.latest_updates_table.select_all_by_type("manga").await?;
+        info!("MangaUpdatePublisher: Found {} manga subscriptions.", latest_updates.len());
 
-        // 2. Get unique manga ids to fetch
-        let mut latest_update_ids = HashSet::<u32>::new();
-        for subs in subscribers {
-            if !latest_update_ids.insert(subs.latest_update_id) {
-                continue;
-            };
-            debug!("MangaUpdatePublisher: Checking for updates for subscription ID: {}", subs.latest_update_id);
-
-            let mut prev_check = self.db
-                .latest_updates_table
-                .select(&subs.latest_update_id)
-                .await?;
-            debug!("MangaUpdatePublisher: Previous check for series ID {}: chapter {}", prev_check.series_id, prev_check.series_latest);
-
-            // Check step
-            // 3. Fetch latest manga chapters from sources using the unique manga ids
-            let curr = self.source.get_latest(&prev_check.series_id).await?;
-            debug!("MangaUpdatePublisher: Current latest for series ID {}: chapter {}", prev_check.series_id, curr.chapter_id);
-            // 4. Compare chapters
-            if curr.chapter_id == prev_check.series_latest {
-                debug!("MangaUpdatePublisher: No new chapter for series ID {}.", prev_check.series_id);
+        for mut prev_check in latest_updates {
+            // 2. No subscribers to prev_check.id => Don't publish
+            if db.subscribers_table.select_all_by_latest_update(prev_check.id).await?.is_empty() {
                 continue;
             }
 
+            // 3. Fetch latest manga chapters from sources
+            let curr = source.get_latest(&prev_check.series_id).await?;
+            debug!("MangaUpdatePublisher: Current latest for series ID {}: chapter {}", prev_check.series_id, curr.chapter);
+
+            // 4. Compare chapters
+            if curr.chapter == prev_check.series_latest {
+                debug!("MangaUpdatePublisher: No new chapter for series ID {}.", prev_check.series_id);
+                continue;
+            }
+            info!("MangaUpdatePublisher: New chapter found for series ID {}: {} -> {}. Updating database.", prev_check.series_id, prev_check.series_latest, curr.chapter);
+
             // Handle update event
-            info!("MangaUpdatePublisher: New chapter found for series ID {}: {} -> {}. Updating database.", prev_check.series_id, prev_check.series_latest, curr.chapter_id);
             // 5. Insert new updates into database
-            prev_check.series_latest = curr.chapter_id.clone();
+            prev_check.series_latest = curr.chapter.clone();
             prev_check.series_published = curr.published;
-            self.db.latest_updates_table.update(&prev_check).await?;
+            db.latest_updates_table.update(&prev_check).await?;
 
             // 6. Publish events to event bus
+            info!("MangaUpdatePublisher: Publishing update event for series ID {}.", prev_check.series_id);
             let event: MangaUpdateEvent = curr.into();
             self.event_bus.publish(event).await;
         }
+
         debug!("MangaUpdatePublisher: Finished checking for manga updates.");
         Ok(())
     }
