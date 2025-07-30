@@ -1,7 +1,7 @@
-use anyhow;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use poise::ChoiceParameter;
+use poise::{ChoiceParameter, CreateReply};
+use serenity::all::CreateAttachment;
 
 use super::bot::Data;
 use crate::database::model::latest_updates_model::LatestUpdatesModel;
@@ -51,7 +51,7 @@ pub async fn subscribe(
     #[description = "Type of series"] series_type: SeriesType,
     #[description = "ID of the series"] series_id: String,
     #[description = "Where to send the notifications"] send_into: SendInto,
-) -> anyhow::Result<(), Error> {
+) -> Result<(), Error> {
     let user_id = ctx.author().id.to_string();
     let data = ctx.data();
 
@@ -156,7 +156,7 @@ pub async fn unsubscribe(
     #[description = "Type of series"] series_type: SeriesType,
     #[description = "ID of the series"] series_id: String,
     #[description = "Where the notifications were sent"] send_into: SendInto,
-) -> anyhow::Result<(), Error> {
+) -> Result<(), Error> {
     let user_id = ctx.author().id.to_string();
     let data = ctx.data();
 
@@ -216,7 +216,7 @@ pub async fn unsubscribe(
 }
 
 #[poise::command(slash_command)]
-pub async fn subscriptions(ctx: Context<'_>) -> anyhow::Result<(), Error> {
+pub async fn subscriptions(ctx: Context<'_>) -> Result<(), Error> {
     let user_id = ctx.author().id.to_string();
     let data = ctx.data();
 
@@ -257,7 +257,7 @@ pub async fn help(
     #[description = "Specific command to show help about"]
     #[autocomplete = "poise::builtins::autocomplete_command"]
     command: Option<String>,
-) -> anyhow::Result<(), Error> {
+) -> Result<(), Error> {
     poise::builtins::help(
         ctx,
         command.as_deref(),
@@ -269,8 +269,37 @@ pub async fn help(
     Ok(())
 }
 
-#[poise::command(prefix_command)]
+#[poise::command(prefix_command, owners_only, hide_in_help)]
 pub async fn register(ctx: Context<'_>) -> Result<(), Error> {
     poise::builtins::register_application_commands_buttons(ctx).await?;
     Ok(())
 }
+
+#[poise::command(slash_command, owners_only, hide_in_help)]
+pub async fn dump_db(ctx: Context<'_>) -> Result<(), Error> {
+    let data = ctx.data();
+
+    let subscribers = data.db.subscribers_table.select_all().await?;
+    let latest_updates = data.db.latest_updates_table.select_all().await?;
+
+    let subscribers_json = serde_json::to_string_pretty(&subscribers)?;
+    let latest_updates_json = serde_json::to_string_pretty(&latest_updates)?;
+
+    let reply = CreateReply::default()
+        .content("Database dump:")
+        .attachment(CreateAttachment::bytes(subscribers_json.as_bytes(), "subscribers.json"))
+        .attachment(CreateAttachment::bytes(latest_updates_json.as_bytes(), "latest_updates.json"));
+
+    if let Err(e) = ctx.send(reply).await {
+        let _ = ctx.say(format!("Failed to send: {}", e)).await;
+    }
+    Ok(())
+}
+
+// #[poise::command(slash_command, owners_only, hide_in_help)]
+// pub async fn add_owner(ctx: Context<'_>) -> Result<(), Error> {
+//     let user_id = ctx.author().id.to_string();
+//     let data = ctx.data();
+//     ctx.say(format!("Successfully added {} as an owner.", user_id)).await?;
+//     Ok(())
+// }

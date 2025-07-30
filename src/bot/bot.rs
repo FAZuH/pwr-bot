@@ -3,10 +3,13 @@ use anyhow::Result;
 use futures::lock::Mutex;
 use log::info;
 use poise::serenity_prelude as serenity;
+use ::serenity::all::UserId;
+use std::collections::HashSet;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use super::commands::{help, register, subscribe, subscriptions, unsubscribe};
+use super::commands::{dump_db, help, register, subscribe, subscriptions, unsubscribe};
 use crate::source::ani_list_source::AniListSource;
 use crate::{
     config::Config, database::database::Database, source::manga_dex_source::MangaDexSource,
@@ -34,7 +37,14 @@ impl Bot {
     ) -> Result<Self> {
         info!("Initializing bot...");
         let options = poise::FrameworkOptions {
-            commands: vec![subscribe(), unsubscribe(), subscriptions(), help(), register()],
+            commands: vec![
+                subscribe(),
+                unsubscribe(),
+                subscriptions(),
+                dump_db(),
+                help(),
+                register(),
+            ],
             prefix_options: poise::PrefixFrameworkOptions {
                 prefix: Some("!".into()),
                 edit_tracker: Some(Arc::new(poise::EditTracker::for_timespan(
@@ -42,6 +52,7 @@ impl Bot {
                 ))),
                 ..Default::default()
             },
+            owners: HashSet::from([UserId::from_str(config.admin_id.as_str()).expect("Invalid admin ID")]),
             ..Default::default()
         };
         let data = Data {

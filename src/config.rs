@@ -7,6 +7,7 @@ pub struct Config {
     pub db_path: String,
     pub discord_token: String,
     pub webhook_url: String,
+    pub admin_id: String,
 }
 
 impl Config {
@@ -21,6 +22,7 @@ impl Config {
             discord_token: std::env::var("DISCORD_TOKEN")
                 .expect("Expected DISCORD_TOKEN in environment"),
             webhook_url: std::env::var("WEBHOOK_URL").expect("Expected WEBHOOK_URL in environment"),
+            admin_id: std::env::var("ADMIN_ID").expect("Expected ADMIN_ID in environment"),
         }
     }
 }

@@ -1,7 +1,8 @@
+use serde::Serialize;
 use chrono::{DateTime, Utc};
 use sqlx::FromRow;
 
-#[derive(FromRow, Debug)]
+#[derive(FromRow, Debug, Serialize)]
 pub struct LatestUpdatesModel {
     pub id: u32,
     pub r#type: String,        // Anime/Manga

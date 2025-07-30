@@ -1,6 +1,7 @@
+use serde::Serialize;
 use sqlx::FromRow;
 
-#[derive(FromRow, Debug)]
+#[derive(FromRow, Debug, Serialize)]
 pub struct SubscribersModel {
     pub id: u32,
     pub subscriber_type: String, // Webhook/DM
