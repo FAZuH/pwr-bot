@@ -57,7 +57,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Setup & start bot
     let mut bot = Bot::new(shared_config.clone(), shared_db.clone(), anime_source.clone(), manga_source.clone()).await?;
-    bot.start().await?;
+    bot.start();
     let shared_bot = Arc::new(bot);
 
     // Setup subscribers
@@ -76,7 +76,7 @@ async fn main() -> anyhow::Result<()> {
         shared_bot.clone(),
         Arc::new(
             Webhook::from_url(
-                shared_bot.client.http.clone(),
+                shared_bot.client().await?.http.clone(),
                 shared_config.webhook_url.clone().as_str(),
             )
             .await?,

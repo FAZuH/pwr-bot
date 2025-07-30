@@ -73,11 +73,11 @@ impl DiscordDmSubscriber {
                 continue; // Skip invalid IDs, don't return early
             };
 
-            let http = self.bot.client.http.clone();
+            let http = self.bot.client().await?.http.clone();
             let message = message.clone();
 
             // Check cache first, but extract the data we need
-            let cached_user_exists = self.bot.client.cache.user(user_id).is_some();
+            let cached_user_exists = self.bot.client().await?.cache.user(user_id).is_some();
 
             if cached_user_exists {
                 // User exists in cache, send DM directly using user_id
@@ -90,7 +90,7 @@ impl DiscordDmSubscriber {
             } else {
                 // User not in cache, fetch from HTTP then send
                 info!("User {} not in cache, attempting to fetch from HTTP.", user_id);
-                match self.bot.client.http.get_user(user_id).await {
+                match self.bot.client().await?.http.get_user(user_id).await {
                     Ok(user) => {
                         info!("Successfully fetched user {}. Attempting to send DM.", user_id);
                         if let Err(e) = user.dm(&http, message).await {

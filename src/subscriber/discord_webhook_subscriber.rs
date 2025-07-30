@@ -31,7 +31,7 @@ impl DiscordWebhookSubscriber {
         // 2. Notify event to all serenity::User DMs
         info!("Attempting to execute webhook for anime update: {}", event.title);
         if let Err(e) = self.webhook
-            .execute(self.bot.client.http.clone(), false, message)
+            .execute(self.bot.client().await?.http.clone(), false, message)
             .await {
             error!("Failed to execute webhook for anime update: {}", e);
             return Err(e.into());
@@ -50,7 +50,7 @@ impl DiscordWebhookSubscriber {
         // 2. Notify event to all serenity::User DMs
         info!("Attempting to execute webhook for manga update: {}", event.title);
         if let Err(e) = self.webhook
-            .execute(self.bot.client.http.clone(), false, message)
+            .execute(self.bot.client().await?.http.clone(), false, message)
             .await {
             error!("Failed to execute webhook for manga update: {}", e);
             return Err(e.into());
