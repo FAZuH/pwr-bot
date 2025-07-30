@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use sqlx::Error as DbError;
 use sqlx::SqlitePool;
 
 use super::base_table::BaseTable;
@@ -19,7 +20,7 @@ impl LatestUpdatesTable {
     pub async fn select_all_by_type(
         &self,
         r#type: &str,
-    ) -> anyhow::Result<Vec<LatestUpdatesModel>> {
+    ) -> Result<Vec<LatestUpdatesModel>, DbError> {
         let ret =
             sqlx::query_as::<_, LatestUpdatesModel>("SELECT * FROM latest_updates WHERE type = ?")
                 .bind(r#type)
@@ -31,7 +32,7 @@ impl LatestUpdatesTable {
     pub async fn select_by_model(
         &self,
         model: &LatestUpdatesModel,
-    ) -> anyhow::Result<LatestUpdatesModel> {
+    ) -> Result<LatestUpdatesModel, DbError> {
         let res = sqlx::query_as::<_, LatestUpdatesModel>(
             "SELECT * FROM latest_updates WHERE type = ? AND series_id = ?",
         )
@@ -45,7 +46,7 @@ impl LatestUpdatesTable {
 
 #[async_trait]
 impl Table<LatestUpdatesModel, u32> for LatestUpdatesTable {
-    async fn create_table(&self) -> anyhow::Result<()> {
+    async fn create_table(&self) -> Result<(), DbError> {
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS latest_updates (
@@ -64,14 +65,14 @@ impl Table<LatestUpdatesModel, u32> for LatestUpdatesTable {
         Ok(())
     }
 
-    async fn drop_table(&self) -> anyhow::Result<()> {
+    async fn drop_table(&self) -> Result<(), DbError> {
         sqlx::query("DROP TABLE IF EXISTS latest_updates")
             .execute(&self.base.pool)
             .await?;
         Ok(())
     }
 
-    async fn select_all(&self) -> anyhow::Result<Vec<LatestUpdatesModel>> {
+    async fn select_all(&self) -> Result<Vec<LatestUpdatesModel>, DbError> {
         let ret = sqlx::query_as::<_, LatestUpdatesModel>(
             "SELECT * FROM latest_updates",
         )
@@ -80,14 +81,14 @@ impl Table<LatestUpdatesModel, u32> for LatestUpdatesTable {
         Ok(ret)
     }
 
-    async fn delete_all(&self) -> anyhow::Result<()> {
+    async fn delete_all(&self) -> Result<(), DbError> {
         sqlx::query("DELETE FROM latest_updates")
             .execute(&self.base.pool)
             .await?;
         Ok(())
     }
 
-    async fn select(&self, id: &u32) -> anyhow::Result<LatestUpdatesModel> {
+    async fn select(&self, id: &u32) -> Result<LatestUpdatesModel, DbError> {
         let model = sqlx::query_as::<_, LatestUpdatesModel>(
             "SELECT * FROM latest_updates WHERE id = ?",
         )
@@ -97,7 +98,7 @@ impl Table<LatestUpdatesModel, u32> for LatestUpdatesTable {
         Ok(model)
     }
 
-    async fn insert(&self, model: &LatestUpdatesModel) -> anyhow::Result<u32> {
+    async fn insert(&self, model: &LatestUpdatesModel) -> Result<u32, DbError> {
         let res = sqlx::query(
             r#"
             INSERT INTO latest_updates
@@ -111,10 +112,10 @@ impl Table<LatestUpdatesModel, u32> for LatestUpdatesTable {
         .bind(model.series_published)
         .execute(&self.base.pool)
         .await?;
-        Ok(res.last_insert_rowid().try_into()?)
+        Ok(res.last_insert_rowid().try_into().expect("Failed to convert last_insert_rowid to u32"))
     }
 
-    async fn update(&self, model: &LatestUpdatesModel) -> anyhow::Result<()> {
+    async fn update(&self, model: &LatestUpdatesModel) -> Result<(), DbError> {
         sqlx::query(
             r#"UPDATE latest_updates 
             SET type = ?,
@@ -135,7 +136,7 @@ impl Table<LatestUpdatesModel, u32> for LatestUpdatesTable {
         Ok(())
     }
 
-    async fn delete(&self, id: &u32) -> anyhow::Result<()> {
+    async fn delete(&self, id: &u32) -> Result<(), DbError> {
         sqlx::query("DELETE FROM latest_updates WHERE id = ?")
             .bind(id)
             .execute(&self.base.pool)

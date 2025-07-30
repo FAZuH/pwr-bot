@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use sqlx::SqlitePool;
+use sqlx::Error as DbError;
 
 use super::{base_table::BaseTable, table::Table};
 use crate::database::model::subscribers_model::SubscribersModel;
@@ -15,7 +16,7 @@ impl SubscribersTable {
         }
     }
 
-    pub async fn select_all_by_type(&self, r#type: &str) -> anyhow::Result<Vec<SubscribersModel>> {
+    pub async fn select_all_by_type(&self, r#type: &str) -> Result<Vec<SubscribersModel>, DbError> {
         let ret = sqlx::query_as::<_, SubscribersModel>(
             "SELECT * FROM subscribers WHERE subscriber_type = ?",
         )
@@ -28,7 +29,7 @@ impl SubscribersTable {
     pub async fn select_all_by_latest_update(
         &self,
         latest_update_id: u32,
-    ) -> anyhow::Result<Vec<SubscribersModel>> {
+    ) -> Result<Vec<SubscribersModel>, DbError> {
         let ret = sqlx::query_as::<_, SubscribersModel>(
             "SELECT * FROM subscribers WHERE latest_update_id = ?",
         )
@@ -42,7 +43,7 @@ impl SubscribersTable {
         &self,
         subscriber_type: String,
         latest_update_id: u32,
-    ) -> anyhow::Result<Vec<SubscribersModel>> {
+    ) -> Result<Vec<SubscribersModel>, DbError> {
         let ret = sqlx::query_as::<_, SubscribersModel>(
             "SELECT * FROM subscribers WHERE subscriber_type = ? AND latest_update_id = ?",
         )
@@ -53,7 +54,7 @@ impl SubscribersTable {
         Ok(ret)
     }
 
-    pub async fn delete_by_model(&self, model: SubscribersModel) -> anyhow::Result<bool> {
+    pub async fn delete_by_model(&self, model: SubscribersModel) -> Result<bool, DbError> {
         let res = sqlx::query(
             r#"
             DELETE FROM subscribers WHERE 
@@ -73,7 +74,7 @@ impl SubscribersTable {
     pub async fn select_all_by_subscriber_id(
         &self,
         subscriber_id: &str,
-    ) -> anyhow::Result<Vec<SubscribersModel>> {
+    ) -> Result<Vec<SubscribersModel>, DbError> {
         let ret =
             sqlx::query_as::<_, SubscribersModel>("SELECT * FROM subscribers WHERE subscriber_id = ?")
                 .bind(subscriber_id)
@@ -85,7 +86,7 @@ impl SubscribersTable {
 
 #[async_trait]
 impl Table<SubscribersModel, u32> for SubscribersTable {
-    async fn create_table(&self) -> anyhow::Result<()> {
+    async fn create_table(&self) -> Result<(), DbError> {
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS subscribers (
@@ -105,28 +106,28 @@ impl Table<SubscribersModel, u32> for SubscribersTable {
         Ok(())
     }
 
-    async fn drop_table(&self) -> anyhow::Result<()> {
+    async fn drop_table(&self) -> Result<(), DbError> {
         sqlx::query("DROP TABLE IF EXISTS subscribers")
             .execute(&self.base.pool)
             .await?;
         Ok(())
     }
 
-    async fn select_all(&self) -> anyhow::Result<Vec<SubscribersModel>> {
+    async fn select_all(&self) -> Result<Vec<SubscribersModel>, DbError> {
         let ret = sqlx::query_as::<_, SubscribersModel>("SELECT * FROM subscribers")
             .fetch_all(&self.base.pool)
             .await?;
         Ok(ret)
     }
 
-    async fn delete_all(&self) -> anyhow::Result<()> {
+    async fn delete_all(&self) -> Result<(), DbError> {
         sqlx::query("DELETE FROM subscribers")
             .execute(&self.base.pool)
             .await?;
         Ok(())
     }
 
-    async fn select(&self, id: &u32) -> anyhow::Result<SubscribersModel> {
+    async fn select(&self, id: &u32) -> Result<SubscribersModel, DbError> {
         let model = sqlx::query_as::<_, SubscribersModel>("SELECT * FROM subscribers WHERE id = ?")
             .bind(id)
             .fetch_one(&self.base.pool)
@@ -134,7 +135,7 @@ impl Table<SubscribersModel, u32> for SubscribersTable {
         Ok(model)
     }
 
-    async fn insert(&self, model: &SubscribersModel) -> anyhow::Result<u32> {
+    async fn insert(&self, model: &SubscribersModel) -> Result<u32, DbError> {
         let res =
             sqlx::query(
                 r#"INSERT INTO subscribers
@@ -146,10 +147,11 @@ impl Table<SubscribersModel, u32> for SubscribersTable {
                 .bind(&model.latest_update_id)
                 .execute(&self.base.pool)
                 .await?;
-        Ok(res.last_insert_rowid().try_into()?)
+        // TODO: ID: i64 instead
+        Ok(res.last_insert_rowid().try_into().expect("Failed to convert last_insert_rowid to u32"))
     }
 
-    async fn update(&self, model: &SubscribersModel) -> anyhow::Result<()> {
+    async fn update(&self, model: &SubscribersModel) -> Result<(), DbError> {
         sqlx::query("UPDATE subscribers SET subscriber_type = ?, subscriber_id = ?, latest_update_id = ? WHERE id = ?")
             .bind(&model.subscriber_type)
             .bind(&model.subscriber_id)
@@ -160,7 +162,7 @@ impl Table<SubscribersModel, u32> for SubscribersTable {
         Ok(())
     }
 
-    async fn delete(&self, id: &u32) -> anyhow::Result<()> {
+    async fn delete(&self, id: &u32) -> Result<(), DbError> {
         sqlx::query("DELETE FROM subscribers WHERE id = ?")
             .bind(id)
             .execute(&self.base.pool)
