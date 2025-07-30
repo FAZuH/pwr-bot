@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use futures::lock::Mutex;
-use httpmock::{prelude::*, Mock};
+use httpmock::{Mock, prelude::*};
 use pwr_bot::database::model::latest_updates_model::LatestUpdatesModel;
 use pwr_bot::database::model::subscribers_model::SubscribersModel;
 use pwr_bot::database::table::table::Table;
@@ -61,7 +61,7 @@ impl Subscriber<AnimeUpdateEvent> for MockAnimeSubscriber {
 async fn wait_for_request(mock: &Mock<'_>, threshhold: usize) {
     while mock.hits() < threshhold {
         sleep(Duration::from_millis(100)).await;
-    };
+    }
 }
 
 #[tokio::test]
@@ -85,17 +85,22 @@ async fn test_manga_publisher_and_subscriber() -> anyhow::Result<()> {
     );
     // 0:Setup:Populate db
     let series_id = "789";
-    let latest_update_id = db.latest_updates_table.insert(&LatestUpdatesModel {
-        series_id: series_id.to_string(),
-        r#type: "manga".to_string(),
-        series_latest: "41".to_string(),
-        ..Default::default()
-    }).await?;
-    db.subscribers_table.insert(&SubscribersModel {
-        latest_update_id,
-        subscriber_type: "manga".to_string(),
-        ..Default::default()
-    }).await?;
+    let latest_update_id = db
+        .latest_updates_table
+        .insert(&LatestUpdatesModel {
+            series_id: series_id.to_string(),
+            r#type: "manga".to_string(),
+            series_latest: "41".to_string(),
+            ..Default::default()
+        })
+        .await?;
+    db.subscribers_table
+        .insert(&SubscribersModel {
+            latest_update_id,
+            subscriber_type: "manga".to_string(),
+            ..Default::default()
+        })
+        .await?;
 
     // 1:Setup:Mock initial API response
     let mut mock = server.mock(|when, then| {
@@ -179,17 +184,22 @@ async fn test_anime_publisher_and_subscriber() -> anyhow::Result<()> {
     );
     // 0:Setup:Populate db
     let series_id = "456";
-    let latest_update_id = db.latest_updates_table.insert(&LatestUpdatesModel {
-        series_id: series_id.to_string(),
-        r#type: "anime".to_string(),
-        series_latest: "4".to_string(),
-        ..Default::default()
-    }).await?;
-    db.subscribers_table.insert(&SubscribersModel {
-        latest_update_id,
-        subscriber_type: "anime".to_string(),
-        ..Default::default()
-    }).await?;
+    let latest_update_id = db
+        .latest_updates_table
+        .insert(&LatestUpdatesModel {
+            series_id: series_id.to_string(),
+            r#type: "anime".to_string(),
+            series_latest: "4".to_string(),
+            ..Default::default()
+        })
+        .await?;
+    db.subscribers_table
+        .insert(&SubscribersModel {
+            latest_update_id,
+            subscriber_type: "anime".to_string(),
+            ..Default::default()
+        })
+        .await?;
 
     // 1:Setup:Mock initial API response
     let mut mock = server.mock(|when, then| {

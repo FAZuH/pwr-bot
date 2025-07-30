@@ -14,13 +14,13 @@ use crate::event::event_bus::EventBus;
 use crate::event::manga_update_event::MangaUpdateEvent;
 use crate::publisher::anime_update_publisher::AnimeUpdatePublisher;
 use crate::publisher::manga_update_publisher::MangaUpdatePublisher;
+use crate::source::ani_list_source::AniListSource;
 use crate::source::manga_dex_source::MangaDexSource;
 use crate::subscriber::discord_dm_subscriber::DiscordDmSubscriber;
 use crate::subscriber::discord_webhook_subscriber::DiscordWebhookSubscriber;
-use crate::source::ani_list_source::AniListSource;
 use dotenv::dotenv;
-use std::sync::Arc;
 use log::info;
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -39,7 +39,13 @@ async fn main() -> anyhow::Result<()> {
     let manga_source = Arc::new(MangaDexSource::new());
 
     // Setup & start bot
-    let mut bot = Bot::new(config.clone(), db.clone(), anime_source.clone(), manga_source.clone()).await?;
+    let mut bot = Bot::new(
+        config.clone(),
+        db.clone(),
+        anime_source.clone(),
+        manga_source.clone(),
+    )
+    .await?;
     bot.start();
     let bot = Arc::new(bot);
 
@@ -54,7 +60,7 @@ async fn main() -> anyhow::Result<()> {
 
     let webhook_subscriber = Arc::new(DiscordWebhookSubscriber::new(
         bot.clone(),
-        config.webhook_url.clone()
+        config.webhook_url.clone(),
     ));
     event_bus
         .register_subcriber::<AnimeUpdateEvent, _>(webhook_subscriber.clone())
@@ -69,13 +75,15 @@ async fn main() -> anyhow::Result<()> {
         event_bus.clone(),
         anime_source.clone(),
         config.poll_interval,
-    ).start()?;
+    )
+    .start()?;
     MangaUpdatePublisher::new(
         db.clone(),
         event_bus.clone(),
         manga_source.clone(),
         config.poll_interval,
-    ).start()?;
+    )
+    .start()?;
 
     // Listen for exit signal
     info!("pwr-bot is up. Press Ctrl+C to stop.");

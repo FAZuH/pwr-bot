@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use anyhow::{self, Result};
-use serenity::all::{ExecuteWebhook, Webhook};
 use log::{debug, info};
+use serenity::all::{ExecuteWebhook, Webhook};
 
 use crate::{
     bot::bot::Bot,
@@ -29,10 +29,18 @@ impl DiscordWebhookSubscriber {
         ));
 
         // 2. Notify event to all serenity::User DMs
-        debug!("Attempting to execute webhook for anime update: {}", event.title);
+        debug!(
+            "Attempting to execute webhook for anime update: {}",
+            event.title
+        );
         let webhook = Webhook::from_url(self.bot.http.clone(), self.webhook_url.as_str()).await?;
-        webhook.execute(self.bot.http.clone(), false, message).await?;
-        info!("Successfully executed webhook for anime update: {}", event.title);
+        webhook
+            .execute(self.bot.http.clone(), false, message)
+            .await?;
+        info!(
+            "Successfully executed webhook for anime update: {}",
+            event.title
+        );
         Ok(())
     }
 
@@ -44,10 +52,18 @@ impl DiscordWebhookSubscriber {
         ));
 
         // 2. Notify event to all serenity::User DMs
-        debug!("Attempting to execute webhook for anime update: {}", event.title);
+        debug!(
+            "Attempting to execute webhook for anime update: {}",
+            event.title
+        );
         let webhook = Webhook::from_url(self.bot.http.clone(), self.webhook_url.as_str()).await?;
-        webhook.execute(self.bot.http.clone(), false, message).await?;
-        info!("Successfully executed webhook for anime update: {}", event.title);
+        webhook
+            .execute(self.bot.http.clone(), false, message)
+            .await?;
+        info!(
+            "Successfully executed webhook for anime update: {}",
+            event.title
+        );
         Ok(())
     }
 }

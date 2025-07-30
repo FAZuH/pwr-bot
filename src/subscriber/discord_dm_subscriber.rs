@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use anyhow::Result;
+use log::{error, info};
 use serenity::all::{CreateMessage, UserId};
-use log::{info, error};
 
 use crate::{
     bot::bot::Bot,
@@ -89,10 +89,16 @@ impl DiscordDmSubscriber {
                 }
             } else {
                 // User not in cache, fetch from HTTP then send
-                info!("User {} not in cache, attempting to fetch from HTTP.", user_id);
+                info!(
+                    "User {} not in cache, attempting to fetch from HTTP.",
+                    user_id
+                );
                 match http.get_user(user_id).await {
                     Ok(user) => {
-                        info!("Successfully fetched user {}. Attempting to send DM.", user_id);
+                        info!(
+                            "Successfully fetched user {}. Attempting to send DM.",
+                            user_id
+                        );
                         if let Err(e) = user.dm(&http, message).await {
                             error!("Failed to send DM to fetched user {}: {}", user_id, e);
                         } else {

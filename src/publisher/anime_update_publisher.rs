@@ -3,10 +3,10 @@ use crate::database::table::table::Table;
 use crate::event::anime_update_event::AnimeUpdateEvent;
 use crate::event::event_bus::EventBus;
 use crate::source::ani_list_source::AniListSource;
+use log::{debug, error, info};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
-use log::{info, error, debug};
 
 pub struct AnimeUpdatePublisher {
     db: Arc<Database>,
@@ -17,8 +17,16 @@ pub struct AnimeUpdatePublisher {
 }
 
 impl AnimeUpdatePublisher {
-    pub fn new(db: Arc<Database>, event_bus: Arc<EventBus>, source: Arc<AniListSource>, poll_interval: Duration) -> Arc<Self> {
-        info!("Initializing AnimeUpdatePublisher with poll interval {:?}", poll_interval);
+    pub fn new(
+        db: Arc<Database>,
+        event_bus: Arc<EventBus>,
+        source: Arc<AniListSource>,
+        poll_interval: Duration,
+    ) -> Arc<Self> {
+        info!(
+            "Initializing AnimeUpdatePublisher with poll interval {:?}",
+            poll_interval
+        );
         Arc::new(Self {
             db,
             event_bus,
@@ -66,24 +74,41 @@ impl AnimeUpdatePublisher {
         let source = &self.source;
         debug!("AnimeUpdatePublisher: Checking for anime updates.");
         let latest_updates = db.latest_updates_table.select_all_by_type("anime").await?;
-        info!("AnimeUpdatePublisher: Found {} anime subscriptions.", latest_updates.len());
+        info!(
+            "AnimeUpdatePublisher: Found {} anime subscriptions.",
+            latest_updates.len()
+        );
 
         for mut prev_check in latest_updates {
             // 2. No subscribers to prev_check.id => Don't publish
-            if db.subscribers_table.select_all_by_latest_update(prev_check.id).await?.is_empty() {
+            if db
+                .subscribers_table
+                .select_all_by_latest_update(prev_check.id)
+                .await?
+                .is_empty()
+            {
                 continue;
             }
 
             // 3. Fetch latest anime episodes from sources
             let curr = source.get_latest(&prev_check.series_id).await?;
-            debug!("AnimeUpdatePublisher: Current latest for series ID {}: episode {}", prev_check.series_id, curr.episode);
+            debug!(
+                "AnimeUpdatePublisher: Current latest for series ID {}: episode {}",
+                prev_check.series_id, curr.episode
+            );
 
             // 4. Compare chapters
             if curr.episode == prev_check.series_latest {
-                debug!("AnimeUpdatePublisher: No new episode for series ID {}.", prev_check.series_id);
+                debug!(
+                    "AnimeUpdatePublisher: No new episode for series ID {}.",
+                    prev_check.series_id
+                );
                 continue;
             }
-            info!("AnimeUpdatePublisher: New episode found for series ID {}: {} -> {}. Updating database.", prev_check.series_id, prev_check.series_latest, curr.episode);
+            info!(
+                "AnimeUpdatePublisher: New episode found for series ID {}: {} -> {}. Updating database.",
+                prev_check.series_id, prev_check.series_latest, curr.episode
+            );
 
             // Handle update event
             // 5. Insert new updates into database
@@ -92,7 +117,10 @@ impl AnimeUpdatePublisher {
             db.latest_updates_table.update(&prev_check).await?;
 
             // 6. Publish events to event bus
-            info!("AnimeUpdatePublisher: Publishing update event for series ID {}.", prev_check.series_id);
+            info!(
+                "AnimeUpdatePublisher: Publishing update event for series ID {}.",
+                prev_check.series_id
+            );
             let event: AnimeUpdateEvent = curr.into();
             self.event_bus.publish(event).await;
         }

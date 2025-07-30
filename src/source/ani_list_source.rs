@@ -1,14 +1,14 @@
 use super::anime::Anime;
 use chrono::{DateTime, Utc};
-use reqwest::Client;
 use log::{info, warn};
+use reqwest::Client;
 
 use std::hash::{Hash, Hasher};
 
 #[derive(Clone)]
 pub struct AniListSource {
     client: Client,
-    api_url: String,  // Changed from &'static str to String
+    api_url: String, // Changed from &'static str to String
 }
 
 impl AniListSource {
@@ -36,13 +36,11 @@ impl AniListSource {
         let json = serde_json::json!({ "query": query, "variables": { "id": series_id } });
         let response = self
             .client
-            .post(&self.api_url)  // Use reference to the String
+            .post(&self.api_url) // Use reference to the String
             .json(&json)
             .send()
             .await?;
-        let body = response
-            .json::<serde_json::Value>()
-            .await?;
+        let body = response.json::<serde_json::Value>().await?;
         let episode = body["data"]["Media"]["nextAiringEpisode"].as_object();
         if episode.is_none() {
             warn!("No next airing episode found for series_id: {}", series_id);
@@ -114,7 +112,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_get_latest_returns_error_when_no_next_airing_episode() {  // Fixed test name and logic
+    async fn test_get_latest_returns_error_when_no_next_airing_episode() {
+        // Fixed test name and logic
         let server = MockServer::start();
         let mock = server.mock(|when, then| {
             when.method(POST);
@@ -131,7 +130,7 @@ mod tests {
         let source = AniListSource::new_with_url(server.url(""));
 
         let result = source.get_latest("456").await;
-        assert!(result.is_err());  // Should return error when nextAiringEpisode is null
+        assert!(result.is_err()); // Should return error when nextAiringEpisode is null
         mock.assert();
     }
 
