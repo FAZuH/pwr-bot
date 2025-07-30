@@ -45,15 +45,17 @@ impl SendInto {
     }
 }
 
+/// Subscribe to an anime/manga serise
 #[poise::command(slash_command)]
 pub async fn subscribe(
     ctx: Context<'_>,
     #[description = "Type of series"] series_type: SeriesType,
     #[description = "ID of the series"] series_id: String,
-    #[description = "Where to send the notifications"] send_into: SendInto,
+    #[description = "Where to send the notifications. Default to DM"] send_into: Option<SendInto>,
 ) -> Result<(), Error> {
     let user_id = ctx.author().id.to_string();
     let data = ctx.data();
+    let send_into = send_into.unwrap_or(SendInto::DM);
 
     let series_title: String;
     let series_latest: String;
@@ -150,15 +152,17 @@ pub async fn subscribe(
     Ok(())
 }
 
+/// Unsubscribe from an anime/manga serise
 #[poise::command(slash_command)]
 pub async fn unsubscribe(
     ctx: Context<'_>,
     #[description = "Type of series"] series_type: SeriesType,
     #[description = "ID of the series"] series_id: String,
-    #[description = "Where the notifications were sent"] send_into: SendInto,
+    #[description = "Where to send the notifications. Default to DM"] send_into: Option<SendInto>,
 ) -> Result<(), Error> {
     let user_id = ctx.author().id.to_string();
     let data = ctx.data();
+    let send_into = send_into.unwrap_or(SendInto::DM);
 
     let latest_update = LatestUpdatesModel {
         r#type: series_type.as_str().to_string(),
@@ -215,6 +219,7 @@ pub async fn unsubscribe(
     Ok(())
 }
 
+/// List all your subscriptions
 #[poise::command(slash_command)]
 pub async fn subscriptions(ctx: Context<'_>) -> Result<(), Error> {
     let user_id = ctx.author().id.to_string();
@@ -251,6 +256,7 @@ pub async fn subscriptions(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
+/// Help command to show all available commands
 #[poise::command(slash_command)]
 pub async fn help(
     ctx: Context<'_>,
