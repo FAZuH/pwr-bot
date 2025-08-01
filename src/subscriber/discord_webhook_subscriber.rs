@@ -21,7 +21,11 @@ pub struct DiscordWebhookSubscriber {
 impl DiscordWebhookSubscriber {
     pub fn new(bot: Arc<Bot>, db: Arc<Database>, webhook_url: String) -> Self {
         info!("Initializing DiscordWebhookSubscriber.");
-        Self { bot, db, webhook_url }
+        Self {
+            bot,
+            db,
+            webhook_url,
+        }
     }
 
     pub async fn series_event_callback(&self, event: SeriesUpdateEvent) -> anyhow::Result<()> {
@@ -72,7 +76,7 @@ impl DiscordWebhookSubscriber {
 #[async_trait::async_trait]
 impl Subscriber<SeriesUpdateEvent> for DiscordWebhookSubscriber {
     async fn callback(&self, event: SeriesUpdateEvent) -> Result<()> {
-        DiscordWebhookSubscriber::new(self.bot.clone(), self.webhook_url.clone())
+        DiscordWebhookSubscriber::new(self.bot.clone(), self.db.clone(), self.webhook_url.clone())
             .series_event_callback(event)
             .await
     }
