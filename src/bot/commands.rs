@@ -1,33 +1,16 @@
 use anyhow::Result;
-use sqlx::error::ErrorKind;
-use chrono::{DateTime, Utc};
 use poise::{ChoiceParameter, CreateReply};
 use serenity::all::CreateAttachment;
+use sqlx::error::ErrorKind;
 
 use super::bot::Data;
-use crate::database::model::latest_updates_model::LatestUpdatesModel;
+use crate::database::model::latest_results_model::LatestResultModel;
 use crate::database::model::subscribers_model::SubscribersModel;
-use crate::database::table::table::Table;
+use crate::database::table::Table;
+use crate::source::model::SourceResult;
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
 type Context<'a> = poise::Context<'a, Data, Error>;
-
-#[derive(ChoiceParameter)]
-enum SeriesType {
-    #[name = "Anime"]
-    Anime,
-    #[name = "Manga"]
-    Manga,
-}
-
-impl SeriesType {
-    fn as_str(&self) -> &'static str {
-        match self {
-            Self::Anime => "anime",
-            Self::Manga => "manga",
-        }
-    }
-}
 
 #[derive(ChoiceParameter)]
 enum SendInto {
@@ -46,82 +29,52 @@ impl SendInto {
     }
 }
 
+impl std::fmt::Display for SendInto {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
 /// Subscribe to an anime/manga serise
 #[poise::command(slash_command)]
 pub async fn subscribe(
     ctx: Context<'_>,
-    #[description = "Type of series"] series_type: SeriesType,
-    #[description = "ID/link of the series(s)"] series: String,
+    #[description = "Link of the series"] link: String,
     #[description = "Where to send the notifications. Default to DM"] send_into: Option<SendInto>,
 ) -> Result<(), Error> {
-
     // 1. Setup
     let user_id = ctx.author().id.to_string();
     let data = ctx.data();
     let send_into = send_into.unwrap_or(SendInto::DM);
 
-    // 2. Fetch latest update for the series
-    let series_id: String;
-    let series_title: String;
-    let series_latest: String;
-    let series_published: DateTime<Utc>;
-    match series_type {
-        SeriesType::Manga => {
-            series_id = data.manga_source.get_id_from_url(&series).unwrap_or(series);
-            match data.manga_source.get_latest(&series_id).await {
-                Ok(res) => {
-                    // get_title returns Ok(Manga) <=> get_latest returns Ok(Manga)
-                    series_title = data.manga_source.get_title(&series_id).await?;
-                    series_latest = res.chapter;
-                    series_published = res.published;
-                }
-                Err(err) => {
-                    ctx.reply(format!(
-                        "❌ Manga with series id \"{series_id}\" not found on https://{}: ({})",
-                        data.manga_source.base.api_domain, err
-                    ))
-                    .await?;
-                    return Ok(());
-                }
-            }
-        }
-        SeriesType::Anime => {
-            series_id = data.anime_source.get_id_from_url(&series).unwrap_or(series);
-            match data.anime_source.get_latest(&series_id).await {
-                Ok(res) => {
-                    // get_title returns Ok(Anime) <=> get_latest returns Ok(Anime)
-                    series_title = res.title;
-                    series_latest = res.episode;
-                    series_published = res.published;
-                }
-                Err(err) => {
-                    ctx.reply(format!(
-                        "❌ Anime with series id \"{series_id}\" not found on https://{} ({})",
-                        data.anime_source.base.api_domain, err
-                    ))
-                    .await?;
-                    return Ok(());
-                }
-            }
-        }
-    }
+    // 2. Fetch latest series for the series
+    let SourceResult::Series(series_item) = data.sources.get_latest_by_url(&link).await?;
+    // let series_item = match data.sources.get_latest_by_url(&link).await? {
+    //     SourceResult::Series(series_item) => series_item,
+        // _ => {
+        //     ctx.reply(format!("❌ Invalid URL: {}", series_id)).await?;
+        //     return Ok(());
+        // }
+    // };
+    let title = series_item.title;
+    let latest = series_item.latest;
+    let published = series_item.published;
 
-    // 3. latest_update doesn't exist in db => insert it
+    // 3. latest_result doesn't exist in db => insert it
     // otherwise => get id
-    let latest_update = LatestUpdatesModel {
-        r#type: series_type.as_str().to_string(),
-        series_id: series_id.clone(),
-        series_latest,
-        series_title: series_title.clone(),
-        series_published,
+    let latest_result = LatestResultModel {
+        url: series_item.url, // (1) NOTE: Important for consistent URL
+        latest,
+        name: title.clone(),
+        published,
         ..Default::default()
     };
-    let latest_update_id = match data.db.latest_updates_table.insert(&latest_update).await {
+    let latest_results_id = match data.db.latest_results_table.insert(&latest_result).await {
         Ok(id) => id,
         Err(_) => {
             data.db
-                .latest_updates_table
-                .select_by_model(&latest_update)
+                .latest_results_table
+                .select_by_url(&latest_result.url)
                 .await?
                 .id
         }
@@ -137,23 +90,21 @@ pub async fn subscribe(
             }
         },
         subscriber_type: send_into.as_str().to_string(),
-        latest_update_id,
+        latest_results_id,
         ..Default::default()
     };
     if let Err(err) = data.db.subscribers_table.insert(&subscriber).await {
         if let Some(db_err) = err.into_database_error() {
             if matches!(db_err.kind(), ErrorKind::UniqueViolation) {
-                ctx.reply(format!("You are already subscribed to {series_title}")).await?;
+                ctx.reply(format!("You are already subscribed to {title}"))
+                    .await?;
             } else {
                 ctx.reply(format!("Unknown error: {db_err}")).await?;
             }
         }
     } else {
         ctx.reply(format!(
-            "✅ Successfully subscribed to \"{}\" series \"{}\". Notifications will be sent to {}",
-            series_type.as_str(),
-            series_title,
-            send_into.as_str()
+            "✅ Successfully subscribed to series \"{title}\". Notifications will be sent to {send_into}",
         ))
         .await?;
     }
@@ -165,52 +116,52 @@ pub async fn subscribe(
 #[poise::command(slash_command)]
 pub async fn unsubscribe(
     ctx: Context<'_>,
-    #[description = "Type of series"] series_type: SeriesType,
-    #[description = "ID/link of the series(s)"] series: String,
+    #[description = "Link of the series"] link: String,
     #[description = "Where to send the notifications. Default to DM"] send_into: Option<SendInto>,
 ) -> Result<(), Error> {
-
     // 1. Setup
     let user_id = ctx.author().id.to_string();
     let data = ctx.data();
     let send_into = send_into.unwrap_or(SendInto::DM);
 
-    // 2. Get series_id from series link if needed
-    let series_id = match series_type {
-        SeriesType::Manga => data.manga_source.get_id_from_url(&series).unwrap_or(series),
-        SeriesType::Anime => data.anime_source.get_id_from_url(&series).unwrap_or(series),
+    // 2. Get source from series link
+    let source = match data.sources.get_source_by_url(&link) {
+        Some(source) => source,
+        None => {
+            ctx.reply(format!("❌ Unsupported URL: {link}")).await?;
+            return Ok(());
+        }
     };
 
-    // 3. Get latest update id from db
-    let latest_update = LatestUpdatesModel {
-        r#type: series_type.as_str().to_string(),
-        series_id: series_id.clone(),
-        ..Default::default()
-    };
-    let latest_update_id = if let Ok(res) = data
+    // 3. Get latest series id from db
+    //
+    // HACK: We do it like this to make sure the link matches the one on the db. See (1)
+    let id = source.get_id_from_url(&link)?; // Assuming link is already validated on step 2
+    let latest_result = match data
         .db
-        .latest_updates_table
-        .select_by_model(&latest_update)
+        .latest_results_table
+        .select_by_url(&source.get_url_from_id(id))
         .await
     {
-        res.id
-    } else {
-        ctx.reply(format!(
-            "❌ type \"{}\" and series_id \"{}\" not found in the database",
-            latest_update.r#type, latest_update.series_id
-        ))
-        .await?;
-        return Ok(());
+        Ok(res) => res,
+        Err(err) => {
+            ctx.reply(format!("❌ Failed to find series in database: {err:?}"))
+                .await?;
+            return Ok(());
+        }
     };
 
-    // 4. Delete subscriber based on latest_update_id, subscriber_id, and subscriber_type
+    // 4. Delete subscriber based on latest_result_id, subscriber_id, and subscriber_type
     let subscriber = SubscribersModel {
         subscriber_type: send_into.as_str().to_string(),
         subscriber_id: {
-            if send_into.as_str() == "webhook" { data.config.webhook_url.clone() } else { user_id
+            if send_into.as_str() == "webhook" {
+                data.config.webhook_url.clone()
+            } else {
+                user_id
             }
         },
-        latest_update_id,
+        latest_results_id: latest_result.id,
         ..Default::default()
     };
     if data
@@ -221,12 +172,13 @@ pub async fn unsubscribe(
     {
         ctx.reply(format!(
             "✅ Successfully unsubscribed from {} series {}",
-            series_type.as_str(),
-            latest_update.series_title
+            source.get_url().name,
+            latest_result.name
         ))
         .await?;
     } else {
-        ctx.reply("❌ You are not subscribed to this series").await?;
+        ctx.reply("❌ You are not subscribed to this series")
+            .await?;
     }
 
     Ok(())
@@ -250,18 +202,20 @@ pub async fn subscriptions(ctx: Context<'_>) -> Result<(), Error> {
     }
 
     let mut message = "You are subscribed to the following series:
-".to_string();
+"
+    .to_string();
     for subscription in subscriptions {
-        let latest_update = data
+        let LatestResultModel {
+            name,
+            url,
+            ..
+        } = data
             .db
-            .latest_updates_table
-            .select(&subscription.latest_update_id)
+            .latest_results_table
+            .select(&subscription.latest_results_id)
             .await?;
 
-        message.push_str(&format!(
-            "- {} `{}` ({})\n",
-            latest_update.r#type, latest_update.series_title, latest_update.series_id
-        ));
+        message.push_str(&format!("- {name} ({url})\n",));
     }
 
     ctx.reply(message).await?;
@@ -299,26 +253,24 @@ pub async fn dump_db(ctx: Context<'_>) -> Result<(), Error> {
     let data = ctx.data();
 
     let subscribers = data.db.subscribers_table.select_all().await?;
-    let latest_updates = data.db.latest_updates_table.select_all().await?;
+    let latest_results = data.db.latest_results_table.select_all().await?;
 
     let subscribers_json = serde_json::to_string_pretty(&subscribers)?;
-    let latest_updates_json = serde_json::to_string_pretty(&latest_updates)?;
+    let latest_results_json = serde_json::to_string_pretty(&latest_results)?;
 
     let reply = CreateReply::default()
         .content("Database dump:")
-        .attachment(CreateAttachment::bytes(subscribers_json.as_bytes(), "subscribers.json"))
-        .attachment(CreateAttachment::bytes(latest_updates_json.as_bytes(), "latest_updates.json"));
+        .attachment(CreateAttachment::bytes(
+            subscribers_json.as_bytes(),
+            "subscribers.json",
+        ))
+        .attachment(CreateAttachment::bytes(
+            latest_results_json.as_bytes(),
+            "latest_results.json",
+        ));
 
     if let Err(e) = ctx.send(reply).await {
         let _ = ctx.reply(format!("Failed to send: {}", e)).await;
     }
     Ok(())
 }
-
-// #[poise::command(slash_command, owners_only, hide_in_help)]
-// pub async fn add_owner(ctx: Context<'_>) -> Result<(), Error> {
-//     let user_id = ctx.author().id.to_string();
-//     let data = ctx.data();
-//     ctx.reply(format!("Successfully added {} as an owner.", user_id)).await?;
-//     Ok(())
-// }

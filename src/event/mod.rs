@@ -1,9 +1,6 @@
-pub mod anime_update_event;
-pub mod event;
 pub mod event_bus;
-pub mod manga_update_event;
-pub mod update_event;
+pub mod series_update_event;
 
-// pub use manga_update_event::MangaUpdateEvent;
-// pub use anime_update_event::AnimeUpdateEvent;
-// pub use new_event::UpdateEvent;
+pub trait Event: std::any::Any + Send + Sync + 'static {
+    fn as_any(&self) -> &dyn std::any::Any;
+}

@@ -1,8 +1,9 @@
 use async_trait::async_trait;
-use sqlx::SqlitePool;
 use sqlx::Error as DbError;
+use sqlx::SqlitePool;
 
-use super::{base_table::BaseTable, table::Table};
+use super::BaseTable;
+use super::Table;
 use crate::database::model::subscribers_model::SubscribersModel;
 
 pub struct SubscribersTable {
@@ -26,29 +27,29 @@ impl SubscribersTable {
         Ok(ret)
     }
 
-    pub async fn select_all_by_latest_update(
+    pub async fn select_all_by_latest_results(
         &self,
-        latest_update_id: u32,
+        latest_results_id: u32,
     ) -> Result<Vec<SubscribersModel>, DbError> {
         let ret = sqlx::query_as::<_, SubscribersModel>(
-            "SELECT * FROM subscribers WHERE latest_update_id = ?",
+            "SELECT * FROM subscribers WHERE latest_results_id = ?",
         )
-        .bind(latest_update_id)
+        .bind(latest_results_id)
         .fetch_all(&self.base.pool)
         .await?;
         Ok(ret)
     }
 
-    pub async fn select_all_by_type_and_latest_update(
+    pub async fn select_all_by_type_and_latest_results(
         &self,
         subscriber_type: String,
-        latest_update_id: u32,
+        latest_results_id: u32,
     ) -> Result<Vec<SubscribersModel>, DbError> {
         let ret = sqlx::query_as::<_, SubscribersModel>(
-            "SELECT * FROM subscribers WHERE subscriber_type = ? AND latest_update_id = ?",
+            "SELECT * FROM subscribers WHERE subscriber_type = ? AND latest_results_id = ?",
         )
         .bind(subscriber_type)
-        .bind(latest_update_id)
+        .bind(latest_results_id)
         .fetch_all(&self.base.pool)
         .await?;
         Ok(ret)
@@ -60,12 +61,12 @@ impl SubscribersTable {
             DELETE FROM subscribers WHERE 
                 subscriber_type = ? AND 
                 subscriber_id = ? AND
-                latest_update_id = ?
+                latest_results_id = ?
             "#,
         )
         .bind(model.subscriber_type)
         .bind(model.subscriber_id)
-        .bind(model.latest_update_id)
+        .bind(model.latest_results_id)
         .execute(&self.base.pool)
         .await?;
         Ok(res.rows_affected() > 0)
@@ -75,11 +76,12 @@ impl SubscribersTable {
         &self,
         subscriber_id: &str,
     ) -> Result<Vec<SubscribersModel>, DbError> {
-        let ret =
-            sqlx::query_as::<_, SubscribersModel>("SELECT * FROM subscribers WHERE subscriber_id = ?")
-                .bind(subscriber_id)
-                .fetch_all(&self.base.pool)
-                .await?;
+        let ret = sqlx::query_as::<_, SubscribersModel>(
+            "SELECT * FROM subscribers WHERE subscriber_id = ?",
+        )
+        .bind(subscriber_id)
+        .fetch_all(&self.base.pool)
+        .await?;
         Ok(ret)
     }
 }
@@ -88,18 +90,16 @@ impl SubscribersTable {
 impl Table<SubscribersModel, u32> for SubscribersTable {
     async fn create_table(&self) -> Result<(), DbError> {
         sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS subscribers (
+            r#"CREATE TABLE IF NOT EXISTS subscribers (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 subscriber_type TEXT NOT NULL,
                 subscriber_id TEXT NOT NULL,
-                latest_update_id INTEGER,
-                UNIQUE(subscriber_type, subscriber_id, latest_update_id),
-                FOREIGN KEY (latest_update_id) REFERENCES latest_updates(id)
+                latest_results_id INTEGER,
+                UNIQUE(subscriber_type, subscriber_id, latest_results_id),
+                FOREIGN KEY (latest_results_id) REFERENCES latest_results(id)
                     ON DELETE CASCADE
                     ON UPDATE CASCADE
-            )
-            "#,
+            )"#,
         )
         .execute(&self.base.pool)
         .await?;
@@ -136,26 +136,28 @@ impl Table<SubscribersModel, u32> for SubscribersTable {
     }
 
     async fn insert(&self, model: &SubscribersModel) -> Result<u32, DbError> {
-        let res =
-            sqlx::query(
-                r#"INSERT INTO subscribers
-                    (subscriber_type, subscriber_id, latest_update_id)
-                VALUES (?, ?, ?)"#
-            )
-                .bind(&model.subscriber_type)
-                .bind(&model.subscriber_id)
-                .bind(&model.latest_update_id)
-                .execute(&self.base.pool)
-                .await?;
+        let res = sqlx::query(
+            r#"INSERT INTO subscribers
+                    (subscriber_type, subscriber_id, latest_results_id)
+                VALUES (?, ?, ?)"#,
+        )
+        .bind(&model.subscriber_type)
+        .bind(&model.subscriber_id)
+        .bind(&model.latest_results_id)
+        .execute(&self.base.pool)
+        .await?;
         // TODO: ID: i64 instead
-        Ok(res.last_insert_rowid().try_into().expect("Failed to convert last_insert_rowid to u32"))
+        Ok(res
+            .last_insert_rowid()
+            .try_into()
+            .expect("Failed to convert last_insert_rowid to u32"))
     }
 
     async fn update(&self, model: &SubscribersModel) -> Result<(), DbError> {
-        sqlx::query("UPDATE subscribers SET subscriber_type = ?, subscriber_id = ?, latest_update_id = ? WHERE id = ?")
+        sqlx::query("UPDATE subscribers SET subscriber_type = ?, subscriber_id = ?, latest_results_id = ? WHERE id = ?")
             .bind(&model.subscriber_type)
             .bind(&model.subscriber_id)
-            .bind(&model.latest_update_id)
+            .bind(&model.latest_results_id)
             .bind(model.id)
             .execute(&self.base.pool)
             .await?;

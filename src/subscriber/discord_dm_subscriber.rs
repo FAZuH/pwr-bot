@@ -1,15 +1,15 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use log::{error, info};
+use log::error;
+use log::info;
+use poise::serenity_prelude as serenity;
 use serenity::all::{CreateMessage, UserId};
 
-use crate::{
-    bot::bot::Bot,
-    database::{database::Database, model::latest_updates_model::LatestUpdatesModel},
-    event::{anime_update_event::AnimeUpdateEvent, manga_update_event::MangaUpdateEvent},
-    subscriber::subscriber::Subscriber,
-};
+use super::Subscriber;
+use crate::bot::bot::Bot;
+use crate::database::database::Database;
+use crate::event::series_update_event::SeriesUpdateEvent;
 
 pub struct DiscordDmSubscriber {
     bot: Arc<Bot>,
@@ -22,48 +22,17 @@ impl DiscordDmSubscriber {
         Self { bot, db }
     }
 
-    pub async fn anime_event_callback(&self, event: AnimeUpdateEvent) -> Result<()> {
+    pub async fn series_event_callback(&self, event: SeriesUpdateEvent) -> Result<()> {
         let message = CreateMessage::new().content(format!(
-            "🚨 New episode {} from anime {}! 🚨",
-            event.episode, event.title
+            "🚨 New series update {} -> {} from [{}]({})! 🚨",
+            event.previous, event.current, event.title, event.url
         ));
-        self.common(event.series_type.clone(), event.series_id.clone(), message)
-            .await
-    }
 
-    pub async fn manga_event_callback(&self, event: MangaUpdateEvent) -> Result<()> {
-        let message = CreateMessage::new().content(format!(
-            "🚨 New chapter {} from manga {}! 🚨",
-            event.chapter, event.title
-        ));
-        self.common(event.series_type.clone(), event.series_id.clone(), message)
-            .await
-    }
-
-    async fn common(
-        &self,
-        series_type: String,
-        series_id: String,
-        message: CreateMessage,
-    ) -> Result<()> {
-        // 1. Get latest_update model by type and series_id
-        let model = LatestUpdatesModel {
-            r#type: series_type,
-            series_id: series_id,
-            ..Default::default()
-        };
-        let id = self
-            .db
-            .latest_updates_table
-            .select_by_model(&model)
-            .await?
-            .id;
-
-        // 2. Get all subscribers by latest_update.id
+        // 2. Get all subscribers by latest_results id
         let subscribers = self
             .db
             .subscribers_table
-            .select_all_by_type_and_latest_update("dm".to_string(), id)
+            .select_all_by_latest_results(event.latest_results_id)
             .await?;
 
         for sub in subscribers {
@@ -116,32 +85,15 @@ impl DiscordDmSubscriber {
 }
 
 #[async_trait::async_trait]
-impl Subscriber<AnimeUpdateEvent> for DiscordDmSubscriber {
-    async fn callback(&self, event: AnimeUpdateEvent) -> Result<()> {
+impl Subscriber<SeriesUpdateEvent> for DiscordDmSubscriber {
+    async fn callback(&self, event: SeriesUpdateEvent) -> Result<()> {
         let bot = self.bot.clone();
         let db = self.db.clone();
 
         tokio::spawn(async move {
             let subscriber = DiscordDmSubscriber { bot, db };
-            if let Err(e) = subscriber.anime_event_callback(event).await {
+            if let Err(e) = subscriber.series_event_callback(event).await {
                 error!("Error in spawned DM task: {}", e);
-            }
-        });
-
-        Ok(())
-    }
-}
-
-#[async_trait::async_trait]
-impl Subscriber<MangaUpdateEvent> for DiscordDmSubscriber {
-    async fn callback(&self, event: MangaUpdateEvent) -> Result<()> {
-        let bot = self.bot.clone();
-        let db = self.db.clone();
-
-        tokio::spawn(async move {
-            let subscriber = DiscordDmSubscriber { bot, db };
-            if let Err(e) = subscriber.manga_event_callback(event).await {
-                error!("Error in spawned manga DM task: {}", e);
             }
         });
 

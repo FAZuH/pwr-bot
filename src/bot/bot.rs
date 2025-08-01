@@ -1,25 +1,25 @@
+use ::serenity::all::UserId;
 use anyhow;
 use anyhow::Result;
 use futures::lock::Mutex;
+use log::error;
 use log::info;
 use poise::serenity_prelude as serenity;
-use ::serenity::all::UserId;
 use std::collections::HashSet;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
+type Error = Box<dyn std::error::Error + Send + Sync>;
+
 use super::commands::{dump_db, help, register, subscribe, subscriptions, unsubscribe};
-use crate::source::ani_list_source::AniListSource;
-use crate::{
-    config::Config, database::database::Database, source::manga_dex_source::MangaDexSource,
-};
+use crate::source::sources::Sources;
+use crate::{config::Config, database::database::Database};
 
 pub struct Data {
     pub config: Arc<Config>,
     pub db: Arc<Database>,
-    pub manga_source: Arc<MangaDexSource>,
-    pub anime_source: Arc<AniListSource>,
+    pub sources: Arc<Sources>,
 }
 
 pub struct Bot {
@@ -32,8 +32,7 @@ impl Bot {
     pub async fn new(
         config: Arc<Config>,
         db: Arc<Database>,
-        anime_source: Arc<AniListSource>,
-        manga_source: Arc<MangaDexSource>,
+        sources: Arc<Sources>,
     ) -> Result<Self> {
         info!("Initializing bot...");
         let options = poise::FrameworkOptions {
@@ -52,14 +51,16 @@ impl Bot {
                 ))),
                 ..Default::default()
             },
-            owners: HashSet::from([UserId::from_str(config.admin_id.as_str()).expect("Invalid admin ID")]),
+            on_error: |error| Box::pin(Bot::on_error(error)),
+            owners: HashSet::from([
+                UserId::from_str(config.admin_id.as_str()).expect("Invalid admin ID")
+            ]),
             ..Default::default()
         };
         let data = Data {
             config: config.clone(),
             db: db.clone(),
-            manga_source: manga_source.clone(),
-            anime_source: anime_source.clone(),
+            sources: sources.clone(),
         };
         let framework = poise::Framework::builder()
             .options(options)
@@ -94,5 +95,27 @@ impl Bot {
             })
         });
         info!("Bot client started.");
+    }
+
+    /// Global custom error handler
+    async fn on_error(error: poise::FrameworkError<'_, Data, Error>) {
+        match error {
+            poise::FrameworkError::Setup { error, .. } => {
+                panic!("Failed to start bot: {:?}", error)
+            }
+            poise::FrameworkError::Command { error, ctx, .. } => {
+                error!("Error in command `{}`: {:?}", ctx.command().name, error,);
+                let _ = ctx
+                    .say(format!(
+                        "❌ An error occurred while executing the command ({error:?})",
+                    ))
+                    .await;
+            }
+            error => {
+                if let Err(e) = poise::builtins::on_error(error).await {
+                    error!("Error while handling error: {}", e)
+                }
+            }
+        }
     }
 }

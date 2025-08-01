@@ -6,7 +6,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use crate::subscriber::subscriber::Subscriber;
+use crate::subscriber::Subscriber;
 
 type AsyncSubscriber<E> =
     Box<dyn Fn(E) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> + Send + Sync>;

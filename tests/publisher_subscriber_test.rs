@@ -4,20 +4,20 @@ use std::time::Duration;
 use async_trait::async_trait;
 use futures::lock::Mutex;
 use httpmock::{Mock, prelude::*};
-use pwr_bot::database::model::latest_updates_model::LatestUpdatesModel;
+use pwr_bot::database::model::latest_results_model::LatestResultModel;
 use pwr_bot::database::model::subscribers_model::SubscribersModel;
 use pwr_bot::database::table::table::Table;
 use serde_json::json;
 use tokio::time::sleep;
 
 use pwr_bot::database::database::Database;
-use pwr_bot::event::anime_update_event::AnimeUpdateEvent;
 use pwr_bot::event::event_bus::EventBus;
 use pwr_bot::event::manga_update_event::MangaUpdateEvent;
+use pwr_bot::event::series_update_event::SeriesUpdateEvent;
 use pwr_bot::publisher::anime_update_publisher::AnimeUpdatePublisher;
 use pwr_bot::publisher::manga_update_publisher::MangaUpdatePublisher;
-use pwr_bot::source::ani_list_source::AniListSource;
-use pwr_bot::source::manga_dex_source::MangaDexSource;
+use pwr_bot::source::anilist_source::AniListSource;
+use pwr_bot::source::mangadex_source::MangaDexSource;
 use pwr_bot::subscriber::subscriber::Subscriber;
 
 #[derive(Clone)]
@@ -41,7 +41,7 @@ impl Subscriber<MangaUpdateEvent> for MockMangaSubscriber {
 
 #[derive(Clone)]
 struct MockAnimeSubscriber {
-    pub received_events: Arc<Mutex<Vec<AnimeUpdateEvent>>>,
+    pub received_events: Arc<Mutex<Vec<SeriesUpdateEvent>>>,
 }
 impl MockAnimeSubscriber {
     fn new() -> Self {
@@ -51,8 +51,8 @@ impl MockAnimeSubscriber {
     }
 }
 #[async_trait]
-impl Subscriber<AnimeUpdateEvent> for MockAnimeSubscriber {
-    async fn callback(&self, event: AnimeUpdateEvent) -> anyhow::Result<()> {
+impl Subscriber<SeriesUpdateEvent> for MockAnimeSubscriber {
+    async fn callback(&self, event: SeriesUpdateEvent) -> anyhow::Result<()> {
         self.received_events.lock().await.push(event);
         Ok(())
     }
@@ -86,11 +86,11 @@ async fn test_manga_publisher_and_subscriber() -> anyhow::Result<()> {
     // 0:Setup:Populate db
     let series_id = "789";
     let latest_update_id = db
-        .latest_updates_table
-        .insert(&LatestUpdatesModel {
-            series_id: series_id.to_string(),
+        .latest_results_table
+        .insert(&LatestResultModel {
+            url: series_id.to_string(),
             r#type: "manga".to_string(),
-            series_latest: "41".to_string(),
+            latest: "41".to_string(),
             ..Default::default()
         })
         .await?;
@@ -185,11 +185,11 @@ async fn test_anime_publisher_and_subscriber() -> anyhow::Result<()> {
     // 0:Setup:Populate db
     let series_id = "456";
     let latest_update_id = db
-        .latest_updates_table
-        .insert(&LatestUpdatesModel {
-            series_id: series_id.to_string(),
+        .latest_results_table
+        .insert(&LatestResultModel {
+            url: series_id.to_string(),
             r#type: "anime".to_string(),
-            series_latest: "4".to_string(),
+            latest: "4".to_string(),
             ..Default::default()
         })
         .await?;
