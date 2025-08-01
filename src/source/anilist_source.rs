@@ -4,6 +4,7 @@ use super::error::UrlParseError;
 
 use super::model::SeriesItem;
 use async_trait::async_trait;
+use log::debug;
 
 use super::BaseSource;
 use super::Source;
@@ -40,7 +41,7 @@ impl<'a> AniListSource<'a> {
 #[async_trait]
 impl Source for AniListSource<'_> {
     async fn get_latest(&self, series_id: &str) -> Result<SourceResult, SourceError> {
-        info!("Fetching latest anime for series_id: {}", series_id);
+        debug!("Fetching latest anime for series_id: {}", series_id);
 
         // Validate series_id format (should be numeric for AniList)
         let series_id_num = series_id

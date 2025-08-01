@@ -20,7 +20,7 @@ pub struct DiscordWebhookSubscriber {
 
 impl DiscordWebhookSubscriber {
     pub fn new(bot: Arc<Bot>, db: Arc<Database>, webhook_url: String) -> Self {
-        info!("Initializing DiscordWebhookSubscriber.");
+        debug!("Initializing DiscordWebhookSubscriber.");
         Self {
             bot,
             db,

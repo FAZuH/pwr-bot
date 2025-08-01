@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use log::debug;
 use ::serenity::all::MessageFlags;
 use anyhow::Result;
 use log::error;
@@ -19,7 +20,7 @@ pub struct DiscordDmSubscriber {
 
 impl DiscordDmSubscriber {
     pub fn new(bot: Arc<Bot>, db: Arc<Database>) -> Self {
-        info!("Initializing DiscordDmSubscriber.");
+        debug!("Initializing DiscordDmSubscriber.");
         Self { bot, db }
     }
 

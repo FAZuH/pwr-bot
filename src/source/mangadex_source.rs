@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use log::debug;
 
 use super::model::SourceResult;
 
@@ -99,7 +100,7 @@ impl<'a> MangaDexSource<'a> {
 #[async_trait]
 impl Source for MangaDexSource<'_> {
     async fn get_latest(&self, series_id: &str) -> Result<SourceResult, SourceError> {
-        info!("Fetching latest manga for series_id: {}", series_id);
+        debug!("Fetching latest manga for series_id: {}", series_id);
 
         // get_title validates the series_id
         let title = self.get_title(series_id).await?;
