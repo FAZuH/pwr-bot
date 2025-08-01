@@ -3,6 +3,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use log::debug;
 use log::info;
+use serenity::all::MessageFlags;
 use serenity::all::{ExecuteWebhook, Webhook};
 
 use super::Subscriber;
@@ -22,10 +23,10 @@ impl DiscordWebhookSubscriber {
 
     pub async fn series_event_callback(&self, event: SeriesUpdateEvent) -> anyhow::Result<()> {
         // 1. Create message
-        let message = ExecuteWebhook::new().content(format!(
+        let payload = ExecuteWebhook::new().content(format!(
             "🚨 New series update {} -> {} from [{}]({})! 🚨",
             event.previous, event.current, event.title, event.url
-        ));
+        )).flags(MessageFlags::SUPPRESS_EMBEDS);
 
         // 2. Notify event to all serenity::User DMs
         debug!(
@@ -34,7 +35,7 @@ impl DiscordWebhookSubscriber {
         );
         let webhook = Webhook::from_url(self.bot.http.clone(), self.webhook_url.as_str()).await?;
         webhook
-            .execute(self.bot.http.clone(), false, message)
+            .execute(self.bot.http.clone(), false, payload)
             .await?;
         info!(
             "Successfully executed webhook for series update: {}",

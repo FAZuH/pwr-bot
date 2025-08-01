@@ -4,6 +4,7 @@ use anyhow::Result;
 use log::error;
 use log::info;
 use poise::serenity_prelude as serenity;
+use ::serenity::all::MessageFlags;
 use serenity::all::{CreateMessage, UserId};
 
 use super::Subscriber;
@@ -23,10 +24,12 @@ impl DiscordDmSubscriber {
     }
 
     pub async fn series_event_callback(&self, event: SeriesUpdateEvent) -> Result<()> {
+        // 1. Create message
         let message = CreateMessage::new().content(format!(
             "🚨 New series update {} -> {} from [{}]({})! 🚨",
             event.previous, event.current, event.title, event.url
-        ));
+        ))
+        .flags(MessageFlags::SUPPRESS_EMBEDS);
 
         // 2. Get all subscribers by latest_results id
         let subscribers = self
