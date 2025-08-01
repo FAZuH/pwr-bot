@@ -51,10 +51,10 @@ pub async fn subscribe(
     let SourceResult::Series(series_item) = data.sources.get_latest_by_url(&link).await?;
     // let series_item = match data.sources.get_latest_by_url(&link).await? {
     //     SourceResult::Series(series_item) => series_item,
-        // _ => {
-        //     ctx.reply(format!("❌ Invalid URL: {}", series_id)).await?;
-        //     return Ok(());
-        // }
+    // _ => {
+    //     ctx.reply(format!("❌ Invalid URL: {}", series_id)).await?;
+    //     return Ok(());
+    // }
     // };
     let title = series_item.title;
     let latest = series_item.latest;
@@ -205,11 +205,7 @@ pub async fn subscriptions(ctx: Context<'_>) -> Result<(), Error> {
 "
     .to_string();
     for subscription in subscriptions {
-        let LatestResultModel {
-            name,
-            url,
-            ..
-        } = data
+        let LatestResultModel { name, url, .. } = data
             .db
             .latest_results_table
             .select(&subscription.latest_results_id)

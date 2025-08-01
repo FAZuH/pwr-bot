@@ -23,10 +23,12 @@ impl DiscordWebhookSubscriber {
 
     pub async fn series_event_callback(&self, event: SeriesUpdateEvent) -> anyhow::Result<()> {
         // 1. Create message
-        let payload = ExecuteWebhook::new().content(format!(
-            "🚨 New series update {} -> {} from [{}]({})! 🚨",
-            event.previous, event.current, event.title, event.url
-        )).flags(MessageFlags::SUPPRESS_EMBEDS);
+        let payload = ExecuteWebhook::new()
+            .content(format!(
+                "🚨 New series update {} -> {} from [{}]({})! 🚨",
+                event.previous, event.current, event.title, event.url
+            ))
+            .flags(MessageFlags::SUPPRESS_EMBEDS);
 
         // 2. Notify event to all serenity::User DMs
         debug!(

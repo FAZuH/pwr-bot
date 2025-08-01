@@ -75,10 +75,7 @@ impl SeriesPublisher {
         let db = &self.db;
         let sources = &self.sources;
         debug!("SeriesPublisher: Checking for series updates.");
-        let latest_updates = db
-            .latest_results_table
-            .select_all_by_tag("series")
-            .await?;
+        let latest_updates = db.latest_results_table.select_all_by_tag("series").await?;
         info!(
             "SeriesPublisher: Found {} series subscriptions.",
             latest_updates.len()

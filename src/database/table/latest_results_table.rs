@@ -33,22 +33,20 @@ impl LatestResultsTable {
         &self,
         domain: &str, // e.g., "mangadex.org"
     ) -> Result<Vec<LatestResultModel>, DbError> {
-        let ret = sqlx::query_as::<_, LatestResultModel>(
-            "SELECT * FROM latest_results WHERE url LIKE ?",
-        )
-        .bind(format!("%{}%", domain))
-        .fetch_all(&self.base.pool)
-        .await?;
+        let ret =
+            sqlx::query_as::<_, LatestResultModel>("SELECT * FROM latest_results WHERE url LIKE ?")
+                .bind(format!("%{}%", domain))
+                .fetch_all(&self.base.pool)
+                .await?;
         Ok(ret)
     }
 
     pub async fn select_by_url(&self, url: &str) -> Result<LatestResultModel, DbError> {
-        let res = sqlx::query_as::<_, LatestResultModel>(
-            "SELECT * FROM latest_results WHERE url = ?",
-        )
-        .bind(url)
-        .fetch_one(&self.base.pool)
-        .await?;
+        let res =
+            sqlx::query_as::<_, LatestResultModel>("SELECT * FROM latest_results WHERE url = ?")
+                .bind(url)
+                .fetch_one(&self.base.pool)
+                .await?;
         Ok(res)
     }
 }
