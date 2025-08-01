@@ -2,23 +2,26 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use log::debug;
+use log::error;
 use log::info;
 use serenity::all::MessageFlags;
 use serenity::all::{ExecuteWebhook, Webhook};
 
 use super::Subscriber;
 use crate::bot::bot::Bot;
+use crate::database::database::Database;
 use crate::event::series_update_event::SeriesUpdateEvent;
 
 pub struct DiscordWebhookSubscriber {
     bot: Arc<Bot>,
+    db: Arc<Database>,
     webhook_url: String,
 }
 
 impl DiscordWebhookSubscriber {
-    pub fn new(bot: Arc<Bot>, webhook_url: String) -> Self {
+    pub fn new(bot: Arc<Bot>, db: Arc<Database>, webhook_url: String) -> Self {
         info!("Initializing DiscordWebhookSubscriber.");
-        Self { bot, webhook_url }
+        Self { bot, db, webhook_url }
     }
 
     pub async fn series_event_callback(&self, event: SeriesUpdateEvent) -> anyhow::Result<()> {
@@ -30,19 +33,38 @@ impl DiscordWebhookSubscriber {
             ))
             .flags(MessageFlags::SUPPRESS_EMBEDS);
 
-        // 2. Notify event to all serenity::User DMs
-        debug!(
-            "Attempting to execute webhook for series update: {}",
-            event.title
-        );
-        let webhook = Webhook::from_url(self.bot.http.clone(), self.webhook_url.as_str()).await?;
-        webhook
-            .execute(self.bot.http.clone(), false, payload)
+        // 2. Get all subscribers by latest_results id
+        let subscribers = self
+            .db
+            .subscribers_table
+            .select_all_by_type_and_latest_results("webhook", event.latest_results_id)
             .await?;
-        info!(
-            "Successfully executed webhook for series update: {}",
-            event.title
-        );
+
+        for sub in subscribers {
+            // 2. Notify event to all serenity::User DMs
+            debug!(
+                "Attempting to execute to webhook {} for series update: {}",
+                sub.subscriber_id, event.title
+            );
+            let webhook = match Webhook::from_url(self.bot.http.clone(), &sub.subscriber_id).await {
+                Ok(webhook) => webhook,
+                Err(e) => {
+                    error!(
+                        "Failed to create webhook from URL {}: {}",
+                        sub.subscriber_id, e
+                    );
+                    continue; // Skip this subscriber if webhook creation fails
+                }
+            };
+            webhook
+                .execute(self.bot.http.clone(), false, payload.clone())
+                .await?;
+            info!(
+                "Successfully executed webhook for series update: {}",
+                event.title
+            );
+        }
+
         Ok(())
     }
 }

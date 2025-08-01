@@ -35,7 +35,7 @@ impl DiscordDmSubscriber {
         let subscribers = self
             .db
             .subscribers_table
-            .select_all_by_latest_results(event.latest_results_id)
+            .select_all_by_type_and_latest_results("dm", event.latest_results_id)
             .await?;
 
         for sub in subscribers {

@@ -42,7 +42,7 @@ impl SubscribersTable {
 
     pub async fn select_all_by_type_and_latest_results(
         &self,
-        subscriber_type: String,
+        subscriber_type: &str,
         latest_results_id: u32,
     ) -> Result<Vec<SubscribersModel>, DbError> {
         let ret = sqlx::query_as::<_, SubscribersModel>(

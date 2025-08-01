@@ -47,6 +47,7 @@ async fn main() -> anyhow::Result<()> {
 
     let webhook_subscriber = Arc::new(DiscordWebhookSubscriber::new(
         bot.clone(),
+        db.clone(),
         config.webhook_url.clone(),
     ));
     event_bus
