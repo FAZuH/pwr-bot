@@ -12,7 +12,7 @@ pub struct Database {
 
 impl Database {
     pub async fn new(db_url: &str, db_path: &str) -> anyhow::Result<Self> {
-        if !std::fs::metadata(db_path).is_ok() {
+        if std::fs::metadata(db_path).is_err() {
             std::fs::write(db_path, "")?;
         }
 
@@ -20,9 +20,6 @@ impl Database {
 
         let latest_updates_table = LatestUpdatesTable::new(pool.clone());
         let subscribers_table = SubscribersTable::new(pool.clone());
-        sqlx::query("PRAGMA foreign_keys = ON")
-            .execute(&pool)
-            .await?;
 
         Ok(Self {
             pool,
@@ -32,8 +29,7 @@ impl Database {
     }
 
     pub async fn create_all_tables(&self) -> anyhow::Result<()> {
-        self.latest_updates_table.create_table().await?;
-        self.subscribers_table.create_table().await?;
+        sqlx::migrate!("./migrations").run(&self.pool).await?;
         Ok(())
     }
 

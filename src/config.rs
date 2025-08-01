@@ -17,8 +17,8 @@ impl Config {
                 .unwrap_or("60".to_string())
                 .parse::<u32>()
                 .map_or(Duration::new(60, 0), |v| Duration::new(v.into(), 0)),
-            db_url: std::env::var("DB_URL").unwrap_or("sqlite://data.db".to_string()),
-            db_path: std::env::var("DB_PATH").unwrap_or("data.db".to_string()),
+            db_url: std::env::var("DATABASE_URL").unwrap_or("sqlite://data.db".to_string()),
+            db_path: std::env::var("DATABASE_PATH").unwrap_or("data.db".to_string()),
             discord_token: std::env::var("DISCORD_TOKEN")
                 .expect("Expected DISCORD_TOKEN in environment"),
             webhook_url: std::env::var("WEBHOOK_URL").expect("Expected WEBHOOK_URL in environment"),
