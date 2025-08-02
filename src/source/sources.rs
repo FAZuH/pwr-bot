@@ -49,7 +49,7 @@ impl Sources {
                 url: url.to_string(),
             })?;
         let series_id = self.get_series_id_by_url(url)?;
-        source.get_latest(&series_id).await
+        source.get_latest(series_id).await
     }
 
     /// Get source by URL
