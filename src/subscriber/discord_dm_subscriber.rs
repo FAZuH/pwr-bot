@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
-use log::debug;
 use ::serenity::all::MessageFlags;
 use anyhow::Result;
+use log::debug;
 use log::error;
 use log::info;
 use poise::serenity_prelude as serenity;

@@ -39,76 +39,88 @@ impl std::fmt::Display for SendInto {
 #[poise::command(slash_command)]
 pub async fn subscribe(
     ctx: Context<'_>,
-    #[description = "Link of the series"] link: String,
+    #[description = "Link(s) of the series. Separate links with commas (,)"] links: String,
     #[description = "Where to send the notifications. Default to DM"] send_into: Option<SendInto>,
 ) -> Result<(), Error> {
+    // if links.contains(",") {
+    //     for link in links.split(",") {
+    //     }
+    // }
+
     // 1. Setup
-    let user_id = ctx.author().id.to_string();
+    let user_id = ctx.author().id;
     let data = ctx.data();
     let send_into = send_into.unwrap_or(SendInto::DM);
 
-    // 2. Fetch latest series for the series
-    let SourceResult::Series(series_item) = data.sources.get_latest_by_url(&link).await?;
-    // let series_item = match data.sources.get_latest_by_url(&link).await? {
-    //     SourceResult::Series(series_item) => series_item,
-    // _ => {
-    //     ctx.reply(format!("❌ Invalid URL: {}", series_id)).await?;
-    //     return Ok(());
-    // }
-    // };
-    let title = series_item.title;
-    let latest = series_item.latest;
-    let published = series_item.published;
-
-    // 3. latest_result doesn't exist in db => insert it
-    // otherwise => get id
-    let latest_result = LatestResultModel {
-        url: series_item.url, // (1) NOTE: Important for consistent URL
-        latest,
-        name: title.clone(),
-        published,
-        ..Default::default()
-    };
-    let latest_results_id = match data.db.latest_results_table.insert(&latest_result).await {
-        Ok(id) => id,
-        Err(_) => {
-            data.db
-                .latest_results_table
-                .select_by_url(&latest_result.url)
-                .await?
-                .id
-        }
-    };
-
-    // 4. Insert subscriber into db
-    let subscriber = SubscribersModel {
-        subscriber_id: {
-            if send_into.as_str() == "webhook" {
-                data.config.webhook_url.clone()
-            } else {
-                user_id
+    for link in links.split(",") {
+        // 2. Fetch latest series for the series
+        let series_item = match data.sources.get_latest_by_url(link).await {
+            Ok(SourceResult::Series(res)) => res,
+            Err(err) => {
+                ctx.reply(format!("❌ Invalid link ({err:?})")).await?;
+                continue;
             }
-        },
-        subscriber_type: send_into.as_str().to_string(),
-        latest_results_id,
-        ..Default::default()
-    };
-    if let Err(err) = data.db.subscribers_table.insert(&subscriber).await {
-        if let Some(db_err) = err.into_database_error() {
-            if matches!(db_err.kind(), ErrorKind::UniqueViolation) {
-                ctx.reply(format!("You are already subscribed to {title}"))
-                    .await?;
-            } else {
-                ctx.reply(format!("Unknown error: {db_err}")).await?;
+        };
+        let title = series_item.title;
+        let latest = series_item.latest;
+        let published = series_item.published;
+
+        // 3. latest_result doesn't exist in db => insert it
+        // otherwise => get id
+        let latest_result = LatestResultModel {
+            url: series_item.url, // (1) NOTE: Important for consistent URL
+            latest,
+            name: title.clone(),
+            published,
+            ..Default::default()
+        };
+        let latest_results_id = match data.db.latest_results_table.insert(&latest_result).await {
+            Ok(id) => id,
+            Err(_) => {
+                match data
+                    .db
+                    .latest_results_table
+                    .select_by_url(&latest_result.url)
+                    .await
+                {
+                    Ok(ok) => ok.id,
+                    Err(err) => {
+                        ctx.reply(format!("❌ Unexpected error: {err:?}")).await?;
+                        continue;
+                    }
+                }
             }
+        };
+
+        // 4. Insert subscriber into db
+        let subscriber = SubscribersModel {
+            subscriber_id: {
+                if send_into.as_str() == "webhook" {
+                    data.config.webhook_url.clone()
+                } else {
+                    user_id.to_string()
+                }
+            },
+            subscriber_type: send_into.as_str().to_string(),
+            latest_results_id,
+            ..Default::default()
+        };
+        if let Err(err) = data.db.subscribers_table.insert(&subscriber).await {
+            if let Some(db_err) = err.into_database_error() {
+                if matches!(db_err.kind(), ErrorKind::UniqueViolation) {
+                    ctx.reply(format!("You are already subscribed to {title}"))
+                        .await?;
+                } else {
+                    ctx.reply(format!("Unknown error: {db_err}")).await?;
+                }
+            }
+        } else {
+            ctx.reply(format!(
+                "✅ Successfully subscribed to series \"{title}\". Notifications will be sent to {send_into}",
+            ))
+            .await?;
         }
-    } else {
-        ctx.reply(format!(
-            "✅ Successfully subscribed to series \"{title}\". Notifications will be sent to {send_into}",
-        ))
-        .await?;
     }
-
     Ok(())
 }
 
@@ -116,7 +128,7 @@ pub async fn subscribe(
 #[poise::command(slash_command)]
 pub async fn unsubscribe(
     ctx: Context<'_>,
-    #[description = "Link of the series"] link: String,
+    #[description = "Link(s) of the series. Separate links with commas (,)"] link: String,
     #[description = "Where to send the notifications. Default to DM"] send_into: Option<SendInto>,
 ) -> Result<(), Error> {
     // 1. Setup
@@ -135,7 +147,7 @@ pub async fn unsubscribe(
 
     // 3. Get latest series id from db
     //
-    // HACK: We do it like this to make sure the link matches the one on the db. See (1)
+    // HACK: We do it like this to ensure the link matches the one on the db. See (1)
     let id = source.get_id_from_url(&link)?; // Assuming link is already validated on step 2
     let latest_result = match data
         .db
