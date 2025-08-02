@@ -1,4 +1,7 @@
+use std::collections::HashSet;
+
 use anyhow::Result;
+use log::error;
 use poise::{ChoiceParameter, CreateReply};
 use serenity::all::CreateAttachment;
 use sqlx::error::ErrorKind;
@@ -134,7 +137,9 @@ pub async fn subscribe(
 #[poise::command(slash_command)]
 pub async fn unsubscribe(
     ctx: Context<'_>,
-    #[description = "Link(s) of the series. Separate links with commas (,)"] links: String,
+    #[description = "Link(s) of the series. Separate links with commas (,)"]
+    #[autocomplete = "autocomplete_subscriptions"]
+    links: String,
     #[description = "Where to send the notifications. Default to DM"] send_into: Option<SendInto>,
 ) -> Result<(), Error> {
     // 1. Setup
@@ -294,4 +299,57 @@ pub async fn dump_db(ctx: Context<'_>) -> Result<(), Error> {
         let _ = ctx.reply(format!("Failed to send: {}", e)).await;
     }
     Ok(())
+}
+
+async fn autocomplete_subscriptions(ctx: Context<'_>, partial: &str) -> Vec<String> {
+    // Early exit if partial is empty
+    if partial.trim().is_empty() {
+        return Vec::new();
+    }
+
+    let user_id = ctx.author().id.to_string();
+
+    // Get subscriptions
+    let subscriptions = match ctx
+        .data()
+        .db
+        .subscribers_table
+        .select_all_by_subscriber_id(&user_id)
+        .await
+    {
+        Ok(subs) => subs,
+        Err(e) => {
+            error!("Failed to fetch subscriptions for user {}: {}", user_id, e);
+            return Vec::new();
+        }
+    };
+
+    if subscriptions.is_empty() {
+        return Vec::new();
+    }
+
+    // Extract unique latest_results_ids
+    let unique_ids: HashSet<u32> = subscriptions
+        .into_iter()
+        .map(|sub| sub.latest_results_id)
+        .collect();
+
+    // Fetch all results in parallel and filter
+    let futures = unique_ids.into_iter().map(|id| {
+        let db = &ctx.data().db;
+        async move { db.latest_results_table.select(&id).await.ok() }
+    });
+    let results = futures::future::join_all(futures).await;
+
+    let partial_lower = partial.to_lowercase();
+    let mut matching_urls: Vec<String> = results
+        .into_iter()
+        .flatten()
+        .filter(|res| res.url.to_lowercase().contains(&partial_lower))
+        .map(|res| res.url)
+        .collect();
+
+    matching_urls.sort();
+    matching_urls.truncate(25); // Discord autocomplete limit
+    matching_urls
 }
