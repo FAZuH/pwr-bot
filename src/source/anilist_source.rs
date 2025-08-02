@@ -158,7 +158,7 @@ impl Source for AniListSource<'_> {
     }
 
     fn get_url_from_id(&self, id: &str) -> String {
-        format!("{}/anime/{}", self.base.url.api_url, id)
+        format!("{}/anime/{}", self.base.url.api_domain, id)
     }
 
     fn get_base(&self) -> &BaseSource {

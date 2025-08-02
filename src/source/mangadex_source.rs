@@ -192,7 +192,7 @@ impl Source for MangaDexSource<'_> {
     }
 
     fn get_url_from_id(&self, id: &str) -> String {
-        format!("{}/manga/{}", self.base.url.api_url, id)
+        format!("{}/manga/{}", self.base.url.api_domain, id)
     }
 
     fn get_base(&self) -> &BaseSource {
