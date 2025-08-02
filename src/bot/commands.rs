@@ -52,7 +52,13 @@ pub async fn subscribe(
     let data = ctx.data();
     let send_into = send_into.unwrap_or(SendInto::DM);
 
-    for link in links.split(",") {
+    let links_split = links.split(",");
+    if links_split.clone().count() > 10 {
+        ctx.say("Too many links provided. Please provide no more than 10 links at a time.")
+            .await?;
+        return Ok(());
+    };
+    for link in links_split {
         // 2. Fetch latest series for the series
         let series_item = match data.sources.get_latest_by_url(link).await {
             Ok(SourceResult::Series(res)) => res,
