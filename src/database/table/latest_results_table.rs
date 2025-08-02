@@ -110,7 +110,7 @@ impl Table<LatestResultModel, u32> for LatestResultsTable {
         .bind(&model.name)
         .bind(&model.latest)
         .bind(&model.tags)
-        .bind(&model.published)
+        .bind(model.published)
         .bind(&model.url)
         .execute(&self.base.pool)
         .await?;
@@ -126,12 +126,12 @@ impl Table<LatestResultModel, u32> for LatestResultsTable {
             SET name = ?, latest = ?, tags = ?, published = ?, url = ?
             WHERE id = ?"#,
         )
-        .bind(&model.url)
-        .bind(&model.latest)
         .bind(&model.name)
-        .bind(&model.published)
+        .bind(&model.latest)
         .bind(&model.tags)
-        .bind(&model.id)
+        .bind(model.published)
+        .bind(&model.url)
+        .bind(model.id)
         .execute(&self.base.pool)
         .await?;
         Ok(())

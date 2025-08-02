@@ -118,7 +118,8 @@ impl SeriesPublisher {
             );
 
             // Handle update event
-            // 5. Insert new updates into database
+            // 5. Update db with new updates.
+            // TODO: This should be a subscriber
             let prev_latest_clone = prev_check.latest.clone();
             prev_check.latest = curr_check.latest.clone();
             prev_check.published = curr_check.published;
