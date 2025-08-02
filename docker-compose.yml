@@ -1,0 +1,21 @@
+services:
+
+  app:
+    image: ghcr.io/fazuh/pwr-bot:latest 
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - app:/app
+    environment:
+      - POLL_INTERVAL=${POLL_INTERVAL:-180}
+      - DATABASE_PATH=${DATABASE_PATH:-data.db}
+      - DATABASE_URL=${DATABASE_URL:-sqlite://data.db}
+      - DISCORD_TOKEN=${DISCORD_TOKEN:?error}
+      - WEBHOOK_URL=${WEBHOOK_URL:?error}
+      - RUST_LOG=${RUST_LOG:-pwr_bot=info}
+      - ADMIN_ID=${ADMIN_ID:?error}
+    restart: unless-stopped
+      
+volumes:
+  app:
