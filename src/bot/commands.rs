@@ -241,7 +241,7 @@ pub async fn subscriptions(ctx: Context<'_>) -> Result<(), Error> {
             .select(&subscription.latest_results_id)
             .await?;
 
-        message.push_str(&format!("- {name} (<{url}>)\n",));
+        message.push_str(&format!("- [{name}](<{url}>)\n",));
     }
 
     ctx.reply(message).await?;
