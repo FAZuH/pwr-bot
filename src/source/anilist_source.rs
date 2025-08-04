@@ -4,6 +4,7 @@ use super::error::UrlParseError;
 
 use super::model::SeriesItem;
 use async_trait::async_trait;
+use governor::clock::QuantaClock;
 use log::debug;
 
 use super::BaseSource;
@@ -15,9 +16,15 @@ use log::{info, warn};
 
 use std::hash::{Hash, Hasher};
 
-#[derive(Clone)]
+use governor::{
+    Quota, RateLimiter,
+    state::{InMemoryState, direct::NotKeyed},
+};
+use std::num::NonZeroU32;
+
 pub struct AniListSource<'a> {
     pub base: BaseSource<'a>,
+    limiter: RateLimiter<NotKeyed, InMemoryState, QuantaClock>,
 }
 
 impl<'a> AniListSource<'a> {
@@ -32,9 +39,29 @@ impl<'a> AniListSource<'a> {
             api_domain: "anilist.co",
             api_url,
         };
+        // TODO: See https://docs.anilist.co/guide/rate-limiting.
+        // "The API is currently in a degraded state and is limited to 30 requests per minute."
+        // We will use the ratelimit headers `X-RateLimit-Limit` and `X-RateLimit-Remaining` when
+        // the API is fully restored.
+        let limiter = RateLimiter::direct(Quota::per_second(NonZeroU32::new(30).unwrap()));
         Self {
             base: BaseSource::new(url, reqwest::Client::new()),
+            limiter,
         }
+    }
+
+    async fn send(
+        &self,
+        request: reqwest::RequestBuilder,
+    ) -> Result<reqwest::Response, reqwest::Error> {
+        if self.limiter.check().is_err() {
+            info!("Source {} is ratelimited. Waiting...", self.base.url.name);
+        }
+        self.limiter.until_ready().await;
+
+        let req = request.build()?;
+        debug!("Making request to: {}", req.url());
+        self.base.client.execute(req).await
     }
 }
 
@@ -64,13 +91,9 @@ impl Source for AniListSource<'_> {
             "variables": { "id": series_id_num }
         });
 
-        let response = self
-            .base
-            .client
-            .post(self.base.url.api_url)
-            .json(&json)
-            .send()
-            .await?; // Automatically converts to SourceError::RequestFailed
+        let request = self.base.client.post(self.base.url.api_url).json(&json);
+
+        let response = self.send(request).await?;
 
         let body = response.json::<serde_json::Value>().await?; // Automatically converts to SourceError::JsonParseFailed
 

@@ -1,5 +1,7 @@
 use async_trait::async_trait;
+use governor::clock::QuantaClock;
 use log::debug;
+use reqwest;
 
 use super::model::SourceResult;
 
@@ -15,9 +17,15 @@ use reqwest::Client;
 use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
 use std::hash::{Hash, Hasher};
 
-#[derive(Clone)]
+use governor::{
+    Quota, RateLimiter,
+    state::{InMemoryState, direct::NotKeyed},
+};
+use std::num::NonZeroU32;
+
 pub struct MangaDexSource<'a> {
     pub base: BaseSource<'a>,
+    limiter: RateLimiter<NotKeyed, InMemoryState, QuantaClock>,
 }
 
 impl<'a> MangaDexSource<'a> {
@@ -40,9 +48,14 @@ impl<'a> MangaDexSource<'a> {
             api_domain: "mangadex.org",
             api_url,
         };
+        // NOTE: See https://api.mangadex.org/docs/2-limitations/
+        // Because GET /manga/{id} is not specified on #endpoint-specific-rate-limits,
+        // therefore GET /manga/{id} has a default ratelimit of 5 requests per second
+        let limiter = RateLimiter::direct(Quota::per_second(NonZeroU32::new(5).unwrap()));
 
         Self {
             base: BaseSource::new(url, client),
+            limiter,
         }
     }
 
@@ -50,8 +63,11 @@ impl<'a> MangaDexSource<'a> {
         // Validate series_id format (should be UUID for MangaDex)
         self.validate_uuid(&series_id.to_string().clone())?;
 
-        let url = format!("{}/manga/{}", self.base.url.api_url, series_id);
-        let response = self.base.client.get(&url).send().await?; // Converts to SourceError::RequestFailed
+        let request = self
+            .base
+            .client
+            .get(format!("{}/manga/{}", self.base.url.api_url, series_id));
+        let response = self.send(request).await?; // Converts to SourceError::RequestFailed
         let body = response.text().await?;
         let response_json: serde_json::Value = serde_json::from_str(&body)?; // Converts to SourceError::JsonParseFailed
 
@@ -95,22 +111,43 @@ impl<'a> MangaDexSource<'a> {
         }
         Ok(())
     }
+
+    async fn send(
+        &self,
+        request: reqwest::RequestBuilder,
+    ) -> Result<reqwest::Response, reqwest::Error> {
+        if self.limiter.check().is_err() {
+            info!("Source {} is ratelimited. Waiting...", self.base.url.name);
+        }
+        self.limiter.until_ready().await;
+
+        let req = request.build()?;
+        debug!("Making request to: {}", req.url());
+        self.base.client.execute(req).await
+    }
 }
 
 #[async_trait]
 impl Source for MangaDexSource<'_> {
     async fn get_latest(&self, series_id: &str) -> Result<SourceResult, SourceError> {
-        debug!("Fetching latest manga for series_id: {}", series_id);
-
         // get_title validates the series_id
         let title = self.get_title(series_id).await?;
 
-        let url = format!(
-            "{}/manga/{series_id}/feed?order[createdAt]=desc&limit=1&translatedLanguage[]=en&translatedLanguage[]=id",
-            self.base.url.api_url
-        );
+        let request = self
+            .base
+            .client
+            .get(format!(
+                "{}/manga/{}/feed",
+                self.base.url.api_url, series_id
+            ))
+            .query(&[
+                ("order[createdAt]", "desc"),
+                ("limit", "1"),
+                ("translatedLanguage[]", "en"),
+                ("translatedLanguage[]", "id"),
+            ]);
 
-        let response = self.base.client.get(&url).send().await?; // Converts to SourceError::RequestFailed
+        let response = self.send(request).await?; // Converts to SourceError::RequestFailed
 
         let body = response.text().await?;
         let response_json: serde_json::Value = serde_json::from_str(&body)?; // Converts to SourceError::JsonParseFailed

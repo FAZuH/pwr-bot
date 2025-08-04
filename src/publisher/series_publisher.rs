@@ -8,7 +8,6 @@ use log::{debug, error, info};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
-use tokio::time::sleep;
 
 pub struct SeriesPublisher {
     db: Arc<Database>,
@@ -82,7 +81,6 @@ impl SeriesPublisher {
         );
 
         for mut prev_check in latest_updates {
-            sleep(Duration::from_secs(1)).await; // Prevents overwhelming the source
             // 2. No subscribers to prev_check.id => Don't publish
             if db
                 .subscribers_table
