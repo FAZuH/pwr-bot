@@ -40,19 +40,12 @@ async fn main() -> anyhow::Result<()> {
     let bot = Arc::new(bot);
 
     // Setup subscribers
-    let dm_subscriber = Arc::new(DiscordDmSubscriber::new(bot.clone(), db.clone()));
-    event_bus
-        .register_subcriber::<SeriesUpdateEvent, _>(dm_subscriber.clone())
-        .await;
+    let dm_subscriber = DiscordDmSubscriber::new(bot.clone(), db.clone());
+    event_bus.register_subcriber::<SeriesUpdateEvent, _>(dm_subscriber.into());
 
-    let webhook_subscriber = Arc::new(DiscordWebhookSubscriber::new(
-        bot.clone(),
-        db.clone(),
-        config.webhook_url.clone(),
-    ));
-    event_bus
-        .register_subcriber::<SeriesUpdateEvent, _>(webhook_subscriber.clone())
-        .await;
+    let webhook_subscriber =
+        DiscordWebhookSubscriber::new(bot.clone(), db.clone(), config.webhook_url.clone());
+    event_bus.register_subcriber::<SeriesUpdateEvent, _>(webhook_subscriber.into());
 
     // Setup publishers
     SeriesPublisher::new(

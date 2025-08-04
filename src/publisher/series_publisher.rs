@@ -136,7 +136,7 @@ impl SeriesPublisher {
                 url: prev_check.url,
                 published: curr_check.published,
             };
-            self.event_bus.publish(event).await;
+            self.event_bus.publish(event);
         }
 
         debug!("SeriesPublisher: Finished checking for series updates.");

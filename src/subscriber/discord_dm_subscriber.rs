@@ -92,16 +92,6 @@ impl DiscordDmSubscriber {
 #[async_trait::async_trait]
 impl Subscriber<SeriesUpdateEvent> for DiscordDmSubscriber {
     async fn callback(&self, event: SeriesUpdateEvent) -> Result<()> {
-        let bot = self.bot.clone();
-        let db = self.db.clone();
-
-        tokio::spawn(async move {
-            let subscriber = DiscordDmSubscriber { bot, db };
-            if let Err(e) = subscriber.series_event_callback(event).await {
-                error!("Error in spawned DM task: {}", e);
-            }
-        });
-
-        Ok(())
+        self.series_event_callback(event).await
     }
 }

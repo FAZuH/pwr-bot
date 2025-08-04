@@ -76,8 +76,6 @@ impl DiscordWebhookSubscriber {
 #[async_trait::async_trait]
 impl Subscriber<SeriesUpdateEvent> for DiscordWebhookSubscriber {
     async fn callback(&self, event: SeriesUpdateEvent) -> Result<()> {
-        DiscordWebhookSubscriber::new(self.bot.clone(), self.db.clone(), self.webhook_url.clone())
-            .series_event_callback(event)
-            .await
+        self.series_event_callback(event).await
     }
 }
