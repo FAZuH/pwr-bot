@@ -75,6 +75,11 @@ jobs:
       - name: Update rustup
         run: rustup update
 
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: release-build
+
       - name: Build package
         run: cargo build --release
 
@@ -129,6 +134,8 @@ jobs:
             version=${{ needs.changelog.outputs.tag }}
             commit=${{ github.sha }}
             build_date=${{ env.date }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
   release-github:
     name: Release to GitHub
