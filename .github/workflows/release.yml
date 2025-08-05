@@ -81,6 +81,7 @@ jobs:
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
+          name: pwr-bot
           path: target/release/pwr-bot
 
   push-image:
@@ -143,8 +144,8 @@ jobs:
       - name: Download Artifacts
         uses: actions/download-artifact@v4
         with:
-          name: dist
-          path: dist/
+          name: pwr-bot
+          path: target/release/pwr-bot
 
       - name: Create Release and Upload Files
         if: ${{ needs.changelog.outputs.skipped != 'true' }}
@@ -156,7 +157,7 @@ jobs:
           draft: false
           prerelease: false
           files: |
-            dist/*
+            target/release/pwr-bot
 
       - name: Set Current Date
         id: date
