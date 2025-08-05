@@ -13,10 +13,10 @@ exports.preCommit = (props) => {
   // replace only the version string example:
   // version = "0.0.3-alpha.2"
   // version = "0.0.3-alpha.103+MC-1.19.4"
-  replace(
-    "./pyproject.toml",
-    /(?<=version = ")\d+\.\d+\.\d+((-\w+)+\.\d+)?(-SNAPSHOT)?(?=")/g,
-    props.version,
-  );
+    replace(
+      "./Cargo.toml",
+      /^version = "\d+\.\d+\.\d+((-\w+)+\.\d+)?(-SNAPSHOT)?"$/m,
+      `version = "${props.version}"`,
+    );
   // Regex provided by Github Copilot
 };
