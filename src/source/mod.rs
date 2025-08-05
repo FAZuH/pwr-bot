@@ -1,7 +1,81 @@
-pub mod source;
-pub mod manga_dex_source;
-pub mod ani_list_source;
+pub mod anilist_source;
+pub mod error;
+pub mod mangadex_source;
+pub mod model;
+pub mod sources;
 
-pub use source::UpdateSource;
-pub use manga_dex_source::MangaDexSource;
-pub use ani_list_source::AniListSource;
+use error::SourceError;
+use error::UrlParseError;
+use model::SourceResult;
+
+use async_trait::async_trait;
+
+#[derive(Clone, Debug)]
+pub struct SourceUrl<'a> {
+    /// The name of the source, e.g., "MangaDex", "AniList"
+    pub name: &'a str,
+    /// api.source.tld
+    pub api_hostname: &'a str,
+    /// source.tld
+    pub api_domain: &'a str,
+    /// https://api.source.tld
+    pub api_url: &'a str,
+}
+
+#[derive(Clone)]
+pub struct BaseSource<'a> {
+    pub url: SourceUrl<'a>,
+    pub client: reqwest::Client,
+}
+
+impl<'a> BaseSource<'a> {
+    pub fn new(url: SourceUrl<'a>, client: reqwest::Client) -> Self {
+        BaseSource { url, client }
+    }
+    pub fn get_nth_path_from_url<'b>(
+        &self,
+        url: &'b str,
+        n: usize,
+    ) -> Result<&'b str, UrlParseError> {
+        if !url.contains(&self.url.api_domain) {
+            return Err(UrlParseError::InvalidFormat {
+                url: url.to_string(),
+            });
+        }
+
+        let path_start = url
+            .find(&self.url.api_domain)
+            .ok_or(UrlParseError::UnsupportedSite {
+                site: self.url.api_domain.to_string(),
+            })?
+            + self.url.api_domain.len();
+
+        if path_start >= url.len() {
+            return Err(UrlParseError::InvalidFormat {
+                url: url.to_string(),
+            });
+        }
+
+        let path = &url[path_start..];
+        let segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+
+        segments
+            .get(n)
+            .copied() // converts &&str to &str
+            .filter(|s| !s.is_empty())
+            .ok_or(UrlParseError::MissingId {
+                url: url.to_string(),
+            })
+    }
+}
+
+#[async_trait]
+pub trait Source: Send + Sync {
+    async fn get_latest(&self, id: &str) -> Result<SourceResult, SourceError>;
+    fn get_id_from_url<'a>(&self, url: &'a str) -> Result<&'a str, UrlParseError>;
+    fn get_url_from_id(&self, id: &str) -> String;
+    fn get_base(&self) -> &BaseSource;
+    fn get_url(&self) -> &SourceUrl {
+        &self.get_base().url
+    }
+}
