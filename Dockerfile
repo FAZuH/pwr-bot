@@ -1,5 +1,5 @@
 FROM rust:1.88-slim-bookworm AS build
-LABEL org.opencontainers.image.source = "https://github.com/FAZuH/pwr-bot"
+LABEL org.opencontainers.image.source "https://github.com/FAZuH/pwr-bot"
 
 # Required by openssl-sys
 RUN apt-get update && \
