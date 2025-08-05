@@ -28,12 +28,8 @@ pub struct MangaDexSource<'a> {
     limiter: RateLimiter<NotKeyed, InMemoryState, QuantaClock>,
 }
 
-impl<'a> MangaDexSource<'a> {
+impl MangaDexSource<'_> {
     pub fn new() -> Self {
-        Self::new_with_url("https://api.mangadex.org")
-    }
-
-    pub fn new_with_url(api_url: &'a str) -> Self {
         let mut headers = HeaderMap::new();
         headers.insert(USER_AGENT, HeaderValue::from_static("pwr-bot/0.1"));
 
@@ -46,7 +42,7 @@ impl<'a> MangaDexSource<'a> {
             name: "MangaDex",
             api_hostname: "api.mangadex.org",
             api_domain: "mangadex.org",
-            api_url,
+            api_url: "https://api.mangadex.org",
         };
         // NOTE: See https://api.mangadex.org/docs/2-limitations/
         // Because GET /manga/{id} is not specified on #endpoint-specific-rate-limits,
@@ -71,16 +67,14 @@ impl<'a> MangaDexSource<'a> {
         let body = response.text().await?;
         let response_json: serde_json::Value = serde_json::from_str(&body)?; // Converts to SourceError::JsonParseFailed
 
-        // Check for API errors
         if let Some(errors) = response_json.get("errors") {
             if let Some(error_array) = errors.as_array() {
-                if let Some(first_error) = error_array.first() {
-                    let message = first_error["message"]
-                        .as_str()
-                        .unwrap_or("Unknown API error")
-                        .to_string();
-                    return Err(SourceError::ApiError { message });
-                }
+                let err_msg = error_array
+                    .iter()
+                    .map(|e| self.extract_error_message(e))
+                    .collect::<Vec<String>>()
+                    .join(" | ");
+                return Err(SourceError::ApiError { message: err_msg });
             }
         }
 
@@ -136,10 +130,7 @@ impl Source for MangaDexSource<'_> {
         let request = self
             .base
             .client
-            .get(format!(
-                "{}/manga/{}/feed",
-                self.base.url.api_url, series_id
-            ))
+            .get(format!("{}/manga/{series_id}/feed", self.base.url.api_url))
             .query(&[
                 ("order[createdAt]", "desc"),
                 ("limit", "1"),
@@ -176,13 +167,13 @@ impl Source for MangaDexSource<'_> {
         })?;
 
         if let Some(c) = chapters.first().cloned() {
-            // Extract chapter ID
-            let chapter_id = c["id"]
-                .as_str()
-                .ok_or_else(|| SourceError::MissingField {
-                    field: "id".to_string(),
-                })?
-                .to_string();
+            // // Extract chapter ID
+            // let chapter_id = c["id"]
+            //     .as_str()
+            //     .ok_or_else(|| SourceError::MissingField {
+            //         field: "id".to_string(),
+            //     })?
+            //     .to_string();
 
             // Extract chapter number
             let chapter = c["attributes"]["chapter"]
@@ -213,7 +204,7 @@ impl Source for MangaDexSource<'_> {
                 id: series_id.to_string(),
                 title,
                 latest: chapter,
-                url: self.get_url_from_id(&chapter_id),
+                url: self.get_url_from_id(series_id),
                 published,
             }))
         } else {
@@ -229,7 +220,7 @@ impl Source for MangaDexSource<'_> {
     }
 
     fn get_url_from_id(&self, id: &str) -> String {
-        format!("{}/manga/{}", self.base.url.api_domain, id)
+        format!("https://{}/title/{}", self.base.url.api_domain, id)
     }
 
     fn get_base(&self) -> &BaseSource {

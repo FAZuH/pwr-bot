@@ -27,17 +27,13 @@ pub struct AniListSource<'a> {
     limiter: RateLimiter<NotKeyed, InMemoryState, QuantaClock>,
 }
 
-impl<'a> AniListSource<'a> {
+impl AniListSource<'_> {
     pub fn new() -> Self {
-        Self::new_with_url("https://graphql.anilist.co")
-    }
-
-    pub fn new_with_url(api_url: &'a str) -> Self {
         let url = SourceUrl {
             name: "AniList",
             api_hostname: "graphql.anilist.co",
             api_domain: "anilist.co",
-            api_url,
+            api_url: "https://graphql.anilist.co",
         };
         // TODO: See https://docs.anilist.co/guide/rate-limiting.
         // "The API is currently in a degraded state and is limited to 30 requests per minute."
@@ -95,28 +91,25 @@ impl Source for AniListSource<'_> {
 
         let response = self.send(request).await?;
 
-        let body = response.json::<serde_json::Value>().await?; // Automatically converts to SourceError::JsonParseFailed
+        let response_json = response.json::<serde_json::Value>().await?; // Automatically converts to SourceError::JsonParseFailed
 
-        // Check for GraphQL errors
-        if let Some(errors) = body.get("errors") {
+        if let Some(errors) = response_json.get("errors") {
             if let Some(error_array) = errors.as_array() {
-                if let Some(first_error) = error_array.first() {
-                    let message = first_error["message"]
-                        .as_str()
-                        .unwrap_or("Unknown API error")
-                        .to_string();
-                    return Err(SourceError::ApiError { message });
-                }
+                let err_msg = error_array
+                    .iter()
+                    .map(|e| self.extract_error_message(e))
+                    .collect::<Vec<String>>()
+                    .join(" | ");
+                return Err(SourceError::ApiError { message: err_msg });
             }
         }
 
         // Check if Media exists and is not null
-        let media =
-            body["data"]["Media"]
-                .as_object()
-                .ok_or_else(|| SourceError::SeriesNotFound {
-                    series_id: series_id.to_string(),
-                })?;
+        let media = response_json["data"]["Media"].as_object().ok_or_else(|| {
+            SourceError::SeriesNotFound {
+                series_id: series_id.to_string(),
+            }
+        })?;
 
         // Check for next airing episode
         let next_episode = media.get("nextAiringEpisode");
@@ -160,7 +153,7 @@ impl Source for AniListSource<'_> {
         })?;
 
         // Extract title
-        let title = body["data"]["Media"]["title"]["romaji"]
+        let title = response_json["data"]["Media"]["title"]["romaji"]
             .as_str()
             .unwrap_or("Unknown")
             .to_string();
@@ -181,7 +174,7 @@ impl Source for AniListSource<'_> {
     }
 
     fn get_url_from_id(&self, id: &str) -> String {
-        format!("{}/anime/{}", self.base.url.api_domain, id)
+        format!("https://{}/anime/{}", self.base.url.api_domain, id)
     }
 
     fn get_base(&self) -> &BaseSource {

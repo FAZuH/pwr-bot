@@ -75,12 +75,18 @@ jobs:
       - name: Update rustup
         run: rustup update
 
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: release-build
+
       - name: Build package
         run: cargo build --release
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
+          name: pwr-bot
           path: target/release/pwr-bot
 
   push-image:
@@ -128,6 +134,8 @@ jobs:
             version=${{ needs.changelog.outputs.tag }}
             commit=${{ github.sha }}
             build_date=${{ env.date }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
   release-github:
     name: Release to GitHub
@@ -143,8 +151,8 @@ jobs:
       - name: Download Artifacts
         uses: actions/download-artifact@v4
         with:
-          name: dist
-          path: dist/
+          name: pwr-bot
+          path: target/release/pwr-bot
 
       - name: Create Release and Upload Files
         if: ${{ needs.changelog.outputs.skipped != 'true' }}
@@ -156,7 +164,7 @@ jobs:
           draft: false
           prerelease: false
           files: |
-            dist/*
+            target/release/pwr-bot
 
       - name: Set Current Date
         id: date

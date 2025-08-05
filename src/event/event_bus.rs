@@ -18,7 +18,8 @@ pub struct EventBus {
 
 impl EventBus {
     pub fn new() -> Self {
-        let rt = runtime::Builder::new_current_thread()
+        let rt = runtime::Builder::new_multi_thread()
+            .worker_threads(1)
             .enable_all()
             .build()
             .expect("Error spawning tokio runtime for EventBus");
@@ -65,12 +66,15 @@ impl EventBus {
         let subs = self.subscribers.read().unwrap();
 
         if let Some(subs_list) = subs.get(&type_id) {
+            let mut futures = Vec::new();
             for subs_box in subs_list {
                 if let Some(sub) = subs_box.downcast_ref::<AsyncSubscriber<E>>() {
-                    let event_clone = event.clone();
-                    self.rt.spawn(sub(event_clone));
+                    futures.push(sub(event.clone()));
                 }
             }
+            self.rt.spawn(async move {
+                futures::future::join_all(futures).await;
+            });
         }
     }
 }

@@ -25,6 +25,7 @@ impl DiscordDmSubscriber {
     }
 
     pub async fn series_event_callback(&self, event: SeriesUpdateEvent) -> Result<()> {
+        debug!("Received SeriesUpdateEvent: {:?}", event);
         // 1. Create message
         let message = CreateMessage::new()
             .content(format!(
