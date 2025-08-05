@@ -7,6 +7,9 @@ version = "0.1.0"
 
 edition = "2024"
 
+[lints.clippy]
+new_without_default = "allow"
+
 [dependencies]
 anyhow = "1.0.98"
 async-trait = "0.1.88"
