@@ -1,0 +1,175 @@
+# Credit: Workflow configs inspired from https://github.com/Wynntils/Wynntils
+
+name: Release & Deploy
+
+on:
+  push:
+    branches:
+      - release
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  changelog:
+    name: Generate Changelog
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.changelog.outputs.tag }}
+      skipped: ${{ steps.changelog.outputs.skipped }}
+      clean_changelog: ${{ steps.changelog.outputs.clean_changelog }}
+      changelog: ${{ steps.changelog.outputs.changelog }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set Up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Changelog Tools
+        run: |
+          npm install conventional-changelog-conventionalcommits@7.0.2
+          npm install conventional-recommended-bump@9.0.0
+
+      - name: Set Up version.json
+        run: echo "{"version":$(git describe --tags --abbrev=0)}" > version.json
+
+      - name: Create Changelog
+        id: changelog
+        uses: TriPSs/conventional-changelog-action@v5.2.1
+        with:
+          github-token: ${{ secrets.PRIVATE_TOKEN }}
+          git-user-name: "faz-bot"
+          git-user-email: "fazuhhh@proton.me"
+          pre-commit: ./.github/.pre-commit.js
+          config-file-path: ./.github/.config.js
+          version-file: ./version.json
+          skip-version-file: true
+          skip-git-pull: true
+          skip-on-empty: false
+          pre-release: false
+          release-count: 5
+
+      - name: Upload Version Information
+        uses: actions/upload-artifact@v4
+        with:
+          name: version
+          path: version.json
+
+  build:
+    name: Build
+    needs: changelog
+    if: ${{ needs.changelog.outputs.skipped != 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.changelog.outputs.tag }}
+
+      - name: Update rustup
+        run: rustup update
+
+      - name: Build package
+        run: cargo build --release
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          path: target/release/pwr-bot
+
+  push-image:
+    name: Build and Push Docker Image
+    needs: changelog # Build needs the new version number
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set Up QEMU
+        uses: docker/setup-qemu-action@v1
+        with:
+          platforms: all
+
+      - name: Set Up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log In to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: FAZuH
+          password: ${{ secrets.PRIVATE_TOKEN }}
+
+      - name: Set Up Build Date
+        run: echo "date=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_ENV
+
+      - name: Download Version Information
+        uses: actions/download-artifact@v4 # Download version information from changelog
+        with:
+          name: version
+
+      - name: Build and Push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ghcr.io/fazuh/pwr-bot:latest
+            ghcr.io/fazuh/pwr-bot:${{ needs.changelog.outputs.tag }}
+          labels: |
+            version=${{ needs.changelog.outputs.tag }}
+            commit=${{ github.sha }}
+            build_date=${{ env.date }}
+
+  release-github:
+    name: Release to GitHub
+    needs: [changelog, build]
+    if: ${{ needs.changelog.outputs.skipped != 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Version Information
+        uses: actions/download-artifact@v4
+        with:
+          name: version
+
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Create Release and Upload Files
+        if: ${{ needs.changelog.outputs.skipped != 'true' }}
+        id: release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.changelog.outputs.tag }}
+          body: ${{ needs.changelog.outputs.changelog }}
+          draft: false
+          prerelease: false
+          files: |
+            dist/*
+
+      - name: Set Current Date
+        id: date
+        run: |
+          echo "short=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
+          echo "long=$(date +'%Y-%m-%d %H:%M')" >> $GITHUB_OUTPUT
+
+      - name: Post Release on Discord
+        uses: tsickert/discord-webhook@v6.0.0
+        with:
+          webhook-url: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
+          embed-color: "9498256"
+          embed-title: ${{format('pwr-bot {0}', needs.changelog.outputs.tag)}}
+          embed-description: ${{ needs.changelog.outputs.changelog }}
+          embed-url: ${{ steps.release.outputs.url }}
+          embed-timestamp: ${{ steps.date.outputs.long }}
