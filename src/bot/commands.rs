@@ -78,8 +78,9 @@ pub async fn subscribe(
         // otherwise => get id
         let latest_result = LatestResultModel {
             url: series_item.url, // (1) NOTE: Important for consistent URL
-            latest,
             name: title.clone(),
+            latest,
+            tags: "series".to_string(),
             published,
             ..Default::default()
         };
