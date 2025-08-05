@@ -29,6 +29,7 @@ impl DiscordWebhookSubscriber {
     }
 
     pub async fn series_event_callback(&self, event: SeriesUpdateEvent) -> anyhow::Result<()> {
+        debug!("Received SeriesUpdateEvent: {:?}", event);
         // 1. Create message
         let payload = ExecuteWebhook::new()
             .content(format!(

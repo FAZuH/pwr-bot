@@ -76,7 +76,7 @@ impl SeriesPublisher {
         debug!("SeriesPublisher: Checking for series updates.");
         let latest_updates = db.latest_results_table.select_all_by_tag("series").await?;
         info!(
-            "SeriesPublisher: Found {} series subscriptions.",
+            "SeriesPublisher: Found {} series in latest_updates table.",
             latest_updates.len()
         );
 
@@ -88,31 +88,41 @@ impl SeriesPublisher {
                 .await?
                 .is_empty()
             {
+                debug!(
+                    "SeriesPublisher: No subscribers for series {}. Skipping.",
+                    prev_check.name
+                );
                 continue;
             }
 
             // 3. Fetch latest series latests from sources
             let curr_check = match sources.get_latest_by_url(&prev_check.url).await {
                 Ok(SourceResult::Series(series)) => series,
-                _ => continue,
+                Err(e) => {
+                    error!(
+                        "SeriesPublisher: Error fetching latest for series {}: {}",
+                        prev_check.name, e
+                    );
+                    continue; // Skip this series if there's an error
+                }
             };
             // let curr = source.anilist_source.get_latest(&prev_check.series_url).await?;
             debug!(
                 "SeriesPublisher: Current latest for series {}: latest: {}",
-                prev_check.url, curr_check.latest
+                prev_check.name, curr_check.latest
             );
 
             // 4. Compare chapters
             if curr_check.latest == prev_check.latest {
                 debug!(
                     "SeriesPublisher: No new latest for series {}.",
-                    prev_check.url
+                    prev_check.name
                 );
                 continue;
             }
             info!(
                 "SeriesPublisher: New latest found for series {}: {} -> {}. Updating database.",
-                prev_check.url, prev_check.latest, curr_check.latest
+                prev_check.name, prev_check.latest, curr_check.latest
             );
 
             // Handle update event
@@ -126,7 +136,7 @@ impl SeriesPublisher {
             // 6. Publish events to event bus
             info!(
                 "SeriesPublisher: Publishing update event for series {}.",
-                prev_check.url
+                prev_check.name
             );
             let event = SeriesUpdateEvent {
                 latest_results_id: prev_check.id,
