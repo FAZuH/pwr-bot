@@ -1,22 +1,28 @@
-#[derive(Clone)]
+use std::time::Duration;
+
+#[derive(Clone, Default)]
 pub struct Config {
-    pub mangadex_api_url: String,
-    pub anilist_api_url: String,
-    pub poll_interval: u64,
+    pub poll_interval: Duration,
+    pub db_url: String,
     pub db_path: String,
     pub discord_token: String,
-    pub webhook_url: String
+    pub webhook_url: String,
+    pub admin_id: String,
 }
 
 impl Config {
     pub fn new() -> Self {
         Self {
-            mangadex_api_url: "https://api.mangadex.org".to_string(),
-            anilist_api_url: "https://graphql.anilist.co".to_string(),
-            poll_interval: std::env::var("POLL_INTERVAL").unwrap_or("180".to_string()).parse::<u64>().unwrap_or(180),
-            db_path: std::env::var("DB_PATH").unwrap_or("data.db".to_string()),
-            discord_token: std::env::var("DISCORD_TOKEN").expect("Expected DISCORD_TOKEN in environment"),
-            webhook_url: std::env::var("WEBHOOK_URL").expect("Expected WEBHOOK_URL in environment")
+            poll_interval: std::env::var("POLL_INTERVAL")
+                .unwrap_or("60".to_string())
+                .parse::<u32>()
+                .map_or(Duration::new(60, 0), |v| Duration::new(v.into(), 0)),
+            db_url: std::env::var("DATABASE_URL").unwrap_or("sqlite://data.db".to_string()),
+            db_path: std::env::var("DATABASE_PATH").unwrap_or("data.db".to_string()),
+            discord_token: std::env::var("DISCORD_TOKEN")
+                .expect("Expected DISCORD_TOKEN in environment"),
+            webhook_url: std::env::var("WEBHOOK_URL").expect("Expected WEBHOOK_URL in environment"),
+            admin_id: std::env::var("ADMIN_ID").expect("Expected ADMIN_ID in environment"),
         }
     }
 }
