@@ -1,3 +1,17 @@
+## [0.1.2](https://github.com/FAZuH/pwr-bot/compare/v0.1.1...v0.1.2) (2025-08-06)
+
+
+### New Features
+
+* **publisher:** Auto-remove completed series ([3ac18ba](https://github.com/FAZuH/pwr-bot/commit/3ac18ba27134001090c0020c834fa091e42b2ef2))
+
+
+### Bug Fixes
+
+* **bot:** Occasional "the application did not respond error" [skip ci] ([6e0d90e](https://github.com/FAZuH/pwr-bot/commit/6e0d90e1e159b8d2ab71258672384fdf95036613))
+* **db:** Foreign keys check not enabled [skip ci] ([21c4d15](https://github.com/FAZuH/pwr-bot/commit/21c4d15245f95ece851bc95b949d38546515c140))
+* **source:** MangaDex check en and ja titles first before failing [skip ci] ([db00f99](https://github.com/FAZuH/pwr-bot/commit/db00f99c7ab2f2a024fc57a43f38f01a67986b6f))
+
 ## [0.1.1](https://github.com/FAZuH/pwr-bot/compare/v0.1.0...v0.1.1) (2025-08-05)
 
 
@@ -11,6 +25,7 @@
 
 * Disable new_without_defualt lint warning [skip ci] ([5c25dbe](https://github.com/FAZuH/pwr-bot/commit/5c25dbee01fd575900e25c6ce0900f1955483401))
 * Improve logging message [skip ci] ([ebd3737](https://github.com/FAZuH/pwr-bot/commit/ebd3737867b708e6ee0458c750894174d1369722))
+* **release:** v0.1.1 [skip ci] ([7832099](https://github.com/FAZuH/pwr-bot/commit/783209924668387bd1765b41a1b223d9e2be10cb))
 
 
 ### Build System
