@@ -143,7 +143,7 @@ impl Table<SubscribersModel, u32> for SubscribersTable {
         )
         .bind(&model.subscriber_type)
         .bind(&model.subscriber_id)
-        .bind(&model.latest_results_id)
+        .bind(model.latest_results_id)
         .execute(&self.base.pool)
         .await?;
         // TODO: ID: i64 instead
@@ -157,7 +157,7 @@ impl Table<SubscribersModel, u32> for SubscribersTable {
         sqlx::query("UPDATE subscribers SET subscriber_type = ?, subscriber_id = ?, latest_results_id = ? WHERE id = ?")
             .bind(&model.subscriber_type)
             .bind(&model.subscriber_id)
-            .bind(&model.latest_results_id)
+            .bind(model.latest_results_id)
             .bind(model.id)
             .execute(&self.base.pool)
             .await?;

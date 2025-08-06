@@ -2,6 +2,7 @@ use crate::database::database::Database;
 use crate::database::table::Table;
 use crate::event::event_bus::EventBus;
 use crate::event::series_update_event::SeriesUpdateEvent;
+use crate::source::error::SourceError;
 use crate::source::model::SourceResult;
 use crate::source::sources::Sources;
 use log::{debug, error, info};
@@ -99,10 +100,18 @@ impl SeriesPublisher {
             let curr_check = match sources.get_latest_by_url(&prev_check.url).await {
                 Ok(SourceResult::Series(series)) => series,
                 Err(e) => {
-                    error!(
-                        "SeriesPublisher: Error fetching latest for series {}: {}",
-                        prev_check.name, e
-                    );
+                    if matches!(e, SourceError::FinishedSeries {..} ) {
+                        db.latest_results_table.delete(&prev_check.id).await?;
+                        info!(
+                            "SeriesPublisher: Series {} is finished. Removing from database.",
+                            prev_check.name
+                        );
+                    } else {
+                        error!(
+                            "SeriesPublisher: Error fetching latest for series {}: {}",
+                            prev_check.name, e
+                        );
+                    }
                     continue; // Skip this series if there's an error
                 }
             };
