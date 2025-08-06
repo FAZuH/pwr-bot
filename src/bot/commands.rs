@@ -45,12 +45,8 @@ pub async fn subscribe(
     #[description = "Link(s) of the series. Separate links with commas (,)"] links: String,
     #[description = "Where to send the notifications. Default to DM"] send_into: Option<SendInto>,
 ) -> Result<(), Error> {
-    // if links.contains(",") {
-    //     for link in links.split(",") {
-    //     }
-    // }
-
     // 1. Setup
+    ctx.defer().await?;
     let user_id = ctx.author().id;
     let data = ctx.data();
     let send_into = send_into.unwrap_or(SendInto::DM);
@@ -143,6 +139,7 @@ pub async fn unsubscribe(
     links: String,
     #[description = "Where to send the notifications. Default to DM"] send_into: Option<SendInto>,
 ) -> Result<(), Error> {
+    ctx.defer().await?;
     // 1. Setup
     let user_id = ctx.author().id;
     let data = ctx.data();
@@ -218,6 +215,7 @@ pub async fn unsubscribe(
 /// List all your subscriptions
 #[poise::command(slash_command)]
 pub async fn subscriptions(ctx: Context<'_>) -> Result<(), Error> {
+    ctx.defer().await?;
     let user_id = ctx.author().id.to_string();
     let data = ctx.data();
 
@@ -258,6 +256,7 @@ pub async fn help(
     #[autocomplete = "poise::builtins::autocomplete_command"]
     command: Option<String>,
 ) -> Result<(), Error> {
+    ctx.defer().await?;
     poise::builtins::help(
         ctx,
         command.as_deref(),
@@ -277,6 +276,7 @@ pub async fn register(ctx: Context<'_>) -> Result<(), Error> {
 
 #[poise::command(slash_command, owners_only, hide_in_help)]
 pub async fn dump_db(ctx: Context<'_>) -> Result<(), Error> {
+    ctx.defer().await?;
     let data = ctx.data();
 
     let subscribers = data.db.subscribers_table.select_all().await?;
