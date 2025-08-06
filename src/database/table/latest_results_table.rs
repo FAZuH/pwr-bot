@@ -29,16 +29,28 @@ impl LatestResultsTable {
         .await?;
         Ok(ret)
     }
+
     pub async fn select_all_by_url_contains(
         &self,
-        domain: &str, // e.g., "mangadex.org"
+        pattern: &str, // e.g., "mangadex.org"
     ) -> Result<Vec<LatestResultModel>, DbError> {
         let ret =
             sqlx::query_as::<_, LatestResultModel>("SELECT * FROM latest_results WHERE url LIKE ?")
-                .bind(format!("%{}%", domain))
+                .bind(format!("%{}%", pattern))
                 .fetch_all(&self.base.pool)
                 .await?;
         Ok(ret)
+    }
+
+    pub async fn delete_all_by_url_contains(
+        &self,
+        pattern: &str, // e.g., "mangadex.org"
+    ) -> Result<(), DbError> {
+        sqlx::query("DELETE FROM latest_results WHERE url LIKE ?")
+            .bind(format!("%{}%", pattern))
+            .execute(&self.base.pool)
+            .await?;
+        Ok(())
     }
 
     pub async fn select_by_url(&self, url: &str) -> Result<LatestResultModel, DbError> {
