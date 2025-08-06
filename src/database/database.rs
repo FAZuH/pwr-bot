@@ -1,4 +1,7 @@
+use std::str::FromStr;
+
 use sqlx::SqlitePool;
+use sqlx::sqlite::SqliteConnectOptions;
 
 use super::table::Table;
 use super::table::latest_results_table::LatestResultsTable;
@@ -16,7 +19,8 @@ impl Database {
             std::fs::write(db_path, "")?;
         }
 
-        let pool = SqlitePool::connect(db_url).await?;
+        let opts = SqliteConnectOptions::from_str(db_url)?.foreign_keys(true);
+        let pool = SqlitePool::connect_with(opts).await?;
 
         let latest_updates_table = LatestResultsTable::new(pool.clone());
         let subscribers_table = SubscribersTable::new(pool.clone());
