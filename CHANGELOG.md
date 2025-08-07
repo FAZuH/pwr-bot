@@ -1,3 +1,10 @@
+## [0.1.3](https://github.com/FAZuH/pwr-bot/compare/v0.1.2...v0.1.3) (2025-08-07)
+
+
+### Bug Fixes
+
+* **source:** Get title error ([e63a1d7](https://github.com/FAZuH/pwr-bot/commit/e63a1d7bf63aa07242c03f5c8a53b44c12462e98))
+
 ## [0.1.2](https://github.com/FAZuH/pwr-bot/compare/v0.1.1...v0.1.2) (2025-08-06)
 
 
@@ -11,6 +18,11 @@
 * **bot:** Occasional "the application did not respond error" [skip ci] ([6e0d90e](https://github.com/FAZuH/pwr-bot/commit/6e0d90e1e159b8d2ab71258672384fdf95036613))
 * **db:** Foreign keys check not enabled [skip ci] ([21c4d15](https://github.com/FAZuH/pwr-bot/commit/21c4d15245f95ece851bc95b949d38546515c140))
 * **source:** MangaDex check en and ja titles first before failing [skip ci] ([db00f99](https://github.com/FAZuH/pwr-bot/commit/db00f99c7ab2f2a024fc57a43f38f01a67986b6f))
+
+
+### Miscellaneous Chores
+
+* **release:** v0.1.2 [skip ci] ([4944612](https://github.com/FAZuH/pwr-bot/commit/4944612e2045bcddd60241e50b692601a42ea0dd))
 
 ## [0.1.1](https://github.com/FAZuH/pwr-bot/compare/v0.1.0...v0.1.1) (2025-08-05)
 
