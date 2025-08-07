@@ -89,7 +89,7 @@ impl MangaDexSource<'_> {
         // Extract title
         let title = data["attributes"]["title"]["en"]
             .as_str()
-            .and(data["attributes"]["title"]["ja"].as_str())
+            .or_else(|| {data["attributes"]["title"]["ja"].as_str()})
             .ok_or_else(|| SourceError::MissingField {
                 field: "title.en or title.ja".to_string(),
             })?
