@@ -100,7 +100,7 @@ impl SeriesPublisher {
             let curr_check = match sources.get_latest_by_url(&prev_check.url).await {
                 Ok(SourceResult::Series(series)) => series,
                 Err(e) => {
-                    if matches!(e, SourceError::FinishedSeries {..} ) {
+                    if matches!(e, SourceError::FinishedSeries { .. }) {
                         db.latest_results_table.delete(&prev_check.id).await?;
                         info!(
                             "SeriesPublisher: Series {} is finished. Removing from database.",
