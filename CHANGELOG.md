@@ -3,7 +3,13 @@
 
 ### Bug Fixes
 
+* Error when db path is in a subdir ([d75ea96](https://github.com/FAZuH/pwr-bot/commit/d75ea9603b7006da3c3f39e70b73ea3fb72cc880))
 * Error when db path is in a subdir ([765d5f3](https://github.com/FAZuH/pwr-bot/commit/765d5f3ec43d08c078b5d62117032caef4960342))
+
+
+### Miscellaneous Chores
+
+* **release:** v0.1.4 [skip ci] ([6ecb7df](https://github.com/FAZuH/pwr-bot/commit/6ecb7df59ed634360da6c5b39338262df87291ff))
 
 ## [0.1.3](https://github.com/FAZuH/pwr-bot/compare/v0.1.2...v0.1.3) (2025-08-07)
 
