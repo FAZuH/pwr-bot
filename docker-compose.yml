@@ -6,11 +6,11 @@ services:
       context: .
       dockerfile: Dockerfile
     volumes:
-      - app:/app
+      - app-data:/app/data
     environment:
       - POLL_INTERVAL=${POLL_INTERVAL:-180}
-      - DATABASE_PATH=${DATABASE_PATH:-data.db}
-      - DATABASE_URL=${DATABASE_URL:-sqlite://data.db}
+      - DATABASE_PATH=${DATABASE_PATH:-data/data.db}
+      - DATABASE_URL=${DATABASE_URL:-sqlite://data/data.db}
       - DISCORD_TOKEN=${DISCORD_TOKEN:?error}
       - WEBHOOK_URL=${WEBHOOK_URL:?error}
       - RUST_LOG=${RUST_LOG:-pwr_bot=info}
@@ -18,4 +18,4 @@ services:
     restart: unless-stopped
       
 volumes:
-  app:
+  app-data:
