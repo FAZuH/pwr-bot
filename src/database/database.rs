@@ -15,8 +15,12 @@ pub struct Database {
 
 impl Database {
     pub async fn new(db_url: &str, db_path: &str) -> anyhow::Result<Self> {
-        if std::fs::metadata(db_path).is_err() {
-            std::fs::write(db_path, "")?;
+        let path = std::path::Path::new(db_path);
+        if !path.exists() {
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(path, "")?;
         }
 
         let opts = SqliteConnectOptions::from_str(db_url)?.foreign_keys(true);
