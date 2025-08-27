@@ -42,7 +42,7 @@ impl DiscordDmSubscriber {
             .await?;
 
         for sub in subscribers {
-            let user_id = if let Ok(id) = sub.subscriber_id.parse::<u64>() {
+            let user_id = if let Ok(id) = sub.target.parse::<u64>() {
                 UserId::new(id)
             } else {
                 continue; // Skip invalid IDs, don't return early
