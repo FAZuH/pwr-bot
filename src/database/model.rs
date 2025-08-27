@@ -28,7 +28,7 @@ impl Default for LatestResultModel {
 #[derive(FromRow, Debug, Serialize, Default)]
 pub struct SubscribersModel {
     pub id: u32,
-    pub subscriber_type: String, // Webhook/DM
-    pub subscriber_id: String,   // Webhook URL/User ID
+    pub r#type: String, // Webhook/DM
+    pub target: String,   // Webhook URL/User ID
     pub latest_results_id: u32,  // Foreign key
 }

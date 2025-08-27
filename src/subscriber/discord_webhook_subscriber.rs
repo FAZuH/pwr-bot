@@ -49,14 +49,14 @@ impl DiscordWebhookSubscriber {
             // 2. Notify event to all serenity::User DMs
             debug!(
                 "Attempting to execute to webhook {} for series update: {}",
-                sub.subscriber_id, event.title
+                sub.target, event.title
             );
-            let webhook = match Webhook::from_url(self.bot.http.clone(), &self.webhook_url).await {
+            let webhook = match Webhook::from_url(self.bot.http.clone(), &sub.target).await {
                 Ok(webhook) => webhook,
                 Err(e) => {
                     error!(
                         "Failed to create webhook from URL {}: {}",
-                        sub.subscriber_id, e
+                        sub.target, e
                     );
                     continue; // Skip this subscriber if webhook creation fails
                 }

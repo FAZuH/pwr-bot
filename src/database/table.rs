@@ -191,7 +191,7 @@ impl SubscribersTable {
 
     pub async fn select_all_by_type(&self, r#type: &str) -> Result<Vec<SubscribersModel>, DbError> {
         let ret = sqlx::query_as::<_, SubscribersModel>(
-            "SELECT * FROM subscribers WHERE subscriber_type = ?",
+            "SELECT * FROM subscribers WHERE type = ?",
         )
         .bind(r#type)
         .fetch_all(&self.base.pool)
@@ -214,13 +214,13 @@ impl SubscribersTable {
 
     pub async fn select_all_by_type_and_latest_results(
         &self,
-        subscriber_type: &str,
+        r#type: &str,
         latest_results_id: u32,
     ) -> Result<Vec<SubscribersModel>, DbError> {
         let ret = sqlx::query_as::<_, SubscribersModel>(
-            "SELECT * FROM subscribers WHERE subscriber_type = ? AND latest_results_id = ?",
+            "SELECT * FROM subscribers WHERE type = ? AND latest_results_id = ?",
         )
-        .bind(subscriber_type)
+        .bind(r#type)
         .bind(latest_results_id)
         .fetch_all(&self.base.pool)
         .await?;
@@ -231,27 +231,27 @@ impl SubscribersTable {
         let res = sqlx::query(
             r#"
             DELETE FROM subscribers WHERE 
-                subscriber_type = ? AND 
-                subscriber_id = ? AND
+                type = ? AND 
+                target = ? AND
                 latest_results_id = ?
             "#,
         )
-        .bind(model.subscriber_type)
-        .bind(model.subscriber_id)
+        .bind(model.r#type)
+        .bind(model.target)
         .bind(model.latest_results_id)
         .execute(&self.base.pool)
         .await?;
         Ok(res.rows_affected() > 0)
     }
 
-    pub async fn select_all_by_subscriber_id(
+    pub async fn select_all_by_target(
         &self,
-        subscriber_id: &str,
+        target: &str,
     ) -> Result<Vec<SubscribersModel>, DbError> {
         let ret = sqlx::query_as::<_, SubscribersModel>(
-            "SELECT * FROM subscribers WHERE subscriber_id = ?",
+            "SELECT * FROM subscribers WHERE target = ?",
         )
-        .bind(subscriber_id)
+        .bind(target)
         .fetch_all(&self.base.pool)
         .await?;
         Ok(ret)
@@ -264,10 +264,10 @@ impl Table<SubscribersModel, u32> for SubscribersTable {
         sqlx::query(
             r#"CREATE TABLE IF NOT EXISTS subscribers (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                subscriber_type TEXT NOT NULL,
-                subscriber_id TEXT NOT NULL,
+                type TEXT NOT NULL,
+                target TEXT NOT NULL,
                 latest_results_id INTEGER,
-                UNIQUE(subscriber_type, subscriber_id, latest_results_id),
+                UNIQUE(type, target, latest_results_id),
                 FOREIGN KEY (latest_results_id) REFERENCES latest_results(id)
                     ON DELETE CASCADE
                     ON UPDATE CASCADE
@@ -310,11 +310,11 @@ impl Table<SubscribersModel, u32> for SubscribersTable {
     async fn insert(&self, model: &SubscribersModel) -> Result<u32, DbError> {
         let res = sqlx::query(
             r#"INSERT INTO subscribers
-                    (subscriber_type, subscriber_id, latest_results_id)
+                    (type, target, latest_results_id)
                 VALUES (?, ?, ?)"#,
         )
-        .bind(&model.subscriber_type)
-        .bind(&model.subscriber_id)
+        .bind(&model.r#type)
+        .bind(&model.target)
         .bind(model.latest_results_id)
         .execute(&self.base.pool)
         .await?;
@@ -326,9 +326,9 @@ impl Table<SubscribersModel, u32> for SubscribersTable {
     }
 
     async fn update(&self, model: &SubscribersModel) -> Result<(), DbError> {
-        sqlx::query("UPDATE subscribers SET subscriber_type = ?, subscriber_id = ?, latest_results_id = ? WHERE id = ?")
-            .bind(&model.subscriber_type)
-            .bind(&model.subscriber_id)
+        sqlx::query("UPDATE subscribers SET type = ?, target = ?, latest_results_id = ? WHERE id = ?")
+            .bind(&model.r#type)
+            .bind(&model.target)
             .bind(model.latest_results_id)
             .bind(model.id)
             .execute(&self.base.pool)

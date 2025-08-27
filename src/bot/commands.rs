@@ -100,14 +100,14 @@ pub async fn subscribe(
 
         // 4. Insert subscriber into db
         let subscriber = SubscribersModel {
-            subscriber_id: {
+            target: {
                 if send_into.as_str() == "webhook" {
                     data.config.webhook_url.clone()
                 } else {
                     user_id.to_string()
                 }
             },
-            subscriber_type: send_into.as_str().to_string(),
+            r#type: send_into.as_str().to_string(),
             latest_results_id,
             ..Default::default()
         };
@@ -179,10 +179,10 @@ pub async fn unsubscribe(
             }
         };
 
-        // 4. Delete subscriber based on latest_result_id, subscriber_id, and subscriber_type
+        // 4. Delete subscriber based on latest_result_id, target, and type
         let subscriber = SubscribersModel {
-            subscriber_type: send_into.as_str().to_string(),
-            subscriber_id: {
+            r#type: send_into.as_str().to_string(),
+            target: {
                 if send_into.as_str() == "webhook" {
                     data.config.webhook_url.clone()
                 } else {
@@ -222,7 +222,7 @@ pub async fn subscriptions(ctx: Context<'_>) -> Result<(), Error> {
     let subscriptions = data
         .db
         .subscribers_table
-        .select_all_by_subscriber_id(&user_id)
+        .select_all_by_target(&user_id)
         .await?;
 
     if subscriptions.is_empty() {
@@ -315,7 +315,7 @@ async fn autocomplete_subscriptions(ctx: Context<'_>, partial: &str) -> Vec<Stri
         .data()
         .db
         .subscribers_table
-        .select_all_by_subscriber_id(&user_id)
+        .select_all_by_target(&user_id)
         .await
     {
         Ok(subs) => subs,
