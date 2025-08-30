@@ -15,12 +15,17 @@ use crate::event::series_update_event::SeriesUpdateEvent;
 pub struct DiscordWebhookSubscriber {
     bot: Arc<Bot>,
     db: Arc<Database>,
+    webhook_url: String,
 }
 
 impl DiscordWebhookSubscriber {
-    pub fn new(bot: Arc<Bot>, db: Arc<Database>) -> Self {
+    pub fn new(bot: Arc<Bot>, db: Arc<Database>, webhook_url: String) -> Self {
         debug!("Initializing DiscordWebhookSubscriber.");
-        Self { bot, db }
+        Self {
+            bot,
+            db,
+            webhook_url,
+        }
     }
 
     pub async fn series_event_callback(&self, event: SeriesUpdateEvent) -> anyhow::Result<()> {
@@ -46,7 +51,7 @@ impl DiscordWebhookSubscriber {
                 "Attempting to execute to webhook {} for series update: {}",
                 sub.subscriber_id, event.title
             );
-            let webhook = match Webhook::from_url(self.bot.http.clone(), &sub.subscriber_id).await {
+            let webhook = match Webhook::from_url(self.bot.http.clone(), &self.webhook_url).await {
                 Ok(webhook) => webhook,
                 Err(e) => {
                     error!(
