@@ -1,5 +1,6 @@
 use crate::database::model::LatestResultModel;
 use crate::database::model::SubscribersModel;
+use crate::database::model::NotifyTargetsModel;
 use async_trait::async_trait;
 use sqlx::Error as DbError;
 use sqlx::SqlitePool;
@@ -15,15 +16,20 @@ impl BaseTable {
 }
 
 #[async_trait]
-pub trait Table<T, ID> {
+pub trait TableBase {
     async fn create_table(&self) -> Result<(), DbError>;
     async fn drop_table(&self) -> Result<(), DbError>;
-    async fn select_all(&self) -> Result<Vec<T>, DbError>;
     async fn delete_all(&self) -> Result<(), DbError>;
+}
+
+#[async_trait]
+pub trait Table<T, ID>: TableBase {
+    async fn select_all(&self) -> Result<Vec<T>, DbError>;
     async fn insert(&self, model: &T) -> Result<ID, DbError>;
     async fn select(&self, id: &ID) -> Result<T, DbError>;
     async fn update(&self, model: &T) -> Result<(), DbError>;
     async fn delete(&self, id: &ID) -> Result<(), DbError>;
+    async fn replace(&self, model: &T) -> Result<ID, DbError>;
 }
 
 pub struct LatestResultsTable {
@@ -31,6 +37,10 @@ pub struct LatestResultsTable {
 }
 
 pub struct SubscribersTable {
+    base: BaseTable,
+}
+
+pub struct NotifyTargetsTable {
     base: BaseTable,
 }
 
@@ -88,7 +98,7 @@ impl LatestResultsTable {
 }
 
 #[async_trait]
-impl Table<LatestResultModel, u32> for LatestResultsTable {
+impl TableBase for LatestResultsTable {
     async fn create_table(&self) -> Result<(), DbError> {
         sqlx::query(
             r#"CREATE TABLE IF NOT EXISTS latest_results (
@@ -113,18 +123,21 @@ impl Table<LatestResultModel, u32> for LatestResultsTable {
         Ok(())
     }
 
-    async fn select_all(&self) -> Result<Vec<LatestResultModel>, DbError> {
-        let ret = sqlx::query_as::<_, LatestResultModel>("SELECT * FROM latest_results")
-            .fetch_all(&self.base.pool)
-            .await?;
-        Ok(ret)
-    }
-
     async fn delete_all(&self) -> Result<(), DbError> {
         sqlx::query("DELETE FROM latest_results")
             .execute(&self.base.pool)
             .await?;
         Ok(())
+    }
+}
+
+#[async_trait]
+impl Table<LatestResultModel, u32> for LatestResultsTable {
+    async fn select_all(&self) -> Result<Vec<LatestResultModel>, DbError> {
+        let ret = sqlx::query_as::<_, LatestResultModel>("SELECT * FROM latest_results")
+            .fetch_all(&self.base.pool)
+            .await?;
+        Ok(ret)
     }
 
     async fn select(&self, id: &u32) -> Result<LatestResultModel, DbError> {
@@ -140,6 +153,26 @@ impl Table<LatestResultModel, u32> for LatestResultsTable {
         let res = sqlx::query(
             r#"
             INSERT INTO latest_results
+                (name, latest, tags, published, url) 
+            VALUES (?, ?, ?, ?, ?)"#,
+        )
+        .bind(&model.name)
+        .bind(&model.latest)
+        .bind(&model.tags)
+        .bind(model.published)
+        .bind(&model.url)
+        .execute(&self.base.pool)
+        .await?;
+        Ok(res
+            .last_insert_rowid()
+            .try_into()
+            .expect("Failed to convert last_insert_rowid to u32"))
+    }
+
+    async fn replace(&self, model: &LatestResultModel) -> Result<u32, DbError> {
+        let res = sqlx::query(
+            r#"
+            REPLACE INTO latest_results
                 (name, latest, tags, published, url) 
             VALUES (?, ?, ?, ?, ?)"#,
         )
@@ -231,27 +264,25 @@ impl SubscribersTable {
         let res = sqlx::query(
             r#"
             DELETE FROM subscribers WHERE 
-                type = ? AND 
-                target = ? AND
+                notify_targets_id = ? AND
                 latest_results_id = ?
             "#,
         )
-        .bind(model.r#type)
-        .bind(model.target)
+        .bind(model.notify_targets_id)
         .bind(model.latest_results_id)
         .execute(&self.base.pool)
         .await?;
         Ok(res.rows_affected() > 0)
     }
 
-    pub async fn select_all_by_target(
+    pub async fn select_all_by_notify_targets_id(
         &self,
-        target: &str,
+        notify_targets_id: &str,
     ) -> Result<Vec<SubscribersModel>, DbError> {
         let ret = sqlx::query_as::<_, SubscribersModel>(
-            "SELECT * FROM subscribers WHERE target = ?",
+            "SELECT * FROM subscribers WHERE notify_targets_id = ?",
         )
-        .bind(target)
+        .bind(notify_targets_id)
         .fetch_all(&self.base.pool)
         .await?;
         Ok(ret)
@@ -259,15 +290,17 @@ impl SubscribersTable {
 }
 
 #[async_trait]
-impl Table<SubscribersModel, u32> for SubscribersTable {
+impl TableBase for SubscribersTable {
     async fn create_table(&self) -> Result<(), DbError> {
         sqlx::query(
             r#"CREATE TABLE IF NOT EXISTS subscribers (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                type TEXT NOT NULL,
-                target TEXT NOT NULL,
-                latest_results_id INTEGER,
-                UNIQUE(type, target, latest_results_id),
+                notify_targets_id INTEGER NOT NULL,
+                latest_results_id INTEGER NOT NULL,
+                UNIQUE(notify_targets_id, latest_results_id),
+                FOREIGN KEY (notify_targets_id) REFERENCES notify_targets(id)
+                    ON DELETE CASCADE
+                    ON UPDATE CASCADE
                 FOREIGN KEY (latest_results_id) REFERENCES latest_results(id)
                     ON DELETE CASCADE
                     ON UPDATE CASCADE
@@ -285,18 +318,21 @@ impl Table<SubscribersModel, u32> for SubscribersTable {
         Ok(())
     }
 
-    async fn select_all(&self) -> Result<Vec<SubscribersModel>, DbError> {
-        let ret = sqlx::query_as::<_, SubscribersModel>("SELECT * FROM subscribers")
-            .fetch_all(&self.base.pool)
-            .await?;
-        Ok(ret)
-    }
-
     async fn delete_all(&self) -> Result<(), DbError> {
         sqlx::query("DELETE FROM subscribers")
             .execute(&self.base.pool)
             .await?;
         Ok(())
+    }
+}
+
+#[async_trait]
+impl Table<SubscribersModel, u32> for SubscribersTable {
+    async fn select_all(&self) -> Result<Vec<SubscribersModel>, DbError> {
+        let ret = sqlx::query_as::<_, SubscribersModel>("SELECT * FROM subscribers")
+            .fetch_all(&self.base.pool)
+            .await?;
+        Ok(ret)
     }
 
     async fn select(&self, id: &u32) -> Result<SubscribersModel, DbError> {
@@ -310,11 +346,27 @@ impl Table<SubscribersModel, u32> for SubscribersTable {
     async fn insert(&self, model: &SubscribersModel) -> Result<u32, DbError> {
         let res = sqlx::query(
             r#"INSERT INTO subscribers
-                    (type, target, latest_results_id)
+                    (notify_targets_id, latest_results_id)
                 VALUES (?, ?, ?)"#,
         )
-        .bind(&model.r#type)
-        .bind(&model.target)
+        .bind(model.notify_targets_id)
+        .bind(model.latest_results_id)
+        .execute(&self.base.pool)
+        .await?;
+        // TODO: ID: i64 instead
+        Ok(res
+            .last_insert_rowid()
+            .try_into()
+            .expect("Failed to convert last_insert_rowid to u32"))
+    }
+
+    async fn replace(&self, model: &SubscribersModel) -> Result<u32, DbError> {
+        let res = sqlx::query(
+            r#"REPLACE INTO subscribers
+                    (type, notify_targets_id, latest_results_id)
+                VALUES (?, ?, ?)"#,
+        )
+        .bind(model.notify_targets_id)
         .bind(model.latest_results_id)
         .execute(&self.base.pool)
         .await?;
@@ -326,9 +378,8 @@ impl Table<SubscribersModel, u32> for SubscribersTable {
     }
 
     async fn update(&self, model: &SubscribersModel) -> Result<(), DbError> {
-        sqlx::query("UPDATE subscribers SET type = ?, target = ?, latest_results_id = ? WHERE id = ?")
-            .bind(&model.r#type)
-            .bind(&model.target)
+        sqlx::query("UPDATE subscribers SET notify_targets_id = ?, latest_results_id = ? WHERE id = ?")
+            .bind(model.notify_targets_id)
             .bind(model.latest_results_id)
             .bind(model.id)
             .execute(&self.base.pool)
@@ -338,6 +389,129 @@ impl Table<SubscribersModel, u32> for SubscribersTable {
 
     async fn delete(&self, id: &u32) -> Result<(), DbError> {
         sqlx::query("DELETE FROM subscribers WHERE id = ?")
+            .bind(id)
+            .execute(&self.base.pool)
+            .await?;
+        Ok(())
+    }
+}
+
+
+impl NotifyTargetsTable {
+    pub fn new(pool: SqlitePool) -> Self {
+        Self {
+            base: BaseTable::new(pool),
+        }
+    }
+
+    pub async fn select_all_by_enabled_type(&self, r#type: &str) -> Result<Vec<NotifyTargetsModel>, DbError> {
+        let ret = sqlx::query_as::<_, NotifyTargetsModel>(
+            "SELECT * FROM notify_targets WHERE enabled = TRUE AND type = ?",
+        )
+        .bind(r#type)
+        .fetch_all(&self.base.pool)
+        .await?;
+        Ok(ret)
+    }
+
+    pub async fn select_all_by_enabled_target(
+        &self,
+        target: &str,
+    ) -> Result<Vec<NotifyTargetsModel>, DbError> {
+        let ret = sqlx::query_as::<_, NotifyTargetsModel>(
+            "SELECT * FROM notify_targest WHERE enabled = TRUE AND target = ?",
+        )
+        .bind(target)
+        .fetch_all(&self.base.pool)
+        .await?;
+        Ok(ret)
+    }
+}
+
+#[async_trait]
+impl TableBase for NotifyTargetsTable {
+    async fn create_table(&self) -> Result<(), DbError> {
+        sqlx::query(
+            r#"CREATE TABLE IF NOT EXISTS notify_targets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                type TEXT NOT NULL,
+                enabled BOOLEAN NOT NULL,
+                UNIQUE(type, target),
+            )"#,
+        )
+        .execute(&self.base.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn drop_table(&self) -> Result<(), DbError> {
+        sqlx::query("DROP TABLE IF EXISTS notify_targets")
+            .execute(&self.base.pool)
+            .await?;
+        Ok(())
+    }
+
+    async fn delete_all(&self) -> Result<(), DbError> {
+        sqlx::query("DELETE FROM notify_targets")
+            .execute(&self.base.pool)
+            .await?;
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl Table<NotifyTargetsModel, u32> for NotifyTargetsTable {
+    async fn select_all(&self) -> Result<Vec<NotifyTargetsModel>, DbError> {
+        let ret = sqlx::query_as::<_, NotifyTargetsModel>("SELECT * FROM notify_targets")
+            .fetch_all(&self.base.pool)
+            .await?;
+        Ok(ret)
+    }
+
+    async fn select(&self, id: &u32) -> Result<NotifyTargetsModel, DbError> {
+        let model = sqlx::query_as::<_, NotifyTargetsModel>("SELECT * FROM notify_targets WHERE id = ?")
+            .bind(id)
+            .fetch_one(&self.base.pool)
+            .await?;
+        Ok(model)
+    }
+
+    async fn insert(&self, model: &NotifyTargetsModel) -> Result<u32, DbError> {
+        let res = sqlx::query("INSERT INTO notify_targets (type, target) VALUES (?, ?)")
+            .bind(&model.r#type)
+            .bind(&model.target)
+            .execute(&self.base.pool)
+            .await?;
+        Ok(res
+            .last_insert_rowid()
+            .try_into()
+            .expect("Failed to convert last_insert_rowid to u32"))
+    }
+
+    async fn replace(&self, model: &NotifyTargetsModel) -> Result<u32, DbError> {
+        let res = sqlx::query("REPLACE INTO notify_targets (type, target) VALUES (?, ?)")
+            .bind(&model.r#type)
+            .bind(&model.target)
+            .execute(&self.base.pool)
+            .await?;
+        Ok(res
+            .last_insert_rowid()
+            .try_into()
+            .expect("Failed to convert last_insert_rowid to u32"))
+    }
+
+    async fn update(&self, model: &NotifyTargetsModel) -> Result<(), DbError> {
+        sqlx::query("UPDATE notify_targets SET type = ?, target = ?, WHERE id = ?")
+            .bind(&model.r#type)
+            .bind(&model.target)
+            .bind(model.id)
+            .execute(&self.base.pool)
+            .await?;
+        Ok(())
+    }
+
+    async fn delete(&self, id: &u32) -> Result<(), DbError> {
+        sqlx::query("DELETE FROM notify_targets WHERE id = ?")
             .bind(id)
             .execute(&self.base.pool)
             .await?;

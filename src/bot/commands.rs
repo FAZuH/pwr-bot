@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::net::ToSocketAddrs;
 
 use anyhow::Result;
 use log::error;
@@ -8,6 +9,7 @@ use sqlx::error::ErrorKind;
 
 use super::bot::Data;
 use crate::database::model::LatestResultModel;
+use crate::database::model::NotifyTargetsModel;
 use crate::database::model::SubscribersModel;
 use crate::database::table::Table;
 use crate::source::model::SourceResult;
@@ -268,6 +270,34 @@ pub async fn help(
     Ok(())
 }
 
+
+#[poise::command(slash_command, subcommands("set_webhook"))]
+pub async fn server(_ctx: Context<'_>) -> Result<(), Error> {
+    Ok(())
+}
+
+
+#[poise::command(slash_command)]
+pub async fn set_webhook(ctx: Context<'_>) -> Result<(), Error> {
+    ctx.defer().await?;
+    let guild_id = if let Some(guild_id) = ctx.guild_id() {
+        guild_id
+    } else {
+        ctx.reply("❌ You must be in a server to run this command").await?;
+        return Ok(())
+    };
+
+    let model = NotifyTargetsModel {
+        r#type: "webhook".to_string(),
+        target: guild_id,
+        ..Default::default()
+    };
+    ctx.data().db.notify_targets_table.replace(model).await?;
+
+    Ok(())
+}
+
+
 #[poise::command(prefix_command, owners_only, hide_in_help)]
 pub async fn register(ctx: Context<'_>) -> Result<(), Error> {
     poise::builtins::register_application_commands_buttons(ctx).await?;
@@ -301,6 +331,7 @@ pub async fn dump_db(ctx: Context<'_>) -> Result<(), Error> {
     }
     Ok(())
 }
+
 
 async fn autocomplete_subscriptions(ctx: Context<'_>, partial: &str) -> Vec<String> {
     // Early exit if partial is empty

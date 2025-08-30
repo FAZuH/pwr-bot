@@ -2,8 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 use sqlx::FromRow;
 
-#[derive(FromRow, Debug, Serialize)]
-pub struct LatestResultModel {
+#[derive(FromRow, Serialize)] pub struct LatestResultModel {
     pub id: u32,
     pub name: String,   // eg Frieren
     pub latest: String, // eg S2E1
@@ -25,10 +24,17 @@ impl Default for LatestResultModel {
     }
 }
 
-#[derive(FromRow, Debug, Serialize, Default)]
+#[derive(FromRow, Serialize, Default)]
 pub struct SubscribersModel {
     pub id: u32,
-    pub r#type: String, // Webhook/DM
-    pub target: String,   // Webhook URL/User ID
-    pub latest_results_id: u32,  // Foreign key
+    pub r#type: String,         // Guild/DM
+    pub target: String,         // Guild ID/User ID
+    pub latest_results_id: u32, // Foreign key
+}
+
+// We need an additional field to store webhook URL for each guild
+#[derive(FromRow, Serialize, Default)]
+pub struct GuildNotifyTargets {
+    pub guild_id: i64,          // Guild ID
+    pub webhook_url: String,    // Webhook URL/User ID
 }
