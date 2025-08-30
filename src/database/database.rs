@@ -3,9 +3,9 @@ use std::str::FromStr;
 use sqlx::SqlitePool;
 use sqlx::sqlite::SqliteConnectOptions;
 
+use super::table::LatestResultsTable;
+use super::table::SubscribersTable;
 use super::table::Table;
-use super::table::latest_results_table::LatestResultsTable;
-use super::table::subscribers_table::SubscribersTable;
 
 pub struct Database {
     pub pool: SqlitePool,

@@ -42,7 +42,6 @@ async fn main() -> anyhow::Result<()> {
     // Setup subscribers
     let dm_subscriber = DiscordDmSubscriber::new(bot.clone(), db.clone());
     event_bus.register_subcriber::<SeriesUpdateEvent, _>(dm_subscriber.into());
-
     let webhook_subscriber =
         DiscordWebhookSubscriber::new(bot.clone(), db.clone(), config.webhook_url.clone());
     event_bus.register_subcriber::<SeriesUpdateEvent, _>(webhook_subscriber.into());

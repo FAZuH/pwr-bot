@@ -7,8 +7,8 @@ use serenity::all::CreateAttachment;
 use sqlx::error::ErrorKind;
 
 use super::bot::Data;
-use crate::database::model::latest_results_model::LatestResultModel;
-use crate::database::model::subscribers_model::SubscribersModel;
+use crate::database::model::LatestResultModel;
+use crate::database::model::SubscribersModel;
 use crate::database::table::Table;
 use crate::source::model::SourceResult;
 
