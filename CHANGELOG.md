@@ -1,3 +1,15 @@
+## [0.1.5](https://github.com/FAZuH/pwr-bot/compare/v0.1.4...v0.1.5) (2025-08-30)
+
+
+### Bug Fixes
+
+* **subscriber:** Use webhook url from .env instead of db ([d1e7cd0](https://github.com/FAZuH/pwr-bot/commit/d1e7cd07c2f51c8a0fb6614e368be37cc3892027))
+
+
+### Code Refactoring
+
+* **db:** Combine model and table modules into each module [skip ci] ([616f2be](https://github.com/FAZuH/pwr-bot/commit/616f2be861281de5c468c65fc0eb2469dbef7c01))
+
 ## [0.1.4](https://github.com/FAZuH/pwr-bot/compare/v0.1.3...v0.1.4) (2025-08-26)
 
 
@@ -9,6 +21,7 @@
 
 ### Miscellaneous Chores
 
+* **release:** v0.1.4 [skip ci] ([93d2ddf](https://github.com/FAZuH/pwr-bot/commit/93d2ddfeb36b1a6aad0343d555a1bd3146400321))
 * **release:** v0.1.4 [skip ci] ([6ecb7df](https://github.com/FAZuH/pwr-bot/commit/6ecb7df59ed634360da6c5b39338262df87291ff))
 
 ## [0.1.3](https://github.com/FAZuH/pwr-bot/compare/v0.1.2...v0.1.3) (2025-08-07)
@@ -61,16 +74,4 @@
 ### Build System
 
 * Fix incorrect image source label [skip ci] ([d6d8e45](https://github.com/FAZuH/pwr-bot/commit/d6d8e456ef40bb60a86d5e5daa221ad313496758))
-
-## [0.1.0](https://github.com/FAZuH/pwr-bot/compare/a14f52450e29cb38caa6fe61996dcbbed4a721d4...v0.1.0) (2025-08-05)
-
-
-### New Features
-
-* Initial release ([a14f524](https://github.com/FAZuH/pwr-bot/commit/a14f52450e29cb38caa6fe61996dcbbed4a721d4))
-
-
-### Miscellaneous Chores
-
-* **release:** v0.1.0 [skip ci] ([65c2df2](https://github.com/FAZuH/pwr-bot/commit/65c2df2fe935d6fa7581f8dffe27b5e8bfa41487))
 
