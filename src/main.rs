@@ -10,11 +10,11 @@ use crate::bot::bot::Bot;
 use crate::config::Config;
 use crate::database::database::Database;
 use crate::event::event_bus::EventBus;
-use crate::event::series_update_event::SeriesUpdateEvent;
-use crate::publisher::series_publisher::SeriesPublisher;
+use crate::event::feed_update_event::FeedUpdateEvent;
+use crate::publisher::feed_publisher::FeedPublisher;
 use crate::source::sources::Sources;
+use crate::subscriber::discord_channel_subscriber::DiscordChannelSubscriber;
 use crate::subscriber::discord_dm_subscriber::DiscordDmSubscriber;
-use crate::subscriber::discord_webhook_subscriber::DiscordWebhookSubscriber;
 use dotenv::dotenv;
 use log::info;
 use std::sync::Arc;
@@ -51,7 +51,7 @@ async fn main() -> anyhow::Result<()> {
     info!("Subscribers setup complete.");
 
     // Setup publishers
-    SeriesPublisher::new(
+    FeedPublisher::new(
         db.clone(),
         event_bus.clone(),
         sources.clone(),

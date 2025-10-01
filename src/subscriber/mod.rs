@@ -1,5 +1,5 @@
+pub mod discord_channel_subscriber;
 pub mod discord_dm_subscriber;
-pub mod discord_webhook_subscriber;
 
 use anyhow::Result;
 

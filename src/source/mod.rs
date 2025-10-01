@@ -76,8 +76,8 @@ pub trait Source: Send + Sync {
     /// Returns the URL for a series given its ID.
     /// The returned URL is the public URL of the series, not the API URL.
     fn get_url_from_id(&self, id: &str) -> String;
-    fn get_base(&self) -> &BaseSource;
-    fn get_url(&self) -> &SourceUrl {
+    fn get_base(&self) -> &BaseSource<'_>;
+    fn get_url(&self) -> &SourceUrl<'_> {
         &self.get_base().url
     }
     fn extract_error_message(&self, error: &serde_json::Value) -> String {

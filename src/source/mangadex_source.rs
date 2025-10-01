@@ -223,7 +223,7 @@ impl Source for MangaDexSource<'_> {
         format!("https://{}/title/{}", self.base.url.api_domain, id)
     }
 
-    fn get_base(&self) -> &BaseSource {
+    fn get_base(&self) -> &BaseSource<'_> {
         &self.base
     }
 }
