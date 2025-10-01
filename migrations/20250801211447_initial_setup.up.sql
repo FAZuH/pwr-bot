@@ -1,25 +1,38 @@
 -- Add migration script here
 
-CREATE TABLE IF NOT EXISTS latest_updates (
+CREATE TABLE IF NOT EXISTS feeds (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    `type` TEXT NOT NULL,
-    series_id TEXT NOT NULL,
-    series_latest TEXT NOT NULL,
-    series_title TEXT NOT NULL,
-    series_published TIMESTAMP NOT NULL,
-    UNIQUE(type, series_id)
+    name TEXT NOT NULL,
+    url TEXT NOT NULL UNIQUE,
+    tags TEXT DEFAULT NULL
 );
 
-
-CREATE TABLE IF NOT EXISTS subscribers (
+CREATE TABLE IF NOT EXISTS feed_versions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    subscriber_type TEXT NOT NULL,
-    subscriber_id TEXT NOT NULL,
-    latest_update_id INTEGER,
-    UNIQUE(subscriber_type, subscriber_id, latest_update_id),
-    FOREIGN KEY (latest_update_id) REFERENCES latest_updates(id)
+    feed_id INTEGER NOT NULL,
+    version TEXT NOT NULL,
+    published TIMESTAMP NOT NULL,
+    FOREIGN KEY (feed_id) REFERENCES feeds(id)
         ON DELETE CASCADE
         ON UPDATE CASCADE
 );
 
-PRAGMA foreign_keys = ON;
+CREATE TABLE IF NOT EXISTS subscribers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    type TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    UNIQUE(type, target_id)
+);
+
+CREATE TABLE IF NOT EXISTS feed_subscriptions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    feed_id INTEGER NOT NULL,
+    subscriber_id INTEGER NOT NULL,
+    UNIQUE(feed_id, subscriber_id),
+    FOREIGN KEY (feed_id) REFERENCES feeds(id)
+        ON DELETE CASCADE
+        ON UPDATE CASCADE,
+    FOREIGN KEY (subscriber_id) REFERENCES subscribers(id)
+        ON DELETE CASCADE
+        ON UPDATE CASCADE
+);

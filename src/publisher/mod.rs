@@ -1,1 +1,1 @@
-pub mod series_publisher;
+pub mod feed_publisher;

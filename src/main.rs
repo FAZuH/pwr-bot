@@ -10,11 +10,11 @@ use crate::bot::bot::Bot;
 use crate::config::Config;
 use crate::database::database::Database;
 use crate::event::event_bus::EventBus;
-use crate::event::series_update_event::SeriesUpdateEvent;
-use crate::publisher::series_publisher::SeriesPublisher;
+use crate::event::feed_update_event::FeedUpdateEvent;
+use crate::publisher::feed_publisher::FeedPublisher;
 use crate::source::sources::Sources;
+use crate::subscriber::discord_channel_subscriber::DiscordChannelSubscriber;
 use crate::subscriber::discord_dm_subscriber::DiscordDmSubscriber;
-use crate::subscriber::discord_webhook_subscriber::DiscordWebhookSubscriber;
 use dotenv::dotenv;
 use log::info;
 use std::sync::Arc;
@@ -41,12 +41,12 @@ async fn main() -> anyhow::Result<()> {
 
     // Setup subscribers
     let dm_subscriber = DiscordDmSubscriber::new(bot.clone(), db.clone());
-    event_bus.register_subcriber::<SeriesUpdateEvent, _>(dm_subscriber.into());
-    let webhook_subscriber = DiscordWebhookSubscriber::new(bot.clone(), db.clone());
-    event_bus.register_subcriber::<SeriesUpdateEvent, _>(webhook_subscriber.into());
+    event_bus.register_subcriber::<FeedUpdateEvent, _>(dm_subscriber.into());
+    let webhook_subscriber = DiscordChannelSubscriber::new(bot.clone(), db.clone());
+    event_bus.register_subcriber::<FeedUpdateEvent, _>(webhook_subscriber.into());
 
     // Setup publishers
-    SeriesPublisher::new(
+    FeedPublisher::new(
         db.clone(),
         event_bus.clone(),
         sources.clone(),
