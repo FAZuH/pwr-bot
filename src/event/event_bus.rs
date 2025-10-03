@@ -4,7 +4,6 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, RwLock};
-use tokio::runtime;
 
 use crate::subscriber::Subscriber;
 
@@ -13,19 +12,12 @@ type AsyncSubscriber<E> =
 
 pub struct EventBus {
     subscribers: Arc<RwLock<HashMap<TypeId, Vec<Box<dyn Any + Send + Sync>>>>>,
-    rt: runtime::Runtime,
 }
 
 impl EventBus {
     pub fn new() -> Self {
-        let rt = runtime::Builder::new_multi_thread()
-            .worker_threads(1)
-            .enable_all()
-            .build()
-            .expect("Error spawning tokio runtime for EventBus");
         Self {
             subscribers: Arc::new(RwLock::new(HashMap::new())),
-            rt,
         }
     }
 
@@ -72,7 +64,7 @@ impl EventBus {
                     futures.push(sub(event.clone()));
                 }
             }
-            self.rt.spawn(async move {
+            tokio::spawn(async move {
                 futures::future::join_all(futures).await;
             });
         }

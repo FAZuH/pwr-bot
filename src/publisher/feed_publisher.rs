@@ -70,7 +70,11 @@ impl FeedPublisher {
         });
     }
 
-    async fn check_updates(&self) -> anyhow::Result<()> {
+    pub async fn check_updates_once(&self) -> anyhow::Result<()> {
+        self.check_updates().await
+    }
+
+    pub async fn check_updates(&self) -> anyhow::Result<()> {
         debug!("FeedPublisher: Checking for feed updates.");
 
         // Get all feeds tagged as "series"

@@ -2309,6 +2309,7 @@ dependencies = [
  "futures",
  "governor",
  "httpmock",
+ "lazy_static",
  "log",
  "poise",
  "reqwest 0.12.22",
