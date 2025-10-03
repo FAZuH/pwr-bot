@@ -29,6 +29,7 @@ pub trait Table<T, ID>: TableBase {
     async fn select(&self, id: &ID) -> Result<T, DbError>;
     async fn update(&self, model: &T) -> Result<(), DbError>;
     async fn delete(&self, id: &ID) -> Result<(), DbError>;
+    async fn replace(&self, model: &T) -> Result<ID, DbError>;
 }
 
 // ============================================================================
@@ -152,6 +153,16 @@ impl Table<FeedModel, i32> for FeedTable {
             .execute(&self.base.pool)
             .await?;
         Ok(())
+    }
+
+    async fn replace(&self, model: &FeedModel) -> Result<i32, DbError> {
+        let res = sqlx::query("REPLACE INTO feeds (name, url, tags) VALUES (?, ?, ?)")
+            .bind(&model.name)
+            .bind(&model.url)
+            .bind(&model.tags)
+            .execute(&self.base.pool)
+            .await?;
+        Ok(res.last_insert_rowid() as i32)
     }
 }
 
@@ -286,6 +297,17 @@ impl Table<FeedVersionModel, i32> for FeedVersionTable {
             .await?;
         Ok(())
     }
+
+    async fn replace(&self, model: &FeedVersionModel) -> Result<i32, DbError> {
+        let res =
+            sqlx::query("REPLACE INTO feed_versions (feed_id, version, published) VALUES (?, ?, ?)")
+                .bind(model.feed_id)
+                .bind(&model.version)
+                .bind(model.published)
+                .execute(&self.base.pool)
+                .await?;
+        Ok(res.last_insert_rowid() as i32)
+    }
 }
 
 // ============================================================================
@@ -406,6 +428,15 @@ impl Table<SubscriberModel, i32> for SubscriberTable {
             .execute(&self.base.pool)
             .await?;
         Ok(())
+    }
+
+    async fn replace(&self, model: &SubscriberModel) -> Result<i32, DbError> {
+        let res = sqlx::query("REPLACE INTO subscribers (type, target_id) VALUES (?, ?)")
+            .bind(model.r#type)
+            .bind(&model.target_id)
+            .execute(&self.base.pool)
+            .await?;
+        Ok(res.last_insert_rowid() as i32)
     }
 }
 
@@ -574,5 +605,15 @@ impl Table<FeedSubscriptionModel, i32> for FeedSubscriptionTable {
             .execute(&self.base.pool)
             .await?;
         Ok(())
+    }
+
+    async fn replace(&self, model: &FeedSubscriptionModel) -> Result<i32, DbError> {
+        let res =
+            sqlx::query("REPLACE INTO feed_subscriptions (feed_id, subscriber_id) VALUES (?, ?)")
+                .bind(model.feed_id)
+                .bind(model.subscriber_id)
+                .execute(&self.base.pool)
+                .await?;
+        Ok(res.last_insert_rowid() as i32)
     }
 }

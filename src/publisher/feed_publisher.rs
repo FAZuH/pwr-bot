@@ -74,18 +74,18 @@ impl FeedPublisher {
         debug!("FeedPublisher: Checking for feed updates.");
 
         // Get all feeds tagged as "series"
-        let feeds = self.db.feed_table.select_all_by_tag("series").await?;
+        let feeds = self.db.feed_table.select_all().await?;
         info!("FeedPublisher: Found {} feeds to check.", feeds.len());
 
         for feed in feeds {
-            // Skip feeds with no subscriptions
-            let subscriptions = self
+            // Skip feeds with no subscribers
+            let subs = self
                 .db
                 .feed_subscription_table
                 .select_all_by_feed_id(feed.id)
                 .await?;
 
-            if subscriptions.is_empty() {
+            if subs.is_empty() {
                 debug!(
                     "FeedPublisher: No subscriptions for feed {}. Skipping.",
                     feed.name
@@ -151,7 +151,7 @@ impl FeedPublisher {
                 version: curr_check.latest.clone(),
                 published: curr_check.published,
             };
-            let version_id = self.db.feed_version_table.insert(&new_version).await?;
+            let version_id = self.db.feed_version_table.replace(&new_version).await?;
 
             // Publish update event
             info!(
