@@ -8,7 +8,7 @@ use super::anilist_source::AniListSource;
 use super::mangadex_source::MangaDexSource;
 
 pub struct Sources {
-    sources: Vec<Arc<dyn Source>>,
+    sources: Vec<Arc<dyn SeriesSource>>,
     pub anilist_source: Arc<AniListSource<'static>>,
     pub mangadex_source: Arc<MangaDexSource<'static>>,
 }
@@ -53,7 +53,7 @@ impl Sources {
     }
 
     /// Get source by URL
-    pub fn get_source_by_url(&self, url: &str) -> Option<&Arc<dyn Source>> {
+    pub fn get_source_by_url(&self, url: &str) -> Option<&Arc<dyn SeriesSource>> {
         self.sources.iter().find(|source| {
             source
                 .get_url()
@@ -62,7 +62,7 @@ impl Sources {
         })
     }
 
-    pub fn add_source(&mut self, source: Arc<dyn Source>) {
+    pub fn add_source(&mut self, source: Arc<dyn SeriesSource>) {
         self.sources.push(source);
     }
 

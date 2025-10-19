@@ -10,6 +10,8 @@ use error::UrlParseError;
 
 use async_trait::async_trait;
 
+use crate::source::model::Series;
+
 #[derive(Clone, Debug)]
 pub struct SourceUrl<'a> {
     /// The name of the source, e.g., "MangaDex", "AniList"
@@ -37,14 +39,14 @@ impl<'a> BaseSource<'a> {
         url: &'b str,
         n: usize,
     ) -> Result<&'b str, UrlParseError> {
-        if !url.contains(&self.url.api_domain) {
+        if !url.contains(self.url.api_domain) {
             return Err(UrlParseError::InvalidFormat {
                 url: url.to_string(),
             });
         }
 
         let path_start = url
-            .find(&self.url.api_domain)
+            .find(self.url.api_domain)
             .ok_or(UrlParseError::UnsupportedSite {
                 site: self.url.api_domain.to_string(),
             })?
@@ -70,13 +72,15 @@ impl<'a> BaseSource<'a> {
 }
 
 #[async_trait]
-pub trait Source: Send + Sync {
+pub trait SeriesSource: Send + Sync {
     async fn get_latest(&self, id: &str) -> Result<SourceResult, SourceError>;
+    async fn get_info(&self, id: &str) -> Result<Series, SourceError>;
     fn get_id_from_url<'a>(&self, url: &'a str) -> Result<&'a str, UrlParseError>;
     /// Returns the URL for a series given its ID.
     /// The returned URL is the public URL of the series, not the API URL.
     fn get_url_from_id(&self, id: &str) -> String;
     fn get_base(&self) -> &BaseSource<'_>;
+
     fn get_url(&self) -> &SourceUrl<'_> {
         &self.get_base().url
     }
@@ -101,10 +105,10 @@ pub trait Source: Send + Sync {
         }
 
         // Fallback to message if available
-        if parts.is_empty() {
-            if let Some(message) = error.get("message").and_then(|v| v.as_str()) {
-                parts.push(format!("message: {}", message));
-            }
+        if parts.is_empty()
+            && let Some(message) = error.get("message").and_then(|v| v.as_str())
+        {
+            parts.push(format!("message: {}", message));
         }
 
         // If we still have nothing useful, dump the whole error object

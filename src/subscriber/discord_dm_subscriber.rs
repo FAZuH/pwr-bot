@@ -3,7 +3,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use log::{debug, error, info};
 use poise::serenity_prelude as serenity;
-use serenity::all::{CreateMessage, MessageFlags, UserId};
+use serenity::all::UserId;
 
 use super::Subscriber;
 use crate::bot::bot::Bot;
@@ -12,6 +12,7 @@ use crate::database::model::SubscriberType;
 use crate::database::table::Table;
 use crate::event::Event;
 use crate::event::feed_update_event::FeedUpdateEvent;
+use crate::subscriber::event_message_builder::EventMessageBuilder;
 
 pub struct DiscordDmSubscriber {
     bot: Arc<Bot>,
@@ -27,12 +28,7 @@ impl DiscordDmSubscriber {
     pub async fn feed_event_callback(&self, event: FeedUpdateEvent) -> Result<()> {
         debug!("Received {}: {:?}", event.event_name(), event);
 
-        let message = CreateMessage::new()
-            .content(format!(
-                "🚨 **{}** updated: {} → {}\n{}",
-                event.title, event.previous_version, event.current_version, event.url
-            ))
-            .flags(MessageFlags::SUPPRESS_EMBEDS);
+        let message = EventMessageBuilder::new(&event).build();
 
         // Get all subscriptions for this feed
         let subscriptions = self

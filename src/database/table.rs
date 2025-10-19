@@ -299,13 +299,14 @@ impl Table<FeedVersionModel, i32> for FeedVersionTable {
     }
 
     async fn replace(&self, model: &FeedVersionModel) -> Result<i32, DbError> {
-        let res =
-            sqlx::query("REPLACE INTO feed_versions (feed_id, version, published) VALUES (?, ?, ?)")
-                .bind(model.feed_id)
-                .bind(&model.version)
-                .bind(model.published)
-                .execute(&self.base.pool)
-                .await?;
+        let res = sqlx::query(
+            "REPLACE INTO feed_versions (feed_id, version, published) VALUES (?, ?, ?)",
+        )
+        .bind(model.feed_id)
+        .bind(&model.version)
+        .bind(model.published)
+        .execute(&self.base.pool)
+        .await?;
         Ok(res.last_insert_rowid() as i32)
     }
 }
@@ -325,21 +326,26 @@ impl SubscriberTable {
         }
     }
 
-    pub async fn select_all_by_type(
+    pub async fn select_by_type_and_feed(
         &self,
         r#type: SubscriberType,
+        feed_id: i32,
     ) -> Result<Vec<SubscriberModel>, DbError> {
-        sqlx::query_as::<_, SubscriberModel>("SELECT * FROM subscribers WHERE type = ?")
-            .bind(r#type)
-            .fetch_all(&self.base.pool)
-            .await
-    }
-
-    pub async fn select_by_target_id(&self, target_id: &str) -> Result<SubscriberModel, DbError> {
-        sqlx::query_as::<_, SubscriberModel>("SELECT * FROM subscribers WHERE target_id = ?")
-            .bind(target_id)
-            .fetch_one(&self.base.pool)
-            .await
+        sqlx::query_as::<_, SubscriberModel>(
+            r#"
+            SELECT * FROM subscribers
+            WHERE type = ?
+                AND id IN (
+                    SELECT subscriber_id
+                    FROM feed_subscriptions
+                    WHERE feed_id = ?
+                )
+            "#,
+        )
+        .bind(r#type)
+        .bind(feed_id)
+        .fetch_all(&self.base.pool)
+        .await
     }
 
     pub async fn select_by_type_and_target(

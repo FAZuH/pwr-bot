@@ -2,6 +2,10 @@ use async_trait::async_trait;
 use governor::clock::QuantaClock;
 use log::debug;
 use reqwest;
+use serde_json::Map;
+use serde_json::Value;
+
+use crate::source::model::Series;
 
 use super::BaseSource;
 use super::SeriesItem;
@@ -21,6 +25,8 @@ use governor::{
     state::{InMemoryState, direct::NotKeyed},
 };
 use std::num::NonZeroU32;
+
+type Data<'a> = &'a Map<String, Value>;
 
 pub struct MangaDexSource<'a> {
     pub base: BaseSource<'a>,
@@ -54,47 +60,49 @@ impl MangaDexSource<'_> {
         }
     }
 
-    pub async fn get_title(&self, series_id: &str) -> Result<String, SourceError> {
-        // Validate series_id format (should be UUID for MangaDex)
-        self.validate_uuid(&series_id.to_string().clone())?;
-
-        let request = self
-            .base
-            .client
-            .get(format!("{}/manga/{}", self.base.url.api_url, series_id));
-        let response = self.send(request).await?; // Converts to SourceError::RequestFailed
-        let body = response.text().await?;
-        let response_json: serde_json::Value = serde_json::from_str(&body)?; // Converts to SourceError::JsonParseFailed
-
-        if let Some(errors) = response_json.get("errors") {
+    fn check_resp_errors(resp: &Value) -> Result<(), SourceError> {
+        if let Some(errors) = resp.get("errors") {
             if let Some(error_array) = errors.as_array() {
-                let err_msg = error_array
-                    .iter()
-                    .map(|e| self.extract_error_message(e))
-                    .collect::<Vec<String>>()
-                    .join(" | ");
-                return Err(SourceError::ApiError { message: err_msg });
+                if let Some(first_error) = error_array.first() {
+                    let message = first_error["message"]
+                        .as_str()
+                        .unwrap_or("Unknown API error")
+                        .to_string();
+                    return Err(SourceError::ApiError { message });
+                }
             }
         }
+        Ok(())
+    }
 
-        // Check if data exists
-        let data =
-            response_json["data"]
-                .as_object()
-                .ok_or_else(|| SourceError::SeriesNotFound {
-                    series_id: series_id.to_string(),
-                })?;
+    fn get_data_from_resp<'a>(
+        resp: &'a Value,
+        series_id: &'a str,
+    ) -> Result<&'a Map<String, Value>, SourceError> {
+        resp["data"]
+            .as_object()
+            .ok_or_else(|| SourceError::SeriesNotFound {
+                series_id: series_id.to_string(),
+            })
+    }
 
-        // Extract title
-        let title = data["attributes"]["title"]["en"]
+    fn get_title_from_data(data: Data) -> Result<String, SourceError> {
+        Ok(data["attributes"]["title"]["en"]
             .as_str()
             .or_else(|| data["attributes"]["title"]["ja"].as_str())
             .ok_or_else(|| SourceError::MissingField {
                 field: "title.en or title.ja".to_string(),
             })?
-            .to_string();
+            .to_string())
+    }
 
-        Ok(title)
+    fn get_description_from_data(data: Data) -> Result<String, SourceError> {
+        Ok(data["attributes"]["description"]["en"]
+            .as_str()
+            .ok_or_else(|| SourceError::MissingField {
+                field: "description.en".to_string(),
+            })?
+            .to_string())
     }
 
     fn validate_uuid(&self, uuid: &String) -> Result<(), SourceError> {
@@ -122,10 +130,41 @@ impl MangaDexSource<'_> {
 }
 
 #[async_trait]
-impl Source for MangaDexSource<'_> {
+impl SeriesSource for MangaDexSource<'_> {
+    async fn get_info(&self, series_id: &str) -> Result<Series, SourceError> {
+        self.validate_uuid(&series_id.to_string().clone())?;
+
+        let request = self
+            .base
+            .client
+            .get(format!("{}/manga", self.base.url.api_url));
+
+        let response = self.send(request).await?; // Converts to SourceError::RequestFailed
+
+        let body = response.text().await?;
+        let response_json: serde_json::Value = serde_json::from_str(&body)?; // Converts to SourceError::JsonParseFailed
+
+        Self::check_resp_errors(&response_json)?;
+
+        let data = Self::get_data_from_resp(&response_json, series_id)?;
+        let title = Self::get_title_from_data(&data)?;
+        let description = Self::get_description_from_data(&data)?;
+
+        info!(
+            "Successfully fetched latest manga for series_id: {}",
+            series_id
+        );
+
+        Ok(Series {
+            id: series_id.to_string(),
+            title,
+            url: self.get_url_from_id(series_id),
+            description,
+        })
+    }
+
     async fn get_latest(&self, series_id: &str) -> Result<SourceResult, SourceError> {
-        // get_title validates the series_id
-        let title = self.get_title(series_id).await?;
+        let title = self.get_info(series_id).await?.title;
 
         let request = self
             .base
@@ -143,38 +182,16 @@ impl Source for MangaDexSource<'_> {
         let body = response.text().await?;
         let response_json: serde_json::Value = serde_json::from_str(&body)?; // Converts to SourceError::JsonParseFailed
 
-        // Check for API errors
-        if let Some(errors) = response_json.get("errors") {
-            if let Some(error_array) = errors.as_array() {
-                if let Some(first_error) = error_array.first() {
-                    let message = first_error["message"]
-                        .as_str()
-                        .unwrap_or("Unknown API error")
-                        .to_string();
-                    return Err(SourceError::ApiError { message });
-                }
-            }
-        }
+        Self::check_resp_errors(&response_json)?;
 
         let chapters = response_json["data"].as_array().ok_or_else(|| {
-            warn!(
-                "No chapters array found in response for series_id: {}",
-                series_id
-            );
+            warn!("No data found in response for series_id: {}", series_id);
             SourceError::SeriesNotFound {
                 series_id: series_id.to_string(),
             }
         })?;
 
         if let Some(c) = chapters.first().cloned() {
-            // // Extract chapter ID
-            // let chapter_id = c["id"]
-            //     .as_str()
-            //     .ok_or_else(|| SourceError::MissingField {
-            //         field: "id".to_string(),
-            //     })?
-            //     .to_string();
-
             // Extract chapter number
             let chapter = c["attributes"]["chapter"]
                 .as_str()
@@ -200,7 +217,7 @@ impl Source for MangaDexSource<'_> {
                 series_id
             );
 
-            Ok(SourceResult::Series(SeriesItem {
+            Ok(SourceResult::Series(SeriesLatestItem {
                 id: series_id.to_string(),
                 title,
                 latest: chapter,

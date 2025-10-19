@@ -3,6 +3,8 @@ use super::error::UrlParseError;
 use async_trait::async_trait;
 use governor::clock::QuantaClock;
 use log::debug;
+use serde_json::Map;
+use serde_json::Value;
 
 use super::BaseSource;
 use super::SeriesItem;
@@ -58,10 +60,24 @@ impl AniListSource<'_> {
         debug!("Making request to: {}", req.url());
         self.base.client.execute(req).await
     }
+
+    fn check_api_errors(&self, resp: &Value) -> Result<(), SourceError> {
+        if let Some(errors) = resp.get("errors") {
+            if let Some(error_array) = errors.as_array() {
+                let err_msg = error_array
+                    .iter()
+                    .map(|e| self.extract_error_message(e))
+                    .collect::<Vec<String>>()
+                    .join(" | ");
+                return Err(SourceError::ApiError { message: err_msg });
+            }
+        }
+        Ok(())
+    }
 }
 
 #[async_trait]
-impl Source for AniListSource<'_> {
+impl SeriesSource for AniListSource<'_> {
     async fn get_latest(&self, series_id: &str) -> Result<SourceResult, SourceError> {
         debug!("Fetching latest anime for series_id: {}", series_id);
 
@@ -92,16 +108,7 @@ impl Source for AniListSource<'_> {
 
         let response_json = response.json::<serde_json::Value>().await?; // Automatically converts to SourceError::JsonParseFailed
 
-        if let Some(errors) = response_json.get("errors") {
-            if let Some(error_array) = errors.as_array() {
-                let err_msg = error_array
-                    .iter()
-                    .map(|e| self.extract_error_message(e))
-                    .collect::<Vec<String>>()
-                    .join(" | ");
-                return Err(SourceError::ApiError { message: err_msg });
-            }
-        }
+        self.check_api_errors(&response_json)?;
 
         // Check if Media exists and is not null
         let media = response_json["data"]["Media"].as_object().ok_or_else(|| {
@@ -159,7 +166,7 @@ impl Source for AniListSource<'_> {
 
         info!("Successfully fetched anime for series_id: {series_id}");
 
-        Ok(SourceResult::Series(SeriesItem {
+        Ok(SourceResult::Series(SeriesLatestItem {
             id: series_id.to_string(),
             title,
             latest: episode,

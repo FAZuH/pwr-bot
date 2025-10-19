@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use log::{debug, error, info};
-use serenity::all::{ChannelId, CreateMessage};
+use serenity::all::ChannelId;
 
 use super::Subscriber;
 use crate::bot::bot::Bot;
@@ -10,6 +10,7 @@ use crate::database::model::SubscriberType;
 use crate::database::table::Table;
 use crate::event::Event;
 use crate::event::feed_update_event::FeedUpdateEvent;
+use crate::subscriber::event_message_builder::EventMessageBuilder;
 use anyhow::Result;
 
 pub struct DiscordChannelSubscriber {
@@ -26,38 +27,22 @@ impl DiscordChannelSubscriber {
     pub async fn feed_event_callback(&self, event: FeedUpdateEvent) -> Result<()> {
         debug!("Received {}: {:?}", event.event_name(), event);
 
-        // Get all subscriptions for this feed
-        let subscriptions = self
+        let subs = self
             .db
-            .feed_subscription_table
-            .select_all_by_feed_id(event.feed_id)
+            .subscriber_table
+            .select_by_type_and_feed(SubscriberType::Guild, event.feed_id)
             .await?;
 
-        for subscription in subscriptions {
-            // Get subscriber details
-            let subscriber = self
-                .db
-                .subscriber_table
-                .select(&subscription.subscriber_id)
-                .await?;
-
-            // Only process guild channel subscribers
-            if !matches!(subscriber.r#type, SubscriberType::Guild) {
-                continue;
-            }
-
-            let channel_id = match subscriber.target_id.parse::<u64>() {
+        for sub in subs {
+            let channel_id = match sub.target_id.parse::<u64>() {
                 Ok(id) => ChannelId::new(id),
                 Err(e) => {
-                    error!("Invalid channel ID {}: {}", subscriber.target_id, e);
+                    error!("Invalid channel ID {}: {}", sub.target_id, e);
                     continue;
                 }
             };
 
-            let message = CreateMessage::new().content(format!(
-                "🚨 **{}** updated: {} → {}\n{}",
-                event.title, event.previous_version, event.current_version, event.url
-            ));
+            let message = EventMessageBuilder::new(&event).build();
 
             debug!(
                 "Sending notification to channel {} for feed: {}",
