@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use anyhow::Result;
-use log::error;
+use log::{debug, error};
 use poise::{ChoiceParameter, CreateReply};
 use serenity::all::CreateAttachment;
 use sqlx::error::ErrorKind;
@@ -77,8 +77,9 @@ pub async fn subscribe(
         // Fetch latest from source
         let series_item = match data.sources.get_latest_by_url(link).await {
             Ok(SourceResult::Series(res)) => res,
-            Err(_) => {
+            Err(e) => {
                 ctx.reply(format!("❌ Invalid link: <{link}>")).await?;
+                debug!("{}", e);
                 continue;
             }
         };

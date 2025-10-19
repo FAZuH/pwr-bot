@@ -1,4 +1,4 @@
-use serenity::all::{Colour, CreateEmbed, CreateMessage, MessageFlags};
+use serenity::all::{Colour, CreateEmbed, CreateMessage};
 
 use crate::event::feed_update_event::FeedUpdateEvent;
 
@@ -14,7 +14,6 @@ impl<'a> EventMessageBuilder<'a> {
     pub fn build(&self) -> CreateMessage {
         let e = self.event;
 
-        let title = format!("[{}]({})", e.title, e.url);
         let desc = format!(
             "- Old: {}\n- New: {}",
             e.previous_version, e.current_version
@@ -22,10 +21,8 @@ impl<'a> EventMessageBuilder<'a> {
         let embed = CreateEmbed::new()
             .colour(Colour::DARKER_GREY)
             .description(desc)
-            .title(title);
+            .title(e.title.clone());
 
-        CreateMessage::new()
-            .embed(embed)
-            .flags(MessageFlags::SUPPRESS_EMBEDS)
+        CreateMessage::new().embed(embed)
     }
 }

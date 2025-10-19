@@ -3,7 +3,6 @@ use super::error::UrlParseError;
 use async_trait::async_trait;
 use governor::clock::QuantaClock;
 use log::debug;
-use serde_json::Map;
 use serde_json::Value;
 
 use super::BaseSource;
@@ -62,17 +61,42 @@ impl AniListSource<'_> {
     }
 
     fn check_api_errors(&self, resp: &Value) -> Result<(), SourceError> {
-        if let Some(errors) = resp.get("errors") {
-            if let Some(error_array) = errors.as_array() {
+        if let Some(errors) = resp.get("errors")
+            && let Some(error_array) = errors.as_array() {
                 let err_msg = error_array
                     .iter()
                     .map(|e| self.extract_error_message(e))
                     .collect::<Vec<String>>()
                     .join(" | ");
                 return Err(SourceError::ApiError { message: err_msg });
-            }
         }
         Ok(())
+    }
+
+    /// Validate series_id format (should be numeric for AniList)
+    fn validate_id(series_id: &str) -> Result<i32, SourceError> {
+        let series_id_num = series_id
+            .parse::<i32>()
+            .map_err(|_| SourceError::InvalidSeriesId {
+                series_id: series_id.to_string(),
+            })?;
+        Ok(series_id_num)
+    }
+
+    async fn request(&self, series_id: &str, query: &str) -> Result<serde_json::Value, SourceError> {
+        let series_id_num = Self::validate_id(series_id)?;
+        let json = serde_json::json!({
+            "query": query,
+            "variables": { "id": series_id_num }
+        });
+
+        let request = self.base.client.post(self.base.url.api_url).json(&json);
+        let response = self.send(request).await?;
+        let response_json = response.json::<serde_json::Value>().await?; // Automatically converts to SourceError::JsonParseFailed
+
+        self.check_api_errors(&response_json)?;
+
+        Ok(response_json)
     }
 }
 
@@ -80,13 +104,6 @@ impl AniListSource<'_> {
 impl SeriesSource for AniListSource<'_> {
     async fn get_latest(&self, series_id: &str) -> Result<SourceResult, SourceError> {
         debug!("Fetching latest anime for series_id: {}", series_id);
-
-        // Validate series_id format (should be numeric for AniList)
-        let series_id_num = series_id
-            .parse::<i32>()
-            .map_err(|_| SourceError::InvalidSeriesId {
-                series_id: series_id.to_string(),
-            })?;
 
         let query = r#"
         query ($id: Int) {
@@ -96,19 +113,7 @@ impl SeriesSource for AniListSource<'_> {
             }
         }
         "#;
-
-        let json = serde_json::json!({
-            "query": query,
-            "variables": { "id": series_id_num }
-        });
-
-        let request = self.base.client.post(self.base.url.api_url).json(&json);
-
-        let response = self.send(request).await?;
-
-        let response_json = response.json::<serde_json::Value>().await?; // Automatically converts to SourceError::JsonParseFailed
-
-        self.check_api_errors(&response_json)?;
+        let response_json = self.request(series_id, query).await?;
 
         // Check if Media exists and is not null
         let media = response_json["data"]["Media"].as_object().ok_or_else(|| {
@@ -159,7 +164,7 @@ impl SeriesSource for AniListSource<'_> {
         })?;
 
         // Extract title
-        let title = response_json["data"]["Media"]["title"]["romaji"]
+        let title = media["title"]["romaji"]
             .as_str()
             .unwrap_or("Unknown")
             .to_string();
@@ -173,6 +178,51 @@ impl SeriesSource for AniListSource<'_> {
             url: self.get_url_from_id(series_id),
             published,
         }))
+    }
+
+    async fn get_info(&self, series_id: &str) -> Result<Series, SourceError> {
+        let query = r#"
+            query ($id: Int) {
+                Media(id: $id, type: ANIME) {
+                    title { romaji }
+                    siteUrl
+                    description(asHtml: false)
+                }
+            }
+        "#;
+        let response_json = self.request(series_id, query).await?;
+
+        // Check if Media exists and is not null
+        let media = response_json["data"]["Media"].as_object().ok_or_else(|| {
+            SourceError::SeriesNotFound {
+                series_id: series_id.to_string(),
+            }
+        })?;
+
+        // Extract title
+        let title = media["title"]["romaji"]
+            .as_str()
+            .unwrap_or("Unknown")
+            .to_string();
+
+        // Extract url
+        let url = media["siteUrl"]
+            .as_str()
+            .unwrap_or("Unknown")
+            .to_string();
+
+        // Extract description
+        let description = media["description"]
+            .as_str()
+            .unwrap_or("Unknown")
+            .to_string();
+
+        Ok(Series {
+            id: series_id.to_string(),
+            title,
+            url,
+            description
+        })
     }
 
     fn get_id_from_url<'a>(&self, url: &'a str) -> Result<&'a str, UrlParseError> {

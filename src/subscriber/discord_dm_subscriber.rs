@@ -9,7 +9,6 @@ use super::Subscriber;
 use crate::bot::bot::Bot;
 use crate::database::database::Database;
 use crate::database::model::SubscriberType;
-use crate::database::table::Table;
 use crate::event::Event;
 use crate::event::feed_update_event::FeedUpdateEvent;
 use crate::subscriber::event_message_builder::EventMessageBuilder;
@@ -31,39 +30,17 @@ impl DiscordDmSubscriber {
         let message = EventMessageBuilder::new(&event).build();
 
         // Get all subscriptions for this feed
-        let subscriptions = self
+        let subs = self
             .db
-            .feed_subscription_table
-            .select_all_by_feed_id(event.feed_id)
+            .subscriber_table
+            .select_by_type_and_feed(SubscriberType::Dm, event.feed_id)
             .await?;
 
-        for subscription in subscriptions {
-            // Get subscriber details
-            let subscriber = match self
-                .db
-                .subscriber_table
-                .select(&subscription.subscriber_id)
-                .await
-            {
-                Ok(sub) => sub,
-                Err(e) => {
-                    error!(
-                        "Failed to fetch subscriber {}: {}",
-                        subscription.subscriber_id, e
-                    );
-                    continue;
-                }
-            };
-
-            // Only process DM subscribers
-            if !matches!(subscriber.r#type, SubscriberType::Dm) {
-                continue;
-            }
-
-            let user_id = match subscriber.target_id.parse::<u64>() {
+        for sub in subs {
+            let user_id = match sub.target_id.parse::<u64>() {
                 Ok(id) => UserId::new(id),
                 Err(e) => {
-                    error!("Invalid user ID {}: {}", subscriber.target_id, e);
+                    error!("Invalid user ID {}: {}", sub.target_id, e);
                     continue;
                 }
             };
@@ -81,10 +58,10 @@ impl DiscordDmSubscriber {
                 }
             } else {
                 // User not in cache, fetch from HTTP
-                info!("User {} not in cache, fetching from HTTP.", user_id);
+                debug!("User {} not in cache, fetching from HTTP.", user_id);
                 match http.get_user(user_id).await {
                     Ok(user) => {
-                        info!("Fetched user {}. Sending DM.", user_id);
+                        debug!("Fetched user {}. Sending DM.", user_id);
                         if let Err(e) = user.dm(&http, message).await {
                             error!("Failed to send DM to fetched user {}: {}", user_id, e);
                         } else {

@@ -61,16 +61,14 @@ impl MangaDexSource<'_> {
     }
 
     fn check_resp_errors(resp: &Value) -> Result<(), SourceError> {
-        if let Some(errors) = resp.get("errors") {
-            if let Some(error_array) = errors.as_array() {
-                if let Some(first_error) = error_array.first() {
-                    let message = first_error["message"]
-                        .as_str()
-                        .unwrap_or("Unknown API error")
-                        .to_string();
-                    return Err(SourceError::ApiError { message });
-                }
-            }
+        if let Some(errors) = resp.get("errors")
+            && let Some(error_array) = errors.as_array() 
+            && let Some(first_error) = error_array.first() {
+                let message = first_error["message"]
+                    .as_str()
+                    .unwrap_or("Unknown API error")
+                    .to_string();
+                return Err(SourceError::ApiError { message });
         }
         Ok(())
     }
@@ -137,7 +135,7 @@ impl SeriesSource for MangaDexSource<'_> {
         let request = self
             .base
             .client
-            .get(format!("{}/manga", self.base.url.api_url));
+            .get(format!("{}/manga/{series_id}", self.base.url.api_url));
 
         let response = self.send(request).await?; // Converts to SourceError::RequestFailed
 
@@ -147,8 +145,8 @@ impl SeriesSource for MangaDexSource<'_> {
         Self::check_resp_errors(&response_json)?;
 
         let data = Self::get_data_from_resp(&response_json, series_id)?;
-        let title = Self::get_title_from_data(&data)?;
-        let description = Self::get_description_from_data(&data)?;
+        let title = Self::get_title_from_data(data)?;
+        let description = Self::get_description_from_data(data)?;
 
         info!(
             "Successfully fetched latest manga for series_id: {}",

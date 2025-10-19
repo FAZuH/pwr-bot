@@ -7,7 +7,6 @@ use super::Subscriber;
 use crate::bot::bot::Bot;
 use crate::database::database::Database;
 use crate::database::model::SubscriberType;
-use crate::database::table::Table;
 use crate::event::Event;
 use crate::event::feed_update_event::FeedUpdateEvent;
 use crate::subscriber::event_message_builder::EventMessageBuilder;

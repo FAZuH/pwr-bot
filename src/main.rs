@@ -16,33 +16,39 @@ use crate::source::sources::Sources;
 use crate::subscriber::discord_channel_subscriber::DiscordChannelSubscriber;
 use crate::subscriber::discord_dm_subscriber::DiscordDmSubscriber;
 use dotenv::dotenv;
-use log::info;
+use log::{info, debug};
 use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    debug!("Instantiating Config...");
     dotenv().ok();
     env_logger::init();
     info!("Starting pwr-bot...");
 
     let config = Arc::new(Config::new());
+    debug!("Instantiating EventBus...");
     let event_bus = Arc::new(EventBus::new());
 
     // Setup database
+    debug!("Instatiating Database...");
     let db = Arc::new(Database::new(&config.db_url, &config.db_path).await?);
     db.create_all_tables().await?;
     info!("Database setup complete.");
 
     // Setup sources
+    debug!("Instantiating Sources...");
     let sources = Arc::new(Sources::new());
 
     // Setup & start bot
+    info!("Starting bot...");
     let mut bot = Bot::new(config.clone(), db.clone(), sources.clone()).await?;
     bot.start();
     let bot = Arc::new(bot);
     info!("Bot setup complete.");
 
     // Setup subscribers
+    debug!("Instantiating Subscribers...");
     let dm_subscriber = DiscordDmSubscriber::new(bot.clone(), db.clone());
     event_bus.register_subcriber::<SeriesUpdateEvent, _>(dm_subscriber.into());
     let webhook_subscriber =
@@ -51,6 +57,7 @@ async fn main() -> anyhow::Result<()> {
     info!("Subscribers setup complete.");
 
     // Setup publishers
+    debug!("Instantiating Publishers...");
     FeedPublisher::new(
         db.clone(),
         event_bus.clone(),
