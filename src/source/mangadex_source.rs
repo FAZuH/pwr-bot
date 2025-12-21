@@ -3,14 +3,13 @@ use governor::clock::QuantaClock;
 use log::debug;
 use reqwest;
 
-use super::model::SourceResult;
-
 use super::BaseSource;
+use super::SeriesItem;
 use super::Source;
+use super::SourceResult;
 use super::SourceUrl;
 use super::error::SourceError;
 use super::error::UrlParseError;
-use super::model::SeriesItem;
 use chrono::{DateTime, Utc};
 use log::{info, warn};
 use reqwest::Client;

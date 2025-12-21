@@ -1,14 +1,13 @@
-use super::model::SourceResult;
-
 use super::error::UrlParseError;
 
-use super::model::SeriesItem;
 use async_trait::async_trait;
 use governor::clock::QuantaClock;
 use log::debug;
 
 use super::BaseSource;
+use super::SeriesItem;
 use super::Source;
+use super::SourceResult;
 use super::SourceUrl;
 use super::error::SourceError;
 use chrono::DateTime;

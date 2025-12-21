@@ -23,13 +23,15 @@ use std::sync::Arc;
 async fn main() -> anyhow::Result<()> {
     dotenv().ok();
     env_logger::init();
-    info!("Bot starting up...");
+    info!("Starting pwr-bot...");
+
     let config = Arc::new(Config::new());
     let event_bus = Arc::new(EventBus::new());
 
     // Setup database
     let db = Arc::new(Database::new(&config.db_url, &config.db_path).await?);
     db.create_all_tables().await?;
+    info!("Database setup complete.");
 
     // Setup sources
     let sources = Arc::new(Sources::new());
@@ -38,6 +40,7 @@ async fn main() -> anyhow::Result<()> {
     let mut bot = Bot::new(config.clone(), db.clone(), sources.clone()).await?;
     bot.start();
     let bot = Arc::new(bot);
+    info!("Bot setup complete.");
 
     // Setup subscribers
     let dm_subscriber = DiscordDmSubscriber::new(bot.clone(), db.clone());
@@ -45,6 +48,7 @@ async fn main() -> anyhow::Result<()> {
     let webhook_subscriber =
         DiscordWebhookSubscriber::new(bot.clone(), db.clone(), config.webhook_url.clone());
     event_bus.register_subcriber::<SeriesUpdateEvent, _>(webhook_subscriber.into());
+    info!("Subscribers setup complete.");
 
     // Setup publishers
     SeriesPublisher::new(
@@ -54,6 +58,7 @@ async fn main() -> anyhow::Result<()> {
         config.poll_interval,
     )
     .start()?;
+    info!("Publishers setup complete.");
 
     // Listen for exit signal
     info!("pwr-bot is up. Press Ctrl+C to stop.");

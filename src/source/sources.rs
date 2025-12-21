@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use super::Source;
+use super::SourceResult;
 use super::error::SourceError;
-use super::model::SourceResult;
 
 use super::anilist_source::AniListSource;
 use super::mangadex_source::MangaDexSource;

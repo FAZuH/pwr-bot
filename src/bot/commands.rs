@@ -10,7 +10,7 @@ use super::bot::Data;
 use crate::database::model::LatestResultModel;
 use crate::database::model::SubscribersModel;
 use crate::database::table::Table;
-use crate::source::model::SourceResult;
+use crate::source::SourceResult;
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
 type Context<'a> = poise::Context<'a, Data, Error>;
