@@ -1,5 +1,7 @@
 use std::str::FromStr;
 
+use log::debug;
+use log::info;
 use sqlx::SqlitePool;
 use sqlx::sqlite::SqliteConnectOptions;
 
@@ -21,30 +23,34 @@ impl Database {
     pub async fn new(db_url: &str, db_path: &str) -> anyhow::Result<Self> {
         let path = std::path::Path::new(db_path);
         if !path.exists() {
+            debug!("Database path {db_path} does not exist. Creating...");
             if let Some(parent) = path.parent() {
                 std::fs::create_dir_all(parent)?;
             }
             std::fs::write(path, "")?;
+            info!("Created {db_path}");
         }
 
+        debug!("Connecting to db...");
         let opts = SqliteConnectOptions::from_str(db_url)?.foreign_keys(true);
         let pool = SqlitePool::connect_with(opts).await?;
+        info!("Connected to db.");
 
         let feed_table = FeedTable::new(pool.clone());
-        let feed_version_table = FeedItemTable::new(pool.clone());
+        let feed_item_table = FeedItemTable::new(pool.clone());
         let subscriber_table = SubscriberTable::new(pool.clone());
         let feed_subscription_table = FeedSubscriptionTable::new(pool.clone());
 
         Ok(Self {
             pool,
             feed_table,
-            feed_item_table: feed_version_table,
+            feed_item_table,
             subscriber_table,
             feed_subscription_table,
         })
     }
 
-    pub async fn create_all_tables(&self) -> anyhow::Result<()> {
+    pub async fn run_migrations(&self) -> anyhow::Result<()> {
         sqlx::migrate!("./migrations").run(&self.pool).await?;
         Ok(())
     }

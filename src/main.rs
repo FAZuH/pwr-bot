@@ -33,9 +33,10 @@ async fn main() -> anyhow::Result<()> {
     let event_bus = Arc::new(EventBus::new());
 
     // Setup database
-    debug!("Instatiating Database...");
+    debug!("Instantiating Database...");
     let db = Arc::new(Database::new(&config.db_url, &config.db_path).await?);
-    db.create_all_tables().await?;
+    info!("Running database migrations...");
+    db.run_migrations().await?;
     info!("Database setup complete.");
 
     // Setup sources
