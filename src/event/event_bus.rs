@@ -33,7 +33,7 @@ impl EventBus {
         }
     }
 
-    pub fn register_callback<E, F, Fut>(&self, callback: F)
+    pub fn register_callback<E, F, Fut>(&self, callback: F) -> &Self
     where
         E: 'static + Send + Sync,
         F: Fn(E) -> Fut + Send + Sync + 'static,
@@ -49,9 +49,10 @@ impl EventBus {
             .entry(type_id)
             .or_default()
             .push(Box::new(wrapped_sub));
+        self
     }
 
-    pub fn register_subcriber<E, S>(&self, subscriber: Arc<S>)
+    pub fn register_subcriber<E, S>(&self, subscriber: Arc<S>) -> &Self
     where
         E: 'static + Send + Sync + Clone,
         S: Subscriber<E> + Send + Sync + 'static,
@@ -62,7 +63,7 @@ impl EventBus {
         })
     }
 
-    pub fn publish<E>(&self, event: E)
+    pub fn publish<E>(&self, event: E) -> &Self
     where
         E: 'static + Send + Sync + Clone,
     {
@@ -80,6 +81,7 @@ impl EventBus {
                 futures::future::join_all(futures).await;
             });
         }
+        self
     }
 }
 

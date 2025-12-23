@@ -16,7 +16,6 @@ use crate::bot::bot::Bot;
 use crate::config::Config;
 use crate::database::database::Database;
 use crate::event::event_bus::EventBus;
-use crate::event::feed_update_event::FeedUpdateEvent;
 use crate::feed::feeds::Feeds;
 use crate::publisher::feed_publisher::FeedPublisher;
 use crate::subscriber::discord_channel_subscriber::DiscordChannelSubscriber;
@@ -54,8 +53,9 @@ async fn main() -> anyhow::Result<()> {
     debug!("Instantiating Subscribers...");
     let dm_subscriber = DiscordDmSubscriber::new(bot.clone(), db.clone());
     let webhook_subscriber = DiscordChannelSubscriber::new(bot.clone(), db.clone());
-    event_bus.register_subcriber::<FeedUpdateEvent, _>(dm_subscriber.into());
-    event_bus.register_subcriber::<FeedUpdateEvent, _>(webhook_subscriber.into());
+    event_bus
+        .register_subcriber(dm_subscriber.into())
+        .register_subcriber(webhook_subscriber.into());
     info!("Subscribers setup complete.");
 
     // Setup publishers
