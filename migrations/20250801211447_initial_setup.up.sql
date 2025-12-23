@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS feed_items (
 );
 
 -- Entities subscribed to feeds
+CREATE TABLE IF NOT EXISTS subscribers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     type TEXT NOT NULL,
     target_id TEXT NOT NULL,
