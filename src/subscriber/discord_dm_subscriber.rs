@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use log::{debug, error, info};
+use log::debug;
+use log::error;
+use log::info;
 use poise::serenity_prelude as serenity;
 use serenity::all::UserId;
 

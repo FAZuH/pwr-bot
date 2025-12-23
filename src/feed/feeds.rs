@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
-use crate::feed::series::{SeriesFeed, SeriesItem, SeriesLatest};
-
-use crate::feed::error::SeriesError;
-
 use crate::feed::anilist_feed::AniListFeed;
+use crate::feed::error::SeriesError;
 use crate::feed::mangadex_feed::MangaDexFeed;
+use crate::feed::series::SeriesFeed;
+use crate::feed::series::SeriesItem;
+use crate::feed::series::SeriesLatest;
 
 pub struct Feeds {
     feeds: Vec<Arc<dyn SeriesFeed>>,

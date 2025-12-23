@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
-use log::{debug, error, info};
+use anyhow::Result;
+use log::debug;
+use log::error;
+use log::info;
 use serenity::all::ChannelId;
 
 use super::Subscriber;
@@ -10,7 +13,6 @@ use crate::database::model::SubscriberType;
 use crate::event::Event;
 use crate::event::feed_update_event::FeedUpdateEvent;
 use crate::subscriber::event_message_builder::EventMessageBuilder;
-use anyhow::Result;
 
 pub struct DiscordChannelSubscriber {
     bot: Arc<Bot>,

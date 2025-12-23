@@ -1,7 +1,23 @@
+use std::hash::Hash;
+use std::hash::Hasher;
+use std::num::NonZeroU32;
+
 use async_trait::async_trait;
+use chrono::DateTime;
+use chrono::Utc;
+use governor::Quota;
+use governor::RateLimiter;
 use governor::clock::QuantaClock;
+use governor::state::InMemoryState;
+use governor::state::direct::NotKeyed;
 use log::debug;
+use log::info;
+use log::warn;
 use reqwest;
+use reqwest::Client;
+use reqwest::header::HeaderMap;
+use reqwest::header::HeaderValue;
+use reqwest::header::USER_AGENT;
 use serde_json::Map;
 use serde_json::Value;
 
@@ -12,17 +28,6 @@ use crate::feed::error::UrlParseError;
 use crate::feed::series::SeriesFeed;
 use crate::feed::series::SeriesItem;
 use crate::feed::series::SeriesLatest;
-use chrono::{DateTime, Utc};
-use log::{info, warn};
-use reqwest::Client;
-use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
-use std::hash::{Hash, Hasher};
-
-use governor::{
-    Quota, RateLimiter,
-    state::{InMemoryState, direct::NotKeyed},
-};
-use std::num::NonZeroU32;
 
 type Data<'a> = &'a Map<String, Value>;
 

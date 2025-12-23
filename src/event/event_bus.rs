@@ -1,9 +1,12 @@
-use anyhow::Result;
-use std::any::{Any, TypeId};
+use std::any::Any;
+use std::any::TypeId;
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+use std::sync::RwLock;
+
+use anyhow::Result;
 use tokio::runtime;
 
 use crate::subscriber::Subscriber;

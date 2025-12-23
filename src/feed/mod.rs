@@ -1,7 +1,6 @@
-use crate::feed::{
-    error::UrlParseError,
-    series::{SeriesItem, SeriesLatest},
-};
+use crate::feed::error::UrlParseError;
+use crate::feed::series::SeriesItem;
+use crate::feed::series::SeriesLatest;
 
 pub mod anilist_feed;
 

@@ -1,15 +1,19 @@
 use std::collections::HashSet;
 
 use anyhow::Result;
-use log::{debug, error};
-use poise::{ChoiceParameter, CreateReply};
+use log::debug;
+use log::error;
+use poise::ChoiceParameter;
+use poise::CreateReply;
 use serenity::all::CreateAttachment;
 use sqlx::error::ErrorKind;
 
 use crate::bot::bot::Data;
-use crate::database::model::{
-    FeedItemModel, FeedModel, FeedSubscriptionModel, SubscriberModel, SubscriberType,
-};
+use crate::database::model::FeedItemModel;
+use crate::database::model::FeedModel;
+use crate::database::model::FeedSubscriptionModel;
+use crate::database::model::SubscriberModel;
+use crate::database::model::SubscriberType;
 use crate::database::table::Table;
 
 type Error = Box<dyn std::error::Error + Send + Sync>;

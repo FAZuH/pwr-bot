@@ -7,7 +7,6 @@ use super::table::FeedItemTable;
 use super::table::FeedSubscriptionTable;
 use super::table::FeedTable;
 use super::table::SubscriberTable;
-
 use super::table::TableBase;
 
 pub struct Database {

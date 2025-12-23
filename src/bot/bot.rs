@@ -1,3 +1,8 @@
+use std::collections::HashSet;
+use std::str::FromStr;
+use std::sync::Arc;
+use std::time::Duration;
+
 use ::serenity::all::UserId;
 use anyhow;
 use anyhow::Result;
@@ -5,16 +10,18 @@ use futures::lock::Mutex;
 use log::error;
 use log::info;
 use poise::serenity_prelude as serenity;
-use std::collections::HashSet;
-use std::str::FromStr;
-use std::sync::Arc;
-use std::time::Duration;
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
 
-use super::commands::{dump_db, help, register, subscribe, subscriptions, unsubscribe};
+use super::commands::dump_db;
+use super::commands::help;
+use super::commands::register;
+use super::commands::subscribe;
+use super::commands::subscriptions;
+use super::commands::unsubscribe;
+use crate::config::Config;
+use crate::database::database::Database;
 use crate::feed::feeds::Feeds;
-use crate::{config::Config, database::database::Database};
 
 pub struct Data {
     pub config: Arc<Config>,

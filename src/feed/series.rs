@@ -1,8 +1,11 @@
-use crate::feed::{BaseFeed, FeedUrl, error::UrlParseError};
 use async_trait::async_trait;
+use chrono::DateTime;
+use chrono::Utc;
 
+use crate::feed::BaseFeed;
+use crate::feed::FeedUrl;
 use crate::feed::error::SeriesError;
-use chrono::{DateTime, Utc};
+use crate::feed::error::UrlParseError;
 
 #[derive(Clone, Debug)]
 pub struct SeriesLatest {

@@ -1,27 +1,25 @@
-use crate::feed::SeriesItem;
-use crate::feed::series::SeriesLatest;
-
-use super::error::UrlParseError;
+use std::hash::Hash;
+use std::hash::Hasher;
+use std::num::NonZeroU32;
 
 use async_trait::async_trait;
+use chrono::DateTime;
+use governor::Quota;
+use governor::RateLimiter;
 use governor::clock::QuantaClock;
+use governor::state::InMemoryState;
+use governor::state::direct::NotKeyed;
 use log::debug;
+use log::info;
 use serde_json::Value;
 
 use super::BaseFeed;
 use super::FeedUrl;
 use super::error::SeriesError;
+use super::error::UrlParseError;
 use super::series::SeriesFeed;
-use chrono::DateTime;
-use log::info;
-
-use std::hash::{Hash, Hasher};
-
-use governor::{
-    Quota, RateLimiter,
-    state::{InMemoryState, direct::NotKeyed},
-};
-use std::num::NonZeroU32;
+use crate::feed::SeriesItem;
+use crate::feed::series::SeriesLatest;
 
 pub struct AniListFeed<'a> {
     pub base: BaseFeed<'a>,

@@ -1,3 +1,12 @@
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
+use std::time::Duration;
+
+use log::debug;
+use log::error;
+use log::info;
+
 use crate::database::database::Database;
 use crate::database::model::FeedItemModel;
 use crate::database::table::Table;
@@ -5,10 +14,6 @@ use crate::event::event_bus::EventBus;
 use crate::event::feed_update_event::FeedUpdateEvent;
 use crate::feed::error::SeriesError;
 use crate::feed::feeds::Feeds;
-use log::{debug, error, info};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
 
 pub struct FeedPublisher {
     db: Arc<Database>,

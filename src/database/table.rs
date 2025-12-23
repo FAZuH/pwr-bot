@@ -1,9 +1,12 @@
-use crate::database::model::{
-    FeedItemModel, FeedModel, FeedSubscriptionModel, SubscriberModel, SubscriberType,
-};
 use async_trait::async_trait;
 use sqlx::Error as DbError;
 use sqlx::SqlitePool;
+
+use crate::database::model::FeedItemModel;
+use crate::database::model::FeedModel;
+use crate::database::model::FeedSubscriptionModel;
+use crate::database::model::SubscriberModel;
+use crate::database::model::SubscriberType;
 
 pub struct BaseTable {
     pub pool: SqlitePool,

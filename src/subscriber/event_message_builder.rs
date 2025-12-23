@@ -1,4 +1,6 @@
-use serenity::all::{Colour, CreateEmbed, CreateMessage};
+use serenity::all::Colour;
+use serenity::all::CreateEmbed;
+use serenity::all::CreateMessage;
 
 use crate::event::feed_update_event::FeedUpdateEvent;
 

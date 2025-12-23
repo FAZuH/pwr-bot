@@ -3,14 +3,12 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use futures::lock::Mutex;
-use httpmock::{Mock, prelude::*};
+use httpmock::Mock;
+use httpmock::prelude::*;
+use pwr_bot::database::database::Database;
 use pwr_bot::database::model::latest_results_model::LatestResultModel;
 use pwr_bot::database::model::subscribers_model::SubscribersModel;
 use pwr_bot::database::table::table::Table;
-use serde_json::json;
-use tokio::time::sleep;
-
-use pwr_bot::database::database::Database;
 use pwr_bot::event::event_bus::EventBus;
 use pwr_bot::event::manga_update_event::MangaUpdateEvent;
 use pwr_bot::event::series_update_event::SeriesUpdateEvent;
@@ -19,6 +17,8 @@ use pwr_bot::feed::mangadex_feed::MangaDexFeed;
 use pwr_bot::publisher::anime_update_publisher::AnimeUpdatePublisher;
 use pwr_bot::publisher::manga_update_publisher::MangaUpdatePublisher;
 use pwr_bot::subscriber::subscriber::Subscriber;
+use serde_json::json;
+use tokio::time::sleep;
 
 #[derive(Clone)]
 struct MockMangaSubscriber {

@@ -6,17 +6,21 @@ pub mod feed;
 pub mod publisher;
 pub mod subscriber;
 
+use std::sync::Arc;
+
+use dotenv::dotenv;
+use log::debug;
+use log::info;
+
+use crate::bot::bot::Bot;
 use crate::config::Config;
 use crate::database::database::Database;
 use crate::event::event_bus::EventBus;
 use crate::event::feed_update_event::FeedUpdateEvent;
+use crate::feed::feeds::Feeds;
 use crate::publisher::feed_publisher::FeedPublisher;
 use crate::subscriber::discord_channel_subscriber::DiscordChannelSubscriber;
 use crate::subscriber::discord_dm_subscriber::DiscordDmSubscriber;
-use crate::{bot::bot::Bot, feed::feeds::Feeds};
-use dotenv::dotenv;
-use log::{debug, info};
-use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
