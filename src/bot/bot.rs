@@ -13,13 +13,13 @@ use std::time::Duration;
 type Error = Box<dyn std::error::Error + Send + Sync>;
 
 use super::commands::{dump_db, help, register, subscribe, subscriptions, unsubscribe};
-use crate::source::sources::Sources;
+use crate::feed::feeds::Feeds;
 use crate::{config::Config, database::database::Database};
 
 pub struct Data {
     pub config: Arc<Config>,
     pub db: Arc<Database>,
-    pub sources: Arc<Sources>,
+    pub sources: Arc<Feeds>,
 }
 
 pub struct Bot {
@@ -29,11 +29,7 @@ pub struct Bot {
 }
 
 impl Bot {
-    pub async fn new(
-        config: Arc<Config>,
-        db: Arc<Database>,
-        sources: Arc<Sources>,
-    ) -> Result<Self> {
+    pub async fn new(config: Arc<Config>, db: Arc<Database>, sources: Arc<Feeds>) -> Result<Self> {
         info!("Initializing bot...");
         let options = poise::FrameworkOptions {
             commands: vec![

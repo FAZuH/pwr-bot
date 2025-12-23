@@ -6,12 +6,11 @@ use poise::{ChoiceParameter, CreateReply};
 use serenity::all::CreateAttachment;
 use sqlx::error::ErrorKind;
 
-use super::bot::Data;
+use crate::bot::bot::Data;
 use crate::database::model::{
-    FeedModel, FeedSubscriptionModel, FeedVersionModel, SubscriberModel, SubscriberType,
+    FeedItemModel, FeedModel, FeedSubscriptionModel, SubscriberModel, SubscriberType,
 };
 use crate::database::table::Table;
-use crate::source::SourceResult;
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
 type Context<'a> = poise::Context<'a, Data, Error>;
@@ -75,8 +74,16 @@ pub async fn subscribe(
 
     for link in links_split {
         // Fetch latest from source
-        let series_item = match data.sources.get_latest_by_url(link).await {
-            Ok(SourceResult::Series(res)) => res,
+        let source = match data.sources.get_feed_by_url(link) {
+            Some(source) => source,
+            None => {
+                ctx.reply(format!("❌ Unsupported link: <{link}>")).await?;
+                return Ok(());
+            }
+        };
+
+        let series_latest = match source.get_latest(link).await {
+            Ok(res) => res,
             Err(e) => {
                 ctx.reply(format!("❌ Invalid link: <{link}>")).await?;
                 debug!("{}", e);
@@ -85,28 +92,36 @@ pub async fn subscribe(
         };
 
         // Get or create feed
-        let feed_id = match data.db.feed_table.select_by_url(&series_item.url).await {
-            Ok(existing_feed) => existing_feed.id,
+        let feed = match data.db.feed_table.select_by_url(&series_latest.url).await {
+            Ok(feed) => feed,
             Err(_) => {
                 // Feed doesn't exist, create it
+                let series_info = match source.get_info(link).await {
+                    Ok(res) => res,
+                    Err(e) => {
+                        ctx.reply(format!("❌ Invalid link: <{link}>")).await?;
+                        debug!("{}", e);
+                        continue;
+                    }
+                };
                 let feed = FeedModel {
-                    name: series_item.title.clone(),
-                    url: series_item.url.clone(),
+                    name: series_info.title.clone(),
+                    url: series_info.url.clone(),
                     tags: "series".to_string(),
                     ..Default::default()
                 };
                 let feed_id = data.db.feed_table.insert(&feed).await?;
 
                 // Create initial version
-                let version = FeedVersionModel {
+                let version = FeedItemModel {
                     feed_id,
-                    version: series_item.latest.clone(),
-                    published: series_item.published,
+                    description: series_latest.latest.clone(),
+                    published: series_latest.published,
                     ..Default::default()
                 };
-                data.db.feed_version_table.insert(&version).await?;
+                data.db.feed_item_table.insert(&version).await?;
 
-                feed_id
+                feed
             }
         };
 
@@ -131,7 +146,7 @@ pub async fn subscribe(
 
         // Create subscription
         let subscription = FeedSubscriptionModel {
-            feed_id,
+            feed_id: feed.id,
             subscriber_id,
             ..Default::default()
         };
@@ -140,7 +155,7 @@ pub async fn subscribe(
             Ok(_) => {
                 ctx.reply(format!(
                     "✅ Successfully subscribed to \"{}\". Notifications will be sent to {}",
-                    series_item.title, send_into
+                    feed.name, send_into
                 ))
                 .await?;
             }
@@ -148,7 +163,7 @@ pub async fn subscribe(
                 let err_msg = err.to_string();
                 if let Some(db_err) = err.into_database_error() {
                     if matches!(db_err.kind(), ErrorKind::UniqueViolation) {
-                        ctx.reply(format!("❌ Already subscribed to {}", series_item.title))
+                        ctx.reply(format!("❌ Already subscribed to {}", feed.name))
                             .await?;
                     } else {
                         ctx.reply(format!("⚠️ Unknown error: {db_err:?}")).await?;
@@ -192,7 +207,7 @@ pub async fn unsubscribe(
 
     for link in links.split(',').map(|s| s.trim()) {
         // Get source and normalize URL
-        let source = match data.sources.get_source_by_url(link) {
+        let source = match data.sources.get_feed_by_url(link) {
             Some(source) => source,
             None => {
                 ctx.reply(format!("❌ Unsupported link: <{link}>")).await?;
@@ -302,11 +317,11 @@ pub async fn subscriptions(
         // Get latest version
         let latest = match data
             .db
-            .feed_version_table
+            .feed_item_table
             .select_latest_by_feed_id(feed.id)
             .await
         {
-            Ok(ver) => ver.version,
+            Ok(ver) => ver.description,
             Err(_) => "Unknown".to_string(),
         };
 
@@ -352,7 +367,7 @@ pub async fn dump_db(ctx: Context<'_>) -> Result<(), Error> {
     let data = ctx.data();
 
     let feeds = data.db.feed_table.select_all().await?;
-    let versions = data.db.feed_version_table.select_all().await?;
+    let versions = data.db.feed_item_table.select_all().await?;
     let subscribers = data.db.subscriber_table.select_all().await?;
     let subscriptions = data.db.feed_subscription_table.select_all().await?;
 

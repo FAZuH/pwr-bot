@@ -37,14 +37,14 @@ pub struct FeedModel {
 /// chapter, or post creates a new version entry. The latest version can be
 /// determined by querying for the most recent `published` timestamp.
 #[derive(FromRow, Serialize, Default)]
-pub struct FeedVersionModel {
+pub struct FeedItemModel {
     #[serde(default)]
     pub id: i32,
     #[serde(default)]
     pub feed_id: i32,
     /// Human-readable version identifier (e.g., "S2E1", "Chapter 127")
     #[serde(default)]
-    pub version: String,
+    pub description: String,
     #[serde(default)]
     pub published: DateTime<Utc>,
 }

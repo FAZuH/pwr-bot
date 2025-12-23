@@ -1,5 +1,5 @@
 use crate::database::model::{
-    FeedModel, FeedSubscriptionModel, FeedVersionModel, SubscriberModel, SubscriberType,
+    FeedItemModel, FeedModel, FeedSubscriptionModel, SubscriberModel, SubscriberType,
 };
 use async_trait::async_trait;
 use sqlx::Error as DbError;
@@ -170,11 +170,11 @@ impl Table<FeedModel, i32> for FeedTable {
 // FeedVersionTable
 // ============================================================================
 
-pub struct FeedVersionTable {
+pub struct FeedItemTable {
     base: BaseTable,
 }
 
-impl FeedVersionTable {
+impl FeedItemTable {
     pub fn new(pool: SqlitePool) -> Self {
         Self {
             base: BaseTable::new(pool),
@@ -182,12 +182,9 @@ impl FeedVersionTable {
     }
 
     /// Get the latest version for a specific feed
-    pub async fn select_latest_by_feed_id(
-        &self,
-        feed_id: i32,
-    ) -> Result<FeedVersionModel, DbError> {
-        sqlx::query_as::<_, FeedVersionModel>(
-            "SELECT * FROM feed_versions WHERE feed_id = ? ORDER BY published DESC LIMIT 1",
+    pub async fn select_latest_by_feed_id(&self, feed_id: i32) -> Result<FeedItemModel, DbError> {
+        sqlx::query_as::<_, FeedItemModel>(
+            "SELECT * FROM feed_items WHERE feed_id = ? ORDER BY published DESC LIMIT 1",
         )
         .bind(feed_id)
         .fetch_one(&self.base.pool)
@@ -195,12 +192,9 @@ impl FeedVersionTable {
     }
 
     /// Get all versions for a specific feed, ordered by published date
-    pub async fn select_all_by_feed_id(
-        &self,
-        feed_id: i32,
-    ) -> Result<Vec<FeedVersionModel>, DbError> {
-        sqlx::query_as::<_, FeedVersionModel>(
-            "SELECT * FROM feed_versions WHERE feed_id = ? ORDER BY published DESC",
+    pub async fn select_all_by_feed_id(&self, feed_id: i32) -> Result<Vec<FeedItemModel>, DbError> {
+        sqlx::query_as::<_, FeedItemModel>(
+            "SELECT * FROM feed_items WHERE feed_id = ? ORDER BY published DESC",
         )
         .bind(feed_id)
         .fetch_all(&self.base.pool)
@@ -209,7 +203,7 @@ impl FeedVersionTable {
 
     /// Delete all versions for a specific feed
     pub async fn delete_all_by_feed_id(&self, feed_id: i32) -> Result<(), DbError> {
-        sqlx::query("DELETE FROM feed_versions WHERE feed_id = ?")
+        sqlx::query("DELETE FROM feed_items WHERE feed_id = ?")
             .bind(feed_id)
             .execute(&self.base.pool)
             .await?;
@@ -218,13 +212,13 @@ impl FeedVersionTable {
 }
 
 #[async_trait]
-impl TableBase for FeedVersionTable {
+impl TableBase for FeedItemTable {
     async fn create_table(&self) -> Result<(), DbError> {
         sqlx::query(
-            r#"CREATE TABLE IF NOT EXISTS feed_versions (
+            r#"CREATE TABLE IF NOT EXISTS feed_items (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 feed_id INTEGER NOT NULL,
-                version TEXT NOT NULL,
+                description TEXT NOT NULL,
                 published TIMESTAMP NOT NULL,
                 FOREIGN KEY (feed_id) REFERENCES feeds(id)
                     ON DELETE CASCADE
@@ -237,14 +231,14 @@ impl TableBase for FeedVersionTable {
     }
 
     async fn drop_table(&self) -> Result<(), DbError> {
-        sqlx::query("DROP TABLE IF EXISTS feed_versions")
+        sqlx::query("DROP TABLE IF EXISTS feed_items")
             .execute(&self.base.pool)
             .await?;
         Ok(())
     }
 
     async fn delete_all(&self) -> Result<(), DbError> {
-        sqlx::query("DELETE FROM feed_versions")
+        sqlx::query("DELETE FROM feed_items")
             .execute(&self.base.pool)
             .await?;
         Ok(())
@@ -252,37 +246,37 @@ impl TableBase for FeedVersionTable {
 }
 
 #[async_trait]
-impl Table<FeedVersionModel, i32> for FeedVersionTable {
-    async fn select_all(&self) -> Result<Vec<FeedVersionModel>, DbError> {
-        sqlx::query_as::<_, FeedVersionModel>("SELECT * FROM feed_versions ORDER BY published DESC")
+impl Table<FeedItemModel, i32> for FeedItemTable {
+    async fn select_all(&self) -> Result<Vec<FeedItemModel>, DbError> {
+        sqlx::query_as::<_, FeedItemModel>("SELECT * FROM feed_items ORDER BY published DESC")
             .fetch_all(&self.base.pool)
             .await
     }
 
-    async fn select(&self, id: &i32) -> Result<FeedVersionModel, DbError> {
-        sqlx::query_as::<_, FeedVersionModel>("SELECT * FROM feed_versions WHERE id = ?")
+    async fn select(&self, id: &i32) -> Result<FeedItemModel, DbError> {
+        sqlx::query_as::<_, FeedItemModel>("SELECT * FROM feed_items WHERE id = ?")
             .bind(id)
             .fetch_one(&self.base.pool)
             .await
     }
 
-    async fn insert(&self, model: &FeedVersionModel) -> Result<i32, DbError> {
+    async fn insert(&self, model: &FeedItemModel) -> Result<i32, DbError> {
         let res =
-            sqlx::query("INSERT INTO feed_versions (feed_id, version, published) VALUES (?, ?, ?)")
+            sqlx::query("INSERT INTO feed_items (feed_id, version, published) VALUES (?, ?, ?)")
                 .bind(model.feed_id)
-                .bind(&model.version)
+                .bind(&model.description)
                 .bind(model.published)
                 .execute(&self.base.pool)
                 .await?;
         Ok(res.last_insert_rowid() as i32)
     }
 
-    async fn update(&self, model: &FeedVersionModel) -> Result<(), DbError> {
+    async fn update(&self, model: &FeedItemModel) -> Result<(), DbError> {
         sqlx::query(
-            "UPDATE feed_versions SET feed_id = ?, version = ?, published = ? WHERE id = ?",
+            "UPDATE feed_items SET feed_id = ?, description = ?, published = ? WHERE id = ?",
         )
         .bind(model.feed_id)
-        .bind(&model.version)
+        .bind(&model.description)
         .bind(model.published)
         .bind(model.id)
         .execute(&self.base.pool)
@@ -291,22 +285,21 @@ impl Table<FeedVersionModel, i32> for FeedVersionTable {
     }
 
     async fn delete(&self, id: &i32) -> Result<(), DbError> {
-        sqlx::query("DELETE FROM feed_versions WHERE id = ?")
+        sqlx::query("DELETE FROM feed_items WHERE id = ?")
             .bind(id)
             .execute(&self.base.pool)
             .await?;
         Ok(())
     }
 
-    async fn replace(&self, model: &FeedVersionModel) -> Result<i32, DbError> {
-        let res = sqlx::query(
-            "REPLACE INTO feed_versions (feed_id, version, published) VALUES (?, ?, ?)",
-        )
-        .bind(model.feed_id)
-        .bind(&model.version)
-        .bind(model.published)
-        .execute(&self.base.pool)
-        .await?;
+    async fn replace(&self, model: &FeedItemModel) -> Result<i32, DbError> {
+        let res =
+            sqlx::query("REPLACE INTO feed_items (feed_id, version, published) VALUES (?, ?, ?)")
+                .bind(model.feed_id)
+                .bind(&model.description)
+                .bind(model.published)
+                .execute(&self.base.pool)
+                .await?;
         Ok(res.last_insert_rowid() as i32)
     }
 }
@@ -488,14 +481,12 @@ impl FeedSubscriptionTable {
     }
 
     /// Check if a subscription exists
-    pub async fn exists(&self, feed_id: i32, subscriber_id: i32) -> Result<bool, DbError> {
-        let count: (i32,) = sqlx::query_as(
-            "SELECT COUNT(*) FROM feed_subscriptions WHERE feed_id = ? AND subscriber_id = ?",
-        )
-        .bind(feed_id)
-        .bind(subscriber_id)
-        .fetch_one(&self.base.pool)
-        .await?;
+    pub async fn exists_by_feed_id(&self, feed_id: i32) -> Result<bool, DbError> {
+        let count: (i32,) =
+            sqlx::query_as("SELECT COUNT(*) FROM feed_subscriptions WHERE feed_id = ?")
+                .bind(feed_id)
+                .fetch_one(&self.base.pool)
+                .await?;
         Ok(count.0 > 0)
     }
 

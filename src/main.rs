@@ -2,30 +2,29 @@ pub mod bot;
 pub mod config;
 pub mod database;
 pub mod event;
+pub mod feed;
 pub mod publisher;
-pub mod source;
 pub mod subscriber;
 
-use crate::bot::bot::Bot;
 use crate::config::Config;
 use crate::database::database::Database;
 use crate::event::event_bus::EventBus;
 use crate::event::feed_update_event::FeedUpdateEvent;
 use crate::publisher::feed_publisher::FeedPublisher;
-use crate::source::sources::Sources;
 use crate::subscriber::discord_channel_subscriber::DiscordChannelSubscriber;
 use crate::subscriber::discord_dm_subscriber::DiscordDmSubscriber;
+use crate::{bot::bot::Bot, feed::feeds::Feeds};
 use dotenv::dotenv;
-use log::{info, debug};
+use log::{debug, info};
 use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    debug!("Instantiating Config...");
     dotenv().ok();
     env_logger::init();
     info!("Starting pwr-bot...");
 
+    debug!("Instantiating Config...");
     let config = Arc::new(Config::new());
     debug!("Instantiating EventBus...");
     let event_bus = Arc::new(EventBus::new());
@@ -38,7 +37,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Setup sources
     debug!("Instantiating Sources...");
-    let sources = Arc::new(Sources::new());
+    let sources = Arc::new(Feeds::new());
 
     // Setup & start bot
     info!("Starting bot...");
@@ -50,10 +49,9 @@ async fn main() -> anyhow::Result<()> {
     // Setup subscribers
     debug!("Instantiating Subscribers...");
     let dm_subscriber = DiscordDmSubscriber::new(bot.clone(), db.clone());
-    event_bus.register_subcriber::<SeriesUpdateEvent, _>(dm_subscriber.into());
-    let webhook_subscriber =
-        DiscordWebhookSubscriber::new(bot.clone(), db.clone(), config.webhook_url.clone());
-    event_bus.register_subcriber::<SeriesUpdateEvent, _>(webhook_subscriber.into());
+    let webhook_subscriber = DiscordChannelSubscriber::new(bot.clone(), db.clone());
+    event_bus.register_subcriber::<FeedUpdateEvent, _>(dm_subscriber.into());
+    event_bus.register_subcriber::<FeedUpdateEvent, _>(webhook_subscriber.into());
     info!("Subscribers setup complete.");
 
     // Setup publishers

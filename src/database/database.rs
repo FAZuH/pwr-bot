@@ -3,9 +3,9 @@ use std::str::FromStr;
 use sqlx::SqlitePool;
 use sqlx::sqlite::SqliteConnectOptions;
 
+use super::table::FeedItemTable;
 use super::table::FeedSubscriptionTable;
 use super::table::FeedTable;
-use super::table::FeedVersionTable;
 use super::table::SubscriberTable;
 
 use super::table::TableBase;
@@ -13,7 +13,7 @@ use super::table::TableBase;
 pub struct Database {
     pub pool: SqlitePool,
     pub feed_table: FeedTable,
-    pub feed_version_table: FeedVersionTable,
+    pub feed_item_table: FeedItemTable,
     pub subscriber_table: SubscriberTable,
     pub feed_subscription_table: FeedSubscriptionTable,
 }
@@ -32,14 +32,14 @@ impl Database {
         let pool = SqlitePool::connect_with(opts).await?;
 
         let feed_table = FeedTable::new(pool.clone());
-        let feed_version_table = FeedVersionTable::new(pool.clone());
+        let feed_version_table = FeedItemTable::new(pool.clone());
         let subscriber_table = SubscriberTable::new(pool.clone());
         let feed_subscription_table = FeedSubscriptionTable::new(pool.clone());
 
         Ok(Self {
             pool,
             feed_table,
-            feed_version_table,
+            feed_item_table: feed_version_table,
             subscriber_table,
             feed_subscription_table,
         })
@@ -52,7 +52,7 @@ impl Database {
 
     pub async fn drop_all_tables(&self) -> anyhow::Result<()> {
         self.feed_table.drop_table().await?;
-        self.feed_version_table.drop_table().await?;
+        self.feed_item_table.drop_table().await?;
         self.subscriber_table.drop_table().await?;
         self.feed_subscription_table.drop_table().await?;
         Ok(())
@@ -60,7 +60,7 @@ impl Database {
 
     pub async fn delete_all_tables(&self) -> anyhow::Result<()> {
         self.feed_table.delete_all().await?;
-        self.feed_version_table.delete_all().await?;
+        self.feed_item_table.delete_all().await?;
         self.subscriber_table.delete_all().await?;
         self.feed_subscription_table.delete_all().await?;
         Ok(())

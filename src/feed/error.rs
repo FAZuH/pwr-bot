@@ -1,22 +1,3 @@
-pub struct Error {
-    pub kind: ErrorKind,
-    pub message: String,
-}
-
-impl Error {
-    pub fn new(kind: ErrorKind, message: String) -> Self {
-        Self { kind, message }
-    }
-
-    pub fn kind(&self) -> &ErrorKind {
-        &self.kind
-    }
-
-    pub fn message(&self) -> &str {
-        &self.message
-    }
-}
-
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum UrlParseError {
@@ -35,7 +16,7 @@ pub enum UrlParseError {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum SourceError {
+pub enum SeriesError {
     #[error("HTTP request failed: {0}")]
     RequestFailed(#[from] reqwest::Error),
 
@@ -43,7 +24,10 @@ pub enum SourceError {
     JsonParseFailed(#[from] serde_json::Error),
 
     #[error("Series not found with ID: {series_id}")]
-    SeriesNotFound { series_id: String },
+    SeriesItemNotFound { series_id: String },
+
+    #[error("Latest item not found for series with ID: {series_id}")]
+    SeriesLatestNotFound { series_id: String },
 
     #[error("Series finished for series ID: {series_id}")]
     FinishedSeries { series_id: String },
@@ -69,14 +53,14 @@ pub enum SourceError {
     #[error("Unsupported url: {url}")]
     UnsupportedUrl { url: String },
 
-    #[error("Wrong result type when downcasting")]
-    WrongResultType,
+    #[error("Unexpected result: {message}")]
+    UnexpectedResult { message: String },
 
     #[error("URL parse error: {0}")]
     UrlParseFailed(#[from] UrlParseError),
 }
 
-pub enum ErrorKind {
-    SourceError(SourceError),
+pub enum FeedErrorKind {
+    SeriesError(SeriesError),
     UrlParseError(UrlParseError),
 }

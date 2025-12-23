@@ -10,9 +10,10 @@ use crate::subscriber::Subscriber;
 
 type AsyncSubscriber<E> =
     Box<dyn Fn(E) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> + Send + Sync>;
+type Subscribers = Arc<RwLock<HashMap<TypeId, Vec<Box<dyn Any + Send + Sync>>>>>;
 
 pub struct EventBus {
-    subscribers: Arc<RwLock<HashMap<TypeId, Vec<Box<dyn Any + Send + Sync>>>>>,
+    subscribers: Subscribers,
     rt: runtime::Runtime,
 }
 

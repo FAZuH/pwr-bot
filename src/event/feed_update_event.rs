@@ -10,10 +10,15 @@ use super::Event;
 pub struct FeedUpdateEvent {
     pub feed_id: i32,
     pub version_id: i32,
+    /// Title of this feed.
     pub title: String,
     pub previous_version: String,
     pub current_version: String,
+    /// URL of this feed.
     pub url: String,
+    /// Description of this feed.
+    pub description: String,
+    /// Time this feed item is published.
     pub published: DateTime<Utc>,
 }
 
