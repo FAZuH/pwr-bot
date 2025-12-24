@@ -130,13 +130,14 @@ impl Table<FeedModel, i32> for FeedTable {
     }
 
     async fn insert(&self, model: &FeedModel) -> Result<i32, DbError> {
-        let res = sqlx::query("INSERT INTO feeds (name, url, tags) VALUES (?, ?, ?)")
-            .bind(&model.name)
-            .bind(&model.url)
-            .bind(&model.tags)
-            .execute(&self.base.pool)
-            .await?;
-        Ok(res.last_insert_rowid() as i32)
+        let row: (i32,) =
+            sqlx::query_as("INSERT INTO feeds (name, url, tags) VALUES (?, ?, ?) RETURNING id")
+                .bind(&model.name)
+                .bind(&model.url)
+                .bind(&model.tags)
+                .fetch_one(&self.base.pool)
+                .await?;
+        Ok(row.0)
     }
 
     async fn update(&self, model: &FeedModel) -> Result<(), DbError> {
@@ -159,13 +160,14 @@ impl Table<FeedModel, i32> for FeedTable {
     }
 
     async fn replace(&self, model: &FeedModel) -> Result<i32, DbError> {
-        let res = sqlx::query("REPLACE INTO feeds (name, url, tags) VALUES (?, ?, ?)")
-            .bind(&model.name)
-            .bind(&model.url)
-            .bind(&model.tags)
-            .execute(&self.base.pool)
-            .await?;
-        Ok(res.last_insert_rowid() as i32)
+        let row: (i32,) =
+            sqlx::query_as("REPLACE INTO feeds (name, url, tags) VALUES (?, ?, ?) RETURNING id")
+                .bind(&model.name)
+                .bind(&model.url)
+                .bind(&model.tags)
+                .fetch_one(&self.base.pool)
+                .await?;
+        Ok(row.0)
     }
 }
 
@@ -264,14 +266,15 @@ impl Table<FeedItemModel, i32> for FeedItemTable {
     }
 
     async fn insert(&self, model: &FeedItemModel) -> Result<i32, DbError> {
-        let res =
-            sqlx::query("INSERT INTO feed_items (feed_id, version, published) VALUES (?, ?, ?)")
-                .bind(model.feed_id)
-                .bind(&model.description)
-                .bind(model.published)
-                .execute(&self.base.pool)
-                .await?;
-        Ok(res.last_insert_rowid() as i32)
+        let row: (i32,) = sqlx::query_as(
+            "INSERT INTO feed_items (feed_id, description, published) VALUES (?, ?, ?) RETURNING id",
+        )
+        .bind(model.feed_id)
+        .bind(&model.description)
+        .bind(model.published)
+        .fetch_one(&self.base.pool)
+        .await?;
+        Ok(row.0)
     }
 
     async fn update(&self, model: &FeedItemModel) -> Result<(), DbError> {
@@ -296,14 +299,15 @@ impl Table<FeedItemModel, i32> for FeedItemTable {
     }
 
     async fn replace(&self, model: &FeedItemModel) -> Result<i32, DbError> {
-        let res =
-            sqlx::query("REPLACE INTO feed_items (feed_id, version, published) VALUES (?, ?, ?)")
-                .bind(model.feed_id)
-                .bind(&model.description)
-                .bind(model.published)
-                .execute(&self.base.pool)
-                .await?;
-        Ok(res.last_insert_rowid() as i32)
+        let row: (i32,) = sqlx::query_as(
+            "REPLACE INTO feed_items (feed_id, description, published) VALUES (?, ?, ?) RETURNING id",
+        )
+        .bind(model.feed_id)
+        .bind(&model.description)
+        .bind(model.published)
+        .fetch_one(&self.base.pool)
+        .await?;
+        Ok(row.0)
     }
 }
 
@@ -406,12 +410,13 @@ impl Table<SubscriberModel, i32> for SubscriberTable {
     }
 
     async fn insert(&self, model: &SubscriberModel) -> Result<i32, DbError> {
-        let res = sqlx::query("INSERT INTO subscribers (type, target_id) VALUES (?, ?)")
-            .bind(model.r#type)
-            .bind(&model.target_id)
-            .execute(&self.base.pool)
-            .await?;
-        Ok(res.last_insert_rowid() as i32)
+        let row: (i32,) =
+            sqlx::query_as("INSERT INTO subscribers (type, target_id) VALUES (?, ?) RETURNING id")
+                .bind(model.r#type)
+                .bind(&model.target_id)
+                .fetch_one(&self.base.pool)
+                .await?;
+        Ok(row.0)
     }
 
     async fn update(&self, model: &SubscriberModel) -> Result<(), DbError> {
@@ -433,12 +438,13 @@ impl Table<SubscriberModel, i32> for SubscriberTable {
     }
 
     async fn replace(&self, model: &SubscriberModel) -> Result<i32, DbError> {
-        let res = sqlx::query("REPLACE INTO subscribers (type, target_id) VALUES (?, ?)")
-            .bind(model.r#type)
-            .bind(&model.target_id)
-            .execute(&self.base.pool)
-            .await?;
-        Ok(res.last_insert_rowid() as i32)
+        let row: (i32,) =
+            sqlx::query_as("REPLACE INTO subscribers (type, target_id) VALUES (?, ?) RETURNING id")
+                .bind(model.r#type)
+                .bind(&model.target_id)
+                .fetch_one(&self.base.pool)
+                .await?;
+        Ok(row.0)
     }
 }
 
@@ -580,13 +586,14 @@ impl Table<FeedSubscriptionModel, i32> for FeedSubscriptionTable {
     }
 
     async fn insert(&self, model: &FeedSubscriptionModel) -> Result<i32, DbError> {
-        let res =
-            sqlx::query("INSERT INTO feed_subscriptions (feed_id, subscriber_id) VALUES (?, ?)")
-                .bind(model.feed_id)
-                .bind(model.subscriber_id)
-                .execute(&self.base.pool)
-                .await?;
-        Ok(res.last_insert_rowid() as i32)
+        let row: (i32,) = sqlx::query_as(
+            "INSERT INTO feed_subscriptions (feed_id, subscriber_id) VALUES (?, ?) RETURNING id",
+        )
+        .bind(model.feed_id)
+        .bind(model.subscriber_id)
+        .fetch_one(&self.base.pool)
+        .await?;
+        Ok(row.0)
     }
 
     async fn update(&self, model: &FeedSubscriptionModel) -> Result<(), DbError> {
@@ -608,12 +615,13 @@ impl Table<FeedSubscriptionModel, i32> for FeedSubscriptionTable {
     }
 
     async fn replace(&self, model: &FeedSubscriptionModel) -> Result<i32, DbError> {
-        let res =
-            sqlx::query("REPLACE INTO feed_subscriptions (feed_id, subscriber_id) VALUES (?, ?)")
-                .bind(model.feed_id)
-                .bind(model.subscriber_id)
-                .execute(&self.base.pool)
-                .await?;
-        Ok(res.last_insert_rowid() as i32)
+        let row: (i32,) = sqlx::query_as(
+            "REPLACE INTO feed_subscriptions (feed_id, subscriber_id) VALUES (?, ?) RETURNING id",
+        )
+        .bind(model.feed_id)
+        .bind(model.subscriber_id)
+        .fetch_one(&self.base.pool)
+        .await?;
+        Ok(row.0)
     }
 }

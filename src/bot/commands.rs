@@ -1,7 +1,6 @@
 use std::collections::HashSet;
 
 use anyhow::Result;
-use log::debug;
 use log::error;
 use poise::ChoiceParameter;
 use poise::CreateReply;
@@ -15,6 +14,7 @@ use crate::database::model::FeedSubscriptionModel;
 use crate::database::model::SubscriberModel;
 use crate::database::model::SubscriberType;
 use crate::database::table::Table;
+use crate::feed::error::SeriesError;
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
 type Context<'a> = poise::Context<'a, Data, Error>;
@@ -77,48 +77,33 @@ pub async fn subscribe(
     }
 
     for link in links_split {
-        // Fetch latest from source
-        let source = match data.sources.get_feed_by_url(link) {
-            Some(source) => source,
-            None => {
-                ctx.reply(format!("❌ Unsupported link: <{link}>")).await?;
-                return Ok(());
-            }
-        };
-
-        let series_latest = match source.get_latest(link).await {
-            Ok(res) => res,
-            Err(e) => {
-                ctx.reply(format!("❌ Invalid link: <{link}>")).await?;
-                debug!("{}", e);
-                continue;
-            }
-        };
+        let source =
+            data.sources
+                .get_feed_by_url(link)
+                .ok_or_else(|| SeriesError::UnsupportedUrl {
+                    url: link.to_string(),
+                })?;
+        let id = source.get_id_from_url(link)?;
+        let series_latest = source.get_latest(id).await?;
 
         // Get or create feed
         let feed = match data.db.feed_table.select_by_url(&series_latest.url).await {
             Ok(feed) => feed,
             Err(_) => {
                 // Feed doesn't exist, create it
-                let series_info = match source.get_info(link).await {
-                    Ok(res) => res,
-                    Err(e) => {
-                        ctx.reply(format!("❌ Invalid link: <{link}>")).await?;
-                        debug!("{}", e);
-                        continue;
-                    }
-                };
-                let feed = FeedModel {
+                let series_info = source.get_info(id).await?;
+
+                let mut feed = FeedModel {
                     name: series_info.title.clone(),
                     url: series_info.url.clone(),
                     tags: "series".to_string(),
                     ..Default::default()
                 };
-                let feed_id = data.db.feed_table.insert(&feed).await?;
+                feed.id = data.db.feed_table.insert(&feed).await?;
 
                 // Create initial version
                 let version = FeedItemModel {
-                    feed_id,
+                    feed_id: feed.id,
                     description: series_latest.latest.clone(),
                     published: series_latest.published,
                     ..Default::default()
@@ -130,12 +115,12 @@ pub async fn subscribe(
         };
 
         // Get or create subscriber
-        let subscriber_id = match data
+        let subscriber = data
             .db
             .subscriber_table
             .select_by_type_and_target(subscriber_type, &target_id)
-            .await
-        {
+            .await;
+        let subscriber_id = match subscriber {
             Ok(existing) => existing.id,
             Err(_) => {
                 // Subscriber doesn't exist, create it
@@ -154,7 +139,6 @@ pub async fn subscribe(
             subscriber_id,
             ..Default::default()
         };
-
         match data.db.feed_subscription_table.insert(&subscription).await {
             Ok(_) => {
                 ctx.reply(format!(
