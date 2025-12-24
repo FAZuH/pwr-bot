@@ -22,6 +22,9 @@
 pub enum AppError {
     #[error("Assertion error: {msg}")]
     AssertionError { msg: String },
+
+    #[error("Missing config with key \"{key}\"")]
+    MissingConfig { key: String },
 }
 
 pub enum AppErrorKind {

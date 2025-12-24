@@ -1,6 +1,7 @@
 pub mod bot;
 pub mod config;
 pub mod database;
+pub mod error;
 pub mod event;
 pub mod feed;
 pub mod publisher;
@@ -28,7 +29,10 @@ async fn main() -> anyhow::Result<()> {
     info!("Starting pwr-bot...");
 
     debug!("Instantiating Config...");
-    let config = Arc::new(Config::new());
+    let mut config = Config::new();
+    config.load()?;
+    let config = Arc::new(config);
+
     debug!("Instantiating EventBus...");
     let event_bus = Arc::new(EventBus::new());
 

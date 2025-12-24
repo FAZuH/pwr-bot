@@ -5,7 +5,9 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::RwLock;
+
 use anyhow::Result;
+
 use crate::subscriber::Subscriber;
 
 type AsyncSubscriber<E> =
