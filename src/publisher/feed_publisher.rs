@@ -63,7 +63,6 @@ impl FeedPublisher {
         tokio::spawn(async move {
             loop {
                 interval.tick().await;
-                debug!("Tick.");
                 if !self.running.load(Ordering::SeqCst) {
                     info!("Stopping check loop.");
                     break;
