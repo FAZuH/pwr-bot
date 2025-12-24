@@ -88,14 +88,31 @@ impl MangaDexFeed<'_> {
             })
     }
 
+    /// Get title from `/manga/{id}` endpoint response.
+    ///
+    /// Priority: title.en > altTitles.en > title.ja-ro > altTitles.ja-ro > title.ja > altTitles.ja
+    /// I apologize in advance to the future me for this mess
     fn get_title_from_data(data: Data) -> Result<String, SeriesError> {
-        Ok(data["attributes"]["title"]["en"]
-            .as_str()
-            .or_else(|| data["attributes"]["title"]["ja"].as_str())
-            .ok_or_else(|| SeriesError::MissingField {
-                field: "title.en or title.ja".to_string(),
-            })?
-            .to_string())
+        let attr = &data["attributes"];
+        let langs = ["en", "ja-ro", "ja"];
+
+        for lang in langs {
+            if let Some(title) = attr["title"][lang].as_str() {
+                return Ok(title.to_string());
+            }
+
+            if let Some(alt_titles) = attr["altTitles"].as_array() {
+                for alt_title in alt_titles {
+                    if let Some(title) = alt_title[lang].as_str() {
+                        return Ok(title.to_string());
+                    }
+                }
+            }
+        }
+
+        Err(SeriesError::MissingField {
+            field: "title or altTitles in en/ja-ro/ja".to_string(),
+        })
     }
 
     fn get_description_from_data(data: Data) -> Result<String, SeriesError> {
