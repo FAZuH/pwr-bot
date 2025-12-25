@@ -7,7 +7,7 @@ use crate::feed::FeedUrl;
 use crate::feed::error::SeriesError;
 use crate::feed::error::UrlParseError;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct SeriesLatest {
     pub id: String,
     pub series_id: String,
@@ -19,15 +19,17 @@ pub struct SeriesLatest {
     pub published: DateTime<Utc>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct SeriesItem {
     pub id: String,
     ///  Human readable title, e.g., "One Piece", "Attack on Titan".
     pub title: String,
-    /// Url of the series, e.g., "https://mangadex.org/title/1234567890".
-    pub url: String,
     /// Description of the series.
     pub description: String,
+    /// Url of the series, e.g., "https://mangadex.org/title/1234567890".
+    pub url: String,
+    /// Cover url of the series.
+    pub cover_url: Option<String>,
 }
 
 #[async_trait]

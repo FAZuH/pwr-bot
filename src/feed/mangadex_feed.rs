@@ -29,7 +29,7 @@ use crate::feed::series::SeriesFeed;
 use crate::feed::series::SeriesItem;
 use crate::feed::series::SeriesLatest;
 
-type Data<'a> = &'a Map<String, Value>;
+type Json<'a> = &'a Map<String, Value>;
 
 pub struct MangaDexFeed<'a> {
     pub base: BaseFeed<'a>,
@@ -64,7 +64,7 @@ impl MangaDexFeed<'_> {
         }
     }
 
-    fn check_resp_errors(resp: &Value) -> Result<(), SeriesError> {
+    fn check_resp_errors(&self, resp: &Value) -> Result<(), SeriesError> {
         if let Some(errors) = resp.get("errors")
             && let Some(error_array) = errors.as_array()
             && let Some(first_error) = error_array.first()
@@ -78,14 +78,20 @@ impl MangaDexFeed<'_> {
         Ok(())
     }
 
-    fn get_data_from_resp<'a>(
-        resp: &'a Value,
-        series_id: &'a str,
+    fn get_data_from_resp<'a>(&self, resp: &'a Value) -> Result<&'a Value, SeriesError> {
+        resp.get("data").ok_or_else(|| SeriesError::MissingField {
+            field: "data".to_string(),
+        })
+    }
+
+    fn get_attr_from_data<'a>(
+        &self,
+        data: &'a Value,
     ) -> Result<&'a Map<String, Value>, SeriesError> {
-        resp["data"]
+        data["attributes"]
             .as_object()
-            .ok_or_else(|| SeriesError::SeriesItemNotFound {
-                series_id: series_id.to_string(),
+            .ok_or_else(|| SeriesError::MissingField {
+                field: "data".to_string(),
             })
     }
 
@@ -93,8 +99,7 @@ impl MangaDexFeed<'_> {
     ///
     /// Priority: title.en > altTitles.en > title.ja-ro > altTitles.ja-ro > title.ja > altTitles.ja
     /// I apologize in advance to the future me for this mess
-    fn get_title_from_data(data: Data) -> Result<String, SeriesError> {
-        let attr = &data["attributes"];
+    fn get_title_from_attr(&self, attr: Json) -> Result<String, SeriesError> {
         let langs = ["en", "ja-ro", "ja"];
 
         for lang in langs {
@@ -116,13 +121,37 @@ impl MangaDexFeed<'_> {
         })
     }
 
-    fn get_description_from_data(data: Data) -> Result<String, SeriesError> {
-        Ok(data["attributes"]["description"]["en"]
+    fn get_description_from_attr(&self, attr: Json) -> Result<String, SeriesError> {
+        Ok(attr["description"]["en"]
             .as_str()
             .ok_or_else(|| SeriesError::MissingField {
                 field: "description.en".to_string(),
             })?
             .to_string())
+    }
+
+    async fn get_cover_url(&self, id: &str) -> Result<String, SeriesError> {
+        debug!(
+            "Fetching cover from {} for series_id: {id}",
+            self.base.url.name
+        );
+        let request = self
+            .base
+            .client
+            .get(format!("{}/cover/{id}", self.base.url.api_url));
+
+        let resp = self.send_get_json(request).await?;
+        let attr = self.get_attr_from_data(&resp)?;
+
+        let cover_filename = attr
+            .get("fileName")
+            .ok_or_else(|| SeriesError::MissingField {
+                field: "data.attributes.fileName".to_string(),
+            })?
+            .to_string();
+
+        let ret = format!("https://uploads.mangadex.org/covers/{id}/{cover_filename}");
+        Ok(ret)
     }
 
     fn validate_uuid(&self, uuid: &String) -> Result<(), SeriesError> {
@@ -147,11 +176,27 @@ impl MangaDexFeed<'_> {
         debug!("Making request to: {}", req.url());
         self.base.client.execute(req).await
     }
+
+    async fn send_get_json(
+        &self,
+        request: reqwest::RequestBuilder,
+    ) -> Result<serde_json::Value, SeriesError> {
+        let response = self.send(request).await?;
+
+        let body = response.text().await?;
+        let resp: serde_json::Value = serde_json::from_str(&body)?;
+        self.check_resp_errors(&resp)?;
+        Ok(resp)
+    }
 }
 
 #[async_trait]
 impl SeriesFeed for MangaDexFeed<'_> {
     async fn get_info(&self, id: &str) -> Result<SeriesItem, SeriesError> {
+        debug!(
+            "Fetching info from {} for series_id: {id}",
+            self.base.url.name
+        );
         let series_id = id.to_string();
         self.validate_uuid(&series_id.clone())?;
 
@@ -160,28 +205,29 @@ impl SeriesFeed for MangaDexFeed<'_> {
             .client
             .get(format!("{}/manga/{id}", self.base.url.api_url));
 
-        let response = self.send(request).await?;
-
-        let body = response.text().await?;
-        let response_json: serde_json::Value = serde_json::from_str(&body)?;
-
-        Self::check_resp_errors(&response_json)?;
-
-        let data = Self::get_data_from_resp(&response_json, &series_id)?;
-        let title = Self::get_title_from_data(data)?;
-        let description = Self::get_description_from_data(data)?;
+        let resp = self.send_get_json(request).await?;
+        let data = self.get_data_from_resp(&resp)?;
+        let attr = self.get_attr_from_data(&data)?;
+        let title = self.get_title_from_attr(attr)?;
+        let description = self.get_description_from_attr(attr)?;
+        let cover_url = Some(self.get_cover_url(&series_id).await?);
 
         info!("Successfully fetched latest manga for series_id: {series_id}");
 
         Ok(SeriesItem {
             title,
             url: self.get_url_from_id(&series_id),
+            cover_url,
             id: series_id,
             description,
         })
     }
 
     async fn get_latest(&self, id: &str) -> Result<SeriesLatest, SeriesError> {
+        debug!(
+            "Fetching latest from {} for series_id: {id}",
+            self.base.url.name
+        );
         let series_id = id.to_string();
 
         let request = self
@@ -195,22 +241,17 @@ impl SeriesFeed for MangaDexFeed<'_> {
                 ("translatedLanguage[]", "id"),
             ]);
 
-        let response = self.send(request).await?; // Converts to SourceError::RequestFailed
-
-        let body = response.text().await?;
-        let response_json: serde_json::Value = serde_json::from_str(&body)?; // Converts to SourceError::JsonParseFailed
-
-        Self::check_resp_errors(&response_json)?;
+        let resp = self.send_get_json(request).await?;
 
         // Extract fields
-        let chapters =
-            response_json["data"]
-                .as_array()
-                .ok_or_else(|| SeriesError::SeriesItemNotFound {
-                    series_id: series_id.to_string(),
-                })?;
+        let data = self.get_data_from_resp(&resp)?;
+        let chapters = data
+            .as_array()
+            .ok_or_else(|| SeriesError::UnexpectedResult {
+                message: "data field is not an array".to_string(),
+            })?;
 
-        if let Some(c) = chapters.first().cloned() {
+        if let Some(c) = chapters.first() {
             let id = c["id"]
                 .as_str()
                 .ok_or_else(|| SeriesError::MissingField {

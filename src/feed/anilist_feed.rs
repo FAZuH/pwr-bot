@@ -107,8 +107,11 @@ impl AniListFeed<'_> {
 #[async_trait]
 impl SeriesFeed for AniListFeed<'_> {
     async fn get_latest(&self, id: &str) -> Result<SeriesLatest, SeriesError> {
+        debug!(
+            "Fetching latest from {} for series_id: {id}",
+            self.base.url.name
+        );
         let series_id = id.to_string();
-        debug!("Fetching latest from AniList for series_id: {series_id}");
 
         let query = r#"
         query ($id: Int) {
@@ -169,14 +172,20 @@ impl SeriesFeed for AniListFeed<'_> {
     }
 
     async fn get_info(&self, id: &str) -> Result<SeriesItem, SeriesError> {
+        debug!(
+            "Fetching info from {} for series_id: {id}",
+            self.base.url.name
+        );
         let series_id = id.to_string();
-        debug!("Fetching info from AniList for series_id: {series_id}");
 
         let query = r#"
             query ($id: Int) {
               Media(id: $id, type: ANIME) {
                 title { romaji }
                 description(asHtml: false)
+                coverImage {
+                    medium
+                }
               }
             }
         "#;
@@ -199,10 +208,18 @@ impl SeriesFeed for AniListFeed<'_> {
             .unwrap_or("Unknown")
             .to_string();
 
+        let cover_url = Some(
+            media["coverImage"]["medium"]
+                .as_str()
+                .unwrap_or("Unknown")
+                .to_string(),
+        );
+
         Ok(SeriesItem {
             id: series_id,
             title,
             url: self.get_url_from_id(id),
+            cover_url,
             description,
         })
     }
