@@ -1,0 +1,30 @@
+use chrono::DateTime;
+use chrono::Utc;
+
+use super::Event;
+
+/// Event fired when a new version/episode of a feed is published.
+///
+/// Contains both the previous and current version identifiers to enable
+/// delta notifications (e.g., "Updated from Chapter 50 to Chapter 51").
+#[derive(Clone, Debug)]
+pub struct FeedUpdateEvent {
+    pub feed_id: i32,
+    pub version_id: i32,
+    /// Title of this feed.
+    pub title: String,
+    pub previous_version: String,
+    pub current_version: String,
+    /// URL of this feed.
+    pub url: String,
+    /// Description of this feed.
+    pub description: String,
+    /// Time this feed item is published.
+    pub published: DateTime<Utc>,
+}
+
+impl Event for FeedUpdateEvent {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
