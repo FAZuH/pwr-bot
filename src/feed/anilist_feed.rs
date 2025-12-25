@@ -108,7 +108,7 @@ impl AniListFeed<'_> {
 impl SeriesFeed for AniListFeed<'_> {
     async fn get_latest(&self, id: &str) -> Result<SeriesLatest, SeriesError> {
         let series_id = id.to_string();
-        debug!("Fetching latest anime for series_id: {series_id}");
+        debug!("Fetching latest from AniList for series_id: {series_id}");
 
         let query = r#"
         query ($id: Int) {
@@ -128,22 +128,27 @@ impl SeriesFeed for AniListFeed<'_> {
                 series_id: series_id.clone(),
             })?;
 
-        let timestamp =
-            airing_schedule["airingAt"]
-                .as_i64()
+        let timestamp_s =
+            airing_schedule
+                .get("airingAt")
                 .ok_or_else(|| SeriesError::MissingField {
                     field: "data.AiringSchedule.airingAt".to_string(),
                 })?;
+        let timestamp = timestamp_s
+            .as_i64()
+            .ok_or_else(|| SeriesError::UnexpectedResult {
+                message: format!("Invalid data.airingSchedule.airingAt: {timestamp_s}"),
+            })?;
 
-        let latest = airing_schedule["episode"]
-            .as_str()
+        let latest = airing_schedule
+            .get("episode")
             .ok_or_else(|| SeriesError::MissingField {
                 field: "data.AiringSchedule.episode".to_string(),
             })?
             .to_string();
 
-        let id = airing_schedule["id"]
-            .as_str()
+        let id = airing_schedule
+            .get("id")
             .ok_or_else(|| SeriesError::MissingField {
                 field: "data.AiringSchedule.id".to_string(),
             })?
@@ -165,6 +170,8 @@ impl SeriesFeed for AniListFeed<'_> {
 
     async fn get_info(&self, id: &str) -> Result<SeriesItem, SeriesError> {
         let series_id = id.to_string();
+        debug!("Fetching info from AniList for series_id: {series_id}");
+
         let query = r#"
             query ($id: Int) {
               Media(id: $id, type: ANIME) {

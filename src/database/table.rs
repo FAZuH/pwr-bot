@@ -225,6 +225,7 @@ impl TableBase for FeedItemTable {
                 feed_id INTEGER NOT NULL,
                 description TEXT NOT NULL,
                 published TIMESTAMP NOT NULL,
+                UNIQUE(feed_id, published),
                 FOREIGN KEY (feed_id) REFERENCES feeds(id)
                     ON DELETE CASCADE
                     ON UPDATE CASCADE

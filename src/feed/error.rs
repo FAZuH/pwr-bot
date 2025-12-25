@@ -1,10 +1,10 @@
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum UrlParseError {
-    #[error("Unsupported site: {site}. Only mangadex.org URLs are supported")]
+    #[error("Unsupported site: {site}.")]
     UnsupportedSite { site: String },
 
-    #[error("Invalid URL format: {url}. Expected format: https://mangadex.org/[type]/[id]")]
+    #[error("Invalid URL format: {url}.")]
     InvalidFormat { url: String },
 
     #[error("Missing identifier in URL: {url}")]
@@ -38,7 +38,7 @@ pub enum SeriesError {
     #[error("Invalid or missing data in API response: {field}")]
     MissingField { field: String },
 
-    #[error("Invalid series ID format: {series_id}")]
+    #[error("Invalid series ID: {series_id}")]
     InvalidSeriesId { series_id: String },
 
     #[error("API returned error: {message}")]
@@ -58,9 +58,4 @@ pub enum SeriesError {
 
     #[error("URL parse error: {0}")]
     UrlParseFailed(#[from] UrlParseError),
-}
-
-pub enum FeedErrorKind {
-    SeriesError(SeriesError),
-    UrlParseError(UrlParseError),
 }

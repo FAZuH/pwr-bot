@@ -1,21 +1,5 @@
-// pub struct Error {
-//     pub kind: ErrorKind,
-//     pub message: String,
-// }
-//
-// impl Error {
-//     pub fn new(kind: ErrorKind, message: String) -> Self {
-//         Self { kind, message }
-//     }
-//
-//     pub fn kind(&self) -> &ErrorKind {
-//         &self.kind
-//     }
-//
-//     pub fn message(&self) -> &str {
-//         &self.message
-//     }
-// }
+use crate::database::error::DatabaseError;
+use crate::feed::error::SeriesError;
 
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -29,4 +13,6 @@ pub enum AppError {
 
 pub enum AppErrorKind {
     AppError(AppError),
+    DatabaseError(DatabaseError),
+    SeriesError(SeriesError),
 }

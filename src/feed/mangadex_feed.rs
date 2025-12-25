@@ -55,6 +55,7 @@ impl MangaDexFeed<'_> {
         // NOTE: See https://api.mangadex.org/docs/2-limitations/
         // Because GET /manga/{id} is not specified on #endpoint-specific-rate-limits,
         // therefore GET /manga/{id} has a default ratelimit of 5 requests per second
+
         let limiter = RateLimiter::direct(Quota::per_second(NonZeroU32::new(5).unwrap()));
 
         Self {
@@ -159,10 +160,10 @@ impl SeriesFeed for MangaDexFeed<'_> {
             .client
             .get(format!("{}/manga/{id}", self.base.url.api_url));
 
-        let response = self.send(request).await?; // Converts to SourceError::RequestFailed
+        let response = self.send(request).await?;
 
         let body = response.text().await?;
-        let response_json: serde_json::Value = serde_json::from_str(&body)?; // Converts to SourceError::JsonParseFailed
+        let response_json: serde_json::Value = serde_json::from_str(&body)?;
 
         Self::check_resp_errors(&response_json)?;
 
