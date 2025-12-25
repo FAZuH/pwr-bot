@@ -3,22 +3,22 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use futures::lock::Mutex;
-use httpmock::{Mock, prelude::*};
+use httpmock::Mock;
+use httpmock::prelude::*;
+use pwr_bot::database::database::Database;
 use pwr_bot::database::model::latest_results_model::LatestResultModel;
 use pwr_bot::database::model::subscribers_model::SubscribersModel;
 use pwr_bot::database::table::table::Table;
-use serde_json::json;
-use tokio::time::sleep;
-
-use pwr_bot::database::database::Database;
 use pwr_bot::event::event_bus::EventBus;
 use pwr_bot::event::manga_update_event::MangaUpdateEvent;
 use pwr_bot::event::series_update_event::SeriesUpdateEvent;
+use pwr_bot::feed::anilist_feed::AniListFeed;
+use pwr_bot::feed::mangadex_feed::MangaDexFeed;
 use pwr_bot::publisher::anime_update_publisher::AnimeUpdatePublisher;
 use pwr_bot::publisher::manga_update_publisher::MangaUpdatePublisher;
-use pwr_bot::source::anilist_source::AniListSource;
-use pwr_bot::source::mangadex_source::MangaDexSource;
 use pwr_bot::subscriber::subscriber::Subscriber;
+use serde_json::json;
+use tokio::time::sleep;
 
 #[derive(Clone)]
 struct MockMangaSubscriber {
@@ -72,7 +72,7 @@ async fn test_manga_publisher_and_subscriber() -> anyhow::Result<()> {
     db.drop_all_tables().await?;
     db.create_all_tables().await?;
     let server = MockServer::start();
-    let source = Arc::new(MangaDexSource::new_with_url(server.url("")));
+    let source = Arc::new(MangaDexFeed::new_with_url(server.url("")));
     // 0:Setup:Subscriber
     let subscriber = Arc::new(MockMangaSubscriber::new());
     bus.register_subcriber(subscriber.clone()).await;
@@ -171,7 +171,7 @@ async fn test_anime_publisher_and_subscriber() -> anyhow::Result<()> {
     db.drop_all_tables().await?;
     db.create_all_tables().await?;
     let server = MockServer::start();
-    let source = Arc::new(AniListSource::new_with_url(server.url("")));
+    let source = Arc::new(AniListFeed::new_with_url(server.url("")));
     // 0:Setup:Subscriber
     let subscriber = Arc::new(MockAnimeSubscriber::new());
     bus.register_subcriber(subscriber.clone()).await;

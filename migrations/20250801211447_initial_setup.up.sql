@@ -1,25 +1,43 @@
--- Add migration script here
-
-CREATE TABLE IF NOT EXISTS latest_updates (
+-- Feed (computing): a facility for notifying the user of a blog or other frequently updated website that new content has been added.
+--
+-- Each entry is uniquely identifiable by `id` and `url`
+CREATE TABLE IF NOT EXISTS feeds (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    `type` TEXT NOT NULL,
-    series_id TEXT NOT NULL,
-    series_latest TEXT NOT NULL,
-    series_title TEXT NOT NULL,
-    series_published TIMESTAMP NOT NULL,
-    UNIQUE(type, series_id)
+    name TEXT NOT NULL,
+    url TEXT NOT NULL UNIQUE,
+    tags TEXT DEFAULT NULL
 );
 
-
-CREATE TABLE IF NOT EXISTS subscribers (
+-- 
+CREATE TABLE IF NOT EXISTS feed_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    subscriber_type TEXT NOT NULL,
-    subscriber_id TEXT NOT NULL,
-    latest_update_id INTEGER,
-    UNIQUE(subscriber_type, subscriber_id, latest_update_id),
-    FOREIGN KEY (latest_update_id) REFERENCES latest_updates(id)
+    feed_id INTEGER NOT NULL,
+    description TEXT NOT NULL,
+    published TIMESTAMP NOT NULL,
+    UNIQUE(feed_id, published),
+    FOREIGN KEY (feed_id) REFERENCES feeds(id)
         ON DELETE CASCADE
         ON UPDATE CASCADE
 );
 
-PRAGMA foreign_keys = ON;
+-- Entities subscribed to feeds
+CREATE TABLE IF NOT EXISTS subscribers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    type TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    UNIQUE(type, target_id)
+);
+
+-- Junction table to define many-to-many relationship between `feeds` and `subscribers` table.
+CREATE TABLE IF NOT EXISTS feed_subscriptions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    feed_id INTEGER NOT NULL,
+    subscriber_id INTEGER NOT NULL,
+    UNIQUE(feed_id, subscriber_id),
+    FOREIGN KEY (feed_id) REFERENCES feeds(id)
+        ON DELETE CASCADE
+        ON UPDATE CASCADE,
+    FOREIGN KEY (subscriber_id) REFERENCES subscribers(id)
+        ON DELETE CASCADE
+        ON UPDATE CASCADE
+);

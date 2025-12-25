@@ -1,53 +1,48 @@
-use anyhow::Result;
-use std::any::{Any, TypeId};
+use std::any::Any;
+use std::any::TypeId;
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::{Arc, RwLock};
-use tokio::runtime;
+use std::sync::Arc;
+use std::sync::RwLock;
+
+use anyhow::Result;
 
 use crate::subscriber::Subscriber;
 
 type AsyncSubscriber<E> =
     Box<dyn Fn(E) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> + Send + Sync>;
+type Subscribers = Arc<RwLock<HashMap<TypeId, Vec<Box<dyn Any + Send + Sync>>>>>;
 
 pub struct EventBus {
-    subscribers: Arc<RwLock<HashMap<TypeId, Vec<Box<dyn Any + Send + Sync>>>>>,
-    rt: runtime::Runtime,
+    subscribers: Subscribers,
 }
 
 impl EventBus {
     pub fn new() -> Self {
-        let rt = runtime::Builder::new_multi_thread()
-            .worker_threads(1)
-            .enable_all()
-            .build()
-            .expect("Error spawning tokio runtime for EventBus");
         Self {
             subscribers: Arc::new(RwLock::new(HashMap::new())),
-            rt,
         }
     }
 
-    pub fn register_callback<E, F, Fut>(&self, callback: F)
+    pub fn register_callback<E, F, Fut>(&self, callback: F) -> &Self
     where
         E: 'static + Send + Sync,
         F: Fn(E) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<()>> + Send + 'static,
     {
         let type_id = TypeId::of::<E>();
-
         let wrapped_sub: AsyncSubscriber<E> = Box::new(move |event| Box::pin(callback(event)));
-
         self.subscribers
             .write()
             .unwrap()
             .entry(type_id)
             .or_default()
             .push(Box::new(wrapped_sub));
+        self
     }
 
-    pub fn register_subcriber<E, S>(&self, subscriber: Arc<S>)
+    pub fn register_subcriber<E, S>(&self, subscriber: Arc<S>) -> &Self
     where
         E: 'static + Send + Sync + Clone,
         S: Subscriber<E> + Send + Sync + 'static,
@@ -58,13 +53,12 @@ impl EventBus {
         })
     }
 
-    pub fn publish<E>(&self, event: E)
+    pub fn publish<E>(&self, event: E) -> &Self
     where
         E: 'static + Send + Sync + Clone,
     {
         let type_id = TypeId::of::<E>();
         let subs = self.subscribers.read().unwrap();
-
         if let Some(subs_list) = subs.get(&type_id) {
             let mut futures = Vec::new();
             for subs_box in subs_list {
@@ -72,10 +66,11 @@ impl EventBus {
                     futures.push(sub(event.clone()));
                 }
             }
-            self.rt.spawn(async move {
+            tokio::spawn(async move {
                 futures::future::join_all(futures).await;
             });
         }
+        self
     }
 }
 
