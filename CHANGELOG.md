@@ -1,9 +1,21 @@
+## [0.1.6](https://github.com/FAZuH/pwr-bot/compare/v0.1.5...v0.1.6) (2025-12-25)
+
+
+### Code Refactoring
+
+* Improve db design ([#1](https://github.com/FAZuH/pwr-bot/issues/1)) ([39d60f9](https://github.com/FAZuH/pwr-bot/commit/39d60f91c3843e6e492d3022edbc7f9a736c5415))
+
 ## [0.1.5](https://github.com/FAZuH/pwr-bot/compare/v0.1.4...v0.1.5) (2025-08-30)
 
 
 ### Bug Fixes
 
 * **subscriber:** Use webhook url from .env instead of db ([d1e7cd0](https://github.com/FAZuH/pwr-bot/commit/d1e7cd07c2f51c8a0fb6614e368be37cc3892027))
+
+
+### Miscellaneous Chores
+
+* **release:** v0.1.5 [skip ci] ([9d54f3e](https://github.com/FAZuH/pwr-bot/commit/9d54f3e72dde1957e18bf60c05d04eaeafb356d4))
 
 
 ### Code Refactoring
@@ -54,24 +66,4 @@
 ### Miscellaneous Chores
 
 * **release:** v0.1.2 [skip ci] ([4944612](https://github.com/FAZuH/pwr-bot/commit/4944612e2045bcddd60241e50b692601a42ea0dd))
-
-## [0.1.1](https://github.com/FAZuH/pwr-bot/compare/v0.1.0...v0.1.1) (2025-08-05)
-
-
-### Bug Fixes
-
-* Database issues when subscribing ([21f3101](https://github.com/FAZuH/pwr-bot/commit/21f3101d260d92e6e8902e849b332e78b4dd1e2b))
-* Subscribers not getting series update notifications ([3aae939](https://github.com/FAZuH/pwr-bot/commit/3aae9392f1d44d6a033cc2538147a1b45e6b2572))
-
-
-### Miscellaneous Chores
-
-* Disable new_without_defualt lint warning [skip ci] ([5c25dbe](https://github.com/FAZuH/pwr-bot/commit/5c25dbee01fd575900e25c6ce0900f1955483401))
-* Improve logging message [skip ci] ([ebd3737](https://github.com/FAZuH/pwr-bot/commit/ebd3737867b708e6ee0458c750894174d1369722))
-* **release:** v0.1.1 [skip ci] ([7832099](https://github.com/FAZuH/pwr-bot/commit/783209924668387bd1765b41a1b223d9e2be10cb))
-
-
-### Build System
-
-* Fix incorrect image source label [skip ci] ([d6d8e45](https://github.com/FAZuH/pwr-bot/commit/d6d8e456ef40bb60a86d5e5daa221ad313496758))
 
