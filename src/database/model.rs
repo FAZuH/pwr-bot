@@ -27,6 +27,8 @@ pub struct FeedModel {
     pub name: String,
     #[serde(default)]
     pub url: String,
+    #[serde(default)]
+    pub description: String,
     /// Comma-separated tags for categorization (e.g., "manga,ongoing")
     #[serde(default)]
     pub tags: String,
