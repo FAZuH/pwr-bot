@@ -85,10 +85,7 @@ impl FeedPublisher {
 
         for feed in feeds {
             if let Err(e) = self.check_feed(&feed).await {
-                error!(
-                    "Error checking feed with id {} ({}): {:?}",
-                    feed.id, feed.name, e
-                );
+                error!("Error checking {}: {:?}", self.get_feed_desc(&feed), e);
             };
         }
 
@@ -175,18 +172,13 @@ impl FeedPublisher {
         };
         let version_id = self.db.feed_item_table.replace(&new_version).await?;
 
-        let feed_info = series_feed.get_info(series_id).await?;
-
         // Publish update event
-        info!(
-            "Publishing update event for {}.",
-            self.get_feed_desc(feed)
-        );
+        info!("Publishing update event for {}.", self.get_feed_desc(feed));
         let event = FeedUpdateEvent {
             feed_id: feed.id,
-            description: feed_info.description,
+            description: feed.description.clone(),
             version_id,
-            title: feed_info.title,
+            title: feed.name.clone(),
             previous_version: old_latest.description,
             current_version: curr_latest.latest,
             url: feed.url.clone(),
@@ -197,6 +189,6 @@ impl FeedPublisher {
     }
 
     fn get_feed_desc(&self, feed: &FeedModel) -> String {
-        format!("feed id {} ({})", feed.id, feed.name)
+        format!("feed id `{}` ({})", feed.id, feed.name)
     }
 }
