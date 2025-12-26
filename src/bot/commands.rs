@@ -76,7 +76,7 @@ impl Commands {
 
         for link in links_split {
             let source =
-                data.sources
+                data.feeds
                     .get_feed_by_url(link)
                     .ok_or_else(|| SeriesError::UnsupportedUrl {
                         url: link.to_string(),
@@ -186,7 +186,7 @@ impl Commands {
 
         for link in links.split(',').map(|s| s.trim()) {
             // Get source and normalize URL
-            let source = match data.sources.get_feed_by_url(link) {
+            let source = match data.feeds.get_feed_by_url(link) {
                 Some(source) => source,
                 None => {
                     ctx.reply(format!("❌ Unsupported link: <{link}>")).await?;
