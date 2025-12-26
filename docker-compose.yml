@@ -12,7 +12,6 @@ services:
       - DATABASE_PATH=${DATABASE_PATH:-data/data.db}
       - DATABASE_URL=${DATABASE_URL:-sqlite://data/data.db}
       - DISCORD_TOKEN=${DISCORD_TOKEN:?error}
-      - WEBHOOK_URL=${WEBHOOK_URL:?error}
       - RUST_LOG=${RUST_LOG:-pwr_bot=info}
       - ADMIN_ID=${ADMIN_ID:?error}
     restart: unless-stopped
