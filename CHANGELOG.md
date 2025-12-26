@@ -1,4 +1,16 @@
+## [0.1.8](https://github.com/FAZuH/pwr-bot/compare/v0.1.7...v0.1.8) (2025-12-26)
+
+
+### Build System
+
+* Fix and improve build ([#5](https://github.com/FAZuH/pwr-bot/issues/5)) ([a297a52](https://github.com/FAZuH/pwr-bot/commit/a297a52383d56556eb2a2e282e8e44fe15d8320c))
+
 ## [0.1.7](https://github.com/FAZuH/pwr-bot/compare/v0.1.6...v0.1.7) (2025-12-26)
+
+
+### Miscellaneous Chores
+
+* **release:** v0.1.7 [skip ci] ([5078e25](https://github.com/FAZuH/pwr-bot/commit/5078e2542a5575559c80212e5f3f341b61755cef))
 
 ## [0.1.6](https://github.com/FAZuH/pwr-bot/compare/v0.1.5...v0.1.6) (2025-12-25)
 
@@ -42,16 +54,4 @@
 
 * **release:** v0.1.4 [skip ci] ([93d2ddf](https://github.com/FAZuH/pwr-bot/commit/93d2ddfeb36b1a6aad0343d555a1bd3146400321))
 * **release:** v0.1.4 [skip ci] ([6ecb7df](https://github.com/FAZuH/pwr-bot/commit/6ecb7df59ed634360da6c5b39338262df87291ff))
-
-## [0.1.3](https://github.com/FAZuH/pwr-bot/compare/v0.1.2...v0.1.3) (2025-08-07)
-
-
-### Bug Fixes
-
-* **source:** Get title error ([e63a1d7](https://github.com/FAZuH/pwr-bot/commit/e63a1d7bf63aa07242c03f5c8a53b44c12462e98))
-
-
-### Miscellaneous Chores
-
-* **release:** v0.1.3 [skip ci] ([316caf8](https://github.com/FAZuH/pwr-bot/commit/316caf836eba997fadfeb31fc0e7d370e35d10ab))
 
