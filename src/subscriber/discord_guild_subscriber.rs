@@ -16,14 +16,14 @@ use crate::event::Event;
 use crate::event::feed_update_event::FeedUpdateEvent;
 use crate::subscriber::Subscriber;
 
-pub struct DiscordChannelSubscriber {
+pub struct DiscordGuildSubscriber {
     bot: Arc<Bot>,
     db: Arc<Database>,
 }
 
-impl DiscordChannelSubscriber {
+impl DiscordGuildSubscriber {
     pub fn new(bot: Arc<Bot>, db: Arc<Database>) -> Self {
-        debug!("Initializing DiscordChannelSubscriber.");
+        debug!("Initializing DiscordGuildSubscriber.");
         Self { bot, db }
     }
 
@@ -73,7 +73,7 @@ impl DiscordChannelSubscriber {
 }
 
 #[async_trait::async_trait]
-impl Subscriber<FeedUpdateEvent> for DiscordChannelSubscriber {
+impl Subscriber<FeedUpdateEvent> for DiscordGuildSubscriber {
     async fn callback(&self, event: FeedUpdateEvent) -> Result<()> {
         self.feed_event_callback(event).await
     }

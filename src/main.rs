@@ -19,8 +19,8 @@ use crate::database::Database;
 use crate::event::event_bus::EventBus;
 use crate::feed::feeds::Feeds;
 use crate::publisher::series_feed_publisher::SeriesFeedPublisher;
-use crate::subscriber::discord_channel_subscriber::DiscordChannelSubscriber;
 use crate::subscriber::discord_dm_subscriber::DiscordDmSubscriber;
+use crate::subscriber::discord_guild_subscriber::DiscordGuildSubscriber;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -57,7 +57,7 @@ async fn main() -> anyhow::Result<()> {
     // Setup subscribers
     debug!("Instantiating Subscribers...");
     let dm_subscriber = DiscordDmSubscriber::new(bot.clone(), db.clone());
-    let webhook_subscriber = DiscordChannelSubscriber::new(bot.clone(), db.clone());
+    let webhook_subscriber = DiscordGuildSubscriber::new(bot.clone(), db.clone());
     event_bus
         .register_subcriber(dm_subscriber.into())
         .register_subcriber(webhook_subscriber.into());
