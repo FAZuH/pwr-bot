@@ -18,7 +18,7 @@ use crate::database::model::FeedSubscriptionModel;
 use crate::database::model::SubscriberModel;
 use crate::database::model::SubscriberType;
 use crate::database::table::Table;
-use crate::feed::error::SeriesError;
+use crate::feed::error::SeriesFeedError;
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
 type Context<'a> = poise::Context<'a, Data, Error>;
@@ -78,7 +78,7 @@ impl Commands {
             let source =
                 data.feeds
                     .get_feed_by_url(link)
-                    .ok_or_else(|| SeriesError::UnsupportedUrl {
+                    .ok_or_else(|| SeriesFeedError::UnsupportedUrl {
                         url: link.to_string(),
                     })?;
 

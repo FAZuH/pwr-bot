@@ -15,7 +15,7 @@ use serde_json::Value;
 
 use super::BaseFeed;
 use super::FeedInfo;
-use super::error::SeriesError;
+use super::error::SeriesFeedError;
 use super::error::UrlParseError;
 use super::series_feed::SeriesFeed;
 use crate::feed::SeriesItem;
@@ -52,7 +52,7 @@ impl AniListSeriesFeed {
         &self,
         series_id: &str,
         query: &str,
-    ) -> Result<serde_json::Value, SeriesError> {
+    ) -> Result<serde_json::Value, SeriesFeedError> {
         let series_id_num = Self::validate_id(series_id)?;
         let json = serde_json::json!({
             "query": query,
@@ -68,7 +68,7 @@ impl AniListSeriesFeed {
         Ok(response_json)
     }
 
-    fn check_api_errors(&self, resp: &Value) -> Result<(), SeriesError> {
+    fn check_api_errors(&self, resp: &Value) -> Result<(), SeriesFeedError> {
         if let Some(errors) = resp.get("errors")
             && let Some(error_array) = errors.as_array()
         {
@@ -77,7 +77,7 @@ impl AniListSeriesFeed {
                 .map(|e| self.extract_error_message(e))
                 .collect::<Vec<String>>()
                 .join(" | ");
-            return Err(SeriesError::ApiError { message: err_msg });
+            return Err(SeriesFeedError::ApiError { message: err_msg });
         }
         Ok(())
     }
@@ -97,10 +97,10 @@ impl AniListSeriesFeed {
     }
 
     /// Validate series_id format (should be numeric for AniList)
-    fn validate_id(series_id: &str) -> Result<i32, SeriesError> {
+    fn validate_id(series_id: &str) -> Result<i32, SeriesFeedError> {
         let series_id_num = series_id
             .parse::<i32>()
-            .map_err(|_| SeriesError::InvalidSeriesId {
+            .map_err(|_| SeriesFeedError::InvalidSeriesId {
                 series_id: series_id.to_string(),
             })?;
         Ok(series_id_num)
@@ -109,7 +109,7 @@ impl AniListSeriesFeed {
 
 #[async_trait]
 impl SeriesFeed for AniListSeriesFeed {
-    async fn get_latest(&self, id: &str) -> Result<SeriesLatest, SeriesError> {
+    async fn get_latest(&self, id: &str) -> Result<SeriesLatest, SeriesFeedError> {
         debug!(
             "Fetching latest from {} for series_id: {id}",
             self.base.info.name
@@ -130,38 +130,38 @@ impl SeriesFeed for AniListSeriesFeed {
         // Extract fields
         let airing_schedule = response_json["data"]["AiringSchedule"]
             .as_object()
-            .ok_or_else(|| SeriesError::SeriesLatestNotFound {
+            .ok_or_else(|| SeriesFeedError::SeriesLatestNotFound {
                 series_id: series_id.clone(),
             })?;
 
         let timestamp_s =
             airing_schedule
                 .get("airingAt")
-                .ok_or_else(|| SeriesError::MissingField {
+                .ok_or_else(|| SeriesFeedError::MissingField {
                     field: "data.AiringSchedule.airingAt".to_string(),
                 })?;
         let timestamp = timestamp_s
             .as_i64()
-            .ok_or_else(|| SeriesError::UnexpectedResult {
+            .ok_or_else(|| SeriesFeedError::UnexpectedResult {
                 message: format!("Invalid data.airingSchedule.airingAt: {timestamp_s}"),
             })?;
 
         let latest = airing_schedule
             .get("episode")
-            .ok_or_else(|| SeriesError::MissingField {
+            .ok_or_else(|| SeriesFeedError::MissingField {
                 field: "data.AiringSchedule.episode".to_string(),
             })?
             .to_string();
 
         let id = airing_schedule
             .get("id")
-            .ok_or_else(|| SeriesError::MissingField {
+            .ok_or_else(|| SeriesFeedError::MissingField {
                 field: "data.AiringSchedule.id".to_string(),
             })?
             .to_string();
 
         let published = DateTime::from_timestamp(timestamp, 0)
-            .ok_or_else(|| SeriesError::InvalidTimestamp { timestamp })?;
+            .ok_or_else(|| SeriesFeedError::InvalidTimestamp { timestamp })?;
 
         info!("Successfully fetched anime for series_id: {series_id}");
 
@@ -174,7 +174,7 @@ impl SeriesFeed for AniListSeriesFeed {
         })
     }
 
-    async fn get_info(&self, id: &str) -> Result<SeriesItem, SeriesError> {
+    async fn get_info(&self, id: &str) -> Result<SeriesItem, SeriesFeedError> {
         debug!(
             "Fetching info from {} for series_id: {id}",
             self.base.info.name
@@ -196,7 +196,7 @@ impl SeriesFeed for AniListSeriesFeed {
 
         // Extract fields
         let media = response_json["data"]["Media"].as_object().ok_or_else(|| {
-            SeriesError::SeriesItemNotFound {
+            SeriesFeedError::SeriesItemNotFound {
                 series_id: series_id.clone(),
             }
         })?;

@@ -23,7 +23,7 @@ use serde_json::Value;
 
 use super::BaseFeed;
 use crate::feed::FeedInfo;
-use crate::feed::error::SeriesError;
+use crate::feed::error::SeriesFeedError;
 use crate::feed::error::UrlParseError;
 use crate::feed::series_feed::SeriesFeed;
 use crate::feed::series_feed::SeriesItem;
@@ -70,7 +70,7 @@ impl MangaDexSeriesFeed {
         }
     }
 
-    fn check_resp_errors(&self, resp: &Value) -> Result<(), SeriesError> {
+    fn check_resp_errors(&self, resp: &Value) -> Result<(), SeriesFeedError> {
         if let Some(errors) = resp.get("errors")
             && let Some(error_array) = errors.as_array()
             && let Some(first_error) = error_array.first()
@@ -79,13 +79,13 @@ impl MangaDexSeriesFeed {
                 .as_str()
                 .unwrap_or("Unknown API error")
                 .to_string();
-            return Err(SeriesError::ApiError { message });
+            return Err(SeriesFeedError::ApiError { message });
         }
         Ok(())
     }
 
-    fn get_data_from_resp<'a>(&self, resp: &'a Value) -> Result<&'a Value, SeriesError> {
-        resp.get("data").ok_or_else(|| SeriesError::MissingField {
+    fn get_data_from_resp<'a>(&self, resp: &'a Value) -> Result<&'a Value, SeriesFeedError> {
+        resp.get("data").ok_or_else(|| SeriesFeedError::MissingField {
             field: "data".to_string(),
         })
     }
@@ -93,10 +93,10 @@ impl MangaDexSeriesFeed {
     fn get_attr_from_data<'a>(
         &self,
         data: &'a Value,
-    ) -> Result<&'a Map<String, Value>, SeriesError> {
+    ) -> Result<&'a Map<String, Value>, SeriesFeedError> {
         data["attributes"]
             .as_object()
-            .ok_or_else(|| SeriesError::MissingField {
+            .ok_or_else(|| SeriesFeedError::MissingField {
                 field: "data".to_string(),
             })
     }
@@ -105,7 +105,7 @@ impl MangaDexSeriesFeed {
     ///
     /// Priority: title.en > altTitles.en > title.ja-ro > altTitles.ja-ro > title.ja > altTitles.ja
     /// I apologize in advance to the future me for this mess
-    fn get_title_from_attr(&self, attr: Json) -> Result<String, SeriesError> {
+    fn get_title_from_attr(&self, attr: Json) -> Result<String, SeriesFeedError> {
         let langs = ["en", "ja-ro", "ja"];
 
         for lang in langs {
@@ -122,21 +122,21 @@ impl MangaDexSeriesFeed {
             }
         }
 
-        Err(SeriesError::MissingField {
+        Err(SeriesFeedError::MissingField {
             field: "title or altTitles in en/ja-ro/ja".to_string(),
         })
     }
 
-    fn get_description_from_attr(&self, attr: Json) -> Result<String, SeriesError> {
+    fn get_description_from_attr(&self, attr: Json) -> Result<String, SeriesFeedError> {
         Ok(attr["description"]["en"]
             .as_str()
-            .ok_or_else(|| SeriesError::MissingField {
+            .ok_or_else(|| SeriesFeedError::MissingField {
                 field: "description.en".to_string(),
             })?
             .to_string())
     }
 
-    async fn get_cover_url(&self, id: &str) -> Result<String, SeriesError> {
+    async fn get_cover_url(&self, id: &str) -> Result<String, SeriesFeedError> {
         debug!(
             "Fetching cover from {} for series_id: {id}",
             self.base.info.name
@@ -151,7 +151,7 @@ impl MangaDexSeriesFeed {
 
         let cover_filename = attr
             .get("fileName")
-            .ok_or_else(|| SeriesError::MissingField {
+            .ok_or_else(|| SeriesFeedError::MissingField {
                 field: "data.attributes.fileName".to_string(),
             })?
             .to_string();
@@ -160,9 +160,9 @@ impl MangaDexSeriesFeed {
         Ok(ret)
     }
 
-    fn validate_uuid(&self, uuid: &String) -> Result<(), SeriesError> {
+    fn validate_uuid(&self, uuid: &String) -> Result<(), SeriesFeedError> {
         if uuid::Uuid::parse_str(uuid).is_err() {
-            return Err(SeriesError::InvalidSeriesId {
+            return Err(SeriesFeedError::InvalidSeriesId {
                 series_id: uuid.to_string(),
             });
         }
@@ -186,7 +186,7 @@ impl MangaDexSeriesFeed {
     async fn send_get_json(
         &self,
         request: reqwest::RequestBuilder,
-    ) -> Result<serde_json::Value, SeriesError> {
+    ) -> Result<serde_json::Value, SeriesFeedError> {
         let response = self.send(request).await?;
 
         let body = response.text().await?;
@@ -198,7 +198,7 @@ impl MangaDexSeriesFeed {
 
 #[async_trait]
 impl SeriesFeed for MangaDexSeriesFeed {
-    async fn get_info(&self, id: &str) -> Result<SeriesItem, SeriesError> {
+    async fn get_info(&self, id: &str) -> Result<SeriesItem, SeriesFeedError> {
         debug!(
             "Fetching info from {} for series_id: {id}",
             self.base.info.name
@@ -229,7 +229,7 @@ impl SeriesFeed for MangaDexSeriesFeed {
         })
     }
 
-    async fn get_latest(&self, id: &str) -> Result<SeriesLatest, SeriesError> {
+    async fn get_latest(&self, id: &str) -> Result<SeriesLatest, SeriesFeedError> {
         debug!(
             "Fetching latest from {} for series_id: {id}",
             self.base.info.name
@@ -253,35 +253,35 @@ impl SeriesFeed for MangaDexSeriesFeed {
         let data = self.get_data_from_resp(&resp)?;
         let chapters = data
             .as_array()
-            .ok_or_else(|| SeriesError::UnexpectedResult {
+            .ok_or_else(|| SeriesFeedError::UnexpectedResult {
                 message: "data field is not an array".to_string(),
             })?;
 
         if let Some(c) = chapters.first() {
             let id = c["id"]
                 .as_str()
-                .ok_or_else(|| SeriesError::MissingField {
+                .ok_or_else(|| SeriesFeedError::MissingField {
                     field: "data.0.id".to_string(),
                 })?
                 .to_string();
 
             let latest = c["attributes"]["chapter"]
                 .as_str()
-                .ok_or_else(|| SeriesError::MissingField {
+                .ok_or_else(|| SeriesFeedError::MissingField {
                     field: "data.0.attributes.chapter".to_string(),
                 })?
                 .to_string();
 
             let publish_at = c["attributes"]["publishAt"]
                 .as_str()
-                .ok_or_else(|| SeriesError::MissingField {
+                .ok_or_else(|| SeriesFeedError::MissingField {
                     field: "data.0.attributes.publishAt".to_string(),
                 })?
                 .to_string();
 
             let published = DateTime::parse_from_rfc3339(&publish_at)
                 .map(|dt| dt.with_timezone(&Utc))
-                .map_err(|_| SeriesError::InvalidTime { time: publish_at })?;
+                .map_err(|_| SeriesFeedError::InvalidTime { time: publish_at })?;
 
             info!("Successfully fetched latest manga for series_id: {series_id}");
 
@@ -294,7 +294,7 @@ impl SeriesFeed for MangaDexSeriesFeed {
             })
         } else {
             warn!("No chapters found in data for series_id: {series_id}");
-            Err(SeriesError::EmptySeries {
+            Err(SeriesFeedError::EmptySeries {
                 series_id: series_id.to_string(),
             })
         }

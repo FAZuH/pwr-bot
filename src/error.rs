@@ -1,5 +1,5 @@
 use crate::database::error::DatabaseError;
-use crate::feed::error::SeriesError;
+use crate::feed::error::FeedError;
 
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -14,5 +14,5 @@ pub enum AppError {
 pub enum AppErrorKind {
     AppError(AppError),
     DatabaseError(DatabaseError),
-    SeriesError(SeriesError),
+    FeedError(FeedError),
 }

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::feed::anilist_series_feed::AniListSeriesFeed;
-use crate::feed::error::SeriesError;
+use crate::feed::error::SeriesFeedError;
 use crate::feed::mangadex_series_feed::MangaDexSeriesFeed;
 use crate::feed::series_feed::SeriesFeed;
 use crate::feed::series_feed::SeriesItem;
@@ -30,10 +30,10 @@ impl Feeds {
     }
 
     /// Get feed id by URL
-    pub fn get_feed_id_by_url<'a>(&self, url: &'a str) -> Result<&'a str, SeriesError> {
+    pub fn get_feed_id_by_url<'a>(&self, url: &'a str) -> Result<&'a str, SeriesFeedError> {
         let feed = self
             .get_feed_by_url(url)
-            .ok_or_else(|| SeriesError::UnsupportedUrl {
+            .ok_or_else(|| SeriesFeedError::UnsupportedUrl {
                 url: url.to_string(),
             })?;
 
@@ -42,10 +42,10 @@ impl Feeds {
     }
 
     /// Get series feed by URL and call get_latest
-    pub async fn get_latest_by_url(&self, url: &str) -> Result<SeriesLatest, SeriesError> {
+    pub async fn get_latest_by_url(&self, url: &str) -> Result<SeriesLatest, SeriesFeedError> {
         let feed = self
             .get_feed_by_url(url)
-            .ok_or_else(|| SeriesError::UnsupportedUrl {
+            .ok_or_else(|| SeriesFeedError::UnsupportedUrl {
                 url: url.to_string(),
             })?;
         let series_id = self.get_feed_id_by_url(url)?;
@@ -53,10 +53,10 @@ impl Feeds {
     }
 
     /// Get series feed by URL and call get_info
-    pub async fn get_info_by_url(&self, url: &str) -> Result<SeriesItem, SeriesError> {
+    pub async fn get_info_by_url(&self, url: &str) -> Result<SeriesItem, SeriesFeedError> {
         let feed = self
             .get_feed_by_url(url)
-            .ok_or_else(|| SeriesError::UnsupportedUrl {
+            .ok_or_else(|| SeriesFeedError::UnsupportedUrl {
                 url: url.to_string(),
             })?;
         let series_id = self.get_feed_id_by_url(url)?;
