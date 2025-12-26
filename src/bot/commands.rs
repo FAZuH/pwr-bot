@@ -4,7 +4,9 @@ use anyhow::Result;
 use log::error;
 use poise::ChoiceParameter;
 use poise::CreateReply;
-use serenity::all::CreateAttachment;
+use poise::serenity_prelude::AutocompleteChoice;
+use poise::serenity_prelude::CreateAttachment;
+use poise::serenity_prelude::CreateAutocompleteResponse;
 use sqlx::error::ErrorKind;
 
 use crate::bot::bot::Data;
@@ -95,7 +97,9 @@ pub async fn subscribe(
 
                 let mut feed = FeedModel {
                     name: series_info.title.clone(),
+                    description: series_info.description,
                     url: series_info.url.clone(),
+                    cover_url: series_info.cover_url.unwrap_or("".to_string()),
                     tags: "series".to_string(),
                     ..Default::default()
                 };
@@ -323,26 +327,6 @@ pub async fn subscriptions(
     Ok(())
 }
 
-/// Help command to show all available commands
-#[poise::command(slash_command)]
-pub async fn help(
-    ctx: Context<'_>,
-    #[description = "Specific command to show help about"]
-    #[autocomplete = "poise::builtins::autocomplete_command"]
-    command: Option<String>,
-) -> Result<(), Error> {
-    ctx.defer().await?;
-    poise::builtins::help(
-        ctx,
-        command.as_deref(),
-        poise::builtins::HelpConfiguration {
-            ..Default::default()
-        },
-    )
-    .await?;
-    Ok(())
-}
-
 #[poise::command(prefix_command, owners_only, hide_in_help)]
 pub async fn register(ctx: Context<'_>) -> Result<(), Error> {
     poise::builtins::register_application_commands_buttons(ctx).await?;
@@ -362,19 +346,19 @@ pub async fn dump_db(ctx: Context<'_>) -> Result<(), Error> {
     let reply = CreateReply::default()
         .content("Database dump:")
         .attachment(CreateAttachment::bytes(
-            serde_json::to_string_pretty(&feeds)?.as_bytes(),
+            serde_json::to_string_pretty(&feeds)?,
             "feeds.json",
         ))
         .attachment(CreateAttachment::bytes(
-            serde_json::to_string_pretty(&versions)?.as_bytes(),
+            serde_json::to_string_pretty(&versions)?,
             "feed_versions.json",
         ))
         .attachment(CreateAttachment::bytes(
-            serde_json::to_string_pretty(&subscribers)?.as_bytes(),
+            serde_json::to_string_pretty(&subscribers)?,
             "subscribers.json",
         ))
         .attachment(CreateAttachment::bytes(
-            serde_json::to_string_pretty(&subscriptions)?.as_bytes(),
+            serde_json::to_string_pretty(&subscriptions)?,
             "subscriptions.json",
         ));
 
@@ -382,9 +366,12 @@ pub async fn dump_db(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-async fn autocomplete_subscriptions(ctx: Context<'_>, partial: &str) -> Vec<String> {
+async fn autocomplete_subscriptions<'a>(
+    ctx: Context<'_>,
+    partial: &str,
+) -> CreateAutocompleteResponse<'a> {
     if partial.trim().is_empty() {
-        return Vec::new();
+        return CreateAutocompleteResponse::new().set_choices(vec![]);
     }
 
     let data = ctx.data();
@@ -400,7 +387,7 @@ async fn autocomplete_subscriptions(ctx: Context<'_>, partial: &str) -> Vec<Stri
         Ok(sub) => sub,
         Err(e) => {
             error!("Failed to fetch subscriber for user {}: {}", user_id, e);
-            return Vec::new();
+            return CreateAutocompleteResponse::new().set_choices(vec![]);
         }
     };
 
@@ -414,15 +401,16 @@ async fn autocomplete_subscriptions(ctx: Context<'_>, partial: &str) -> Vec<Stri
         Ok(subs) => subs,
         Err(e) => {
             error!("Failed to fetch subscriptions: {}", e);
-            return Vec::new();
+            return CreateAutocompleteResponse::new().set_choices(vec![]);
         }
     };
 
     if subscriptions.is_empty() {
-        return Vec::new();
+        return CreateAutocompleteResponse::new().set_choices(vec![]);
     }
 
     // Fetch feeds in parallel
+    // TODO: Do this in backend instead
     let feed_ids: HashSet<i32> = subscriptions.into_iter().map(|s| s.feed_id).collect();
     let futures = feed_ids.into_iter().map(|id| {
         let db = &data.db;
@@ -431,17 +419,22 @@ async fn autocomplete_subscriptions(ctx: Context<'_>, partial: &str) -> Vec<Stri
     let results = futures::future::join_all(futures).await;
 
     let partial_lower = partial.to_lowercase();
-    let mut matching_urls: Vec<String> = results
+    // 1. Collect into a Vec of Feeds
+    let mut matching_urls = results
         .into_iter()
         .flatten()
-        .filter(|feed| {
-            feed.url.to_lowercase().contains(&partial_lower)
-                || feed.name.to_lowercase().contains(&partial_lower)
-        })
-        .map(|feed| feed.url)
-        .collect();
+        .filter(|feed| feed.url.to_lowercase().contains(&partial_lower))
+        .collect::<Vec<_>>();
 
-    matching_urls.sort();
-    matching_urls.truncate(25); // Discord autocomplete limit
-    matching_urls
+    // 2. Sort the Feeds
+    matching_urls.sort_by_key(|feed| feed.name.to_lowercase());
+
+    // 3. Map the Feeds into AutocompleteChoices
+    let mut choices = matching_urls
+        .into_iter()
+        .map(|feed| AutocompleteChoice::new(feed.name, feed.url))
+        .collect::<Vec<_>>();
+
+    choices.truncate(25); // Discord autocomplete limit
+    CreateAutocompleteResponse::new().set_choices(choices)
 }

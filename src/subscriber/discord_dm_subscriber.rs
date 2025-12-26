@@ -1,19 +1,20 @@
+use std::str::FromStr;
 use std::sync::Arc;
 
 use anyhow::Result;
 use log::debug;
 use log::error;
 use log::info;
-use poise::serenity_prelude as serenity;
-use serenity::all::UserId;
+use poise::serenity_prelude::UserId;
+use serenity::all::CreateMessage;
 
 use super::Subscriber;
 use crate::bot::bot::Bot;
 use crate::database::database::Database;
+use crate::database::model::SubscriberModel;
 use crate::database::model::SubscriberType;
 use crate::event::Event;
 use crate::event::feed_update_event::FeedUpdateEvent;
-use crate::subscriber::event_message_builder::EventMessageBuilder;
 
 pub struct DiscordDmSubscriber {
     bot: Arc<Bot>,
@@ -29,54 +30,42 @@ impl DiscordDmSubscriber {
     pub async fn feed_event_callback(&self, event: FeedUpdateEvent) -> Result<()> {
         debug!("Received {}: {:?}", event.event_name(), event);
 
-        let message = EventMessageBuilder::new(&event).build();
-
         // Get all subscriptions for this feed
         let subs = self
             .db
             .subscriber_table
-            .select_by_type_and_feed(SubscriberType::Dm, event.feed_id)
+            .select_by_type_and_feed(SubscriberType::Dm, event.feed.id)
             .await?;
 
         for sub in subs {
-            let user_id = match sub.target_id.parse::<u64>() {
-                Ok(id) => UserId::new(id),
-                Err(e) => {
-                    error!("Invalid user ID {}: {}", sub.target_id, e);
-                    continue;
-                }
-            };
-
-            let http = self.bot.http.clone();
-            let message = message.clone();
-
-            // Check cache first
-            if self.bot.cache.user(user_id).is_some() {
-                info!("Sending DM to cached user {}.", user_id);
-                if let Err(e) = user_id.dm(&http, message).await {
-                    error!("Failed to send DM to cached user {}: {}", user_id, e);
-                } else {
-                    info!("Successfully sent DM to cached user {}.", user_id);
-                }
-            } else {
-                // User not in cache, fetch from HTTP
-                debug!("User {} not in cache, fetching from HTTP.", user_id);
-                match http.get_user(user_id).await {
-                    Ok(user) => {
-                        debug!("Fetched user {}. Sending DM.", user_id);
-                        if let Err(e) = user.dm(&http, message).await {
-                            error!("Failed to send DM to fetched user {}: {}", user_id, e);
-                        } else {
-                            info!("Successfully sent DM to fetched user {}.", user_id);
-                        }
-                    }
-                    Err(e) => {
-                        error!("Failed to fetch user {}: {}", user_id, e);
-                    }
-                }
+            if let Err(e) = self.handle_sub(&sub, event.message.clone()).await {
+                error!(
+                    "Error handling user id `{}` target `{}`: {:?}",
+                    sub.id, sub.target_id, e
+                );
             }
         }
 
+        Ok(())
+    }
+
+    pub async fn handle_sub(
+        &self,
+        sub: &SubscriberModel,
+        message: CreateMessage<'_>,
+    ) -> anyhow::Result<()> {
+        let user_id = UserId::from_str(&sub.target_id)?;
+
+        debug!("Fetching user id `{}`.", user_id);
+        let user = self.bot.http.get_user(user_id).await?;
+
+        debug!("Fetched user id `{}` ({}). Sending DM.", user_id, user.name);
+        user.id.dm(&self.bot.http, message).await?;
+
+        info!(
+            "Successfully sent DM to fetched user id `{}` ({}).",
+            user_id, user.name
+        );
         Ok(())
     }
 }

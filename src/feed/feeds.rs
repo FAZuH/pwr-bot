@@ -9,8 +9,8 @@ use crate::feed::series::SeriesLatest;
 
 pub struct Feeds {
     feeds: Vec<Arc<dyn SeriesFeed>>,
-    pub anilist_feed: Arc<AniListFeed<'static>>,
-    pub mangadex_feed: Arc<MangaDexFeed<'static>>,
+    pub anilist_feed: Arc<AniListFeed>,
+    pub mangadex_feed: Arc<MangaDexFeed>,
 }
 
 impl Feeds {
@@ -65,9 +65,12 @@ impl Feeds {
 
     /// Get feed by URL
     pub fn get_feed_by_url(&self, url: &str) -> Option<&Arc<dyn SeriesFeed>> {
-        self.feeds
-            .iter()
-            .find(|feed| feed.get_url().api_url.contains(&Self::extract_domain(url)))
+        self.feeds.iter().find(|feed| {
+            feed.get_base()
+                .info
+                .api_url
+                .contains(&Self::extract_domain(url))
+        })
     }
 
     pub fn add_feed(&mut self, feed: Arc<dyn SeriesFeed>) {

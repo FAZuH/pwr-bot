@@ -1,6 +1,5 @@
 pub mod discord_channel_subscriber;
 pub mod discord_dm_subscriber;
-pub mod event_message_builder;
 
 use anyhow::Result;
 
