@@ -1,4 +1,11 @@
+## [0.1.7](https://github.com/FAZuH/pwr-bot/compare/v0.1.6...v0.1.7) (2025-12-26)
+
 ## [0.1.6](https://github.com/FAZuH/pwr-bot/compare/v0.1.5...v0.1.6) (2025-12-25)
+
+
+### Miscellaneous Chores
+
+* **release:** v0.1.6 [skip ci] ([7836615](https://github.com/FAZuH/pwr-bot/commit/78366153dd0bd84bd4191434e036d217b47ca2d3))
 
 
 ### Code Refactoring
@@ -47,23 +54,4 @@
 ### Miscellaneous Chores
 
 * **release:** v0.1.3 [skip ci] ([316caf8](https://github.com/FAZuH/pwr-bot/commit/316caf836eba997fadfeb31fc0e7d370e35d10ab))
-
-## [0.1.2](https://github.com/FAZuH/pwr-bot/compare/v0.1.1...v0.1.2) (2025-08-06)
-
-
-### New Features
-
-* **publisher:** Auto-remove completed series ([3ac18ba](https://github.com/FAZuH/pwr-bot/commit/3ac18ba27134001090c0020c834fa091e42b2ef2))
-
-
-### Bug Fixes
-
-* **bot:** Occasional "the application did not respond error" [skip ci] ([6e0d90e](https://github.com/FAZuH/pwr-bot/commit/6e0d90e1e159b8d2ab71258672384fdf95036613))
-* **db:** Foreign keys check not enabled [skip ci] ([21c4d15](https://github.com/FAZuH/pwr-bot/commit/21c4d15245f95ece851bc95b949d38546515c140))
-* **source:** MangaDex check en and ja titles first before failing [skip ci] ([db00f99](https://github.com/FAZuH/pwr-bot/commit/db00f99c7ab2f2a024fc57a43f38f01a67986b6f))
-
-
-### Miscellaneous Chores
-
-* **release:** v0.1.2 [skip ci] ([4944612](https://github.com/FAZuH/pwr-bot/commit/4944612e2045bcddd60241e50b692601a42ea0dd))
 
