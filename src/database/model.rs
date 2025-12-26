@@ -19,7 +19,7 @@ pub enum SubscriberType {
 /// Represents the base metadata for any subscribable content (manga, anime,
 /// social media). The actual version history is tracked separately in
 /// `FeedVersionModel`.
-#[derive(FromRow, Serialize, Default)]
+#[derive(FromRow, Serialize, Default, Clone, Debug)]
 pub struct FeedModel {
     #[serde(default)]
     pub id: i32,
@@ -27,6 +27,10 @@ pub struct FeedModel {
     pub name: String,
     #[serde(default)]
     pub url: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub cover_url: String,
     /// Comma-separated tags for categorization (e.g., "manga,ongoing")
     #[serde(default)]
     pub tags: String,

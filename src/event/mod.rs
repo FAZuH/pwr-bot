@@ -14,7 +14,7 @@ pub trait Event: std::any::Any + Send + Sync + 'static {
     fn as_any(&self) -> &dyn std::any::Any;
 
     /// Get the name of the event type.
-    fn event_name(&self) -> &'static str {
-        std::any::type_name::<Self>()
+    fn event_name(&self) -> String {
+        std::any::type_name::<Self>().to_string()
     }
 }

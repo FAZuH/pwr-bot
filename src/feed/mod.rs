@@ -10,44 +10,50 @@ pub mod mangadex_feed;
 pub mod series;
 
 #[derive(Clone, Debug)]
-pub struct FeedUrl<'a> {
-    /// The name of the feed, e.g., "MangaDex", "AniList"
-    pub name: &'a str,
+pub struct FeedInfo {
+    /// The name of the feed source, e.g., "MangaDex", "AniList"
+    pub name: String,
+    /// What do you call the item this feed publishes? e.g., "Episode", "Chapter"
+    pub feed_type: String,
     /// api.feed.tld
-    pub api_hostname: &'a str,
+    pub api_hostname: String,
     /// feed.tld
-    pub api_domain: &'a str,
+    pub api_domain: String,
     /// https://api.feed.tld
-    pub api_url: &'a str,
+    pub api_url: String,
+    /// © feed 2067
+    pub copyright_notice: String,
+    /// https://anilist.co/img/icons/icon.svg
+    pub logo_url: String,
 }
 
-#[derive(Clone)]
-pub struct BaseFeed<'a> {
-    pub url: FeedUrl<'a>,
+#[derive(Clone, Debug)]
+pub struct BaseFeed {
+    pub info: FeedInfo,
     pub client: reqwest::Client,
 }
 
-impl<'a> BaseFeed<'a> {
-    pub fn new(url: FeedUrl<'a>, client: reqwest::Client) -> Self {
-        BaseFeed { url, client }
+impl BaseFeed {
+    pub fn new(info: FeedInfo, client: reqwest::Client) -> Self {
+        BaseFeed { info, client }
     }
     pub fn get_nth_path_from_url<'b>(
         &self,
         url: &'b str,
         n: usize,
     ) -> Result<&'b str, UrlParseError> {
-        if !url.contains(self.url.api_domain) {
+        if !url.contains(&self.info.api_domain) {
             return Err(UrlParseError::InvalidFormat {
                 url: url.to_string(),
             });
         }
 
         let path_start = url
-            .find(self.url.api_domain)
+            .find(&self.info.api_domain)
             .ok_or(UrlParseError::UnsupportedSite {
-                site: self.url.api_domain.to_string(),
+                site: self.info.api_domain.to_string(),
             })?
-            + self.url.api_domain.len();
+            + self.info.api_domain.len();
 
         if path_start >= url.len() {
             return Err(UrlParseError::InvalidFormat {

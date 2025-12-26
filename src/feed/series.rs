@@ -3,11 +3,10 @@ use chrono::DateTime;
 use chrono::Utc;
 
 use crate::feed::BaseFeed;
-use crate::feed::FeedUrl;
 use crate::feed::error::SeriesError;
 use crate::feed::error::UrlParseError;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct SeriesLatest {
     pub id: String,
     pub series_id: String,
@@ -19,15 +18,17 @@ pub struct SeriesLatest {
     pub published: DateTime<Utc>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct SeriesItem {
     pub id: String,
     ///  Human readable title, e.g., "One Piece", "Attack on Titan".
     pub title: String,
-    /// Url of the series, e.g., "https://mangadex.org/title/1234567890".
-    pub url: String,
     /// Description of the series.
     pub description: String,
+    /// Url of the series, e.g., "https://mangadex.org/title/1234567890".
+    pub url: String,
+    /// Cover url of the series.
+    pub cover_url: Option<String>,
 }
 
 #[async_trait]
@@ -38,10 +39,7 @@ pub trait SeriesFeed: Send + Sync {
     /// Returns the URL for a series given its ID.
     /// The returned URL is the public URL of the series, not the API URL.
     fn get_url_from_id(&self, id: &str) -> String;
-    fn get_base(&self) -> &BaseFeed<'_>;
-    fn get_url(&self) -> &FeedUrl<'_> {
-        &self.get_base().url
-    }
+    fn get_base(&self) -> &BaseFeed;
     fn extract_error_message(&self, error: &serde_json::Value) -> String {
         let mut parts = Vec::new();
 
