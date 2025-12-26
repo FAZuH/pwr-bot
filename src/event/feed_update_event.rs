@@ -1,7 +1,7 @@
 use serenity::all::CreateMessage;
 
-use super::Event;
 use crate::database::model::FeedModel;
+use crate::event::Event;
 
 /// Event fired when a new version/episode of a feed is published.
 #[derive(Clone, Debug)]

@@ -13,12 +13,12 @@ use log::debug;
 use log::info;
 use serde_json::Value;
 
-use super::BaseFeed;
-use super::FeedInfo;
-use super::error::SeriesFeedError;
-use super::error::UrlParseError;
-use super::series_feed::SeriesFeed;
+use crate::feed::BaseFeed;
+use crate::feed::FeedInfo;
 use crate::feed::SeriesItem;
+use crate::feed::error::SeriesFeedError;
+use crate::feed::error::UrlParseError;
+use crate::feed::series_feed::SeriesFeed;
 use crate::feed::series_feed::SeriesLatest;
 
 pub struct AniListSeriesFeed {
@@ -98,11 +98,12 @@ impl AniListSeriesFeed {
 
     /// Validate series_id format (should be numeric for AniList)
     fn validate_id(series_id: &str) -> Result<i32, SeriesFeedError> {
-        let series_id_num = series_id
-            .parse::<i32>()
-            .map_err(|_| SeriesFeedError::InvalidSeriesId {
-                series_id: series_id.to_string(),
-            })?;
+        let series_id_num =
+            series_id
+                .parse::<i32>()
+                .map_err(|_| SeriesFeedError::InvalidSeriesId {
+                    series_id: series_id.to_string(),
+                })?;
         Ok(series_id_num)
     }
 }

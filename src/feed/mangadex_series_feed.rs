@@ -21,7 +21,7 @@ use reqwest::header::USER_AGENT;
 use serde_json::Map;
 use serde_json::Value;
 
-use super::BaseFeed;
+use crate::feed::BaseFeed;
 use crate::feed::FeedInfo;
 use crate::feed::error::SeriesFeedError;
 use crate::feed::error::UrlParseError;
@@ -85,9 +85,10 @@ impl MangaDexSeriesFeed {
     }
 
     fn get_data_from_resp<'a>(&self, resp: &'a Value) -> Result<&'a Value, SeriesFeedError> {
-        resp.get("data").ok_or_else(|| SeriesFeedError::MissingField {
-            field: "data".to_string(),
-        })
+        resp.get("data")
+            .ok_or_else(|| SeriesFeedError::MissingField {
+                field: "data".to_string(),
+            })
     }
 
     fn get_attr_from_data<'a>(
