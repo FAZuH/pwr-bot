@@ -1,5 +1,5 @@
-FROM rust:1.88-slim-bookworm AS build
-LABEL org.opencontainers.image.source "https://github.com/FAZuH/pwr-bot"
+FROM rust:1.92-slim-bookworm AS build
+LABEL org.opencontainers.image.source="https://github.com/FAZuH/pwr-bot"
 
 # Required by openssl-sys
 RUN apt-get update && \
@@ -13,12 +13,8 @@ COPY ./migrations /app/migrations
 WORKDIR /app
 RUN --mount=type=cache,target=/usr/local/cargo/registry cargo build --release
 
-FROM debian:bookworm-slim AS app
-
-# Install required libssl.so.3
-RUN apt-get update && \
-    apt-get install -y ca-certificates libssl3 && \
-    rm -rf /var/lib/apt/lists/*
+# Includes glibc, libssl.so.3 and libcrypto.so.3, required by app
+FROM gcr.io/distroless/cc-debian12:latest AS app
 
 COPY --from=build /app/migrations /app/migrations
 COPY --from=build /app/target/release/pwr-bot /app/pwr-bot
