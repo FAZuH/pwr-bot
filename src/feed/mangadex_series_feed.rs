@@ -25,18 +25,18 @@ use super::BaseFeed;
 use crate::feed::FeedInfo;
 use crate::feed::error::SeriesError;
 use crate::feed::error::UrlParseError;
-use crate::feed::series::SeriesFeed;
-use crate::feed::series::SeriesItem;
-use crate::feed::series::SeriesLatest;
+use crate::feed::series_feed::SeriesFeed;
+use crate::feed::series_feed::SeriesItem;
+use crate::feed::series_feed::SeriesLatest;
 
 type Json<'a> = &'a Map<String, Value>;
 
-pub struct MangaDexFeed {
+pub struct MangaDexSeriesFeed {
     pub base: BaseFeed,
     limiter: RateLimiter<NotKeyed, InMemoryState, QuantaClock>,
 }
 
-impl MangaDexFeed {
+impl MangaDexSeriesFeed {
     pub fn new() -> Self {
         let mut headers = HeaderMap::new();
         headers.insert(USER_AGENT, HeaderValue::from_static("pwr-bot/0.1"));
@@ -197,7 +197,7 @@ impl MangaDexFeed {
 }
 
 #[async_trait]
-impl SeriesFeed for MangaDexFeed {
+impl SeriesFeed for MangaDexSeriesFeed {
     async fn get_info(&self, id: &str) -> Result<SeriesItem, SeriesError> {
         debug!(
             "Fetching info from {} for series_id: {id}",
@@ -313,15 +313,15 @@ impl SeriesFeed for MangaDexFeed {
     }
 }
 
-impl PartialEq for MangaDexFeed {
+impl PartialEq for MangaDexSeriesFeed {
     fn eq(&self, other: &Self) -> bool {
         self.base.info.api_url == other.base.info.api_url
     }
 }
 
-impl Eq for MangaDexFeed {}
+impl Eq for MangaDexSeriesFeed {}
 
-impl Hash for MangaDexFeed {
+impl Hash for MangaDexSeriesFeed {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.base.info.api_url.hash(state);
     }

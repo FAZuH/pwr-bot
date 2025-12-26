@@ -17,16 +17,16 @@ use super::BaseFeed;
 use super::FeedInfo;
 use super::error::SeriesError;
 use super::error::UrlParseError;
-use super::series::SeriesFeed;
+use super::series_feed::SeriesFeed;
 use crate::feed::SeriesItem;
-use crate::feed::series::SeriesLatest;
+use crate::feed::series_feed::SeriesLatest;
 
-pub struct AniListFeed {
+pub struct AniListSeriesFeed {
     pub base: BaseFeed,
     limiter: RateLimiter<NotKeyed, InMemoryState, QuantaClock>,
 }
 
-impl AniListFeed {
+impl AniListSeriesFeed {
     pub fn new() -> Self {
         let info = FeedInfo {
             name: "AniList".to_string(),
@@ -108,7 +108,7 @@ impl AniListFeed {
 }
 
 #[async_trait]
-impl SeriesFeed for AniListFeed {
+impl SeriesFeed for AniListSeriesFeed {
     async fn get_latest(&self, id: &str) -> Result<SeriesLatest, SeriesError> {
         debug!(
             "Fetching latest from {} for series_id: {id}",
@@ -240,15 +240,15 @@ impl SeriesFeed for AniListFeed {
     }
 }
 
-impl PartialEq for AniListFeed {
+impl PartialEq for AniListSeriesFeed {
     fn eq(&self, other: &Self) -> bool {
         self.base.info.api_url == other.base.info.api_url
     }
 }
 
-impl Eq for AniListFeed {}
+impl Eq for AniListSeriesFeed {}
 
-impl Hash for AniListFeed {
+impl Hash for AniListSeriesFeed {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.base.info.api_url.hash(state);
     }

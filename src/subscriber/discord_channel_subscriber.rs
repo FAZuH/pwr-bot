@@ -8,13 +8,13 @@ use log::info;
 use serenity::all::ChannelId;
 use serenity::all::CreateMessage;
 
-use super::Subscriber;
-use crate::bot::bot::Bot;
-use crate::database::database::Database;
+use crate::bot::Bot;
+use crate::database::Database;
 use crate::database::model::SubscriberModel;
 use crate::database::model::SubscriberType;
 use crate::event::Event;
 use crate::event::feed_update_event::FeedUpdateEvent;
+use crate::subscriber::Subscriber;
 
 pub struct DiscordChannelSubscriber {
     bot: Arc<Bot>,

@@ -9,7 +9,7 @@ use poise::serenity_prelude::CreateAttachment;
 use poise::serenity_prelude::CreateAutocompleteResponse;
 use sqlx::error::ErrorKind;
 
-use crate::bot::bot::Data;
+use crate::bot::Data;
 use crate::database::model::FeedItemModel;
 use crate::database::model::FeedModel;
 use crate::database::model::FeedSubscriptionModel;
