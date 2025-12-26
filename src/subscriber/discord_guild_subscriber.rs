@@ -7,6 +7,7 @@ use log::error;
 use log::info;
 use serenity::all::ChannelId;
 use serenity::all::CreateMessage;
+use serenity::all::GuildId;
 
 use crate::bot::Bot;
 use crate::database::Database;
@@ -39,7 +40,7 @@ impl DiscordGuildSubscriber {
         for sub in subs {
             if let Err(e) = self.handle_sub(&sub, event.message.clone()).await {
                 error!(
-                    "Error handling user id `{}` target `{}`: {:?}",
+                    "Error handling subscriber id `{}` target `{}`: {:?}",
                     sub.id, sub.target_id, e
                 );
             }
@@ -53,10 +54,15 @@ impl DiscordGuildSubscriber {
         sub: &SubscriberModel,
         message: CreateMessage<'_>,
     ) -> anyhow::Result<()> {
-        let channel_id = ChannelId::from_str(&sub.target_id)?;
+        let (guild_id, channel_id) = sub.parse_guild_target_id()?;
+
+        let guild_id = GuildId::from_str(guild_id)?;
+        let channel_id = ChannelId::from_str(channel_id)?;
 
         debug!("Fetching channel id `{}`.", channel_id);
-        let channel = channel_id.to_guild_channel(&self.bot.http, None).await?;
+        let channel = channel_id
+            .to_guild_channel(&self.bot.http, Some(guild_id))
+            .await?;
 
         debug!(
             "Fetched channel id `{}` ({}). Sending message.",

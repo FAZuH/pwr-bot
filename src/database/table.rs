@@ -360,7 +360,7 @@ impl SubscriberTable {
 
     pub async fn select_by_type_and_target(
         &self,
-        r#type: SubscriberType,
+        r#type: &SubscriberType,
         target_id: &str,
     ) -> Result<SubscriberModel, DbError> {
         sqlx::query_as::<_, SubscriberModel>(

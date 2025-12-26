@@ -1,4 +1,5 @@
 pub mod commands;
+pub mod error;
 
 use std::collections::HashSet;
 use std::str::FromStr;

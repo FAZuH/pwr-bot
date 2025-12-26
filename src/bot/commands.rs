@@ -11,6 +11,7 @@ use poise::serenity_prelude::CreateAutocompleteResponse;
 use sqlx::error::ErrorKind;
 
 use crate::bot::Data;
+use crate::bot::error::BotError;
 use crate::database::model::FeedItemModel;
 use crate::database::model::FeedModel;
 use crate::database::model::FeedSubscriptionModel;
@@ -32,7 +33,7 @@ impl From<&SendInto> for SubscriberType {
     fn from(value: &SendInto) -> Self {
         match value {
             SendInto::DM => SubscriberType::Dm,
-            SendInto::Server => SubscriberType::Guild
+            SendInto::Server => SubscriberType::Guild,
         }
     }
 }
@@ -46,7 +47,7 @@ impl Display for SendInto {
     }
 }
 
-pub struct Commands { }
+pub struct Commands {}
 
 impl Commands {
     /// Subscribe to an anime/manga series
@@ -54,18 +55,16 @@ impl Commands {
     pub async fn subscribe(
         ctx: Context<'_>,
         #[description = "Link(s) of the series. Separate links with commas (,)"] links: String,
-        #[description = "Where to send the notifications. Default to DM"] send_into: Option<SendInto>,
+        #[description = "Where to send the notifications. Default to DM"] send_into: Option<
+            SendInto,
+        >,
     ) -> Result<(), Error> {
         ctx.defer().await?;
 
         let data = ctx.data();
         let send_into = send_into.unwrap_or(SendInto::DM);
 
-        // Determine target based on send_into
-        let target_id = match send_into {
-            SendInto::Server => ctx.channel_id().to_string(),
-            SendInto::DM => ctx.author().id.to_string(),
-        };
+        let target_id = Commands::get_target_id(ctx, &send_into)?;
         let subscriber_type = SubscriberType::from(&send_into);
 
         let links_split: Vec<&str> = links.split(',').map(|s| s.trim()).collect();
@@ -82,10 +81,10 @@ impl Commands {
                     .ok_or_else(|| SeriesError::UnsupportedUrl {
                         url: link.to_string(),
                     })?;
+
             let id = source.get_id_from_url(link)?;
             let series_latest = source.get_latest(id).await?;
 
-            // Get or create feed
             let feed = match data.db.feed_table.select_by_url(&series_latest.url).await {
                 Ok(feed) => feed,
                 Err(_) => {
@@ -119,7 +118,7 @@ impl Commands {
             let subscriber = data
                 .db
                 .subscriber_table
-                .select_by_type_and_target(subscriber_type, &target_id)
+                .select_by_type_and_target(&subscriber_type, &target_id)
                 .await;
             let subscriber_id = match subscriber {
                 Ok(existing) => existing.id,
@@ -182,17 +181,8 @@ impl Commands {
         let data = ctx.data();
         let send_into = send_into.unwrap_or(SendInto::DM);
 
-        // Determine target based on send_into
-        let (subscriber_type, target_id) = match send_into {
-            SendInto::Server => {
-                let channel_id = ctx.channel_id();
-                (SubscriberType::Guild, channel_id.to_string())
-            }
-            SendInto::DM => {
-                let user_id = ctx.author().id;
-                (SubscriberType::Dm, user_id.to_string())
-            }
-        };
+        let target_id = Commands::get_target_id(ctx, &send_into)?;
+        let subscriber_type = SubscriberType::from(&send_into);
 
         for link in links.split(',').map(|s| s.trim()) {
             // Get source and normalize URL
@@ -227,7 +217,7 @@ impl Commands {
             let subscriber = match data
                 .db
                 .subscriber_table
-                .select_by_type_and_target(subscriber_type, &target_id)
+                .select_by_type_and_target(&subscriber_type, &target_id)
                 .await
             {
                 Ok(sub) => sub,
@@ -262,22 +252,23 @@ impl Commands {
     #[poise::command(slash_command)]
     pub async fn subscriptions(
         ctx: Context<'_>,
-        #[description = "Show subscriptions for channel instead of DM"] channel: Option<bool>,
+        #[description = "Where the notifications are being sent. Default to DM"] sent_into: Option<
+            SendInto,
+        >,
     ) -> Result<(), Error> {
         ctx.defer().await?;
 
         let data = ctx.data();
-        let (subscriber_type, target_id) = if channel.unwrap_or(false) {
-            (SubscriberType::Guild, ctx.channel_id().to_string())
-        } else {
-            (SubscriberType::Dm, ctx.author().id.to_string())
-        };
+        let sent_into = sent_into.unwrap_or(SendInto::DM);
+
+        let target_id = Commands::get_target_id(ctx, &sent_into)?;
+        let subscriber_type = SubscriberType::from(&sent_into);
 
         // Find subscriber
         let subscriber = match data
             .db
             .subscriber_table
-            .select_by_type_and_target(subscriber_type, &target_id)
+            .select_by_type_and_target(&subscriber_type, &target_id)
             .await
         {
             Ok(sub) => sub,
@@ -330,7 +321,7 @@ impl Commands {
         Ok(())
     }
 
-    #[poise::command(slash_command, owners_only, hide_in_help)]
+    #[poise::command(prefix_command, owners_only, hide_in_help)]
     pub async fn dump_db(ctx: Context<'_>) -> Result<(), Error> {
         ctx.defer().await?;
         let data = ctx.data();
@@ -378,7 +369,7 @@ impl Commands {
         let subscriber = match data
             .db
             .subscriber_table
-            .select_by_type_and_target(SubscriberType::Dm, &user_id)
+            .select_by_type_and_target(&SubscriberType::Dm, &user_id)
             .await
         {
             Ok(sub) => sub,
@@ -436,4 +427,20 @@ impl Commands {
         CreateAutocompleteResponse::new().set_choices(choices)
     }
 
+    fn get_target_id(ctx: Context<'_>, send_into: &SendInto) -> Result<String, BotError> {
+        let channel_id = ctx.channel_id();
+        let guild_id = ctx
+            .guild_id()
+            .ok_or_else(|| BotError::InvalidCommandArgument {
+                parameter: send_into.name().to_string(),
+                reason: "You have to be in a server to do this command with send_into: server"
+                    .to_string(),
+            })?;
+
+        let ret = match send_into {
+            SendInto::Server => SubscriberModel::format_guild_target_id(guild_id, channel_id),
+            SendInto::DM => ctx.author().id.to_string(),
+        };
+        Ok(ret)
+    }
 }

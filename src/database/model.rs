@@ -1,11 +1,15 @@
+use std::fmt::Display;
+
 use chrono::DateTime;
 use chrono::Utc;
 use serde::Deserialize;
 use serde::Serialize;
 use sqlx::FromRow;
 
+use crate::database::error::DatabaseError;
+
 /// Notification target type for feed updates.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, sqlx::Type, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, sqlx::Type, Default, PartialEq, Eq)]
 #[sqlx(type_name = "text", rename_all = "lowercase")]
 #[serde(rename_all = "lowercase")]
 pub enum SubscriberType {
@@ -68,6 +72,35 @@ pub struct SubscriberModel {
     /// Discord snowflake ID (channel ID for Guild, user ID for DM)
     #[serde(default)]
     pub target_id: String,
+}
+
+impl SubscriberModel {
+    /// Parses the target_id for a Guild subscriber into (guild_id, channel_id).
+    ///
+    /// # Errors
+    /// Returns [`DatabaseError::ParseError`] if called on a
+    /// non-Guild subscriber or if target_id format is invalid.
+    pub fn parse_guild_target_id(&self) -> Result<(&str, &str), DatabaseError> {
+        if self.r#type != SubscriberType::Guild {
+            return Err(DatabaseError::ParseError {
+                message: format!(
+                    "Cannot parse guild target_id from {:?} subscriber",
+                    self.r#type
+                ),
+            });
+        }
+
+        self.target_id
+            .split_once(":")
+            .ok_or_else(|| DatabaseError::InternalError {
+                message: format!("Invalid target_id format: {}", self.target_id),
+            })
+    }
+
+    /// Formats a guild_id and channel_id into the target_id format used by Guild subscribers.
+    pub fn format_guild_target_id(guild_id: impl Display, channel_id: impl Display) -> String {
+        format!("{}:{}", guild_id, channel_id)
+    }
 }
 
 /// Links subscribers to the feeds they're monitoring.
