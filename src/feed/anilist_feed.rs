@@ -14,25 +14,28 @@ use log::info;
 use serde_json::Value;
 
 use super::BaseFeed;
-use super::FeedUrl;
+use super::FeedInfo;
 use super::error::SeriesError;
 use super::error::UrlParseError;
 use super::series::SeriesFeed;
 use crate::feed::SeriesItem;
 use crate::feed::series::SeriesLatest;
 
-pub struct AniListFeed<'a> {
-    pub base: BaseFeed<'a>,
+pub struct AniListFeed {
+    pub base: BaseFeed,
     limiter: RateLimiter<NotKeyed, InMemoryState, QuantaClock>,
 }
 
-impl AniListFeed<'_> {
+impl AniListFeed {
     pub fn new() -> Self {
-        let url = FeedUrl {
-            name: "AniList",
-            api_hostname: "graphql.anilist.co",
-            api_domain: "anilist.co",
-            api_url: "https://graphql.anilist.co",
+        let info = FeedInfo {
+            name: "AniList".to_string(),
+            feed_type: "Episode".to_string(),
+            api_hostname: "graphql.anilist.co".to_string(),
+            api_domain: "anilist.co".to_string(),
+            api_url: "https://graphql.anilist.co".to_string(),
+            copyright_notice: "© AniList LLC 2025".to_string(),
+            logo_url: "https://anilist.co/img/icons/android-chrome-192x192.png".to_string(),
         };
         // TODO: See https://docs.anilist.co/guide/rate-limiting.
         // "The API is currently in a degraded state and is limited to 30 requests per minute."
@@ -40,7 +43,7 @@ impl AniListFeed<'_> {
         // the API is fully restored.
         let limiter = RateLimiter::direct(Quota::per_second(NonZeroU32::new(30).unwrap()));
         Self {
-            base: BaseFeed::new(url, reqwest::Client::new()),
+            base: BaseFeed::new(info, reqwest::Client::new()),
             limiter,
         }
     }
@@ -56,7 +59,7 @@ impl AniListFeed<'_> {
             "variables": { "id": series_id_num }
         });
 
-        let request = self.base.client.post(self.base.url.api_url).json(&json);
+        let request = self.base.client.post(&self.base.info.api_url).json(&json);
         let response = self.send(request).await?;
         let response_json = response.json::<serde_json::Value>().await?; // Automatically converts to SourceError::JsonParseFailed
 
@@ -84,7 +87,7 @@ impl AniListFeed<'_> {
         request: reqwest::RequestBuilder,
     ) -> Result<reqwest::Response, reqwest::Error> {
         if self.limiter.check().is_err() {
-            info!("Source {} is ratelimited. Waiting...", self.base.url.name);
+            info!("Source {} is ratelimited. Waiting...", self.base.info.name);
         }
         self.limiter.until_ready().await;
 
@@ -105,11 +108,11 @@ impl AniListFeed<'_> {
 }
 
 #[async_trait]
-impl SeriesFeed for AniListFeed<'_> {
+impl SeriesFeed for AniListFeed {
     async fn get_latest(&self, id: &str) -> Result<SeriesLatest, SeriesError> {
         debug!(
             "Fetching latest from {} for series_id: {id}",
-            self.base.url.name
+            self.base.info.name
         );
         let series_id = id.to_string();
 
@@ -174,7 +177,7 @@ impl SeriesFeed for AniListFeed<'_> {
     async fn get_info(&self, id: &str) -> Result<SeriesItem, SeriesError> {
         debug!(
             "Fetching info from {} for series_id: {id}",
-            self.base.url.name
+            self.base.info.name
         );
         let series_id = id.to_string();
 
@@ -184,7 +187,7 @@ impl SeriesFeed for AniListFeed<'_> {
                 title { romaji }
                 description(asHtml: false)
                 coverImage {
-                    medium
+                    extraLarge
                 }
               }
             }
@@ -209,7 +212,7 @@ impl SeriesFeed for AniListFeed<'_> {
             .to_string();
 
         let cover_url = Some(
-            media["coverImage"]["medium"]
+            media["coverImage"]["extraLarge"]
                 .as_str()
                 .unwrap_or("Unknown")
                 .to_string(),
@@ -229,24 +232,24 @@ impl SeriesFeed for AniListFeed<'_> {
     }
 
     fn get_url_from_id(&self, id: &str) -> String {
-        format!("https://{}/anime/{}", self.base.url.api_domain, id)
+        format!("https://{}/anime/{}", self.base.info.api_domain, id)
     }
 
-    fn get_base(&self) -> &BaseFeed<'_> {
+    fn get_base(&self) -> &BaseFeed {
         &self.base
     }
 }
 
-impl PartialEq for AniListFeed<'_> {
+impl PartialEq for AniListFeed {
     fn eq(&self, other: &Self) -> bool {
-        self.base.url.api_url == other.base.url.api_url
+        self.base.info.api_url == other.base.info.api_url
     }
 }
 
-impl Eq for AniListFeed<'_> {}
+impl Eq for AniListFeed {}
 
-impl Hash for AniListFeed<'_> {
+impl Hash for AniListFeed {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.base.url.api_url.hash(state);
+        self.base.info.api_url.hash(state);
     }
 }

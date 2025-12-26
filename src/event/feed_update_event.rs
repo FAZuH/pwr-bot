@@ -1,7 +1,7 @@
-use chrono::DateTime;
-use chrono::Utc;
+use serenity::all::CreateMessage;
 
 use super::Event;
+use crate::database::model::FeedModel;
 
 /// Event fired when a new version/episode of a feed is published.
 ///
@@ -9,18 +9,8 @@ use super::Event;
 /// delta notifications (e.g., "Updated from Chapter 50 to Chapter 51").
 #[derive(Clone, Debug)]
 pub struct FeedUpdateEvent {
-    pub feed_id: i32,
-    pub version_id: i32,
-    /// Title of this feed.
-    pub title: String,
-    pub previous_version: String,
-    pub current_version: String,
-    /// URL of this feed.
-    pub url: String,
-    /// Description of this feed.
-    pub description: String,
-    /// Time this feed item is published.
-    pub published: DateTime<Utc>,
+    pub feed: FeedModel,
+    pub message: CreateMessage<'static>,
 }
 
 impl Event for FeedUpdateEvent {

@@ -22,7 +22,7 @@ use serde_json::Map;
 use serde_json::Value;
 
 use super::BaseFeed;
-use crate::feed::FeedUrl;
+use crate::feed::FeedInfo;
 use crate::feed::error::SeriesError;
 use crate::feed::error::UrlParseError;
 use crate::feed::series::SeriesFeed;
@@ -31,12 +31,12 @@ use crate::feed::series::SeriesLatest;
 
 type Json<'a> = &'a Map<String, Value>;
 
-pub struct MangaDexFeed<'a> {
-    pub base: BaseFeed<'a>,
+pub struct MangaDexFeed {
+    pub base: BaseFeed,
     limiter: RateLimiter<NotKeyed, InMemoryState, QuantaClock>,
 }
 
-impl MangaDexFeed<'_> {
+impl MangaDexFeed {
     pub fn new() -> Self {
         let mut headers = HeaderMap::new();
         headers.insert(USER_AGENT, HeaderValue::from_static("pwr-bot/0.1"));
@@ -46,11 +46,17 @@ impl MangaDexFeed<'_> {
             .build()
             .expect("Failed to create client");
 
-        let url = FeedUrl {
-            name: "MangaDex",
-            api_hostname: "api.mangadex.org",
-            api_domain: "mangadex.org",
-            api_url: "https://api.mangadex.org",
+        let info = FeedInfo {
+            name: "MangaDex".to_string(),
+            feed_type: "Chapter".to_string(),
+            api_hostname: "api.mangadex.org".to_string(),
+            api_domain: "mangadex.org".to_string(),
+            api_url: "https://api.mangadex.org".to_string(),
+            copyright_notice: "© MangaDex 2025".to_string(),
+            // Discord doesn't support .svg files on their embed, and I can't find a .png link
+            // under MangaDex's domain
+            logo_url: "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/manga-dex.png"
+                .to_string(),
         };
         // NOTE: See https://api.mangadex.org/docs/2-limitations/
         // Because GET /manga/{id} is not specified on #endpoint-specific-rate-limits,
@@ -59,7 +65,7 @@ impl MangaDexFeed<'_> {
         let limiter = RateLimiter::direct(Quota::per_second(NonZeroU32::new(5).unwrap()));
 
         Self {
-            base: BaseFeed::new(url, client),
+            base: BaseFeed::new(info, client),
             limiter,
         }
     }
@@ -133,12 +139,12 @@ impl MangaDexFeed<'_> {
     async fn get_cover_url(&self, id: &str) -> Result<String, SeriesError> {
         debug!(
             "Fetching cover from {} for series_id: {id}",
-            self.base.url.name
+            self.base.info.name
         );
         let request = self
             .base
             .client
-            .get(format!("{}/cover/{id}", self.base.url.api_url));
+            .get(format!("{}/cover/{id}", self.base.info.api_url));
 
         let resp = self.send_get_json(request).await?;
         let attr = self.get_attr_from_data(&resp)?;
@@ -168,7 +174,7 @@ impl MangaDexFeed<'_> {
         request: reqwest::RequestBuilder,
     ) -> Result<reqwest::Response, reqwest::Error> {
         if self.limiter.check().is_err() {
-            info!("Source {} is ratelimited. Waiting...", self.base.url.name);
+            info!("Source {} is ratelimited. Waiting...", self.base.info.name);
         }
         self.limiter.until_ready().await;
 
@@ -191,11 +197,11 @@ impl MangaDexFeed<'_> {
 }
 
 #[async_trait]
-impl SeriesFeed for MangaDexFeed<'_> {
+impl SeriesFeed for MangaDexFeed {
     async fn get_info(&self, id: &str) -> Result<SeriesItem, SeriesError> {
         debug!(
             "Fetching info from {} for series_id: {id}",
-            self.base.url.name
+            self.base.info.name
         );
         let series_id = id.to_string();
         self.validate_uuid(&series_id.clone())?;
@@ -203,11 +209,11 @@ impl SeriesFeed for MangaDexFeed<'_> {
         let request = self
             .base
             .client
-            .get(format!("{}/manga/{id}", self.base.url.api_url));
+            .get(format!("{}/manga/{id}", self.base.info.api_url));
 
         let resp = self.send_get_json(request).await?;
         let data = self.get_data_from_resp(&resp)?;
-        let attr = self.get_attr_from_data(&data)?;
+        let attr = self.get_attr_from_data(data)?;
         let title = self.get_title_from_attr(attr)?;
         let description = self.get_description_from_attr(attr)?;
         let cover_url = Some(self.get_cover_url(&series_id).await?);
@@ -226,14 +232,14 @@ impl SeriesFeed for MangaDexFeed<'_> {
     async fn get_latest(&self, id: &str) -> Result<SeriesLatest, SeriesError> {
         debug!(
             "Fetching latest from {} for series_id: {id}",
-            self.base.url.name
+            self.base.info.name
         );
         let series_id = id.to_string();
 
         let request = self
             .base
             .client
-            .get(format!("{}/manga/{series_id}/feed", self.base.url.api_url))
+            .get(format!("{}/manga/{series_id}/feed", self.base.info.api_url))
             .query(&[
                 ("order[createdAt]", "desc"),
                 ("limit", "1"),
@@ -299,24 +305,24 @@ impl SeriesFeed for MangaDexFeed<'_> {
     }
 
     fn get_url_from_id(&self, id: &str) -> String {
-        format!("https://{}/title/{}", self.base.url.api_domain, id)
+        format!("https://{}/title/{}", self.base.info.api_domain, id)
     }
 
-    fn get_base(&self) -> &BaseFeed<'_> {
+    fn get_base(&self) -> &BaseFeed {
         &self.base
     }
 }
 
-impl PartialEq for MangaDexFeed<'_> {
+impl PartialEq for MangaDexFeed {
     fn eq(&self, other: &Self) -> bool {
-        self.base.url.api_url == other.base.url.api_url
+        self.base.info.api_url == other.base.info.api_url
     }
 }
 
-impl Eq for MangaDexFeed<'_> {}
+impl Eq for MangaDexFeed {}
 
-impl Hash for MangaDexFeed<'_> {
+impl Hash for MangaDexFeed {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.base.url.api_url.hash(state);
+        self.base.info.api_url.hash(state);
     }
 }

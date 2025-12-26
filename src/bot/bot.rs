@@ -3,18 +3,24 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use ::serenity::all::UserId;
 use anyhow;
 use anyhow::Result;
 use futures::lock::Mutex;
 use log::error;
 use log::info;
-use poise::serenity_prelude as serenity;
+use poise::Framework;
+use poise::FrameworkOptions;
+use poise::serenity_prelude::Cache;
+use poise::serenity_prelude::Client;
+use poise::serenity_prelude::ClientBuilder;
+use poise::serenity_prelude::GatewayIntents;
+use poise::serenity_prelude::Http;
+use poise::serenity_prelude::UserId;
+use serenity::all::Token;
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
 
 use super::commands::dump_db;
-use super::commands::help;
 use super::commands::register;
 use super::commands::subscribe;
 use super::commands::subscriptions;
@@ -30,23 +36,23 @@ pub struct Data {
 }
 
 pub struct Bot {
-    client: Arc<Mutex<serenity::Client>>,
-    pub cache: Arc<serenity::Cache>,
-    pub http: Arc<serenity::Http>,
+    client: Arc<Mutex<Client>>,
+    pub cache: Arc<Cache>,
+    pub http: Arc<Http>,
 }
 
 impl Bot {
     pub async fn new(config: Arc<Config>, db: Arc<Database>, sources: Arc<Feeds>) -> Result<Self> {
         info!("Initializing bot...");
-        let options = poise::FrameworkOptions {
+        let options = FrameworkOptions::<Data, Error> {
             commands: vec![
                 subscribe(),
                 unsubscribe(),
                 subscriptions(),
                 dump_db(),
-                help(),
                 register(),
             ],
+            on_error: |error| Box::pin(Bot::on_error(error)),
             prefix_options: poise::PrefixFrameworkOptions {
                 prefix: Some("!".into()),
                 edit_tracker: Some(Arc::new(poise::EditTracker::for_timespan(
@@ -54,26 +60,26 @@ impl Bot {
                 ))),
                 ..Default::default()
             },
-            on_error: |error| Box::pin(Bot::on_error(error)),
             owners: HashSet::from([
                 UserId::from_str(config.admin_id.as_str()).expect("Invalid admin ID")
             ]),
             ..Default::default()
         };
-        let data = Data {
+        let data = Arc::new(Data {
             config: config.clone(),
             db: db.clone(),
             sources: sources.clone(),
-        };
-        let framework = poise::Framework::builder()
-            .options(options)
-            .setup(|_ctx, _ready, _framework| Box::pin(async move { Ok(data) }))
-            .build();
-        let intents =
-            serenity::GatewayIntents::non_privileged() | serenity::GatewayIntents::MESSAGE_CONTENT;
+        });
 
-        let client = serenity::ClientBuilder::new(&config.discord_token, intents)
+        let intents = GatewayIntents::non_privileged() | GatewayIntents::MESSAGE_CONTENT;
+        let token = Token::from_str(&config.discord_token)?;
+
+        let framework: Box<Framework<Data, Error>> =
+            Box::new(poise::Framework::builder().options(options).build());
+
+        let client = ClientBuilder::new(token, intents)
             .framework(framework)
+            .data(data)
             .await?;
 
         Ok(Self {
@@ -103,9 +109,6 @@ impl Bot {
     /// Global custom error handler
     async fn on_error(error: poise::FrameworkError<'_, Data, Error>) {
         match error {
-            poise::FrameworkError::Setup { error, .. } => {
-                panic!("Failed to start bot: {:?}", error)
-            }
             poise::FrameworkError::Command { error, ctx, .. } => {
                 error!("Error in command `{}`: {:?}", ctx.command().name, error,);
                 let _ = ctx

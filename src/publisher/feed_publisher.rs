@@ -6,6 +6,20 @@ use std::time::Duration;
 use log::debug;
 use log::error;
 use log::info;
+use serenity::all::CreateComponent;
+use serenity::all::CreateContainer;
+use serenity::all::CreateContainerComponent;
+use serenity::all::CreateMediaGallery;
+use serenity::all::CreateMediaGalleryItem;
+use serenity::all::CreateMessage;
+use serenity::all::CreateSection;
+use serenity::all::CreateSectionAccessory;
+use serenity::all::CreateSectionComponent;
+use serenity::all::CreateSeparator;
+use serenity::all::CreateTextDisplay;
+use serenity::all::CreateThumbnail;
+use serenity::all::CreateUnfurledMediaItem;
+use serenity::all::MessageFlags;
 
 use crate::database::database::Database;
 use crate::database::error::DatabaseError;
@@ -14,6 +28,7 @@ use crate::database::model::FeedModel;
 use crate::database::table::Table;
 use crate::event::event_bus::EventBus;
 use crate::event::feed_update_event::FeedUpdateEvent;
+use crate::feed::FeedInfo;
 use crate::feed::error::SeriesError;
 use crate::feed::feeds::Feeds;
 
@@ -84,8 +99,10 @@ impl FeedPublisher {
         info!("Found {} feeds to check.", feeds.len());
 
         for feed in feeds {
-            if let Err(e) = self.check_feed(&feed).await {
-                error!("Error checking {}: {:?}", self.get_feed_desc(&feed), e);
+            let id = feed.id;
+            let name = feed.name.clone();
+            if let Err(e) = self.check_feed(feed).await {
+                error!("Error checking feed id `{id}` ({name}): {e:?}");
             };
         }
 
@@ -93,7 +110,7 @@ impl FeedPublisher {
         Ok(())
     }
 
-    async fn check_feed(&self, feed: &FeedModel) -> anyhow::Result<()> {
+    async fn check_feed(&self, feed: FeedModel) -> anyhow::Result<()> {
         // Skip feeds with no subscribers
         let subs = self
             .db
@@ -104,7 +121,7 @@ impl FeedPublisher {
         if !subs {
             debug!(
                 "No subscriptions for {}. Skipping.",
-                self.get_feed_desc(feed)
+                self.get_feed_desc(&feed)
             );
             return Ok(());
         }
@@ -128,17 +145,17 @@ impl FeedPublisher {
         // NOTE: Should've been checked already in commands.rs
 
         // Fetch current state from source
-        let curr_latest = match series_feed.get_latest(series_id).await {
+        let new_latest = match series_feed.get_latest(series_id).await {
             Ok(series) => series,
             Err(e) => {
                 if matches!(e, SeriesError::FinishedSeries { .. }) {
                     info!(
                         "Feed {} is finished. Removing from database.",
-                        self.get_feed_desc(feed)
+                        self.get_feed_desc(&feed)
                     );
                     self.db.feed_table.delete(&feed.id).await?;
                 } else {
-                    error!("Error fetching {}: {}", self.get_feed_desc(feed), e);
+                    error!("Error fetching {}: {}", self.get_feed_desc(&feed), e);
                     return Err(e.into());
                 }
                 return Ok(());
@@ -147,48 +164,105 @@ impl FeedPublisher {
 
         debug!(
             "Current version for {}: {}",
-            self.get_feed_desc(feed),
-            curr_latest.latest
+            self.get_feed_desc(&feed),
+            new_latest.latest
         );
 
         // Check if version changed
-        if curr_latest.latest == old_latest.description {
-            debug!("No new version for {}.", self.get_feed_desc(feed));
+        if new_latest.latest == old_latest.description {
+            debug!("No new version for {}.", self.get_feed_desc(&feed));
             return Ok(());
         }
         info!(
             "New version found for {}: {} -> {}",
-            self.get_feed_desc(feed),
+            self.get_feed_desc(&feed),
             old_latest.description,
-            curr_latest.latest
+            new_latest.latest
         );
 
         // Insert new version into database
-        let new_version = FeedItemModel {
+        let new_feed_item = FeedItemModel {
             id: 0, // Will be set by database
             feed_id: feed.id,
-            description: curr_latest.latest.clone(),
-            published: curr_latest.published,
+            description: new_latest.latest.clone(),
+            published: new_latest.published,
         };
-        let version_id = self.db.feed_item_table.replace(&new_version).await?;
+        self.db.feed_item_table.replace(&new_feed_item).await?;
+
+        // Set vars
+        let message = self.create_message(
+            &feed,
+            &series_feed.get_base().info,
+            &old_latest,
+            &new_feed_item,
+        );
 
         // Publish update event
-        info!("Publishing update event for {}.", self.get_feed_desc(feed));
-        let event = FeedUpdateEvent {
-            feed_id: feed.id,
-            description: feed.description.clone(),
-            version_id,
-            title: feed.name.clone(),
-            previous_version: old_latest.description,
-            current_version: curr_latest.latest,
-            url: feed.url.clone(),
-            published: curr_latest.published,
-        };
+        info!("Publishing update event for {}.", self.get_feed_desc(&feed));
+        let event = FeedUpdateEvent { feed, message };
         self.event_bus.publish(event);
         Ok(())
     }
 
     fn get_feed_desc(&self, feed: &FeedModel) -> String {
         format!("feed id `{}` ({})", feed.id, feed.name)
+    }
+
+    fn create_message(
+        &self,
+        feed: &FeedModel,
+        feed_info: &FeedInfo,
+        old_feed_item: &FeedItemModel,
+        new_feed_item: &FeedItemModel,
+    ) -> CreateMessage<'static> {
+        let feed_desc = feed
+            .description
+            .trim_start()
+            .trim_end()
+            .replace("\n", "\n> ")
+            .replace("<br>", "");
+        let text_main = format!(
+            "### {}
+
+> {}
+
+**Old {}**: {}
+Published on <t:{}>
+
+**New {}**: {}
+Published on <t:{}>
+
+**[Open in browser ↗]({})**",
+            feed.name,
+            feed_desc, 
+            feed_info.feed_type,
+            old_feed_item.description,
+            old_feed_item.published.timestamp(),
+            feed_info.feed_type,
+            new_feed_item.description,
+            new_feed_item.published.timestamp(),
+            feed.url
+        );
+        let text_footer = format!("-# {}", feed_info.copyright_notice);
+
+        let container = CreateContainer::new(vec![
+            CreateContainerComponent::Section(CreateSection::new(
+                vec![CreateSectionComponent::TextDisplay(CreateTextDisplay::new(
+                    text_main,
+                ))],
+                CreateSectionAccessory::Thumbnail(CreateThumbnail::new(
+                    CreateUnfurledMediaItem::new(feed_info.logo_url.clone()),
+                )),
+            )),
+            CreateContainerComponent::Separator(CreateSeparator::new(false)),
+            CreateContainerComponent::MediaGallery(CreateMediaGallery::new(vec![
+                CreateMediaGalleryItem::new(CreateUnfurledMediaItem::new(feed.cover_url.clone())),
+            ])),
+            CreateContainerComponent::TextDisplay(CreateTextDisplay::new(text_footer)),
+        ]);
+
+        CreateMessage::new()
+            .flags(MessageFlags::IS_COMPONENTS_V2)
+            .components(vec![CreateComponent::Container(container)])
     }
 }

@@ -3,7 +3,6 @@ use chrono::DateTime;
 use chrono::Utc;
 
 use crate::feed::BaseFeed;
-use crate::feed::FeedUrl;
 use crate::feed::error::SeriesError;
 use crate::feed::error::UrlParseError;
 
@@ -40,10 +39,7 @@ pub trait SeriesFeed: Send + Sync {
     /// Returns the URL for a series given its ID.
     /// The returned URL is the public URL of the series, not the API URL.
     fn get_url_from_id(&self, id: &str) -> String;
-    fn get_base(&self) -> &BaseFeed<'_>;
-    fn get_url(&self) -> &FeedUrl<'_> {
-        &self.get_base().url
-    }
+    fn get_base(&self) -> &BaseFeed;
     fn extract_error_message(&self, error: &serde_json::Value) -> String {
         let mut parts = Vec::new();
 

@@ -90,8 +90,9 @@ impl TableBase for FeedTable {
             r#"CREATE TABLE IF NOT EXISTS feeds (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
-                url TEXT NOT NULL UNIQUE,
                 description TEXT DEFAULT NULL,
+                url TEXT NOT NULL UNIQUE,
+                cover_url TEXT DEFAULT NULL,
                 tags TEXT DEFAULT NULL
             )"#,
         )
@@ -132,9 +133,11 @@ impl Table<FeedModel, i32> for FeedTable {
 
     async fn insert(&self, model: &FeedModel) -> Result<i32, DbError> {
         let row: (i32,) =
-            sqlx::query_as("INSERT INTO feeds (name, url, tags) VALUES (?, ?, ?) RETURNING id")
+            sqlx::query_as("INSERT INTO feeds (name, description, url, cover_url, tags) VALUES (?, ?, ?, ?, ?) RETURNING id")
                 .bind(&model.name)
+                .bind(&model.description)
                 .bind(&model.url)
+                .bind(&model.cover_url)
                 .bind(&model.tags)
                 .fetch_one(&self.base.pool)
                 .await?;
@@ -142,10 +145,11 @@ impl Table<FeedModel, i32> for FeedTable {
     }
 
     async fn update(&self, model: &FeedModel) -> Result<(), DbError> {
-        sqlx::query("UPDATE feeds SET name = ?, description = ?, url = ?, tags = ? WHERE id = ?")
+        sqlx::query("UPDATE feeds SET name = ?, description = ?, url = ?, cover_url = ?, tags = ? WHERE id = ?")
             .bind(&model.name)
             .bind(&model.description)
             .bind(&model.url)
+            .bind(&model.cover_url)
             .bind(&model.tags)
             .bind(model.id)
             .execute(&self.base.pool)
@@ -163,11 +167,12 @@ impl Table<FeedModel, i32> for FeedTable {
 
     async fn replace(&self, model: &FeedModel) -> Result<i32, DbError> {
         let row: (i32,) = sqlx::query_as(
-            "REPLACE INTO feeds (name, description, url, tags) VALUES (?, ?, ?, ?) RETURNING id",
+            "REPLACE INTO feeds (name, description, url, cover_url, tags) VALUES (?, ?, ?, ?, ?) RETURNING id",
         )
         .bind(&model.name)
         .bind(&model.description)
         .bind(&model.url)
+        .bind(&model.cover_url)
         .bind(&model.tags)
         .fetch_one(&self.base.pool)
         .await?;
