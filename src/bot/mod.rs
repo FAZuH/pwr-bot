@@ -22,11 +22,7 @@ use serenity::all::Token;
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
 
-use crate::bot::commands::dump_db;
-use crate::bot::commands::register;
-use crate::bot::commands::subscribe;
-use crate::bot::commands::subscriptions;
-use crate::bot::commands::unsubscribe;
+use crate::bot::commands::Commands;
 use crate::config::Config;
 use crate::database::Database;
 use crate::feed::feeds::Feeds;
@@ -48,11 +44,11 @@ impl Bot {
         info!("Initializing bot...");
         let options = FrameworkOptions::<Data, Error> {
             commands: vec![
-                subscribe(),
-                unsubscribe(),
-                subscriptions(),
-                dump_db(),
-                register(),
+                Commands::subscribe(),
+                Commands::unsubscribe(),
+                Commands::subscriptions(),
+                Commands::dump_db(),
+                Commands::register(),
             ],
             on_error: |error| Box::pin(Bot::on_error(error)),
             prefix_options: poise::PrefixFrameworkOptions {
