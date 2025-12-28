@@ -35,3 +35,14 @@ impl Config {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_config_defaults() {
+        let config = Config::new();
+        assert_eq!(config.poll_interval.as_secs(), 0);
+    }
+}
