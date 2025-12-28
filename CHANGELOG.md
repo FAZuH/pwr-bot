@@ -1,9 +1,21 @@
+## [0.1.11](https://github.com/FAZuH/pwr-bot/compare/v0.1.10...v0.1.11) (2025-12-28)
+
+
+### Code Refactoring
+
+* **db:** Use macros for TableBase and Table impls ([95d03f2](https://github.com/FAZuH/pwr-bot/commit/95d03f2479e57554b88f643f27370c8d9abbec68))
+
 ## [0.1.10](https://github.com/FAZuH/pwr-bot/compare/v0.1.9...v0.1.10) (2025-12-28)
 
 
 ### Performance Improvements
 
 * Improve API requests and database queries ([#10](https://github.com/FAZuH/pwr-bot/issues/10)) ([4cc9e0d](https://github.com/FAZuH/pwr-bot/commit/4cc9e0d5715c8ab355dca394df34d10ffb896228))
+
+
+### Miscellaneous Chores
+
+* **release:** v0.1.10 [skip ci] ([bcdf33b](https://github.com/FAZuH/pwr-bot/commit/bcdf33b9b1747a39afd9d92c24f9d89323f9dcc8))
 
 ## [0.1.9](https://github.com/FAZuH/pwr-bot/compare/v0.1.8...v0.1.9) (2025-12-28)
 
@@ -35,16 +47,4 @@
 ### Miscellaneous Chores
 
 * **release:** v0.1.7 [skip ci] ([5078e25](https://github.com/FAZuH/pwr-bot/commit/5078e2542a5575559c80212e5f3f341b61755cef))
-
-## [0.1.6](https://github.com/FAZuH/pwr-bot/compare/v0.1.5...v0.1.6) (2025-12-25)
-
-
-### Miscellaneous Chores
-
-* **release:** v0.1.6 [skip ci] ([7836615](https://github.com/FAZuH/pwr-bot/commit/78366153dd0bd84bd4191434e036d217b47ca2d3))
-
-
-### Code Refactoring
-
-* Improve db design ([#1](https://github.com/FAZuH/pwr-bot/issues/1)) ([39d60f9](https://github.com/FAZuH/pwr-bot/commit/39d60f91c3843e6e492d3022edbc7f9a736c5415))
 
