@@ -34,7 +34,7 @@ impl DiscordGuildSubscriber {
         let subs = self
             .db
             .subscriber_table
-            .select_by_type_and_feed(SubscriberType::Guild, event.feed.id)
+            .select_all_by_type_and_feed(SubscriberType::Guild, event.feed.id)
             .await?;
 
         for sub in subs {
