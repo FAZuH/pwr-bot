@@ -87,16 +87,16 @@ impl SeriesFeedSubscriptionService {
             .delete_subscription(feed.id, subscriber.id)
             .await
         {
-            Ok(_) => Ok(UnsubscribeResult::Success { feed }),
-            Err(err) => {
-                if let DatabaseError::BackendError(sqlx::Error::RowNotFound) = &err {
-                    Ok(UnsubscribeResult::AlreadyUnsubscribed { feed })
+            Ok(not_already_deleted) => {
+                if not_already_deleted {
+                    Ok(UnsubscribeResult::Success { feed })
                 } else {
-                    Err(ServiceError::UnexpectedResult {
-                        message: err.to_string(),
-                    })
+                    Ok(UnsubscribeResult::AlreadyUnsubscribed { feed })
                 }
             }
+            Err(err) => Err(ServiceError::UnexpectedResult {
+                message: err.to_string(),
+            }),
         }
     }
     pub async fn list_paginated_subscriptions(
@@ -105,7 +105,8 @@ impl SeriesFeedSubscriptionService {
         page: impl Into<u32>,
         per_page: impl Into<u32>,
     ) -> Result<Vec<SubscriptionInfo>, ServiceError> {
-        let subscriber = self.get_or_create_subscriber(&target).await?;
+        let subscriber = self.get_or_create_subscriber(target).await?;
+        let page = page.into() - 1;
 
         let mut ret = vec![];
         // Existence guaranteed by FOREIGN KEY constraint
@@ -137,12 +138,23 @@ impl SeriesFeedSubscriptionService {
     }
 
     async fn get_or_create_feed(&self, url: &str) -> Result<FeedModel, ServiceError> {
-        let feed = match self.db.feed_table.select_by_url(url).await {
+        let source =
+            self.feeds
+                .get_feed_by_url(url)
+                .ok_or_else(|| SeriesFeedError::UnsupportedUrl {
+                    url: url.to_string(),
+                })?;
+        let id = source
+            .get_id_from_url(url)
+            .map_err(SeriesFeedError::UrlParseFailed)?;
+        let normalized_url = source.get_url_from_id(id);
+
+        let feed = match self.db.feed_table.select_by_url(&normalized_url).await {
             Ok(res) => res,
             Err(_) => {
                 // Feed doesn't exist, create it
-                let series_latest = self.feeds.get_latest_by_url(url).await?;
-                let series_info = self.feeds.get_info_by_url(url).await?;
+                let series_latest = source.get_latest(&normalized_url).await?;
+                let series_info = source.get_info(&normalized_url).await?;
 
                 let mut feed = FeedModel {
                     name: series_info.title,

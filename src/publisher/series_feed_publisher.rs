@@ -208,6 +208,7 @@ impl SeriesFeedPublisher {
         format!("feed id `{}` ({})", feed.id, feed.name)
     }
 
+    /// Insipred by freestuffbot.xyz's notifications
     fn create_message(
         &self,
         feed: &FeedModel,

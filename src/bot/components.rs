@@ -10,13 +10,19 @@ use serenity::all::CreateInteractionResponse;
 use crate::bot::commands::Context;
 
 pub struct Pagination {
+    /// Current page number. Guaranteed to be >= 1 and <= pages
     pub current_page: u32,
+    /// Total number of pages. Guaranteed to be >= 1
     pub pages: u32,
+    /// Number of items to show per pag. Guaranteed to be >= 1
     pub per_page: u32,
 }
 
 impl Pagination {
     pub fn new(pages: u32, per_page: u32, current_page: u32) -> Self {
+        let pages = pages.max(1);
+        let per_page = per_page.max(1);
+        let current_page = current_page.clamp(1, pages.max(1));
         Self {
             pages,
             per_page,
@@ -28,28 +34,46 @@ impl Pagination {
     }
     pub fn prev_page(&mut self) {
         self.current_page -= 1;
+        self.clamp();
     }
     pub fn next_page(&mut self) {
         self.current_page += 1;
+        self.clamp();
     }
     pub fn last_page(&mut self) {
-        self.current_page = 1;
+        self.current_page = self.pages;
+    }
+    fn clamp(&mut self) {
+        self.current_page = self.current_page.clamp(1, self.pages.max(1));
     }
 }
 
 pub struct PageNavigationComponent<'a> {
     pub pagination: Pagination,
     ctx: &'a Context<'a>,
+    button_ids: Vec<String>,
 }
 
 impl<'a> PageNavigationComponent<'a> {
     pub fn new(ctx: &'a Context<'a>, pagination: Pagination) -> Self {
-        Self { pagination, ctx }
+        let button_ids = vec![
+            "first".to_string(),
+            "prev".to_string(),
+            "next".to_string(),
+            "last".to_string(),
+        ];
+        Self {
+            pagination,
+            ctx,
+            button_ids,
+        }
     }
 
     pub async fn listen(&mut self, timeout: Duration) -> bool {
-        let collector =
-            ComponentInteractionCollector::new(self.ctx.serenity_context()).timeout(timeout);
+        let button_ids = self.button_ids.clone();
+        let collector = ComponentInteractionCollector::new(self.ctx.serenity_context())
+            .filter(move |i| button_ids.contains(&i.data.custom_id.to_string()))
+            .timeout(timeout);
 
         match collector.next().await {
             None => false,

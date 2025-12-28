@@ -6,7 +6,7 @@ pub enum DatabaseError {
     BackendError(#[from] sqlx::Error),
 
     /// Internal database error not originating from the backend
-    #[error("Internal database error: {message}")]
+    #[error("Application database error: {message}")]
     InternalError { message: String },
 
     /// Failed to parse or extract data from a model field

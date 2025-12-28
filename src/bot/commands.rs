@@ -123,8 +123,7 @@ impl Commands {
             })?
         };
 
-        let mut states: Vec<String> =
-            vec!["<a:loading:466940188849995807> ﻿ Processing...".to_string(); urls_split.len()];
+        let mut states: Vec<String> = vec!["⏳ ﻿ Processing...".to_string(); urls_split.len()];
 
         let interval = Duration::from_secs(2);
         let mut last_send = Instant::now();
@@ -156,7 +155,7 @@ impl Commands {
                 .flags(MessageFlags::IS_COMPONENTS_V2)
                 .components(components);
 
-            if last_send.elapsed() > interval {
+            if last_send.elapsed() > interval || i + 1 == urls_split.len() {
                 match reply {
                     None => {
                         reply = Some(ctx.send(resp).await?);
@@ -198,8 +197,7 @@ impl Commands {
             })?
         };
 
-        let mut states: Vec<String> =
-            vec!["<a:loading:466940188849995807> ﻿ Processing...".to_string(); urls_split.len()];
+        let mut states: Vec<String> = vec!["⏳ ﻿ Processing...".to_string(); urls_split.len()];
 
         let interval = Duration::from_secs(2);
         let mut last_send = Instant::now();
@@ -231,7 +229,7 @@ impl Commands {
                 .flags(MessageFlags::IS_COMPONENTS_V2)
                 .components(components);
 
-            if last_send.elapsed() > interval {
+            if last_send.elapsed() > interval || i + 1 == urls_split.len() {
                 match reply {
                     None => {
                         reply = Some(ctx.send(resp).await?);
@@ -273,23 +271,22 @@ impl Commands {
             .await?;
 
         // Get subscriber's subscription count
-        let pages = ctx
+        let per_page = 10;
+        let items = ctx
             .data()
             .series_feed_subscription_service
             .get_subscription_count(subscriber.id)
             .await?;
-        if pages == 0 {
-            ctx.reply("You have no subscriptions.").await?;
-            return Ok(());
-        }
 
         // Create navigation component
-        let mut navigation = PageNavigationComponent::new(&ctx, Pagination::new(pages, 10, 1));
+        let mut navigation =
+            PageNavigationComponent::new(&ctx, Pagination::new(items / per_page + 1, per_page, 1));
 
         // Run feedback loop until timeout
         let reply = ctx
             .send(
                 CreateReply::new()
+                    .flags(MessageFlags::IS_COMPONENTS_V2)
                     .components(Commands::create_page(&ctx, &target, &navigation).await?),
             )
             .await?;
@@ -299,6 +296,7 @@ impl Commands {
                 .edit(
                     ctx,
                     CreateReply::new()
+                        .flags(MessageFlags::IS_COMPONENTS_V2)
                         .components(Commands::create_page(&ctx, &target, &navigation).await?),
                 )
                 .await?;
@@ -312,24 +310,33 @@ impl Commands {
         target: &SubscriberTarget,
         navigation: &'a PageNavigationComponent<'_>,
     ) -> anyhow::Result<Vec<CreateComponent<'a>>> {
-        let mut container_components = vec![];
         let subscriptions = ctx
             .data()
             .series_feed_subscription_service
             .list_paginated_subscriptions(
                 target,
                 navigation.pagination.current_page,
-                navigation.pagination.pages,
+                navigation.pagination.per_page,
             )
             .await?;
+
+        if subscriptions.is_empty() {
+            let text = CreateTextDisplay::new("You have no subscriptions.");
+            let empty_container = CreateComponent::Container(CreateContainer::new(vec![
+                CreateContainerComponent::TextDisplay(text),
+            ]));
+            return Ok(vec![empty_container]);
+        }
+
+        let mut container_components = vec![];
         for sub in subscriptions {
             let text = CreateTextDisplay::new(format!(
                 "### {}
 
-- **Last version**: {}
-- **Last updated**: <t:{}>
-- **Source**: <{}>
-﻿",
+    - **Last version**: {}
+    - **Last updated**: <t:{}>
+    - **Source**: <{}>
+    ﻿",
                 sub.feed.name,
                 sub.feed_latest.description,
                 sub.feed_latest.published.timestamp(),
@@ -344,9 +351,12 @@ impl Commands {
         }
 
         let container = CreateComponent::Container(CreateContainer::new(container_components));
-        let buttons = navigation.create_buttons();
-
-        Ok(vec![container, buttons])
+        if navigation.pagination.pages == 1 {
+            Ok(vec![container])
+        } else {
+            let buttons = navigation.create_buttons();
+            Ok(vec![container, buttons])
+        }
     }
 
     #[poise::command(prefix_command, owners_only, hide_in_help)]
