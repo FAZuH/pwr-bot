@@ -35,21 +35,135 @@ pub trait Table<T, ID>: TableBase {
     async fn replace(&self, model: &T) -> Result<ID, DatabaseError>;
 }
 
+macro_rules! impl_table {
+    (
+        $struct_name:ident,
+        $model:ty,
+        $table:expr,
+        $create_sql:expr,
+        $cols:expr,
+        $vals:expr,
+        $update_set:expr,
+        [ $( $field:ident ),+ ]
+    ) => {
+        pub struct $struct_name {
+            base: BaseTable,
+        }
+
+        impl $struct_name {
+            pub fn new(pool: SqlitePool) -> Self {
+                Self {
+                    base: BaseTable::new(pool),
+                }
+            }
+        }
+
+        #[async_trait]
+        impl TableBase for $struct_name {
+            async fn create_table(&self) -> Result<(), DatabaseError> {
+                sqlx::query($create_sql)
+                    .execute(&self.base.pool)
+                    .await?;
+                Ok(())
+            }
+
+            async fn drop_table(&self) -> Result<(), DatabaseError> {
+                sqlx::query(concat!("DROP TABLE IF EXISTS ", $table))
+                    .execute(&self.base.pool)
+                    .await?;
+                Ok(())
+            }
+
+            async fn delete_all(&self) -> Result<(), DatabaseError> {
+                sqlx::query(concat!("DELETE FROM ", $table))
+                    .execute(&self.base.pool)
+                    .await?;
+                Ok(())
+            }
+        }
+
+        #[async_trait]
+        impl Table<$model, i32> for $struct_name {
+            async fn select_all(&self) -> Result<Vec<$model>, DatabaseError> {
+                Ok(sqlx::query_as::<_, $model>(concat!("SELECT * FROM ", $table))
+                    .fetch_all(&self.base.pool)
+                    .await?)
+            }
+
+            async fn select(&self, id: &i32) -> Result<$model, DatabaseError> {
+                Ok(
+                    sqlx::query_as::<_, $model>(concat!("SELECT * FROM ", $table, " WHERE id = ? LIMIT 1"))
+                        .bind(id)
+                        .fetch_one(&self.base.pool)
+                        .await?,
+                )
+            }
+
+            async fn insert(&self, model: &$model) -> Result<i32, DatabaseError> {
+                let row: (i32,) = sqlx::query_as(concat!(
+                        "INSERT INTO ", $table, " (", $cols, ") VALUES (", $vals, ") RETURNING id"
+                    ))
+                    $( .bind(&model.$field) )+
+                    .fetch_one(&self.base.pool)
+                    .await?;
+                Ok(row.0)
+            }
+
+            async fn update(&self, model: &$model) -> Result<(), DatabaseError> {
+                sqlx::query(concat!(
+                        "UPDATE ", $table, " SET ", $update_set, " WHERE id = ?"
+                    ))
+                    $( .bind(&model.$field) )+
+                    .bind(model.id)
+                    .execute(&self.base.pool)
+                    .await?;
+                Ok(())
+            }
+
+            async fn delete(&self, id: &i32) -> Result<(), DatabaseError> {
+                sqlx::query(concat!("DELETE FROM ", $table, " WHERE id = ?"))
+                    .bind(id)
+                    .execute(&self.base.pool)
+                    .await?;
+                Ok(())
+            }
+
+            async fn replace(&self, model: &$model) -> Result<i32, DatabaseError> {
+                let row: (i32,) = sqlx::query_as(concat!(
+                        "REPLACE INTO ", $table, " (", $cols, ") VALUES (", $vals, ") RETURNING id"
+                    ))
+                    $( .bind(&model.$field) )+
+                    .fetch_one(&self.base.pool)
+                    .await?;
+                Ok(row.0)
+            }
+        }
+    };
+}
+
 // ============================================================================
 // FeedTable
 // ============================================================================
 
-pub struct FeedTable {
-    base: BaseTable,
-}
+impl_table!(
+    FeedTable,
+    FeedModel,
+    "feeds",
+    r#"CREATE TABLE IF NOT EXISTS feeds (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        description TEXT DEFAULT NULL,
+        url TEXT NOT NULL UNIQUE,
+        cover_url TEXT DEFAULT NULL,
+        tags TEXT DEFAULT NULL
+    )"#,
+    "name, description, url, cover_url, tags",
+    "?, ?, ?, ?, ?",
+    "name = ?, description = ?, url = ?, cover_url = ?, tags = ?",
+    [name, description, url, cover_url, tags]
+);
 
 impl FeedTable {
-    pub fn new(pool: SqlitePool) -> Self {
-        Self {
-            base: BaseTable::new(pool),
-        }
-    }
-
     pub async fn select_by_url(&self, url: &str) -> Result<FeedModel, DatabaseError> {
         Ok(
             sqlx::query_as::<_, FeedModel>("SELECT * FROM feeds WHERE url = ? LIMIT 1")
@@ -89,120 +203,31 @@ impl FeedTable {
     }
 }
 
-#[async_trait]
-impl TableBase for FeedTable {
-    async fn create_table(&self) -> Result<(), DatabaseError> {
-        sqlx::query(
-            r#"CREATE TABLE IF NOT EXISTS feeds (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                description TEXT DEFAULT NULL,
-                url TEXT NOT NULL UNIQUE,
-                cover_url TEXT DEFAULT NULL,
-                tags TEXT DEFAULT NULL
-            )"#,
-        )
-        .execute(&self.base.pool)
-        .await?;
-        Ok(())
-    }
-
-    async fn drop_table(&self) -> Result<(), DatabaseError> {
-        sqlx::query("DROP TABLE IF EXISTS feeds")
-            .execute(&self.base.pool)
-            .await?;
-        Ok(())
-    }
-
-    async fn delete_all(&self) -> Result<(), DatabaseError> {
-        sqlx::query("DELETE FROM feeds")
-            .execute(&self.base.pool)
-            .await?;
-        Ok(())
-    }
-}
-
-#[async_trait]
-impl Table<FeedModel, i32> for FeedTable {
-    async fn select_all(&self) -> Result<Vec<FeedModel>, DatabaseError> {
-        Ok(sqlx::query_as::<_, FeedModel>("SELECT * FROM feeds")
-            .fetch_all(&self.base.pool)
-            .await?)
-    }
-
-    async fn select(&self, id: &i32) -> Result<FeedModel, DatabaseError> {
-        Ok(
-            sqlx::query_as::<_, FeedModel>("SELECT * FROM feeds WHERE id = ? LIMIT 1")
-                .bind(id)
-                .fetch_one(&self.base.pool)
-                .await?,
-        )
-    }
-
-    async fn insert(&self, model: &FeedModel) -> Result<i32, DatabaseError> {
-        let row: (i32,) =
-            sqlx::query_as("INSERT INTO feeds (name, description, url, cover_url, tags) VALUES (?, ?, ?, ?, ?) RETURNING id")
-                .bind(&model.name)
-                .bind(&model.description)
-                .bind(&model.url)
-                .bind(&model.cover_url)
-                .bind(&model.tags)
-                .fetch_one(&self.base.pool)
-                .await?;
-        Ok(row.0)
-    }
-
-    async fn update(&self, model: &FeedModel) -> Result<(), DatabaseError> {
-        sqlx::query("UPDATE feeds SET name = ?, description = ?, url = ?, cover_url = ?, tags = ? WHERE id = ?")
-            .bind(&model.name)
-            .bind(&model.description)
-            .bind(&model.url)
-            .bind(&model.cover_url)
-            .bind(&model.tags)
-            .bind(model.id)
-            .execute(&self.base.pool)
-            .await?;
-        Ok(())
-    }
-
-    async fn delete(&self, id: &i32) -> Result<(), DatabaseError> {
-        sqlx::query("DELETE FROM feeds WHERE id = ?")
-            .bind(id)
-            .execute(&self.base.pool)
-            .await?;
-        Ok(())
-    }
-
-    async fn replace(&self, model: &FeedModel) -> Result<i32, DatabaseError> {
-        let row: (i32,) = sqlx::query_as(
-            "REPLACE INTO feeds (name, description, url, cover_url, tags) VALUES (?, ?, ?, ?, ?) RETURNING id",
-        )
-        .bind(&model.name)
-        .bind(&model.description)
-        .bind(&model.url)
-        .bind(&model.cover_url)
-        .bind(&model.tags)
-        .fetch_one(&self.base.pool)
-        .await?;
-        Ok(row.0)
-    }
-}
-
 // ============================================================================
-// FeedVersionTable
+// FeedItemTable
 // ============================================================================
 
-pub struct FeedItemTable {
-    base: BaseTable,
-}
+impl_table!(
+    FeedItemTable,
+    FeedItemModel,
+    "feed_items",
+    r#"CREATE TABLE IF NOT EXISTS feed_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        feed_id INTEGER NOT NULL,
+        description TEXT NOT NULL,
+        published TIMESTAMP NOT NULL,
+        UNIQUE(feed_id, published),
+        FOREIGN KEY (feed_id) REFERENCES feeds(id)
+            ON DELETE CASCADE
+            ON UPDATE CASCADE
+    )"#,
+    "feed_id, description, published",
+    "?, ?, ?",
+    "feed_id = ?, description = ?, published = ?",
+    [feed_id, description, published]
+);
 
 impl FeedItemTable {
-    pub fn new(pool: SqlitePool) -> Self {
-        Self {
-            base: BaseTable::new(pool),
-        }
-    }
-
     /// Get the latest version for a specific feed
     pub async fn select_latest_by_feed_id(
         &self,
@@ -239,121 +264,27 @@ impl FeedItemTable {
     }
 }
 
-#[async_trait]
-impl TableBase for FeedItemTable {
-    async fn create_table(&self) -> Result<(), DatabaseError> {
-        sqlx::query(
-            r#"CREATE TABLE IF NOT EXISTS feed_items (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                feed_id INTEGER NOT NULL,
-                description TEXT NOT NULL,
-                published TIMESTAMP NOT NULL,
-                UNIQUE(feed_id, published),
-                FOREIGN KEY (feed_id) REFERENCES feeds(id)
-                    ON DELETE CASCADE
-                    ON UPDATE CASCADE
-            )"#,
-        )
-        .execute(&self.base.pool)
-        .await?;
-        Ok(())
-    }
-
-    async fn drop_table(&self) -> Result<(), DatabaseError> {
-        sqlx::query("DROP TABLE IF EXISTS feed_items")
-            .execute(&self.base.pool)
-            .await?;
-        Ok(())
-    }
-
-    async fn delete_all(&self) -> Result<(), DatabaseError> {
-        sqlx::query("DELETE FROM feed_items")
-            .execute(&self.base.pool)
-            .await?;
-        Ok(())
-    }
-}
-
-#[async_trait]
-impl Table<FeedItemModel, i32> for FeedItemTable {
-    async fn select_all(&self) -> Result<Vec<FeedItemModel>, DatabaseError> {
-        Ok(
-            sqlx::query_as::<_, FeedItemModel>("SELECT * FROM feed_items ORDER BY published DESC")
-                .fetch_all(&self.base.pool)
-                .await?,
-        )
-    }
-
-    async fn select(&self, id: &i32) -> Result<FeedItemModel, DatabaseError> {
-        Ok(
-            sqlx::query_as::<_, FeedItemModel>("SELECT * FROM feed_items WHERE id = ? LIMIT 1")
-                .bind(id)
-                .fetch_one(&self.base.pool)
-                .await?,
-        )
-    }
-
-    async fn insert(&self, model: &FeedItemModel) -> Result<i32, DatabaseError> {
-        let row: (i32,) = sqlx::query_as(
-            "INSERT INTO feed_items (feed_id, description, published) VALUES (?, ?, ?) RETURNING id",
-        )
-        .bind(model.feed_id)
-        .bind(&model.description)
-        .bind(model.published)
-        .fetch_one(&self.base.pool)
-        .await?;
-        Ok(row.0)
-    }
-
-    async fn update(&self, model: &FeedItemModel) -> Result<(), DatabaseError> {
-        sqlx::query(
-            "UPDATE feed_items SET feed_id = ?, description = ?, published = ? WHERE id = ?",
-        )
-        .bind(model.feed_id)
-        .bind(&model.description)
-        .bind(model.published)
-        .bind(model.id)
-        .execute(&self.base.pool)
-        .await?;
-        Ok(())
-    }
-
-    async fn delete(&self, id: &i32) -> Result<(), DatabaseError> {
-        sqlx::query("DELETE FROM feed_items WHERE id = ?")
-            .bind(id)
-            .execute(&self.base.pool)
-            .await?;
-        Ok(())
-    }
-
-    async fn replace(&self, model: &FeedItemModel) -> Result<i32, DatabaseError> {
-        let row: (i32,) = sqlx::query_as(
-            "REPLACE INTO feed_items (feed_id, description, published) VALUES (?, ?, ?) RETURNING id",
-        )
-        .bind(model.feed_id)
-        .bind(&model.description)
-        .bind(model.published)
-        .fetch_one(&self.base.pool)
-        .await?;
-        Ok(row.0)
-    }
-}
-
 // ============================================================================
 // SubscriberTable
 // ============================================================================
 
-pub struct SubscriberTable {
-    base: BaseTable,
-}
+impl_table!(
+    SubscriberTable,
+    SubscriberModel,
+    "subscribers",
+    r#"CREATE TABLE IF NOT EXISTS subscribers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        type TEXT NOT NULL,
+        target_id TEXT NOT NULL,
+        UNIQUE(type, target_id)
+    )"#,
+    "type, target_id",
+    "?, ?",
+    "type = ?, target_id = ?",
+    [r#type, target_id]
+);
 
 impl SubscriberTable {
-    pub fn new(pool: SqlitePool) -> Self {
-        Self {
-            base: BaseTable::new(pool),
-        }
-    }
-
     pub async fn select_all_by_type_and_feed(
         &self,
         r#type: SubscriberType,
@@ -391,110 +322,33 @@ impl SubscriberTable {
     }
 }
 
-#[async_trait]
-impl TableBase for SubscriberTable {
-    async fn create_table(&self) -> Result<(), DatabaseError> {
-        sqlx::query(
-            r#"CREATE TABLE IF NOT EXISTS subscribers (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                type TEXT NOT NULL,
-                target_id TEXT NOT NULL,
-                UNIQUE(type, target_id)
-            )"#,
-        )
-        .execute(&self.base.pool)
-        .await?;
-        Ok(())
-    }
-
-    async fn drop_table(&self) -> Result<(), DatabaseError> {
-        sqlx::query("DROP TABLE IF EXISTS subscribers")
-            .execute(&self.base.pool)
-            .await?;
-        Ok(())
-    }
-
-    async fn delete_all(&self) -> Result<(), DatabaseError> {
-        sqlx::query("DELETE FROM subscribers")
-            .execute(&self.base.pool)
-            .await?;
-        Ok(())
-    }
-}
-
-#[async_trait]
-impl Table<SubscriberModel, i32> for SubscriberTable {
-    async fn select_all(&self) -> Result<Vec<SubscriberModel>, DatabaseError> {
-        Ok(
-            sqlx::query_as::<_, SubscriberModel>("SELECT * FROM subscribers")
-                .fetch_all(&self.base.pool)
-                .await?,
-        )
-    }
-
-    async fn select(&self, id: &i32) -> Result<SubscriberModel, DatabaseError> {
-        Ok(
-            sqlx::query_as::<_, SubscriberModel>("SELECT * FROM subscribers WHERE id = ? LIMIT 1")
-                .bind(id)
-                .fetch_one(&self.base.pool)
-                .await?,
-        )
-    }
-
-    async fn insert(&self, model: &SubscriberModel) -> Result<i32, DatabaseError> {
-        let row: (i32,) =
-            sqlx::query_as("INSERT INTO subscribers (type, target_id) VALUES (?, ?) RETURNING id")
-                .bind(model.r#type)
-                .bind(&model.target_id)
-                .fetch_one(&self.base.pool)
-                .await?;
-        Ok(row.0)
-    }
-
-    async fn update(&self, model: &SubscriberModel) -> Result<(), DatabaseError> {
-        sqlx::query("UPDATE subscribers SET type = ?, target_id = ? WHERE id = ?")
-            .bind(model.r#type)
-            .bind(&model.target_id)
-            .bind(model.id)
-            .execute(&self.base.pool)
-            .await?;
-        Ok(())
-    }
-
-    async fn delete(&self, id: &i32) -> Result<(), DatabaseError> {
-        sqlx::query("DELETE FROM subscribers WHERE id = ?")
-            .bind(id)
-            .execute(&self.base.pool)
-            .await?;
-        Ok(())
-    }
-
-    async fn replace(&self, model: &SubscriberModel) -> Result<i32, DatabaseError> {
-        let row: (i32,) =
-            sqlx::query_as("REPLACE INTO subscribers (type, target_id) VALUES (?, ?) RETURNING id")
-                .bind(model.r#type)
-                .bind(&model.target_id)
-                .fetch_one(&self.base.pool)
-                .await?;
-        Ok(row.0)
-    }
-}
-
 // ============================================================================
 // FeedSubscriptionTable
 // ============================================================================
 
-pub struct FeedSubscriptionTable {
-    base: BaseTable,
-}
+impl_table!(
+    FeedSubscriptionTable,
+    FeedSubscriptionModel,
+    "feed_subscriptions",
+    r#"CREATE TABLE IF NOT EXISTS feed_subscriptions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        feed_id INTEGER NOT NULL,
+        subscriber_id INTEGER NOT NULL,
+        UNIQUE(feed_id, subscriber_id),
+        FOREIGN KEY (feed_id) REFERENCES feeds(id)
+            ON DELETE CASCADE
+            ON UPDATE CASCADE,
+        FOREIGN KEY (subscriber_id) REFERENCES subscribers(id)
+            ON DELETE CASCADE
+            ON UPDATE CASCADE
+    )"#,
+    "feed_id, subscriber_id",
+    "?, ?",
+    "feed_id = ?, subscriber_id = ?",
+    [feed_id, subscriber_id]
+);
 
 impl FeedSubscriptionTable {
-    pub fn new(pool: SqlitePool) -> Self {
-        Self {
-            base: BaseTable::new(pool),
-        }
-    }
-
     /// Get all subscribers for a specific feed
     pub async fn select_all_by_feed_id(
         &self,
@@ -602,102 +456,5 @@ impl FeedSubscriptionTable {
             .execute(&self.base.pool)
             .await?;
         Ok(())
-    }
-}
-
-#[async_trait]
-impl TableBase for FeedSubscriptionTable {
-    async fn create_table(&self) -> Result<(), DatabaseError> {
-        sqlx::query(
-            r#"CREATE TABLE IF NOT EXISTS feed_subscriptions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                feed_id INTEGER NOT NULL,
-                subscriber_id INTEGER NOT NULL,
-                UNIQUE(feed_id, subscriber_id),
-                FOREIGN KEY (feed_id) REFERENCES feeds(id)
-                    ON DELETE CASCADE
-                    ON UPDATE CASCADE,
-                FOREIGN KEY (subscriber_id) REFERENCES subscribers(id)
-                    ON DELETE CASCADE
-                    ON UPDATE CASCADE
-            )"#,
-        )
-        .execute(&self.base.pool)
-        .await?;
-        Ok(())
-    }
-
-    async fn drop_table(&self) -> Result<(), DatabaseError> {
-        sqlx::query("DROP TABLE IF EXISTS feed_subscriptions")
-            .execute(&self.base.pool)
-            .await?;
-        Ok(())
-    }
-
-    async fn delete_all(&self) -> Result<(), DatabaseError> {
-        sqlx::query("DELETE FROM feed_subscriptions")
-            .execute(&self.base.pool)
-            .await?;
-        Ok(())
-    }
-}
-
-#[async_trait]
-impl Table<FeedSubscriptionModel, i32> for FeedSubscriptionTable {
-    async fn select_all(&self) -> Result<Vec<FeedSubscriptionModel>, DatabaseError> {
-        Ok(
-            sqlx::query_as::<_, FeedSubscriptionModel>("SELECT * FROM feed_subscriptions")
-                .fetch_all(&self.base.pool)
-                .await?,
-        )
-    }
-
-    async fn select(&self, id: &i32) -> Result<FeedSubscriptionModel, DatabaseError> {
-        Ok(sqlx::query_as::<_, FeedSubscriptionModel>(
-            "SELECT * FROM feed_subscriptions WHERE id = ? LIMIT 1",
-        )
-        .bind(id)
-        .fetch_one(&self.base.pool)
-        .await?)
-    }
-
-    async fn insert(&self, model: &FeedSubscriptionModel) -> Result<i32, DatabaseError> {
-        let row: (i32,) = sqlx::query_as(
-            "INSERT INTO feed_subscriptions (feed_id, subscriber_id) VALUES (?, ?) RETURNING id",
-        )
-        .bind(model.feed_id)
-        .bind(model.subscriber_id)
-        .fetch_one(&self.base.pool)
-        .await?;
-        Ok(row.0)
-    }
-
-    async fn update(&self, model: &FeedSubscriptionModel) -> Result<(), DatabaseError> {
-        sqlx::query("UPDATE feed_subscriptions SET feed_id = ?, subscriber_id = ? WHERE id = ?")
-            .bind(model.feed_id)
-            .bind(model.subscriber_id)
-            .bind(model.id)
-            .execute(&self.base.pool)
-            .await?;
-        Ok(())
-    }
-
-    async fn delete(&self, id: &i32) -> Result<(), DatabaseError> {
-        sqlx::query("DELETE FROM feed_subscriptions WHERE id = ?")
-            .bind(id)
-            .execute(&self.base.pool)
-            .await?;
-        Ok(())
-    }
-
-    async fn replace(&self, model: &FeedSubscriptionModel) -> Result<i32, DatabaseError> {
-        let row: (i32,) = sqlx::query_as(
-            "REPLACE INTO feed_subscriptions (feed_id, subscriber_id) VALUES (?, ?) RETURNING id",
-        )
-        .bind(model.feed_id)
-        .bind(model.subscriber_id)
-        .fetch_one(&self.base.pool)
-        .await?;
-        Ok(row.0)
     }
 }
