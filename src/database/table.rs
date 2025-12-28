@@ -52,7 +52,7 @@ impl FeedTable {
 
     pub async fn select_by_url(&self, url: &str) -> Result<FeedModel, DatabaseError> {
         Ok(
-            sqlx::query_as::<_, FeedModel>("SELECT * FROM feeds WHERE url = ?")
+            sqlx::query_as::<_, FeedModel>("SELECT * FROM feeds WHERE url = ? LIMIT 1")
                 .bind(url)
                 .fetch_one(&self.base.pool)
                 .await?,
@@ -132,7 +132,7 @@ impl Table<FeedModel, i32> for FeedTable {
 
     async fn select(&self, id: &i32) -> Result<FeedModel, DatabaseError> {
         Ok(
-            sqlx::query_as::<_, FeedModel>("SELECT * FROM feeds WHERE id = ?")
+            sqlx::query_as::<_, FeedModel>("SELECT * FROM feeds WHERE id = ? LIMIT 1")
                 .bind(id)
                 .fetch_one(&self.base.pool)
                 .await?,
@@ -286,7 +286,7 @@ impl Table<FeedItemModel, i32> for FeedItemTable {
 
     async fn select(&self, id: &i32) -> Result<FeedItemModel, DatabaseError> {
         Ok(
-            sqlx::query_as::<_, FeedItemModel>("SELECT * FROM feed_items WHERE id = ?")
+            sqlx::query_as::<_, FeedItemModel>("SELECT * FROM feed_items WHERE id = ? LIMIT 1")
                 .bind(id)
                 .fetch_one(&self.base.pool)
                 .await?,
@@ -354,7 +354,7 @@ impl SubscriberTable {
         }
     }
 
-    pub async fn select_by_type_and_feed(
+    pub async fn select_all_by_type_and_feed(
         &self,
         r#type: SubscriberType,
         feed_id: i32,
@@ -382,7 +382,7 @@ impl SubscriberTable {
         target_id: &str,
     ) -> Result<SubscriberModel, DatabaseError> {
         Ok(sqlx::query_as::<_, SubscriberModel>(
-            "SELECT * FROM subscribers WHERE type = ? AND target_id = ?",
+            "SELECT * FROM subscribers WHERE type = ? AND target_id = ? LIMIT 1",
         )
         .bind(r#type)
         .bind(target_id)
@@ -434,7 +434,7 @@ impl Table<SubscriberModel, i32> for SubscriberTable {
 
     async fn select(&self, id: &i32) -> Result<SubscriberModel, DatabaseError> {
         Ok(
-            sqlx::query_as::<_, SubscriberModel>("SELECT * FROM subscribers WHERE id = ?")
+            sqlx::query_as::<_, SubscriberModel>("SELECT * FROM subscribers WHERE id = ? LIMIT 1")
                 .bind(id)
                 .fetch_one(&self.base.pool)
                 .await?,
@@ -654,7 +654,7 @@ impl Table<FeedSubscriptionModel, i32> for FeedSubscriptionTable {
 
     async fn select(&self, id: &i32) -> Result<FeedSubscriptionModel, DatabaseError> {
         Ok(sqlx::query_as::<_, FeedSubscriptionModel>(
-            "SELECT * FROM feed_subscriptions WHERE id = ?",
+            "SELECT * FROM feed_subscriptions WHERE id = ? LIMIT 1",
         )
         .bind(id)
         .fetch_one(&self.base.pool)
