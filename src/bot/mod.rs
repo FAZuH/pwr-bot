@@ -1,4 +1,5 @@
 pub mod commands;
+pub mod components;
 pub mod error;
 
 use std::collections::HashSet;
@@ -27,11 +28,13 @@ use crate::bot::commands::Commands;
 use crate::config::Config;
 use crate::database::Database;
 use crate::feed::feeds::Feeds;
+use crate::service::series_feed_subscription_service::SeriesFeedSubscriptionService;
 
 pub struct Data {
     pub config: Arc<Config>,
     pub db: Arc<Database>,
     pub feeds: Arc<Feeds>,
+    pub series_feed_subscription_service: Arc<SeriesFeedSubscriptionService>,
 }
 
 pub struct Bot {
@@ -64,17 +67,22 @@ impl Bot {
             ]),
             ..Default::default()
         };
-        let data = Arc::new(Data {
-            config: config.clone(),
-            db: db.clone(),
-            feeds: feeds.clone(),
-        });
-
-        let intents = GatewayIntents::non_privileged() | GatewayIntents::MESSAGE_CONTENT;
-        let token = Token::from_str(&config.discord_token)?;
 
         let framework: Box<Framework<Data, Error>> =
             Box::new(poise::Framework::builder().options(options).build());
+
+        let series_feed_subscription_service = Arc::new(SeriesFeedSubscriptionService {
+            db: db.clone(),
+            feeds: feeds.clone(),
+        });
+        let token = Token::from_str(&config.discord_token)?;
+        let intents = GatewayIntents::non_privileged() | GatewayIntents::MESSAGE_CONTENT;
+        let data = Arc::new(Data {
+            config,
+            db,
+            feeds,
+            series_feed_subscription_service,
+        });
 
         let client = ClientBuilder::new(token, intents)
             .framework(framework)
