@@ -1,4 +1,16 @@
+## [0.1.10](https://github.com/FAZuH/pwr-bot/compare/v0.1.9...v0.1.10) (2025-12-28)
+
+
+### Performance Improvements
+
+* Improve API requests and database queries ([#10](https://github.com/FAZuH/pwr-bot/issues/10)) ([4cc9e0d](https://github.com/FAZuH/pwr-bot/commit/4cc9e0d5715c8ab355dca394df34d10ffb896228))
+
 ## [0.1.9](https://github.com/FAZuH/pwr-bot/compare/v0.1.8...v0.1.9) (2025-12-28)
+
+
+### Miscellaneous Chores
+
+* **release:** v0.1.9 [skip ci] ([cef1a79](https://github.com/FAZuH/pwr-bot/commit/cef1a7947f4edc28b19b1fed96aa9a2a3630bc2e))
 
 
 ### Code Refactoring
@@ -35,21 +47,4 @@
 ### Code Refactoring
 
 * Improve db design ([#1](https://github.com/FAZuH/pwr-bot/issues/1)) ([39d60f9](https://github.com/FAZuH/pwr-bot/commit/39d60f91c3843e6e492d3022edbc7f9a736c5415))
-
-## [0.1.5](https://github.com/FAZuH/pwr-bot/compare/v0.1.4...v0.1.5) (2025-08-30)
-
-
-### Bug Fixes
-
-* **subscriber:** Use webhook url from .env instead of db ([d1e7cd0](https://github.com/FAZuH/pwr-bot/commit/d1e7cd07c2f51c8a0fb6614e368be37cc3892027))
-
-
-### Miscellaneous Chores
-
-* **release:** v0.1.5 [skip ci] ([9d54f3e](https://github.com/FAZuH/pwr-bot/commit/9d54f3e72dde1957e18bf60c05d04eaeafb356d4))
-
-
-### Code Refactoring
-
-* **db:** Combine model and table modules into each module [skip ci] ([616f2be](https://github.com/FAZuH/pwr-bot/commit/616f2be861281de5c468c65fc0eb2469dbef7c01))
 
