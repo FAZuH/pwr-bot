@@ -21,7 +21,7 @@ pub async fn setup_db() -> (Arc<Database>, PathBuf) {
     let db = Database::new(&db_url, db_path.to_str().unwrap())
         .await
         .expect("Failed to create database");
-    
+
     db.run_migrations().await.expect("Failed to run migrations");
 
     (Arc::new(db), db_path)
@@ -36,17 +36,20 @@ pub async fn teardown_db(db_path: PathBuf) {
 // MOCK FEED
 
 #[derive(Clone)]
+#[allow(dead_code)]
 pub struct MockFeed {
     pub base: BaseFeed,
     pub state: Arc<RwLock<MockFeedState>>,
 }
 
 #[derive(Default, Clone)]
+#[allow(dead_code)]
 pub struct MockFeedState {
     pub series_item: SeriesItem,
     pub series_latest: SeriesLatest,
 }
 
+#[allow(dead_code)]
 impl MockFeed {
     pub fn new(domain: &str) -> Self {
         let info = FeedInfo {
@@ -59,7 +62,7 @@ impl MockFeed {
             logo_url: "".to_string(),
         };
         let client = reqwest::Client::new();
-        
+
         Self {
             base: BaseFeed::new(info, client),
             state: Arc::new(RwLock::new(MockFeedState::default())),

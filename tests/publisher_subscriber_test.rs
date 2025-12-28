@@ -1,16 +1,18 @@
 use std::sync::Arc;
 use std::time::Duration;
+
 use chrono::Utc;
+use pwr_bot::database::model::SubscriberType;
+use pwr_bot::database::table::Table;
 use pwr_bot::event::event_bus::EventBus;
 use pwr_bot::event::feed_update_event::FeedUpdateEvent;
 use pwr_bot::feed::feeds::Feeds;
-use pwr_bot::feed::series_feed::{SeriesItem, SeriesLatest};
+use pwr_bot::feed::series_feed::SeriesItem;
+use pwr_bot::feed::series_feed::SeriesLatest;
 use pwr_bot::publisher::series_feed_publisher::SeriesFeedPublisher;
-use pwr_bot::service::series_feed_subscription_service::{
-    SeriesFeedSubscriptionService, SubscriberTarget, SubscribeResult,
-};
-use pwr_bot::database::model::SubscriberType;
-use pwr_bot::database::table::Table;
+use pwr_bot::service::series_feed_subscription_service::SeriesFeedSubscriptionService;
+use pwr_bot::service::series_feed_subscription_service::SubscribeResult;
+use pwr_bot::service::series_feed_subscription_service::SubscriberTarget;
 use tokio::time::sleep;
 
 mod common;
@@ -19,7 +21,7 @@ mod common;
 async fn test_subscription_and_publishing() {
     let (db, db_path) = common::setup_db().await;
     let event_bus = Arc::new(EventBus::new());
-    
+
     // Setup Feeds
     let mut feeds = Feeds::new();
     let mock_domain = "mock.test";
@@ -36,7 +38,7 @@ async fn test_subscription_and_publishing() {
     // 1. Prepare Mock Data
     let series_id = "123";
     let series_url = format!("https://{}/title/{}", mock_domain, series_id);
-    
+
     mock_feed.set_info(SeriesItem {
         id: series_id.to_string(),
         title: "Test Series".to_string(),
@@ -60,7 +62,10 @@ async fn test_subscription_and_publishing() {
         target_id: "user1".to_string(),
     };
 
-    let result = service.subscribe(&series_url, target).await.expect("Subscribe failed");
+    let result = service
+        .subscribe(&series_url, target)
+        .await
+        .expect("Subscribe failed");
     match result {
         SubscribeResult::Success { feed } => {
             assert_eq!(feed.name, "Test Series");
@@ -77,7 +82,7 @@ async fn test_subscription_and_publishing() {
     // Setup Event Listener
     let event_received = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let event_received_clone = event_received.clone();
-    
+
     event_bus.register_callback(move |_event: FeedUpdateEvent| {
         event_received_clone.store(true, std::sync::atomic::Ordering::SeqCst);
         async { Ok(()) }
@@ -90,7 +95,10 @@ async fn test_subscription_and_publishing() {
         feeds.clone(),
         Duration::from_millis(100), // Fast poll
     );
-    publisher.clone().start().expect("Failed to start publisher");
+    publisher
+        .clone()
+        .start()
+        .expect("Failed to start publisher");
 
     // Update Mock Data
     let new_latest = SeriesLatest {
@@ -109,12 +117,19 @@ async fn test_subscription_and_publishing() {
         attempts += 1;
     }
 
-    assert!(event_received.load(std::sync::atomic::Ordering::SeqCst), "Publisher did not fire event");
+    assert!(
+        event_received.load(std::sync::atomic::Ordering::SeqCst),
+        "Publisher did not fire event"
+    );
 
     // Verify DB update
-    let db_latest = db.feed_item_table.select_latest_by_feed_id(1).await.unwrap(); 
+    let db_latest = db
+        .feed_item_table
+        .select_latest_by_feed_id(1)
+        .await
+        .unwrap();
     // Assuming feed ID is 1 because it's the first feed.
-    
+
     assert_eq!(db_latest.description, "Chapter 2");
 
     // Cleanup

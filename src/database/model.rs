@@ -45,7 +45,7 @@ pub struct FeedModel {
 /// Tracks the history of updates for a content source. Each new episode,
 /// chapter, or post creates a new version entry. The latest version can be
 /// determined by querying for the most recent `published` timestamp.
-#[derive(FromRow, Serialize, Default)]
+#[derive(FromRow, Serialize, Default, Clone)]
 pub struct FeedItemModel {
     #[serde(default)]
     pub id: i32,
@@ -63,7 +63,7 @@ pub struct FeedItemModel {
 /// Represents either a Discord guild channel or a direct message conversation
 /// with a user. Multiple subscribers can follow the same feed, and a single
 /// subscriber can follow multiple feeds (via `FeedSubscriptionModel`).
-#[derive(FromRow, Serialize, Default)]
+#[derive(FromRow, Serialize, Default, Clone)]
 pub struct SubscriberModel {
     #[serde(default)]
     pub id: i32,
@@ -108,7 +108,7 @@ impl SubscriberModel {
 /// Junction table implementing the many-to-many relationship between feeds
 /// and subscribers. When a new `FeedVersionModel` is published, query this
 /// table to find all subscribers that need to be notified.
-#[derive(FromRow, Serialize, Default)]
+#[derive(FromRow, Serialize, Default, Clone)]
 pub struct FeedSubscriptionModel {
     #[serde(default)]
     pub id: i32,
