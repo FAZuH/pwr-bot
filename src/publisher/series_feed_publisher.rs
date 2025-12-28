@@ -21,7 +21,7 @@ use serenity::all::CreateThumbnail;
 use serenity::all::CreateUnfurledMediaItem;
 use serenity::all::MessageFlags;
 
-use crate::database::database::Database;
+use crate::database::Database;
 use crate::database::error::DatabaseError;
 use crate::database::model::FeedItemModel;
 use crate::database::model::FeedModel;
@@ -29,22 +29,22 @@ use crate::database::table::Table;
 use crate::event::event_bus::EventBus;
 use crate::event::feed_update_event::FeedUpdateEvent;
 use crate::feed::FeedInfo;
-use crate::feed::error::SeriesError;
+use crate::feed::error::SeriesFeedError;
 use crate::feed::feeds::Feeds;
 
-pub struct FeedPublisher {
+pub struct SeriesFeedPublisher {
     db: Arc<Database>,
     event_bus: Arc<EventBus>,
-    sources: Arc<Feeds>,
+    feeds: Arc<Feeds>,
     poll_interval: Duration,
     running: AtomicBool,
 }
 
-impl FeedPublisher {
+impl SeriesFeedPublisher {
     pub fn new(
         db: Arc<Database>,
         event_bus: Arc<EventBus>,
-        sources: Arc<Feeds>,
+        feeds: Arc<Feeds>,
         poll_interval: Duration,
     ) -> Arc<Self> {
         info!(
@@ -54,7 +54,7 @@ impl FeedPublisher {
         Arc::new(Self {
             db,
             event_bus,
-            sources,
+            feeds,
             poll_interval,
             running: AtomicBool::new(false),
         })
@@ -133,7 +133,7 @@ impl FeedPublisher {
             .select_latest_by_feed_id(feed.id)
             .await?;
 
-        let series_feed = self.sources.get_feed_by_url(&feed.url).ok_or_else(|| {
+        let series_feed = self.feeds.get_feed_by_url(&feed.url).ok_or_else(|| {
             DatabaseError::InternalError {
                 message: format!("Series feed source with url {} not found.", feed.url),
             }
@@ -141,14 +141,14 @@ impl FeedPublisher {
             // checks
         })?;
 
-        let series_id = self.sources.get_feed_id_by_url(&feed.url)?;
+        let series_id = self.feeds.get_feed_id_by_url(&feed.url)?;
         // NOTE: Should've been checked already in commands.rs
 
         // Fetch current state from source
         let new_latest = match series_feed.get_latest(series_id).await {
             Ok(series) => series,
             Err(e) => {
-                if matches!(e, SeriesError::FinishedSeries { .. }) {
+                if matches!(e, SeriesFeedError::FinishedSeries { .. }) {
                     info!(
                         "Feed {} is finished. Removing from database.",
                         self.get_feed_desc(&feed)
@@ -208,6 +208,7 @@ impl FeedPublisher {
         format!("feed id `{}` ({})", feed.id, feed.name)
     }
 
+    /// Insipred by freestuffbot.xyz's notifications
     fn create_message(
         &self,
         feed: &FeedModel,
@@ -234,7 +235,7 @@ Published on <t:{}>
 
 **[Open in browser ↗]({})**",
             feed.name,
-            feed_desc, 
+            feed_desc,
             feed_info.feed_type,
             old_feed_item.description,
             old_feed_item.published.timestamp(),

@@ -5,6 +5,7 @@ pub mod error;
 pub mod event;
 pub mod feed;
 pub mod publisher;
+pub mod service;
 pub mod subscriber;
 
 use std::sync::Arc;
@@ -13,14 +14,14 @@ use dotenv::dotenv;
 use log::debug;
 use log::info;
 
-use crate::bot::bot::Bot;
+use crate::bot::Bot;
 use crate::config::Config;
-use crate::database::database::Database;
+use crate::database::Database;
 use crate::event::event_bus::EventBus;
 use crate::feed::feeds::Feeds;
-use crate::publisher::feed_publisher::FeedPublisher;
-use crate::subscriber::discord_channel_subscriber::DiscordChannelSubscriber;
+use crate::publisher::series_feed_publisher::SeriesFeedPublisher;
 use crate::subscriber::discord_dm_subscriber::DiscordDmSubscriber;
+use crate::subscriber::discord_guild_subscriber::DiscordGuildSubscriber;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -45,11 +46,11 @@ async fn main() -> anyhow::Result<()> {
 
     // Setup sources
     debug!("Instantiating Sources...");
-    let sources = Arc::new(Feeds::new());
+    let feeds = Arc::new(Feeds::new());
 
     // Setup & start bot
     info!("Starting bot...");
-    let mut bot = Bot::new(config.clone(), db.clone(), sources.clone()).await?;
+    let mut bot = Bot::new(config.clone(), db.clone(), feeds.clone()).await?;
     bot.start();
     let bot = Arc::new(bot);
     info!("Bot setup complete.");
@@ -57,7 +58,7 @@ async fn main() -> anyhow::Result<()> {
     // Setup subscribers
     debug!("Instantiating Subscribers...");
     let dm_subscriber = DiscordDmSubscriber::new(bot.clone(), db.clone());
-    let webhook_subscriber = DiscordChannelSubscriber::new(bot.clone(), db.clone());
+    let webhook_subscriber = DiscordGuildSubscriber::new(bot.clone(), db.clone());
     event_bus
         .register_subcriber(dm_subscriber.into())
         .register_subcriber(webhook_subscriber.into());
@@ -65,10 +66,10 @@ async fn main() -> anyhow::Result<()> {
 
     // Setup publishers
     debug!("Instantiating Publishers...");
-    FeedPublisher::new(
+    SeriesFeedPublisher::new(
         db.clone(),
         event_bus.clone(),
-        sources.clone(),
+        feeds.clone(),
         config.poll_interval,
     )
     .start()?;

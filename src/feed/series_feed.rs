@@ -3,7 +3,7 @@ use chrono::DateTime;
 use chrono::Utc;
 
 use crate::feed::BaseFeed;
-use crate::feed::error::SeriesError;
+use crate::feed::error::SeriesFeedError;
 use crate::feed::error::UrlParseError;
 
 #[derive(Clone, Debug, Default)]
@@ -33,8 +33,8 @@ pub struct SeriesItem {
 
 #[async_trait]
 pub trait SeriesFeed: Send + Sync {
-    async fn get_latest(&self, id: &str) -> Result<SeriesLatest, SeriesError>;
-    async fn get_info(&self, id: &str) -> Result<SeriesItem, SeriesError>;
+    async fn get_latest(&self, id: &str) -> Result<SeriesLatest, SeriesFeedError>;
+    async fn get_info(&self, id: &str) -> Result<SeriesItem, SeriesFeedError>;
     fn get_id_from_url<'a>(&self, url: &'a str) -> Result<&'a str, UrlParseError>;
     /// Returns the URL for a series given its ID.
     /// The returned URL is the public URL of the series, not the API URL.

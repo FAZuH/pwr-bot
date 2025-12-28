@@ -8,13 +8,13 @@ use log::info;
 use poise::serenity_prelude::UserId;
 use serenity::all::CreateMessage;
 
-use super::Subscriber;
-use crate::bot::bot::Bot;
-use crate::database::database::Database;
+use crate::bot::Bot;
+use crate::database::Database;
 use crate::database::model::SubscriberModel;
 use crate::database::model::SubscriberType;
 use crate::event::Event;
 use crate::event::feed_update_event::FeedUpdateEvent;
+use crate::subscriber::Subscriber;
 
 pub struct DiscordDmSubscriber {
     bot: Arc<Bot>,
@@ -40,7 +40,7 @@ impl DiscordDmSubscriber {
         for sub in subs {
             if let Err(e) = self.handle_sub(&sub, event.message.clone()).await {
                 error!(
-                    "Error handling user id `{}` target `{}`: {:?}",
+                    "Error handling subscriber id `{}` target `{}`: {:?}",
                     sub.id, sub.target_id, e
                 );
             }
