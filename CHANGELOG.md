@@ -1,4 +1,16 @@
+## [0.1.9](https://github.com/FAZuH/pwr-bot/compare/v0.1.8...v0.1.9) (2025-12-28)
+
+
+### Code Refactoring
+
+* Various ([#9](https://github.com/FAZuH/pwr-bot/issues/9)) ([00d49e5](https://github.com/FAZuH/pwr-bot/commit/00d49e586679f86833a5a2f55fe3c5bfed45ad81))
+
 ## [0.1.8](https://github.com/FAZuH/pwr-bot/compare/v0.1.7...v0.1.8) (2025-12-26)
+
+
+### Miscellaneous Chores
+
+* **release:** v0.1.8 [skip ci] ([da3c37c](https://github.com/FAZuH/pwr-bot/commit/da3c37c1c829bdcd69098d51c9444e9c16dfd87a))
 
 
 ### Build System
@@ -40,18 +52,4 @@
 ### Code Refactoring
 
 * **db:** Combine model and table modules into each module [skip ci] ([616f2be](https://github.com/FAZuH/pwr-bot/commit/616f2be861281de5c468c65fc0eb2469dbef7c01))
-
-## [0.1.4](https://github.com/FAZuH/pwr-bot/compare/v0.1.3...v0.1.4) (2025-08-26)
-
-
-### Bug Fixes
-
-* Error when db path is in a subdir ([d75ea96](https://github.com/FAZuH/pwr-bot/commit/d75ea9603b7006da3c3f39e70b73ea3fb72cc880))
-* Error when db path is in a subdir ([765d5f3](https://github.com/FAZuH/pwr-bot/commit/765d5f3ec43d08c078b5d62117032caef4960342))
-
-
-### Miscellaneous Chores
-
-* **release:** v0.1.4 [skip ci] ([93d2ddf](https://github.com/FAZuH/pwr-bot/commit/93d2ddfeb36b1a6aad0343d555a1bd3146400321))
-* **release:** v0.1.4 [skip ci] ([6ecb7df](https://github.com/FAZuH/pwr-bot/commit/6ecb7df59ed634360da6c5b39338262df87291ff))
 
