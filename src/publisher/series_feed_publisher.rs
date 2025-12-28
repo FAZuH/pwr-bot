@@ -20,6 +20,7 @@ use serenity::all::CreateTextDisplay;
 use serenity::all::CreateThumbnail;
 use serenity::all::CreateUnfurledMediaItem;
 use serenity::all::MessageFlags;
+use tokio::time::sleep;
 
 use crate::database::Database;
 use crate::database::error::DatabaseError;
@@ -98,12 +99,16 @@ impl SeriesFeedPublisher {
         let feeds = self.db.feed_table.select_all_by_tag("series").await?;
         info!("Found {} feeds to check.", feeds.len());
 
+        // Use .max(1) to prevent division by zero
+        let feeds_count = feeds.len().max(1) as u64;
+        let interval = Duration::from_millis(self.poll_interval.as_millis() as u64 / feeds_count);
         for feed in feeds {
             let id = feed.id;
             let name = feed.name.clone();
             if let Err(e) = self.check_feed(feed).await {
                 error!("Error checking feed id `{id}` ({name}): {e:?}");
             };
+            sleep(interval).await;
         }
 
         debug!("Finished checking for feed updates.");
