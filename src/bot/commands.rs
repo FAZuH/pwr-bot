@@ -1,440 +1,490 @@
 use std::collections::HashSet;
+use std::fmt::Display;
+use std::time::Duration;
+use std::time::Instant;
 
 use anyhow::Result;
 use log::error;
 use poise::ChoiceParameter;
 use poise::CreateReply;
+use poise::ReplyHandle;
 use poise::serenity_prelude::AutocompleteChoice;
 use poise::serenity_prelude::CreateAttachment;
 use poise::serenity_prelude::CreateAutocompleteResponse;
-use sqlx::error::ErrorKind;
+use serenity::all::CreateComponent;
+use serenity::all::CreateContainer;
+use serenity::all::CreateContainerComponent;
+use serenity::all::CreateSection;
+use serenity::all::CreateSectionAccessory;
+use serenity::all::CreateSectionComponent;
+use serenity::all::CreateTextDisplay;
+use serenity::all::CreateThumbnail;
+use serenity::all::CreateUnfurledMediaItem;
+use serenity::all::MessageFlags;
 
-use crate::bot::bot::Data;
-use crate::database::model::FeedItemModel;
-use crate::database::model::FeedModel;
-use crate::database::model::FeedSubscriptionModel;
+use crate::bot::Data;
+use crate::bot::components::PageNavigationComponent;
+use crate::bot::components::Pagination;
+use crate::bot::error::BotError;
 use crate::database::model::SubscriberModel;
 use crate::database::model::SubscriberType;
 use crate::database::table::Table;
-use crate::feed::error::SeriesError;
+use crate::service::series_feed_subscription_service::SubscribeResult;
+use crate::service::series_feed_subscription_service::SubscriberTarget;
+use crate::service::series_feed_subscription_service::UnsubscribeResult;
 
-type Error = Box<dyn std::error::Error + Send + Sync>;
-type Context<'a> = poise::Context<'a, Data, Error>;
+pub type Error = Box<dyn std::error::Error + Send + Sync>;
+pub type Context<'a> = poise::Context<'a, Data, Error>;
 
 #[derive(ChoiceParameter)]
 enum SendInto {
-    #[name = "channel"]
-    Channel,
-    #[name = "dm"]
+    Server,
     DM,
 }
 
-// impl SendInto {
-//     fn to_subscriber_type(&self) -> SubscriberType {
-//         match self {
-//             Self::Channel => SubscriberType::Guild,
-//             Self::DM => SubscriberType::Dm,
-//         }
-//     }
-// }
+impl From<&SendInto> for SubscriberType {
+    fn from(value: &SendInto) -> Self {
+        match value {
+            SendInto::DM => SubscriberType::Dm,
+            SendInto::Server => SubscriberType::Guild,
+        }
+    }
+}
 
-impl std::fmt::Display for SendInto {
+impl Display for SendInto {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Channel => write!(f, "channel"),
-            Self::DM => write!(f, "DM"),
+            Self::DM => write!(f, "dm"),
+            Self::Server => write!(f, "server"),
         }
     }
 }
 
-/// Subscribe to an anime/manga series
-#[poise::command(slash_command)]
-pub async fn subscribe(
-    ctx: Context<'_>,
-    #[description = "Link(s) of the series. Separate links with commas (,)"] links: String,
-    #[description = "Where to send the notifications. Default to DM"] send_into: Option<SendInto>,
-) -> Result<(), Error> {
-    ctx.defer().await?;
-
-    let data = ctx.data();
-    let send_into = send_into.unwrap_or(SendInto::DM);
-
-    // Determine target based on send_into
-    let (subscriber_type, target_id) = match send_into {
-        SendInto::Channel => {
-            let channel_id = ctx.channel_id();
-            (SubscriberType::Guild, channel_id.to_string())
-        }
-        SendInto::DM => {
-            let user_id = ctx.author().id;
-            (SubscriberType::Dm, user_id.to_string())
-        }
-    };
-
-    let links_split: Vec<&str> = links.split(',').map(|s| s.trim()).collect();
-    if links_split.len() > 10 {
-        ctx.say("Too many links provided. Please provide no more than 10 links at a time.")
-            .await?;
-        return Ok(());
+impl Display for SubscribeResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let msg = match self {
+            SubscribeResult::Success { feed } => format!(
+                "✅ **Successfully** subscribed to [{}](<{}>)",
+                feed.name, feed.url
+            ),
+            SubscribeResult::AlreadySubscribed { feed } => format!(
+                "❌ You are **already subscribed** to [{}](<{}>)",
+                feed.name, feed.url
+            ),
+        };
+        write!(f, "{}", msg)
     }
+}
 
-    for link in links_split {
-        let source =
-            data.sources
-                .get_feed_by_url(link)
-                .ok_or_else(|| SeriesError::UnsupportedUrl {
-                    url: link.to_string(),
-                })?;
-        let id = source.get_id_from_url(link)?;
-        let series_latest = source.get_latest(id).await?;
-
-        // Get or create feed
-        let feed = match data.db.feed_table.select_by_url(&series_latest.url).await {
-            Ok(feed) => feed,
-            Err(_) => {
-                // Feed doesn't exist, create it
-                let series_info = source.get_info(id).await?;
-
-                let mut feed = FeedModel {
-                    name: series_info.title.clone(),
-                    description: series_info.description,
-                    url: series_info.url.clone(),
-                    cover_url: series_info.cover_url.unwrap_or("".to_string()),
-                    tags: "series".to_string(),
-                    ..Default::default()
-                };
-                feed.id = data.db.feed_table.insert(&feed).await?;
-
-                // Create initial version
-                let version = FeedItemModel {
-                    feed_id: feed.id,
-                    description: series_latest.latest.clone(),
-                    published: series_latest.published,
-                    ..Default::default()
-                };
-                data.db.feed_item_table.insert(&version).await?;
-
-                feed
+impl Display for UnsubscribeResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let msg = match self {
+            UnsubscribeResult::Success { feed } => format!(
+                "✅ **Successfully** unsubscribed from [{}](<{}>)",
+                feed.name, feed.url
+            ),
+            UnsubscribeResult::AlreadyUnsubscribed { feed } => format!(
+                "❌ You are **not subscribed** to [{}](<{}>)",
+                feed.name, feed.url
+            ),
+            UnsubscribeResult::NoneSubscribed { url } => {
+                format!("❌ You are **not subscribed** to <{}>", url)
             }
         };
+        write!(f, "{}", msg)
+    }
+}
 
-        // Get or create subscriber
-        let subscriber = data
-            .db
-            .subscriber_table
-            .select_by_type_and_target(subscriber_type, &target_id)
-            .await;
-        let subscriber_id = match subscriber {
-            Ok(existing) => existing.id,
-            Err(_) => {
-                // Subscriber doesn't exist, create it
-                let subscriber = SubscriberModel {
-                    r#type: subscriber_type,
-                    target_id: target_id.clone(),
-                    ..Default::default()
-                };
-                data.db.subscriber_table.insert(&subscriber).await?
-            }
+pub struct Commands;
+
+impl Commands {
+    /// Subscribe to an anime/manga series
+    #[poise::command(slash_command)]
+    pub async fn subscribe(
+        ctx: Context<'_>,
+        #[description = "Link(s) of the series. Separate links with commas (,)"] links: String,
+        #[description = "Where to send the notifications. Default to DM"] send_into: Option<
+            SendInto,
+        >,
+    ) -> Result<(), Error> {
+        ctx.defer().await?;
+
+        let send_into = send_into.unwrap_or(SendInto::DM);
+
+        let subscriber_type = SubscriberType::from(&send_into);
+        let target_id = Commands::get_target_id(ctx, &send_into)?;
+
+        let urls_split: Vec<&str> = links.split(',').map(|s| s.trim()).collect();
+        if urls_split.len() > 10 {
+            Err(BotError::InvalidCommandArgument {
+                parameter: "links".to_string(),
+                reason: "Too many links provided. Please provide no more than 10 links at a time."
+                    .to_string(),
+            })?
         };
 
-        // Create subscription
-        let subscription = FeedSubscriptionModel {
-            feed_id: feed.id,
-            subscriber_id,
-            ..Default::default()
-        };
-        match data.db.feed_subscription_table.insert(&subscription).await {
-            Ok(_) => {
-                ctx.reply(format!(
-                    "✅ Successfully subscribed to \"{}\". Notifications will be sent to {}",
-                    feed.name, send_into
-                ))
-                .await?;
-            }
-            Err(err) => {
-                let err_msg = err.to_string();
-                if let Some(db_err) = err.into_database_error() {
-                    if matches!(db_err.kind(), ErrorKind::UniqueViolation) {
-                        ctx.reply(format!("❌ Already subscribed to {}", feed.name))
-                            .await?;
-                    } else {
-                        ctx.reply(format!("⚠️ Unknown error: {db_err:?}")).await?;
+        let mut states: Vec<String> = vec!["⏳ ﻿ Processing...".to_string(); urls_split.len()];
+
+        let interval = Duration::from_secs(2);
+        let mut last_send = Instant::now();
+
+        let mut reply: Option<ReplyHandle<'_>> = None;
+
+        // NOTE: Can be done concurrently
+        for (i, url) in urls_split.iter().enumerate() {
+            let target = SubscriberTarget {
+                subscriber_type,
+                target_id: target_id.clone(),
+            };
+
+            let sub_result = ctx
+                .data()
+                .series_feed_subscription_service
+                .subscribe(url, target)
+                .await;
+
+            states[i] = sub_result.map_or_else(|e| format!("❌ {e}"), |res| res.to_string());
+
+            let containers: Vec<CreateContainerComponent> = (0..urls_split.len())
+                .map(|i| {
+                    CreateContainerComponent::TextDisplay(CreateTextDisplay::new(states[i].clone()))
+                })
+                .collect();
+            let components = vec![CreateComponent::Container(CreateContainer::new(containers))];
+            let resp = CreateReply::new()
+                .flags(MessageFlags::IS_COMPONENTS_V2)
+                .components(components);
+
+            if last_send.elapsed() > interval || i + 1 == urls_split.len() {
+                match reply {
+                    None => {
+                        reply = Some(ctx.send(resp).await?);
                     }
-                } else {
-                    ctx.reply(format!("⚠️ Error: {err_msg:?}")).await?;
+                    Some(ref reply) => {
+                        reply.edit(ctx, resp).await?;
+                    }
                 }
+                last_send = Instant::now();
             }
+        }
+        Ok(())
+    }
+
+    /// Unsubscribe from an anime/manga series
+    #[poise::command(slash_command)]
+    pub async fn unsubscribe(
+        ctx: Context<'_>,
+        #[description = "Link(s) of the series. Separate links with commas (,)"]
+        #[autocomplete = "Self::autocomplete_subscriptions"]
+        links: String,
+        #[description = "Where notifications were being sent. Default to DM"] send_into: Option<
+            SendInto,
+        >,
+    ) -> Result<(), Error> {
+        ctx.defer().await?;
+
+        let send_into = send_into.unwrap_or(SendInto::DM);
+
+        let subscriber_type = SubscriberType::from(&send_into);
+        let target_id = Commands::get_target_id(ctx, &send_into)?;
+
+        let urls_split: Vec<&str> = links.split(',').map(|s| s.trim()).collect();
+        if urls_split.len() > 10 {
+            Err(BotError::InvalidCommandArgument {
+                parameter: "links".to_string(),
+                reason: "Too many links provided. Please provide no more than 10 links at a time."
+                    .to_string(),
+            })?
+        };
+
+        let mut states: Vec<String> = vec!["⏳ ﻿ Processing...".to_string(); urls_split.len()];
+
+        let interval = Duration::from_secs(2);
+        let mut last_send = Instant::now();
+
+        let mut reply: Option<ReplyHandle<'_>> = None;
+
+        // NOTE: Can be done concurrently
+        for (i, url) in urls_split.iter().enumerate() {
+            let target = SubscriberTarget {
+                subscriber_type,
+                target_id: target_id.clone(),
+            };
+
+            let unsub_result = ctx
+                .data()
+                .series_feed_subscription_service
+                .unsubscribe(url, target)
+                .await;
+
+            states[i] = unsub_result.map_or_else(|e| format!("❌ {e}"), |res| res.to_string());
+
+            let containers: Vec<CreateContainerComponent> = (0..urls_split.len())
+                .map(|i| {
+                    CreateContainerComponent::TextDisplay(CreateTextDisplay::new(states[i].clone()))
+                })
+                .collect();
+            let components = vec![CreateComponent::Container(CreateContainer::new(containers))];
+            let resp = CreateReply::new()
+                .flags(MessageFlags::IS_COMPONENTS_V2)
+                .components(components);
+
+            if last_send.elapsed() > interval || i + 1 == urls_split.len() {
+                match reply {
+                    None => {
+                        reply = Some(ctx.send(resp).await?);
+                    }
+                    Some(ref reply) => {
+                        reply.edit(ctx, resp).await?;
+                    }
+                }
+                last_send = Instant::now();
+            }
+        }
+        Ok(())
+    }
+
+    /// List all your subscriptions
+    #[poise::command(slash_command)]
+    pub async fn subscriptions(
+        ctx: Context<'_>,
+        #[description = "Where the notifications are being sent. Default to DM"] sent_into: Option<
+            SendInto,
+        >,
+    ) -> Result<(), Error> {
+        ctx.defer().await?;
+        let sent_into = sent_into.unwrap_or(SendInto::DM);
+
+        // Create target
+        let target_id = Commands::get_target_id(ctx, &sent_into)?;
+        let subscriber_type = SubscriberType::from(&sent_into);
+        let target = SubscriberTarget {
+            subscriber_type,
+            target_id,
+        };
+
+        // Get subscriber
+        let subscriber = ctx
+            .data()
+            .series_feed_subscription_service
+            .get_or_create_subscriber(&target)
+            .await?;
+
+        // Get subscriber's subscription count
+        let per_page = 10;
+        let items = ctx
+            .data()
+            .series_feed_subscription_service
+            .get_subscription_count(subscriber.id)
+            .await?;
+
+        // Create navigation component
+        let mut navigation =
+            PageNavigationComponent::new(&ctx, Pagination::new(items / per_page + 1, per_page, 1));
+
+        // Run feedback loop until timeout
+        let reply = ctx
+            .send(
+                CreateReply::new()
+                    .flags(MessageFlags::IS_COMPONENTS_V2)
+                    .components(Commands::create_page(&ctx, &target, &navigation).await?),
+            )
+            .await?;
+
+        while navigation.listen(Duration::from_secs(60)).await {
+            reply
+                .edit(
+                    ctx,
+                    CreateReply::new()
+                        .flags(MessageFlags::IS_COMPONENTS_V2)
+                        .components(Commands::create_page(&ctx, &target, &navigation).await?),
+                )
+                .await?;
+        }
+
+        Ok(())
+    }
+
+    async fn create_page<'a>(
+        ctx: &Context<'_>,
+        target: &SubscriberTarget,
+        navigation: &'a PageNavigationComponent<'_>,
+    ) -> anyhow::Result<Vec<CreateComponent<'a>>> {
+        let subscriptions = ctx
+            .data()
+            .series_feed_subscription_service
+            .list_paginated_subscriptions(
+                target,
+                navigation.pagination.current_page,
+                navigation.pagination.per_page,
+            )
+            .await?;
+
+        if subscriptions.is_empty() {
+            let text = CreateTextDisplay::new("You have no subscriptions.");
+            let empty_container = CreateComponent::Container(CreateContainer::new(vec![
+                CreateContainerComponent::TextDisplay(text),
+            ]));
+            return Ok(vec![empty_container]);
+        }
+
+        let mut container_components = vec![];
+        for sub in subscriptions {
+            let text = CreateTextDisplay::new(format!(
+                "### {}
+
+    - **Last version**: {}
+    - **Last updated**: <t:{}>
+    - **Source**: <{}>
+    ﻿",
+                sub.feed.name,
+                sub.feed_latest.description,
+                sub.feed_latest.published.timestamp(),
+                sub.feed.url
+            ));
+            let thumbnail = CreateThumbnail::new(CreateUnfurledMediaItem::new(sub.feed.cover_url));
+
+            container_components.push(CreateContainerComponent::Section(CreateSection::new(
+                vec![CreateSectionComponent::TextDisplay(text)],
+                CreateSectionAccessory::Thumbnail(thumbnail),
+            )))
+        }
+
+        let container = CreateComponent::Container(CreateContainer::new(container_components));
+        if navigation.pagination.pages == 1 {
+            Ok(vec![container])
+        } else {
+            let buttons = navigation.create_buttons();
+            Ok(vec![container, buttons])
         }
     }
-    Ok(())
-}
 
-/// Unsubscribe from an anime/manga series
-#[poise::command(slash_command)]
-pub async fn unsubscribe(
-    ctx: Context<'_>,
-    #[description = "Link(s) of the series. Separate links with commas (,)"]
-    #[autocomplete = "autocomplete_subscriptions"]
-    links: String,
-    #[description = "Where notifications were being sent. Default to DM"] send_into: Option<
-        SendInto,
-    >,
-) -> Result<(), Error> {
-    ctx.defer().await?;
+    #[poise::command(prefix_command, owners_only, hide_in_help)]
+    pub async fn register(ctx: Context<'_>) -> Result<(), Error> {
+        poise::builtins::register_application_commands_buttons(ctx).await?;
+        Ok(())
+    }
 
-    let data = ctx.data();
-    let send_into = send_into.unwrap_or(SendInto::DM);
+    #[poise::command(prefix_command, owners_only, hide_in_help)]
+    pub async fn dump_db(ctx: Context<'_>) -> Result<(), Error> {
+        ctx.defer().await?;
+        let data = ctx.data();
 
-    // Determine target based on send_into
-    let (subscriber_type, target_id) = match send_into {
-        SendInto::Channel => {
-            let channel_id = ctx.channel_id();
-            (SubscriberType::Guild, channel_id.to_string())
+        let feeds = data.db.feed_table.select_all().await?;
+        let versions = data.db.feed_item_table.select_all().await?;
+        let subscribers = data.db.subscriber_table.select_all().await?;
+        let subscriptions = data.db.feed_subscription_table.select_all().await?;
+
+        let reply = CreateReply::default()
+            .content("Database dump:")
+            .attachment(CreateAttachment::bytes(
+                serde_json::to_string_pretty(&feeds)?,
+                "feeds.json",
+            ))
+            .attachment(CreateAttachment::bytes(
+                serde_json::to_string_pretty(&versions)?,
+                "feed_versions.json",
+            ))
+            .attachment(CreateAttachment::bytes(
+                serde_json::to_string_pretty(&subscribers)?,
+                "subscribers.json",
+            ))
+            .attachment(CreateAttachment::bytes(
+                serde_json::to_string_pretty(&subscriptions)?,
+                "subscriptions.json",
+            ));
+
+        ctx.send(reply).await?;
+        Ok(())
+    }
+
+    async fn autocomplete_subscriptions<'a>(
+        ctx: Context<'_>,
+        partial: &str,
+    ) -> CreateAutocompleteResponse<'a> {
+        if partial.trim().is_empty() {
+            return CreateAutocompleteResponse::new().set_choices(vec![]);
         }
-        SendInto::DM => {
-            let user_id = ctx.author().id;
-            (SubscriberType::Dm, user_id.to_string())
-        }
-    };
 
-    for link in links.split(',').map(|s| s.trim()) {
-        // Get source and normalize URL
-        let source = match data.sources.get_feed_by_url(link) {
-            Some(source) => source,
-            None => {
-                ctx.reply(format!("❌ Unsupported link: <{link}>")).await?;
-                continue;
-            }
-        };
+        let data = ctx.data();
+        let user_id = ctx.author().id.to_string();
 
-        let id = match source.get_id_from_url(link) {
-            Ok(id) => id,
-            Err(err) => {
-                ctx.reply(format!("❌ Invalid link: {err:?}")).await?;
-                continue;
-            }
-        };
-
-        let normalized_url = source.get_url_from_id(id);
-
-        // Find the feed
-        let feed = match data.db.feed_table.select_by_url(&normalized_url).await {
-            Ok(feed) => feed,
-            Err(_) => {
-                ctx.reply("❌ Series not found in database").await?;
-                continue;
-            }
-        };
-
-        // Find the subscriber
+        // Find subscriber
         let subscriber = match data
             .db
             .subscriber_table
-            .select_by_type_and_target(subscriber_type, &target_id)
+            .select_by_type_and_target(&SubscriberType::Dm, &user_id)
             .await
         {
             Ok(sub) => sub,
-            Err(_) => {
-                ctx.reply("❌ You are not subscribed to this series")
-                    .await?;
-                continue;
+            Err(e) => {
+                error!("Failed to fetch subscriber for user {}: {}", user_id, e);
+                return CreateAutocompleteResponse::new().set_choices(vec![]);
             }
         };
 
-        // Delete the subscription
-        if data
+        // Get subscriptions
+        let subscriptions = match data
             .db
             .feed_subscription_table
-            .delete_subscription(feed.id, subscriber.id)
-            .await?
-        {
-            ctx.reply(format!(
-                "✅ Successfully unsubscribed from \"{}\"",
-                feed.name
-            ))
-            .await?;
-        } else {
-            ctx.reply("❌ You are not subscribed to this series")
-                .await?;
-        }
-    }
-    Ok(())
-}
-
-/// List all your subscriptions
-#[poise::command(slash_command)]
-pub async fn subscriptions(
-    ctx: Context<'_>,
-    #[description = "Show subscriptions for channel instead of DM"] channel: Option<bool>,
-) -> Result<(), Error> {
-    ctx.defer().await?;
-
-    let data = ctx.data();
-    let (subscriber_type, target_id) = if channel.unwrap_or(false) {
-        (SubscriberType::Guild, ctx.channel_id().to_string())
-    } else {
-        (SubscriberType::Dm, ctx.author().id.to_string())
-    };
-
-    // Find subscriber
-    let subscriber = match data
-        .db
-        .subscriber_table
-        .select_by_type_and_target(subscriber_type, &target_id)
-        .await
-    {
-        Ok(sub) => sub,
-        Err(_) => {
-            ctx.reply("You have no subscriptions.").await?;
-            return Ok(());
-        }
-    };
-
-    // Get all subscriptions
-    let subscriptions = data
-        .db
-        .feed_subscription_table
-        .select_all_by_subscriber_id(subscriber.id)
-        .await?;
-
-    if subscriptions.is_empty() {
-        ctx.reply("You have no subscriptions.").await?;
-        return Ok(());
-    }
-
-    let mut message = "Your subscriptions:\n".to_string();
-    for subscription in subscriptions {
-        let feed = data.db.feed_table.select(&subscription.feed_id).await?;
-
-        // Get latest version
-        let latest = match data
-            .db
-            .feed_item_table
-            .select_latest_by_feed_id(feed.id)
+            .select_all_by_subscriber_id(subscriber.id)
             .await
         {
-            Ok(ver) => ver.description,
-            Err(_) => "Unknown".to_string(),
+            Ok(subs) => subs,
+            Err(e) => {
+                error!("Failed to fetch subscriptions: {}", e);
+                return CreateAutocompleteResponse::new().set_choices(vec![]);
+            }
         };
 
-        message.push_str(&format!(
-            "- [{}](<{}>) - Latest: {}\n",
-            feed.name, feed.url, latest
-        ));
-    }
-
-    ctx.reply(message).await?;
-    Ok(())
-}
-
-#[poise::command(prefix_command, owners_only, hide_in_help)]
-pub async fn register(ctx: Context<'_>) -> Result<(), Error> {
-    poise::builtins::register_application_commands_buttons(ctx).await?;
-    Ok(())
-}
-
-#[poise::command(slash_command, owners_only, hide_in_help)]
-pub async fn dump_db(ctx: Context<'_>) -> Result<(), Error> {
-    ctx.defer().await?;
-    let data = ctx.data();
-
-    let feeds = data.db.feed_table.select_all().await?;
-    let versions = data.db.feed_item_table.select_all().await?;
-    let subscribers = data.db.subscriber_table.select_all().await?;
-    let subscriptions = data.db.feed_subscription_table.select_all().await?;
-
-    let reply = CreateReply::default()
-        .content("Database dump:")
-        .attachment(CreateAttachment::bytes(
-            serde_json::to_string_pretty(&feeds)?,
-            "feeds.json",
-        ))
-        .attachment(CreateAttachment::bytes(
-            serde_json::to_string_pretty(&versions)?,
-            "feed_versions.json",
-        ))
-        .attachment(CreateAttachment::bytes(
-            serde_json::to_string_pretty(&subscribers)?,
-            "subscribers.json",
-        ))
-        .attachment(CreateAttachment::bytes(
-            serde_json::to_string_pretty(&subscriptions)?,
-            "subscriptions.json",
-        ));
-
-    ctx.send(reply).await?;
-    Ok(())
-}
-
-async fn autocomplete_subscriptions<'a>(
-    ctx: Context<'_>,
-    partial: &str,
-) -> CreateAutocompleteResponse<'a> {
-    if partial.trim().is_empty() {
-        return CreateAutocompleteResponse::new().set_choices(vec![]);
-    }
-
-    let data = ctx.data();
-    let user_id = ctx.author().id.to_string();
-
-    // Find subscriber
-    let subscriber = match data
-        .db
-        .subscriber_table
-        .select_by_type_and_target(SubscriberType::Dm, &user_id)
-        .await
-    {
-        Ok(sub) => sub,
-        Err(e) => {
-            error!("Failed to fetch subscriber for user {}: {}", user_id, e);
+        if subscriptions.is_empty() {
             return CreateAutocompleteResponse::new().set_choices(vec![]);
         }
-    };
 
-    // Get subscriptions
-    let subscriptions = match data
-        .db
-        .feed_subscription_table
-        .select_all_by_subscriber_id(subscriber.id)
-        .await
-    {
-        Ok(subs) => subs,
-        Err(e) => {
-            error!("Failed to fetch subscriptions: {}", e);
-            return CreateAutocompleteResponse::new().set_choices(vec![]);
-        }
-    };
+        // Fetch feeds in parallel
+        // TODO: Do this in backend instead
+        let feed_ids: HashSet<i32> = subscriptions.into_iter().map(|s| s.feed_id).collect();
+        let futures = feed_ids.into_iter().map(|id| {
+            let db = &data.db;
+            async move { db.feed_table.select(&id).await.ok() }
+        });
+        let results = futures::future::join_all(futures).await;
 
-    if subscriptions.is_empty() {
-        return CreateAutocompleteResponse::new().set_choices(vec![]);
+        let partial_lower = partial.to_lowercase();
+        // 1. Collect into a Vec of Feeds
+        let mut matching_urls = results
+            .into_iter()
+            .flatten()
+            .filter(|feed| feed.url.to_lowercase().contains(&partial_lower))
+            .collect::<Vec<_>>();
+
+        // 2. Sort the Feeds
+        matching_urls.sort_by_key(|feed| feed.name.to_lowercase());
+
+        // 3. Map the Feeds into AutocompleteChoices
+        let mut choices = matching_urls
+            .into_iter()
+            .map(|feed| AutocompleteChoice::new(feed.name, feed.url))
+            .collect::<Vec<_>>();
+
+        choices.truncate(25); // Discord autocomplete limit
+        CreateAutocompleteResponse::new().set_choices(choices)
     }
 
-    // Fetch feeds in parallel
-    // TODO: Do this in backend instead
-    let feed_ids: HashSet<i32> = subscriptions.into_iter().map(|s| s.feed_id).collect();
-    let futures = feed_ids.into_iter().map(|id| {
-        let db = &data.db;
-        async move { db.feed_table.select(&id).await.ok() }
-    });
-    let results = futures::future::join_all(futures).await;
+    fn get_target_id(ctx: Context<'_>, send_into: &SendInto) -> Result<String, BotError> {
+        let channel_id = ctx.channel_id();
+        let guild_id = ctx
+            .guild_id()
+            .ok_or_else(|| BotError::InvalidCommandArgument {
+                parameter: send_into.name().to_string(),
+                reason: "You have to be in a server to do this command with send_into: server"
+                    .to_string(),
+            })?;
 
-    let partial_lower = partial.to_lowercase();
-    // 1. Collect into a Vec of Feeds
-    let mut matching_urls = results
-        .into_iter()
-        .flatten()
-        .filter(|feed| feed.url.to_lowercase().contains(&partial_lower))
-        .collect::<Vec<_>>();
-
-    // 2. Sort the Feeds
-    matching_urls.sort_by_key(|feed| feed.name.to_lowercase());
-
-    // 3. Map the Feeds into AutocompleteChoices
-    let mut choices = matching_urls
-        .into_iter()
-        .map(|feed| AutocompleteChoice::new(feed.name, feed.url))
-        .collect::<Vec<_>>();
-
-    choices.truncate(25); // Discord autocomplete limit
-    CreateAutocompleteResponse::new().set_choices(choices)
+        let ret = match send_into {
+            SendInto::Server => SubscriberModel::format_guild_target_id(guild_id, channel_id),
+            SendInto::DM => ctx.author().id.to_string(),
+        };
+        Ok(ret)
+    }
 }

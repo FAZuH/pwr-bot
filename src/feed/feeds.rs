@@ -1,22 +1,22 @@
 use std::sync::Arc;
 
-use crate::feed::anilist_feed::AniListFeed;
-use crate::feed::error::SeriesError;
-use crate::feed::mangadex_feed::MangaDexFeed;
-use crate::feed::series::SeriesFeed;
-use crate::feed::series::SeriesItem;
-use crate::feed::series::SeriesLatest;
+use crate::feed::anilist_series_feed::AniListSeriesFeed;
+use crate::feed::error::SeriesFeedError;
+use crate::feed::mangadex_series_feed::MangaDexSeriesFeed;
+use crate::feed::series_feed::SeriesFeed;
+use crate::feed::series_feed::SeriesItem;
+use crate::feed::series_feed::SeriesLatest;
 
 pub struct Feeds {
     feeds: Vec<Arc<dyn SeriesFeed>>,
-    pub anilist_feed: Arc<AniListFeed>,
-    pub mangadex_feed: Arc<MangaDexFeed>,
+    pub anilist_feed: Arc<AniListSeriesFeed>,
+    pub mangadex_feed: Arc<MangaDexSeriesFeed>,
 }
 
 impl Feeds {
     pub fn new() -> Self {
-        let anilist_feed = Arc::new(AniListFeed::new());
-        let mangadex_feed = Arc::new(MangaDexFeed::new());
+        let anilist_feed = Arc::new(AniListSeriesFeed::new());
+        let mangadex_feed = Arc::new(MangaDexSeriesFeed::new());
 
         let mut _self = Self {
             feeds: Vec::new(),
@@ -30,10 +30,10 @@ impl Feeds {
     }
 
     /// Get feed id by URL
-    pub fn get_feed_id_by_url<'a>(&self, url: &'a str) -> Result<&'a str, SeriesError> {
+    pub fn get_feed_id_by_url<'a>(&self, url: &'a str) -> Result<&'a str, SeriesFeedError> {
         let feed = self
             .get_feed_by_url(url)
-            .ok_or_else(|| SeriesError::UnsupportedUrl {
+            .ok_or_else(|| SeriesFeedError::UnsupportedUrl {
                 url: url.to_string(),
             })?;
 
@@ -41,29 +41,29 @@ impl Feeds {
         Ok(ret)
     }
 
-    /// Get feed by URL and call get_latest
-    pub async fn get_latest_by_url(&self, url: &str) -> Result<SeriesLatest, SeriesError> {
+    /// Get series feed by URL and call get_latest
+    pub async fn get_latest_by_url(&self, url: &str) -> Result<SeriesLatest, SeriesFeedError> {
         let feed = self
             .get_feed_by_url(url)
-            .ok_or_else(|| SeriesError::UnsupportedUrl {
+            .ok_or_else(|| SeriesFeedError::UnsupportedUrl {
                 url: url.to_string(),
             })?;
         let series_id = self.get_feed_id_by_url(url)?;
         feed.get_latest(series_id).await
     }
 
-    /// Get feed by URL and call get_info
-    pub async fn get_info_by_url(&self, url: &str) -> Result<SeriesItem, SeriesError> {
+    /// Get series feed by URL and call get_info
+    pub async fn get_info_by_url(&self, url: &str) -> Result<SeriesItem, SeriesFeedError> {
         let feed = self
             .get_feed_by_url(url)
-            .ok_or_else(|| SeriesError::UnsupportedUrl {
+            .ok_or_else(|| SeriesFeedError::UnsupportedUrl {
                 url: url.to_string(),
             })?;
         let series_id = self.get_feed_id_by_url(url)?;
         feed.get_info(series_id).await
     }
 
-    /// Get feed by URL
+    /// Get series feed by URL
     pub fn get_feed_by_url(&self, url: &str) -> Option<&Arc<dyn SeriesFeed>> {
         self.feeds.iter().find(|feed| {
             feed.get_base()

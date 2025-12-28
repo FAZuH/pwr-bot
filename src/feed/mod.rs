@@ -1,13 +1,13 @@
 use crate::feed::error::UrlParseError;
-use crate::feed::series::SeriesItem;
-use crate::feed::series::SeriesLatest;
+use crate::feed::series_feed::SeriesItem;
+use crate::feed::series_feed::SeriesLatest;
 
-pub mod anilist_feed;
+pub mod anilist_series_feed;
 
 pub mod error;
 pub mod feeds;
-pub mod mangadex_feed;
-pub mod series;
+pub mod mangadex_series_feed;
+pub mod series_feed;
 
 #[derive(Clone, Debug)]
 pub struct FeedInfo {

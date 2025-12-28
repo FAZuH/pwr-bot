@@ -5,4 +5,5 @@ pub mod error;
 pub mod event;
 pub mod feed;
 pub mod publisher;
+pub mod service;
 pub mod subscriber;

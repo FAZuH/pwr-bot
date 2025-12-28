@@ -7,23 +7,24 @@ use log::error;
 use log::info;
 use serenity::all::ChannelId;
 use serenity::all::CreateMessage;
+use serenity::all::GuildId;
 
-use super::Subscriber;
-use crate::bot::bot::Bot;
-use crate::database::database::Database;
+use crate::bot::Bot;
+use crate::database::Database;
 use crate::database::model::SubscriberModel;
 use crate::database::model::SubscriberType;
 use crate::event::Event;
 use crate::event::feed_update_event::FeedUpdateEvent;
+use crate::subscriber::Subscriber;
 
-pub struct DiscordChannelSubscriber {
+pub struct DiscordGuildSubscriber {
     bot: Arc<Bot>,
     db: Arc<Database>,
 }
 
-impl DiscordChannelSubscriber {
+impl DiscordGuildSubscriber {
     pub fn new(bot: Arc<Bot>, db: Arc<Database>) -> Self {
-        debug!("Initializing DiscordChannelSubscriber.");
+        debug!("Initializing DiscordGuildSubscriber.");
         Self { bot, db }
     }
 
@@ -39,7 +40,7 @@ impl DiscordChannelSubscriber {
         for sub in subs {
             if let Err(e) = self.handle_sub(&sub, event.message.clone()).await {
                 error!(
-                    "Error handling user id `{}` target `{}`: {:?}",
+                    "Error handling subscriber id `{}` target `{}`: {:?}",
                     sub.id, sub.target_id, e
                 );
             }
@@ -53,10 +54,15 @@ impl DiscordChannelSubscriber {
         sub: &SubscriberModel,
         message: CreateMessage<'_>,
     ) -> anyhow::Result<()> {
-        let channel_id = ChannelId::from_str(&sub.target_id)?;
+        let (guild_id, channel_id) = sub.parse_guild_target_id()?;
+
+        let guild_id = GuildId::from_str(guild_id)?;
+        let channel_id = ChannelId::from_str(channel_id)?;
 
         debug!("Fetching channel id `{}`.", channel_id);
-        let channel = channel_id.to_guild_channel(&self.bot.http, None).await?;
+        let channel = channel_id
+            .to_guild_channel(&self.bot.http, Some(guild_id))
+            .await?;
 
         debug!(
             "Fetched channel id `{}` ({}). Sending message.",
@@ -73,7 +79,7 @@ impl DiscordChannelSubscriber {
 }
 
 #[async_trait::async_trait]
-impl Subscriber<FeedUpdateEvent> for DiscordChannelSubscriber {
+impl Subscriber<FeedUpdateEvent> for DiscordGuildSubscriber {
     async fn callback(&self, event: FeedUpdateEvent) -> Result<()> {
         self.feed_event_callback(event).await
     }
