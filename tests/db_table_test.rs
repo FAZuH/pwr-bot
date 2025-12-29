@@ -176,7 +176,7 @@ async fn test_subscriber_table_operations() {
 
     let sub2 = SubscriberModel {
         r#type: SubscriberType::Guild,
-        target_id: "guild1:chan1".to_string(),
+        target_id: "guild1".to_string(),
         ..Default::default()
     };
     let _id2 = table.insert(&sub2).await.unwrap();
@@ -372,6 +372,61 @@ async fn test_feed_table_select_by_name_and_subscriber_id() {
         .await
         .unwrap();
     assert_eq!(results.len(), 1);
+
+    common::teardown_db(db_path).await;
+}
+
+#[tokio::test]
+async fn test_server_settings_table_crud() {
+    let (db, db_path) = common::setup_db().await;
+    let table = &db.server_settings_table;
+
+    use pwr_bot::database::model::ServerSettings;
+    use pwr_bot::database::model::ServerSettingsModel;
+
+    // 1. Insert (using replace actually, or insert)
+    let settings = ServerSettings {
+        channel_id: Some("123".to_string()),
+    };
+    let model = ServerSettingsModel {
+        guild_id: "guild1".to_string(),
+        settings: sqlx::types::Json(settings),
+    };
+
+    let id = table.insert(&model).await.expect("Failed to insert settings");
+    assert_eq!(id, "guild1");
+
+    // 2. Select
+    let fetched = table
+        .select(&"guild1".to_string())
+        .await
+        .expect("Failed to select");
+    assert_eq!(fetched.settings.0.channel_id, Some("123".to_string()));
+
+    // 3. Update
+    let mut new_settings = fetched.settings.0.clone();
+    new_settings.channel_id = Some("456".to_string());
+    let updated_model = ServerSettingsModel {
+        guild_id: "guild1".to_string(),
+        settings: sqlx::types::Json(new_settings),
+    };
+    table
+        .update(&updated_model)
+        .await
+        .expect("Failed to update");
+
+    let fetched2 = table
+        .select(&"guild1".to_string())
+        .await
+        .expect("Failed to select updated");
+    assert_eq!(fetched2.settings.0.channel_id, Some("456".to_string()));
+
+    // 4. Delete
+    table
+        .delete(&"guild1".to_string())
+        .await
+        .expect("Failed to delete");
+    assert!(table.select(&"guild1".to_string()).await.is_err());
 
     common::teardown_db(db_path).await;
 }

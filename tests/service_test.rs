@@ -97,3 +97,42 @@ async fn test_get_or_create_feed() {
 
     common::teardown_db(db_path).await;
 }
+
+#[tokio::test]
+async fn test_server_settings_service() {
+    let (db, db_path) = common::setup_db().await;
+    let feeds = Arc::new(Feeds::new());
+    let service = FeedSubscriptionService {
+        db: db.clone(),
+        feeds: feeds.clone(),
+    };
+
+    use pwr_bot::database::model::ServerSettings;
+
+    let guild_id = "guild_123";
+
+    // 1. Get default settings
+    let settings = service
+        .get_server_settings(guild_id)
+        .await
+        .expect("Failed to get settings");
+    assert!(settings.channel_id.is_none());
+
+    // 2. Update settings
+    let new_settings = ServerSettings {
+        channel_id: Some("chan_456".to_string()),
+    };
+    service
+        .update_server_settings(guild_id, new_settings.clone())
+        .await
+        .expect("Failed to update");
+
+    // 3. Get updated settings
+    let fetched = service
+        .get_server_settings(guild_id)
+        .await
+        .expect("Failed to get updated settings");
+    assert_eq!(fetched.channel_id, Some("chan_456".to_string()));
+
+    common::teardown_db(db_path).await;
+}
