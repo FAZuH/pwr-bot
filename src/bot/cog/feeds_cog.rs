@@ -4,7 +4,6 @@ use std::time::Duration;
 use std::time::Instant;
 
 use anyhow::Result;
-use log::error;
 use poise::ChoiceParameter;
 use poise::CreateReply;
 use poise::ReplyHandle;
@@ -372,48 +371,69 @@ impl FeedsCog {
         }
 
         // Get subscriber
-        let (target_id, subscriber_type) = match ctx.guild_id() {
-            Some(gid) => (
-                SubscriberModel::format_guild_target_id(gid, ctx.channel_id()),
-                SubscriberType::Guild,
-            ),
-            None => (ctx.author().id.to_string(), SubscriberType::Dm),
+        let user_target = SubscriberTarget {
+            target_id: ctx.author().id.to_string(),
+            subscriber_type: SubscriberType::Dm,
         };
-        let target = SubscriberTarget {
-            subscriber_type,
-            target_id,
-        };
-        let subscriber = match ctx
+        let guild_target = ctx.guild_id().map(|res| SubscriberTarget {
+            target_id: res.to_string(),
+            subscriber_type: SubscriberType::Guild,
+        });
+        let user_subscriber = ctx
             .data()
             .feed_subscription_service
-            .get_or_create_subscriber(&target)
+            .get_or_create_subscriber(&user_target)
             .await
-        {
-            Ok(res) => res,
-            Err(_) => return CreateAutocompleteResponse::new(),
+            .ok();
+        let guild_subscriber = match guild_target {
+            Some(guild_target) => ctx
+                .data()
+                .feed_subscription_service
+                .get_or_create_subscriber(&guild_target)
+                .await
+                .ok(),
+            None => None,
         };
+        if user_subscriber.is_none() && guild_subscriber.is_none() {
+            return CreateAutocompleteResponse::new();
+        }
 
         // Get subscribed feeds
-        let mut feeds = match ctx
-            .data()
-            .feed_subscription_service
-            .search_subcriptions(&subscriber, partial)
-            .await
-        {
-            Ok(res) => res,
-            Err(e) => {
-                error!("Failed to fetch subscriptions: {}", e);
-                return CreateAutocompleteResponse::new().set_choices(vec![]);
-            }
+        let mut user_feeds = match user_subscriber {
+            Some(user_subscriber) => ctx
+                .data()
+                .feed_subscription_service
+                .search_subcriptions(&user_subscriber, partial)
+                .await
+                .unwrap_or(vec![]),
+            None => vec![],
         };
-        if feeds.is_empty() {
+        let mut guild_feeds = match guild_subscriber {
+            Some(guild_subscriber) => ctx
+                .data()
+                .feed_subscription_service
+                .search_subcriptions(&guild_subscriber, partial)
+                .await
+                .unwrap_or(vec![]),
+            None => vec![],
+        };
+        if ctx.guild_id().is_none() && user_feeds.is_empty() {
             return CreateAutocompleteResponse::new().set_choices(vec![AutocompleteChoice::from(
                 "You have no subscriptions yet. Subscribe first with `/subscribe` command",
             )]);
         }
 
-        // Sort the feeds for better UX
-        feeds.sort_by_key(|feed| feed.name.to_lowercase());
+        // Combine the feeds
+        for f in &mut user_feeds {
+            f.name.insert_str(0, "(DM) ");
+        }
+        for f in &mut guild_feeds {
+            f.name.insert_str(0, "(Server) ");
+        }
+        // NOTE: search_subcriptions already returns Vec<FeedModel> sorted by FeedModel.name, so we
+        // don't need to sort it here.
+        user_feeds.append(&mut guild_feeds);
+        let feeds = user_feeds;
 
         // Map the feeds into AutocompleteChoices
         let mut choices = feeds

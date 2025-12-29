@@ -199,6 +199,7 @@ impl FeedTable {
                         FROM feed_subscriptions
                         WHERE subscriber_id = ?
                     )
+                ORDER BY name
                 LIMIT ?
                 "#,
         )
