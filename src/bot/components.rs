@@ -122,3 +122,56 @@ impl<'a> PageNavigationComponent<'a> {
         ))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_pagination_new() {
+        // Normal case
+        let p = Pagination::new(10, 5, 1);
+        assert_eq!(p.pages, 10);
+        assert_eq!(p.per_page, 5);
+        assert_eq!(p.current_page, 1);
+
+        // Clamping current_page
+        let p = Pagination::new(10, 5, 0);
+        assert_eq!(p.current_page, 1);
+
+        let p = Pagination::new(10, 5, 11);
+        assert_eq!(p.current_page, 10);
+
+        // Minimal values
+        let p = Pagination::new(0, 0, 0);
+        assert_eq!(p.pages, 1);
+        assert_eq!(p.per_page, 1);
+        assert_eq!(p.current_page, 1);
+    }
+
+    #[test]
+    fn test_pagination_navigation() {
+        let mut p = Pagination::new(5, 10, 3);
+
+        p.prev_page();
+        assert_eq!(p.current_page, 2);
+
+        p.prev_page();
+        assert_eq!(p.current_page, 1);
+
+        p.prev_page();
+        assert_eq!(p.current_page, 1); // Should not go below 1
+
+        p.next_page();
+        assert_eq!(p.current_page, 2);
+
+        p.last_page();
+        assert_eq!(p.current_page, 5);
+
+        p.next_page();
+        assert_eq!(p.current_page, 5); // Should not go above pages
+
+        p.first_page();
+        assert_eq!(p.current_page, 1);
+    }
+}

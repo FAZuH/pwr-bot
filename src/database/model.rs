@@ -45,7 +45,7 @@ pub struct FeedModel {
 /// Tracks the history of updates for a content source. Each new episode,
 /// chapter, or post creates a new version entry. The latest version can be
 /// determined by querying for the most recent `published` timestamp.
-#[derive(FromRow, Serialize, Default)]
+#[derive(FromRow, Serialize, Default, Clone)]
 pub struct FeedItemModel {
     #[serde(default)]
     pub id: i32,
@@ -63,7 +63,7 @@ pub struct FeedItemModel {
 /// Represents either a Discord guild channel or a direct message conversation
 /// with a user. Multiple subscribers can follow the same feed, and a single
 /// subscriber can follow multiple feeds (via `FeedSubscriptionModel`).
-#[derive(FromRow, Serialize, Default)]
+#[derive(FromRow, Serialize, Default, Clone)]
 pub struct SubscriberModel {
     #[serde(default)]
     pub id: i32,
@@ -108,7 +108,7 @@ impl SubscriberModel {
 /// Junction table implementing the many-to-many relationship between feeds
 /// and subscribers. When a new `FeedVersionModel` is published, query this
 /// table to find all subscribers that need to be notified.
-#[derive(FromRow, Serialize, Default)]
+#[derive(FromRow, Serialize, Default, Clone)]
 pub struct FeedSubscriptionModel {
     #[serde(default)]
     pub id: i32,
@@ -116,4 +116,54 @@ pub struct FeedSubscriptionModel {
     pub feed_id: i32,
     #[serde(default)]
     pub subscriber_id: i32,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_format_guild_target_id() {
+        let gid = "123456";
+        let cid = "789012";
+        let target = SubscriberModel::format_guild_target_id(gid, cid);
+        assert_eq!(target, "123456:789012");
+    }
+
+    #[test]
+    fn test_parse_guild_target_id() {
+        let sub = SubscriberModel {
+            r#type: SubscriberType::Guild,
+            target_id: "123:456".to_string(),
+            ..Default::default()
+        };
+
+        let (gid, cid) = sub.parse_guild_target_id().expect("Should parse");
+        assert_eq!(gid, "123");
+        assert_eq!(cid, "456");
+    }
+
+    #[test]
+    fn test_parse_guild_target_id_invalid_type() {
+        let sub = SubscriberModel {
+            r#type: SubscriberType::Dm,
+            target_id: "123:456".to_string(),
+            ..Default::default()
+        };
+
+        let res = sub.parse_guild_target_id();
+        assert!(matches!(res, Err(DatabaseError::ParseError { .. })));
+    }
+
+    #[test]
+    fn test_parse_guild_target_id_invalid_format() {
+        let sub = SubscriberModel {
+            r#type: SubscriberType::Guild,
+            target_id: "123456".to_string(),
+            ..Default::default()
+        };
+
+        let res = sub.parse_guild_target_id();
+        assert!(matches!(res, Err(DatabaseError::InternalError { .. })));
+    }
 }

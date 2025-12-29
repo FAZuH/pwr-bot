@@ -78,15 +78,16 @@ impl Feeds {
     }
 
     fn extract_domain(url: &str) -> String {
-        if let Some(domain_start) = url.find("://") {
-            let after_protocol = &url[domain_start + 3..];
-            if let Some(domain_end) = after_protocol.find('/') {
-                after_protocol[..domain_end].to_string()
-            } else {
-                after_protocol.to_string()
-            }
+        let after_protocol = if let Some(domain_start) = url.find("://") {
+            &url[domain_start + 3..]
         } else {
-            url.to_string()
+            url
+        };
+
+        if let Some(domain_end) = after_protocol.find('/') {
+            after_protocol[..domain_end].to_string()
+        } else {
+            after_protocol.to_string()
         }
     }
 }
@@ -94,5 +95,25 @@ impl Feeds {
 impl Default for Feeds {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_domain() {
+        assert_eq!(
+            Feeds::extract_domain("https://example.com/foo/bar"),
+            "example.com"
+        );
+        assert_eq!(Feeds::extract_domain("http://example.com"), "example.com");
+        assert_eq!(Feeds::extract_domain("example.com/foo"), "example.com");
+        assert_eq!(Feeds::extract_domain("example.com"), "example.com");
+        assert_eq!(
+            Feeds::extract_domain("https://sub.domain.co.uk/path"),
+            "sub.domain.co.uk"
+        );
     }
 }

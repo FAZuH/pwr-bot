@@ -79,3 +79,42 @@ pub enum FeedResult {
     SeriesItem(SeriesItem),
     SeriesLatest(SeriesLatest),
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_get_nth_path_from_url() {
+        let info = FeedInfo {
+            name: "Test".to_string(),
+            feed_type: "Type".to_string(),
+            api_hostname: "test.com".to_string(),
+            api_domain: "test.com".to_string(),
+            api_url: "https://test.com".to_string(),
+            copyright_notice: "".to_string(),
+            logo_url: "".to_string(),
+        };
+        let client = reqwest::Client::new();
+        let base = BaseFeed::new(info, client);
+
+        let url = "https://test.com/one/two/three";
+
+        assert_eq!(base.get_nth_path_from_url(url, 0).unwrap(), "one");
+        assert_eq!(base.get_nth_path_from_url(url, 1).unwrap(), "two");
+        assert_eq!(base.get_nth_path_from_url(url, 2).unwrap(), "three");
+
+        // Out of bounds
+        assert!(matches!(
+            base.get_nth_path_from_url(url, 3),
+            Err(UrlParseError::MissingId { .. })
+        ));
+
+        // Wrong domain
+        let wrong_url = "https://other.com/one";
+        assert!(matches!(
+            base.get_nth_path_from_url(wrong_url, 0),
+            Err(UrlParseError::InvalidFormat { .. })
+        ));
+    }
+}

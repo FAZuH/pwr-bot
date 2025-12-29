@@ -193,12 +193,12 @@ impl SeriesFeedSubscriptionService {
             Ok(res) => res,
             Err(_) => {
                 // Subscriber doesn't exist, create it
-                let subscriber = SubscriberModel {
+                let mut subscriber = SubscriberModel {
                     r#type: target.subscriber_type,
                     target_id: target.target_id.clone(),
                     ..Default::default()
                 };
-                self.db.subscriber_table.insert(&subscriber).await?;
+                subscriber.id = self.db.subscriber_table.insert(&subscriber).await?;
                 subscriber
             }
         };
