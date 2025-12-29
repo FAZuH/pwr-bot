@@ -27,6 +27,8 @@ use serenity::all::CreateThumbnail;
 use serenity::all::CreateUnfurledMediaItem;
 use serenity::all::GenericChannelId;
 use serenity::all::MessageFlags;
+use serenity::all::Permissions;
+use serenity::all::RoleId;
 
 use crate::bot::cog::Context;
 use crate::bot::cog::Error;
@@ -269,6 +271,24 @@ impl FeedsCog {
 
         let send_into = send_into.unwrap_or(SendInto::DM);
 
+        if let SendInto::Server = send_into {
+            let guild_id = ctx.guild_id().ok_or_else(|| {
+                BotError::ConfigurationError("Command must be run in a server.".to_string())
+            })?;
+            let settings = ctx
+                .data()
+                .feed_subscription_service
+                .get_server_settings(guild_id.get())
+                .await?;
+            if settings.channel_id.is_none() {
+                return Err(BotError::ConfigurationError(
+                    "Server feed settings are not configured. An administrator must run `/settings` to configure a notification channel first.".to_string(),
+                )
+                .into());
+            }
+            FeedsCog::check_guild_permissions(ctx, &settings.subscribe_role_id).await?;
+        }
+
         let urls_split: Vec<&str> = links.split(',').map(|s| s.trim()).collect();
         if urls_split.len() > 10 {
             Err(BotError::InvalidCommandArgument {
@@ -346,6 +366,24 @@ impl FeedsCog {
         ctx.defer().await?;
 
         let send_into = send_into.unwrap_or(SendInto::DM);
+
+        if let SendInto::Server = send_into {
+            let guild_id = ctx.guild_id().ok_or_else(|| {
+                BotError::ConfigurationError("Command must be run in a server.".to_string())
+            })?;
+            let settings = ctx
+                .data()
+                .feed_subscription_service
+                .get_server_settings(guild_id.get())
+                .await?;
+            if settings.channel_id.is_none() {
+                return Err(BotError::ConfigurationError(
+                    "Server feed settings are not configured. An administrator must run `/settings` to configure a notification channel first.".to_string(),
+                )
+                .into());
+            }
+            FeedsCog::check_guild_permissions(ctx, &settings.unsubscribe_role_id).await?;
+        }
 
         let urls_split: Vec<&str> = links.split(',').map(|s| s.trim()).collect();
         if urls_split.len() > 10 {
@@ -609,8 +647,50 @@ impl FeedsCog {
         CreateAutocompleteResponse::new().set_choices(choices)
     }
 
+    async fn check_guild_permissions(
+        ctx: Context<'_>,
+        required_role_id: &Option<String>,
+    ) -> Result<(), Error> {
+        let member = ctx.author_member().await.ok_or_else(|| {
+            BotError::ConfigurationError("Command must be run in a server.".to_string())
+        })?;
+
+        let permissions = member
+            .permissions
+            .ok_or_else(|| anyhow::anyhow!("Could not user retrieve permissions"))?;
+
+        if permissions.contains(Permissions::ADMINISTRATOR) {
+            return Ok(());
+        }
+
+        if let Some(role_id_str) = required_role_id {
+            if let Ok(role_id) = RoleId::from_str(role_id_str)
+                && member.roles.contains(&role_id)
+            {
+                return Ok(());
+            }
+
+            // Role is configured but user doesn't have it
+            return Err(BotError::PermissionDenied(format!(
+                "You need the <@&{}> role to perform this action.",
+                role_id_str
+            ))
+            .into());
+        }
+
+        // No specific role configured, check for MANAGE_GUILD
+        if permissions.contains(Permissions::MANAGE_GUILD) {
+            return Ok(());
+        }
+
+        Err(BotError::PermissionDenied(
+            "You need the `Manage Server` permission or a configured role to perform this action."
+                .to_string(),
+        )
+        .into())
+    }
+
     fn get_target_id(ctx: Context<'_>, send_into: &SendInto) -> Result<String, BotError> {
-        let _channel_id = ctx.channel_id();
         let guild_id = ctx
             .guild_id()
             .ok_or_else(|| BotError::InvalidCommandArgument {
