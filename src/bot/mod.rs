@@ -93,6 +93,7 @@ impl Bot {
     fn create_framework(config: &Config) -> Result<Box<Framework<Data, Error>>> {
         let options = FrameworkOptions::<Data, Error> {
             commands: vec![
+                FeedsCog::settings(),
                 FeedsCog::subscribe(),
                 FeedsCog::unsubscribe(),
                 FeedsCog::subscriptions(),

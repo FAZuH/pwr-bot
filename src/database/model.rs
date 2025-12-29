@@ -1,5 +1,3 @@
-use std::fmt::Display;
-
 use chrono::DateTime;
 use chrono::Utc;
 use serde::Deserialize;
@@ -99,4 +97,8 @@ pub struct ServerSettingsModel {
 pub struct ServerSettings {
     #[serde(default)]
     pub channel_id: Option<String>,
+    #[serde(default)]
+    pub subscribe_role_id: Option<String>,
+    #[serde(default)]
+    pub unsubscribe_role_id: Option<String>,
 }
