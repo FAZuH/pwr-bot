@@ -109,12 +109,12 @@ impl FeedsCog {
         ctx.defer().await?;
 
         let guild_id = ctx.guild_id().unwrap(); // Safe because of guild_only
-        let guild_id_str = guild_id.to_string();
+        let guild_id_u64 = guild_id.get();
 
         let mut settings = ctx
             .data()
             .feed_subscription_service
-            .get_server_settings(&guild_id_str)
+            .get_server_settings(guild_id_u64)
             .await?;
 
         let msg_handle = ctx
@@ -137,7 +137,7 @@ impl FeedsCog {
                     settings.channel_id = Some(channel_id.to_string());
                     ctx.data()
                         .feed_subscription_service
-                        .update_server_settings(&guild_id_str, settings.clone())
+                        .update_server_settings(guild_id_u64, settings.clone())
                         .await?;
                 }
             }

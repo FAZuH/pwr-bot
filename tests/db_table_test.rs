@@ -389,16 +389,16 @@ async fn test_server_settings_table_crud() {
         channel_id: Some("123".to_string()),
     };
     let model = ServerSettingsModel {
-        guild_id: "guild1".to_string(),
+        guild_id: 1234567890,
         settings: sqlx::types::Json(settings),
     };
 
     let id = table.insert(&model).await.expect("Failed to insert settings");
-    assert_eq!(id, "guild1");
+    assert_eq!(id, 1234567890);
 
     // 2. Select
     let fetched = table
-        .select(&"guild1".to_string())
+        .select(&1234567890)
         .await
         .expect("Failed to select");
     assert_eq!(fetched.settings.0.channel_id, Some("123".to_string()));
@@ -407,7 +407,7 @@ async fn test_server_settings_table_crud() {
     let mut new_settings = fetched.settings.0.clone();
     new_settings.channel_id = Some("456".to_string());
     let updated_model = ServerSettingsModel {
-        guild_id: "guild1".to_string(),
+        guild_id: 1234567890,
         settings: sqlx::types::Json(new_settings),
     };
     table
@@ -416,17 +416,17 @@ async fn test_server_settings_table_crud() {
         .expect("Failed to update");
 
     let fetched2 = table
-        .select(&"guild1".to_string())
+        .select(&1234567890)
         .await
         .expect("Failed to select updated");
     assert_eq!(fetched2.settings.0.channel_id, Some("456".to_string()));
 
     // 4. Delete
     table
-        .delete(&"guild1".to_string())
+        .delete(&1234567890)
         .await
         .expect("Failed to delete");
-    assert!(table.select(&"guild1".to_string()).await.is_err());
+    assert!(table.select(&1234567890).await.is_err());
 
     common::teardown_db(db_path).await;
 }
