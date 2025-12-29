@@ -28,7 +28,7 @@ impl DiscordDmSubscriber {
     }
 
     pub async fn feed_event_callback(&self, event: FeedUpdateEvent) -> Result<()> {
-        debug!("Received {}: {:?}", event.event_name(), event);
+        debug!("Received event `{}`", event.event_name());
 
         // Get all subscriptions for this feed
         let subs = self

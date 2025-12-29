@@ -30,7 +30,7 @@ impl DiscordGuildSubscriber {
     }
 
     pub async fn feed_event_callback(&self, event: FeedUpdateEvent) -> Result<()> {
-        debug!("Received {}: {:?}", event.event_name(), event);
+        debug!("Received event `{}`", event.event_name());
 
         let subs = self
             .db
@@ -55,14 +55,16 @@ impl DiscordGuildSubscriber {
         sub: &SubscriberModel,
         message: CreateMessage<'_>,
     ) -> anyhow::Result<()> {
-        let guild_id_str = &sub.target_id;
-        let guild_id = GuildId::from_str(guild_id_str)?;
-        let guild_id_u64 = guild_id.get();
+        let guild_id = GuildId::from_str(&sub.target_id)?;
 
-        let settings = self.db.server_settings_table.select(&guild_id_u64).await?;
+        let settings = self
+            .db
+            .server_settings_table
+            .select(&guild_id.get())
+            .await?;
         let channel_id_str =
             settings.settings.0.channel_id.ok_or_else(|| {
-                anyhow::anyhow!("No channel configured for guild {}", guild_id_str)
+                anyhow::anyhow!("No channel configured for guild {}", &sub.target_id)
             })?;
 
         let channel_id = ChannelId::from_str(&channel_id_str)?;
