@@ -141,11 +141,7 @@ impl MangaDexSeriesFeed {
             .to_string())
     }
 
-    async fn get_cover_url(
-        &self,
-        manga_id: &str,
-        data: &Value,
-    ) -> Result<String, SeriesFeedError> {
+    async fn get_cover_url(&self, manga_id: &str, data: &Value) -> Result<String, SeriesFeedError> {
         let relationships = data
             .get("relationships")
             .and_then(|v| v.as_array())
