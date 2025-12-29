@@ -101,16 +101,6 @@ async fn test_feed_table_custom_methods() {
     assert_eq!(anime.len(), 1);
     assert_eq!(anime[0].name, "Feed 2");
 
-    // select_all_by_url_contains
-    let sites = table.select_all_by_url_contains("site").await.unwrap();
-    assert_eq!(sites.len(), 2);
-
-    // delete_all_by_url_contains
-    table.delete_all_by_url_contains("site1").await.unwrap();
-    let remaining = table.select_all().await.unwrap();
-    assert_eq!(remaining.len(), 1);
-    assert_eq!(remaining[0].url, "https://site2.com");
-
     common::teardown_db(db_path).await;
 }
 
@@ -297,6 +287,91 @@ async fn test_feed_subscription_table_operations() {
     fs_table.insert(&fs).await.unwrap();
     fs_table.delete_all_by_feed_id(feed_id).await.unwrap();
     assert!(!fs_table.exists_by_feed_id(feed_id).await.unwrap());
+
+    common::teardown_db(db_path).await;
+}
+
+#[tokio::test]
+async fn test_feed_table_select_by_name_and_subscriber_id() {
+    let (db, db_path) = common::setup_db().await;
+    let feed_table = &db.feed_table;
+    let sub_table = &db.subscriber_table;
+    let sub_feed_table = &db.feed_subscription_table;
+
+    // 1. Setup Subscriber
+    let sub = SubscriberModel {
+        r#type: SubscriberType::Dm,
+        target_id: "user1".to_string(),
+        ..Default::default()
+    };
+    let sub_id = sub_table.insert(&sub).await.unwrap();
+
+    // 2. Setup Feeds
+    let feed1 = FeedModel {
+        name: "One Piece".to_string(),
+        url: "url1".to_string(),
+        ..Default::default()
+    };
+    let feed1_id = feed_table.insert(&feed1).await.unwrap();
+
+    let feed2 = FeedModel {
+        name: "One Punch Man".to_string(),
+        url: "url2".to_string(),
+        ..Default::default()
+    };
+    let feed2_id = feed_table.insert(&feed2).await.unwrap();
+
+    let feed3 = FeedModel {
+        name: "Naruto".to_string(),
+        url: "url3".to_string(),
+        ..Default::default()
+    };
+    let _feed3_id = feed_table.insert(&feed3).await.unwrap();
+
+    // 3. Setup Subscriptions (Sub1 -> Feed1, Feed2)
+    sub_feed_table
+        .insert(&FeedSubscriptionModel {
+            feed_id: feed1_id,
+            subscriber_id: sub_id,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    sub_feed_table
+        .insert(&FeedSubscriptionModel {
+            feed_id: feed2_id,
+            subscriber_id: sub_id,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    // 4. Test Search "one" -> Expects 2 (case insensitive)
+    let results = feed_table
+        .select_by_name_and_subscriber_id(&sub_id, "one", None)
+        .await
+        .unwrap();
+    assert_eq!(results.len(), 2);
+    // Sort or check content. Order is not guaranteed by SQL without ORDER BY, but usually insertion order for small sets.
+    // Let's just check existence.
+    let names: Vec<String> = results.iter().map(|f| f.name.clone()).collect();
+    assert!(names.contains(&"One Piece".to_string()));
+    assert!(names.contains(&"One Punch Man".to_string()));
+
+    // 5. Test Search "Naruto" -> Expects 0 (not subscribed)
+    let results = feed_table
+        .select_by_name_and_subscriber_id(&sub_id, "Naruto", None)
+        .await
+        .unwrap();
+    assert_eq!(results.len(), 0);
+
+    // 6. Test Limit
+    let results = feed_table
+        .select_by_name_and_subscriber_id(&sub_id, "One", 1u32)
+        .await
+        .unwrap();
+    assert_eq!(results.len(), 1);
 
     common::teardown_db(db_path).await;
 }

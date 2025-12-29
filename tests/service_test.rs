@@ -46,7 +46,7 @@ async fn test_get_or_create_subscriber() {
 #[tokio::test]
 async fn test_get_or_create_feed() {
     let (db, db_path) = common::setup_db().await;
-    
+
     // Setup Mock Feed
     let mut feeds = Feeds::new();
     let mock_domain = "test.com";

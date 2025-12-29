@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::fmt::Display;
 use std::time::Duration;
 use std::time::Instant;
@@ -28,7 +27,6 @@ use crate::bot::components::Pagination;
 use crate::bot::error::BotError;
 use crate::database::model::SubscriberModel;
 use crate::database::model::SubscriberType;
-use crate::database::table::Table;
 use crate::service::series_feed_subscription_service::SubscribeResult;
 use crate::service::series_feed_subscription_service::SubscriberTarget;
 use crate::service::series_feed_subscription_service::UnsubscribeResult;
@@ -260,15 +258,13 @@ impl FeedsCog {
         ctx.defer().await?;
         let sent_into = sent_into.unwrap_or(SendInto::DM);
 
-        // Create target
+        // Get subscriber
         let target_id = FeedsCog::get_target_id(ctx, &sent_into)?;
         let subscriber_type = SubscriberType::from(&sent_into);
         let target = SubscriberTarget {
             subscriber_type,
             target_id,
         };
-
-        // Get subscriber
         let subscriber = ctx
             .data()
             .series_feed_subscription_service
@@ -369,71 +365,63 @@ impl FeedsCog {
         partial: &str,
     ) -> CreateAutocompleteResponse<'a> {
         if partial.trim().is_empty() {
-            return CreateAutocompleteResponse::new().set_choices(vec![]);
+            return CreateAutocompleteResponse::new().set_choices(vec![AutocompleteChoice::from(
+                "Start typing to see suggestions",
+            )]);
         }
 
-        let data = ctx.data();
-        let user_id = ctx.author().id.to_string();
-
-        // Find subscriber
-        let subscriber = match data
-            .db
-            .subscriber_table
-            .select_by_type_and_target(&SubscriberType::Dm, &user_id)
+        // Get subscriber
+        let (target_id, subscriber_type) = match ctx.guild_id() {
+            Some(gid) => (
+                SubscriberModel::format_guild_target_id(gid, ctx.channel_id()),
+                SubscriberType::Guild,
+            ),
+            None => (ctx.author().id.to_string(), SubscriberType::Dm),
+        };
+        let target = SubscriberTarget {
+            subscriber_type,
+            target_id,
+        };
+        let subscriber = match ctx
+            .data()
+            .series_feed_subscription_service
+            .get_or_create_subscriber(&target)
             .await
         {
-            Ok(sub) => sub,
-            Err(e) => {
-                error!("Failed to fetch subscriber for user {}: {}", user_id, e);
-                return CreateAutocompleteResponse::new().set_choices(vec![]);
-            }
+            Ok(res) => res,
+            Err(_) => return CreateAutocompleteResponse::new(),
         };
 
-        // Get subscriptions
-        let subscriptions = match data
-            .db
-            .feed_subscription_table
-            .select_all_by_subscriber_id(subscriber.id)
+        // Get subscribed feeds
+        let mut feeds = match ctx
+            .data()
+            .series_feed_subscription_service
+            .search_subcriptions(&subscriber, partial)
             .await
         {
-            Ok(subs) => subs,
+            Ok(res) => res,
             Err(e) => {
                 error!("Failed to fetch subscriptions: {}", e);
                 return CreateAutocompleteResponse::new().set_choices(vec![]);
             }
         };
-
-        if subscriptions.is_empty() {
-            return CreateAutocompleteResponse::new().set_choices(vec![]);
+        if feeds.is_empty() {
+            return CreateAutocompleteResponse::new().set_choices(vec![AutocompleteChoice::from(
+                "You have no subscriptions yet. Subscribe first with `/subscribe` command",
+            )]);
         }
 
-        // Fetch feeds in parallel
-        // TODO: Do this in backend instead
-        let feed_ids: HashSet<i32> = subscriptions.into_iter().map(|s| s.feed_id).collect();
-        let futures = feed_ids.into_iter().map(|id| {
-            let db = &data.db;
-            async move { db.feed_table.select(&id).await.ok() }
-        });
-        let results = futures::future::join_all(futures).await;
+        // Sort the feeds for better UX
+        feeds.sort_by_key(|feed| feed.name.to_lowercase());
 
-        let partial_lower = partial.to_lowercase();
-        // 1. Collect into a Vec of Feeds
-        let mut matching_urls = results
-            .into_iter()
-            .flatten()
-            .filter(|feed| feed.url.to_lowercase().contains(&partial_lower))
-            .collect::<Vec<_>>();
-
-        // 2. Sort the Feeds
-        matching_urls.sort_by_key(|feed| feed.name.to_lowercase());
-
-        // 3. Map the Feeds into AutocompleteChoices
-        let mut choices = matching_urls
+        // Map the feeds into AutocompleteChoices
+        let mut choices = feeds
             .into_iter()
             .map(|feed| AutocompleteChoice::new(feed.name, feed.url))
             .collect::<Vec<_>>();
 
-        choices.truncate(25); // Discord autocomplete limit
+        // Discord autocomplete limit
+        choices.truncate(25);
         CreateAutocompleteResponse::new().set_choices(choices)
     }
 

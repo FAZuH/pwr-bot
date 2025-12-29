@@ -136,9 +136,17 @@ impl SeriesFeedSubscriptionService {
             .await?)
     }
 
-    // pub async fn search_subcriptions(&self, target: &SubscriberTarget, search: &str) -> Vec<FeedModel> {
-    //     let subscriber = self.get_or_create_subscriber()
-    // }
+    pub async fn search_subcriptions(
+        &self,
+        subscriber: &SubscriberModel,
+        partial: &str,
+    ) -> Result<Vec<FeedModel>, ServiceError> {
+        Ok(self
+            .db
+            .feed_table
+            .select_by_name_and_subscriber_id(&subscriber.id, partial, 25)
+            .await?)
+    }
 
     pub async fn get_or_create_feed(&self, url: &str) -> Result<FeedModel, ServiceError> {
         let source =
