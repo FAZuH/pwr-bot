@@ -10,22 +10,22 @@ use poise::ReplyHandle;
 use poise::serenity_prelude::AutocompleteChoice;
 use poise::serenity_prelude::CreateAutocompleteResponse;
 use serenity::all::ChannelType;
+use serenity::all::ComponentInteractionCollector;
 use serenity::all::ComponentInteractionDataKind;
 use serenity::all::CreateActionRow;
 use serenity::all::CreateComponent;
 use serenity::all::CreateContainer;
-use serenity::all::CreateSelectMenu;
-use serenity::all::CreateSelectMenuKind;
 use serenity::all::CreateContainerComponent;
 use serenity::all::CreateSection;
 use serenity::all::CreateSectionAccessory;
 use serenity::all::CreateSectionComponent;
+use serenity::all::CreateSelectMenu;
+use serenity::all::CreateSelectMenuKind;
 use serenity::all::CreateTextDisplay;
 use serenity::all::CreateThumbnail;
 use serenity::all::CreateUnfurledMediaItem;
-use serenity::all::MessageFlags;
 use serenity::all::GenericChannelId;
-use serenity::all::ComponentInteractionCollector;
+use serenity::all::MessageFlags;
 
 use crate::bot::cog::Context;
 use crate::bot::cog::Error;
@@ -117,14 +117,9 @@ impl FeedsCog {
             .get_server_settings(guild_id_u64)
             .await?;
 
-        let msg_handle = ctx
-            .send(FeedsCog::create_settings_reply(&settings))
-            .await?;
+        let msg_handle = ctx.send(FeedsCog::create_settings_reply(&settings)).await?;
 
-        let msg = msg_handle
-            .message()
-            .await?
-            .into_owned();
+        let msg = msg_handle.message().await?.into_owned();
 
         let mut collector = ComponentInteractionCollector::new(ctx.serenity_context())
             .message_id(msg.id)
@@ -132,14 +127,14 @@ impl FeedsCog {
             .stream();
 
         while let Some(interaction) = collector.next().await {
-            if let ComponentInteractionDataKind::ChannelSelect { values } = &interaction.data.kind {
-                if let Some(channel_id) = values.first() {
-                    settings.channel_id = Some(channel_id.to_string());
-                    ctx.data()
-                        .feed_subscription_service
-                        .update_server_settings(guild_id_u64, settings.clone())
-                        .await?;
-                }
+            if let ComponentInteractionDataKind::ChannelSelect { values } = &interaction.data.kind
+                && let Some(channel_id) = values.first()
+            {
+                settings.channel_id = Some(channel_id.to_string());
+                ctx.data()
+                    .feed_subscription_service
+                    .update_server_settings(guild_id_u64, settings.clone())
+                    .await?;
             }
 
             interaction

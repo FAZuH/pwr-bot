@@ -393,14 +393,14 @@ async fn test_server_settings_table_crud() {
         settings: sqlx::types::Json(settings),
     };
 
-    let id = table.insert(&model).await.expect("Failed to insert settings");
+    let id = table
+        .insert(&model)
+        .await
+        .expect("Failed to insert settings");
     assert_eq!(id, 1234567890);
 
     // 2. Select
-    let fetched = table
-        .select(&1234567890)
-        .await
-        .expect("Failed to select");
+    let fetched = table.select(&1234567890).await.expect("Failed to select");
     assert_eq!(fetched.settings.0.channel_id, Some("123".to_string()));
 
     // 3. Update
@@ -422,10 +422,7 @@ async fn test_server_settings_table_crud() {
     assert_eq!(fetched2.settings.0.channel_id, Some("456".to_string()));
 
     // 4. Delete
-    table
-        .delete(&1234567890)
-        .await
-        .expect("Failed to delete");
+    table.delete(&1234567890).await.expect("Failed to delete");
     assert!(table.select(&1234567890).await.is_err());
 
     common::teardown_db(db_path).await;
