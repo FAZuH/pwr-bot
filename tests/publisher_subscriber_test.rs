@@ -6,13 +6,13 @@ use pwr_bot::database::model::SubscriberType;
 use pwr_bot::database::table::Table;
 use pwr_bot::event::event_bus::EventBus;
 use pwr_bot::event::feed_update_event::FeedUpdateEvent;
+use pwr_bot::feed::FeedItem;
+use pwr_bot::feed::FeedSource;
 use pwr_bot::feed::feeds::Feeds;
-use pwr_bot::feed::series_feed::SeriesItem;
-use pwr_bot::feed::series_feed::SeriesLatest;
 use pwr_bot::publisher::series_feed_publisher::SeriesFeedPublisher;
-use pwr_bot::service::series_feed_subscription_service::SeriesFeedSubscriptionService;
-use pwr_bot::service::series_feed_subscription_service::SubscribeResult;
-use pwr_bot::service::series_feed_subscription_service::SubscriberTarget;
+use pwr_bot::service::feed_subscription_service::FeedSubscriptionService;
+use pwr_bot::service::feed_subscription_service::SubscribeResult;
+use pwr_bot::service::feed_subscription_service::SubscriberTarget;
 use tokio::time::sleep;
 
 mod common;
@@ -30,28 +30,28 @@ async fn test_subscription_and_publishing() {
     let feeds = Arc::new(feeds);
 
     // Setup Service
-    let service = Arc::new(SeriesFeedSubscriptionService {
+    let service = Arc::new(FeedSubscriptionService {
         db: db.clone(),
         feeds: feeds.clone(),
     });
 
     // 1. Prepare Mock Data
-    let series_id = "123";
-    let series_url = format!("https://{}/title/{}", mock_domain, series_id);
+    let source_id = "123";
+    let url = format!("https://{}/title/{}", mock_domain, source_id);
 
-    mock_feed.set_info(SeriesItem {
-        id: series_id.to_string(),
-        title: "Test Series".to_string(),
-        url: series_url.clone(),
+    mock_feed.set_info(FeedSource {
+        id: source_id.to_string(),
+        name: "Test Name".to_string(),
+        url: url.clone(),
         description: "Desc".to_string(),
-        cover_url: None,
+        image_url: None,
     });
 
-    let initial_latest = SeriesLatest {
+    let initial_latest = FeedItem {
         id: "ch1".to_string(),
-        series_id: series_id.to_string(),
-        latest: "Chapter 1".to_string(),
-        url: format!("{}/chapter/1", series_url),
+        source_id: source_id.to_string(),
+        title: "Chapter 1".to_string(),
+        url: format!("{}/chapter/1", url),
         published: Utc::now(),
     };
     mock_feed.set_latest(initial_latest.clone());
@@ -68,13 +68,13 @@ async fn test_subscription_and_publishing() {
         .expect("Failed to get or create subscriber");
 
     let result = service
-        .subscribe(&series_url, &subscriber)
+        .subscribe(&url, &subscriber)
         .await
         .expect("Subscribe failed");
     match result {
         SubscribeResult::Success { feed } => {
-            assert_eq!(feed.name, "Test Series");
-            assert_eq!(feed.url, series_url);
+            assert_eq!(feed.name, "Test Name");
+            assert_eq!(feed.url, url);
         }
         _ => panic!("Expected Success"),
     }
@@ -106,11 +106,11 @@ async fn test_subscription_and_publishing() {
         .expect("Failed to start publisher");
 
     // Update Mock Data
-    let new_latest = SeriesLatest {
+    let new_latest = FeedItem {
         id: "ch2".to_string(),
-        series_id: series_id.to_string(),
-        latest: "Chapter 2".to_string(),
-        url: format!("{}/chapter/2", series_url),
+        source_id: source_id.to_string(),
+        title: "Chapter 2".to_string(),
+        url: format!("{}/chapter/2", url),
         published: Utc::now(),
     };
     mock_feed.set_latest(new_latest);

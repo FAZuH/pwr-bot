@@ -1,14 +1,14 @@
 use std::sync::Arc;
 
+use crate::feed::Feed;
+use crate::feed::FeedItem;
+use crate::feed::FeedSource;
 use crate::feed::anilist_series_feed::AniListSeriesFeed;
 use crate::feed::error::SeriesFeedError;
 use crate::feed::mangadex_series_feed::MangaDexSeriesFeed;
-use crate::feed::series_feed::SeriesFeed;
-use crate::feed::series_feed::SeriesItem;
-use crate::feed::series_feed::SeriesLatest;
 
 pub struct Feeds {
-    feeds: Vec<Arc<dyn SeriesFeed>>,
+    feeds: Vec<Arc<dyn Feed>>,
     pub anilist_feed: Arc<AniListSeriesFeed>,
     pub mangadex_feed: Arc<MangaDexSeriesFeed>,
 }
@@ -41,30 +41,30 @@ impl Feeds {
         Ok(ret)
     }
 
-    /// Get series feed by URL and call get_latest
-    pub async fn get_latest_by_url(&self, url: &str) -> Result<SeriesLatest, SeriesFeedError> {
+    /// Get feed by URL and call fetch_latest
+    pub async fn fetch_latest_by_url(&self, url: &str) -> Result<FeedItem, SeriesFeedError> {
         let feed = self
             .get_feed_by_url(url)
             .ok_or_else(|| SeriesFeedError::UnsupportedUrl {
                 url: url.to_string(),
             })?;
-        let series_id = self.get_feed_id_by_url(url)?;
-        feed.get_latest(series_id).await
+        let source_id = self.get_feed_id_by_url(url)?;
+        feed.fetch_latest(source_id).await
     }
 
-    /// Get series feed by URL and call get_info
-    pub async fn get_info_by_url(&self, url: &str) -> Result<SeriesItem, SeriesFeedError> {
+    /// Get feed by URL and call fetch_source
+    pub async fn fetch_source_by_url(&self, url: &str) -> Result<FeedSource, SeriesFeedError> {
         let feed = self
             .get_feed_by_url(url)
             .ok_or_else(|| SeriesFeedError::UnsupportedUrl {
                 url: url.to_string(),
             })?;
-        let series_id = self.get_feed_id_by_url(url)?;
-        feed.get_info(series_id).await
+        let source_id = self.get_feed_id_by_url(url)?;
+        feed.fetch_source(source_id).await
     }
 
-    /// Get series feed by URL
-    pub fn get_feed_by_url(&self, url: &str) -> Option<&Arc<dyn SeriesFeed>> {
+    /// Get feed by URL
+    pub fn get_feed_by_url(&self, url: &str) -> Option<&Arc<dyn Feed>> {
         self.feeds.iter().find(|feed| {
             feed.get_base()
                 .info
@@ -73,7 +73,7 @@ impl Feeds {
         })
     }
 
-    pub fn add_feed(&mut self, feed: Arc<dyn SeriesFeed>) {
+    pub fn add_feed(&mut self, feed: Arc<dyn Feed>) {
         self.feeds.push(feed);
     }
 

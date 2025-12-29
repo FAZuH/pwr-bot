@@ -1,3 +1,4 @@
+/// Cog to manage feed subscriptions
 use std::fmt::Display;
 use std::time::Duration;
 use std::time::Instant;
@@ -27,9 +28,9 @@ use crate::bot::components::Pagination;
 use crate::bot::error::BotError;
 use crate::database::model::SubscriberModel;
 use crate::database::model::SubscriberType;
-use crate::service::series_feed_subscription_service::SubscribeResult;
-use crate::service::series_feed_subscription_service::SubscriberTarget;
-use crate::service::series_feed_subscription_service::UnsubscribeResult;
+use crate::service::feed_subscription_service::SubscribeResult;
+use crate::service::feed_subscription_service::SubscriberTarget;
+use crate::service::feed_subscription_service::UnsubscribeResult;
 
 #[derive(ChoiceParameter)]
 enum SendInto {
@@ -93,12 +94,12 @@ impl Display for UnsubscribeResult {
 pub struct FeedsCog;
 
 impl FeedsCog {
-    /// Subscribe to an anime/manga series
+    /// Subscribe to a feed
     #[poise::command(slash_command)]
     pub async fn subscribe(
         ctx: Context<'_>,
-        #[description = "Link(s) of the series. Separate links with commas (,)"] links: String,
-        #[description = "Where to send the notifications. Default to DM"] send_into: Option<
+        #[description = "Link(s) of the feeds. Separate links with commas (,)"] links: String,
+        #[description = "Where to send the notifications. Default to your DM"] send_into: Option<
             SendInto,
         >,
     ) -> Result<(), Error> {
@@ -123,7 +124,7 @@ impl FeedsCog {
         };
         let subscriber = ctx
             .data()
-            .series_feed_subscription_service
+            .feed_subscription_service
             .get_or_create_subscriber(&target)
             .await?;
 
@@ -138,7 +139,7 @@ impl FeedsCog {
         for (i, url) in urls_split.iter().enumerate() {
             let sub_result = ctx
                 .data()
-                .series_feed_subscription_service
+                .feed_subscription_service
                 .subscribe(url, &subscriber)
                 .await;
 
@@ -169,11 +170,11 @@ impl FeedsCog {
         Ok(())
     }
 
-    /// Unsubscribe from an anime/manga series
+    /// Unsubscribe from a feed
     #[poise::command(slash_command)]
     pub async fn unsubscribe(
         ctx: Context<'_>,
-        #[description = "Link(s) of the series. Separate links with commas (,)"]
+        #[description = "Link(s) of the feeds. Separate links with commas (,)"]
         #[autocomplete = "Self::autocomplete_subscriptions"]
         links: String,
         #[description = "Where notifications were being sent. Default to DM"] send_into: Option<
@@ -201,7 +202,7 @@ impl FeedsCog {
         };
         let subscriber = ctx
             .data()
-            .series_feed_subscription_service
+            .feed_subscription_service
             .get_or_create_subscriber(&target)
             .await?;
 
@@ -216,7 +217,7 @@ impl FeedsCog {
         for (i, url) in urls_split.iter().enumerate() {
             let unsub_result = ctx
                 .data()
-                .series_feed_subscription_service
+                .feed_subscription_service
                 .unsubscribe(url, &subscriber)
                 .await;
 
@@ -247,7 +248,7 @@ impl FeedsCog {
         Ok(())
     }
 
-    /// List all your subscriptions
+    /// List all your feed subscriptions
     #[poise::command(slash_command)]
     pub async fn subscriptions(
         ctx: Context<'_>,
@@ -267,7 +268,7 @@ impl FeedsCog {
         };
         let subscriber = ctx
             .data()
-            .series_feed_subscription_service
+            .feed_subscription_service
             .get_or_create_subscriber(&target)
             .await?;
 
@@ -275,7 +276,7 @@ impl FeedsCog {
         let per_page = 10;
         let items = ctx
             .data()
-            .series_feed_subscription_service
+            .feed_subscription_service
             .get_subscription_count(&subscriber)
             .await?;
 
@@ -313,7 +314,7 @@ impl FeedsCog {
     ) -> anyhow::Result<Vec<CreateComponent<'a>>> {
         let subscriptions = ctx
             .data()
-            .series_feed_subscription_service
+            .feed_subscription_service
             .list_paginated_subscriptions(
                 subscriber,
                 navigation.pagination.current_page,
@@ -384,7 +385,7 @@ impl FeedsCog {
         };
         let subscriber = match ctx
             .data()
-            .series_feed_subscription_service
+            .feed_subscription_service
             .get_or_create_subscriber(&target)
             .await
         {
@@ -395,7 +396,7 @@ impl FeedsCog {
         // Get subscribed feeds
         let mut feeds = match ctx
             .data()
-            .series_feed_subscription_service
+            .feed_subscription_service
             .search_subcriptions(&subscriber, partial)
             .await
         {

@@ -29,13 +29,13 @@ use crate::bot::cog::owner_cog::OwnerCog;
 use crate::config::Config;
 use crate::database::Database;
 use crate::feed::feeds::Feeds;
-use crate::service::series_feed_subscription_service::SeriesFeedSubscriptionService;
+use crate::service::feed_subscription_service::FeedSubscriptionService;
 
 pub struct Data {
     pub config: Arc<Config>,
     pub db: Arc<Database>,
     pub feeds: Arc<Feeds>,
-    pub series_feed_subscription_service: Arc<SeriesFeedSubscriptionService>,
+    pub feed_subscription_service: Arc<FeedSubscriptionService>,
 }
 
 pub struct Bot {
@@ -72,7 +72,7 @@ impl Bot {
         let framework: Box<Framework<Data, Error>> =
             Box::new(poise::Framework::builder().options(options).build());
 
-        let series_feed_subscription_service = Arc::new(SeriesFeedSubscriptionService {
+        let series_feed_subscription_service = Arc::new(FeedSubscriptionService {
             db: db.clone(),
             feeds: feeds.clone(),
         });
@@ -82,7 +82,7 @@ impl Bot {
             config,
             db,
             feeds,
-            series_feed_subscription_service,
+            feed_subscription_service: series_feed_subscription_service,
         });
 
         let client = ClientBuilder::new(token, intents)

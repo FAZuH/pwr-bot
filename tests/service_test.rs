@@ -2,11 +2,11 @@ use std::sync::Arc;
 
 use chrono::Utc;
 use pwr_bot::database::model::SubscriberType;
+use pwr_bot::feed::FeedItem;
+use pwr_bot::feed::FeedSource;
 use pwr_bot::feed::feeds::Feeds;
-use pwr_bot::feed::series_feed::SeriesItem;
-use pwr_bot::feed::series_feed::SeriesLatest;
-use pwr_bot::service::series_feed_subscription_service::SeriesFeedSubscriptionService;
-use pwr_bot::service::series_feed_subscription_service::SubscriberTarget;
+use pwr_bot::service::feed_subscription_service::FeedSubscriptionService;
+use pwr_bot::service::feed_subscription_service::SubscriberTarget;
 
 mod common;
 
@@ -14,7 +14,7 @@ mod common;
 async fn test_get_or_create_subscriber() {
     let (db, db_path) = common::setup_db().await;
     let feeds = Arc::new(Feeds::new());
-    let service = SeriesFeedSubscriptionService {
+    let service = FeedSubscriptionService {
         db: db.clone(),
         feeds: feeds.clone(),
     };
@@ -54,42 +54,42 @@ async fn test_get_or_create_feed() {
     feeds.add_feed(mock_feed.clone());
     let feeds = Arc::new(feeds);
 
-    let service = SeriesFeedSubscriptionService {
+    let service = FeedSubscriptionService {
         db: db.clone(),
         feeds: feeds.clone(),
     };
 
-    let series_id = "manga-1";
-    let series_url = format!("https://{}/title/{}", mock_domain, series_id);
+    let source_id = "manga-1";
+    let url = format!("https://{}/title/{}", mock_domain, source_id);
 
-    mock_feed.set_info(SeriesItem {
-        id: series_id.to_string(),
-        title: "Test Manga".to_string(),
-        url: series_url.clone(),
+    mock_feed.set_info(FeedSource {
+        id: source_id.to_string(),
+        name: "Test Manga".to_string(),
+        url: url.clone(),
         description: "A test manga".to_string(),
-        cover_url: None,
+        image_url: None,
     });
 
-    mock_feed.set_latest(SeriesLatest {
+    mock_feed.set_latest(FeedItem {
         id: "ch-1".to_string(),
-        series_id: series_id.to_string(),
-        latest: "Chapter 1".to_string(),
-        url: format!("{}/chapter/1", series_url),
+        source_id: source_id.to_string(),
+        title: "Chapter 1".to_string(),
+        url: format!("{}/chapter/1", url),
         published: Utc::now(),
     });
 
     // 1. Create new feed
     let feed1 = service
-        .get_or_create_feed(&series_url)
+        .get_or_create_feed(&url)
         .await
         .expect("Failed to create feed");
     assert_eq!(feed1.name, "Test Manga");
-    assert_eq!(feed1.url, series_url);
+    assert_eq!(feed1.url, url);
     assert!(feed1.id > 0);
 
     // 2. Get existing feed
     let feed2 = service
-        .get_or_create_feed(&series_url)
+        .get_or_create_feed(&url)
         .await
         .expect("Failed to get feed");
     assert_eq!(feed1.id, feed2.id);

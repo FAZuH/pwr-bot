@@ -1,3 +1,4 @@
+/// Cog of owners-only commands
 use poise::CreateReply;
 use serenity::all::CreateAttachment;
 

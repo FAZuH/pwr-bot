@@ -23,23 +23,23 @@ pub enum SeriesFeedError {
     #[error("Failed to parse JSON response: {0}")]
     JsonParseFailed(#[from] serde_json::Error),
 
-    #[error("Series not found with ID: {series_id}")]
-    SeriesItemNotFound { series_id: String },
+    #[error("Source not found with ID: {source_id}")]
+    SourceNotFound { source_id: String },
 
-    #[error("Latest item not found for series with ID: {series_id}")]
-    SeriesLatestNotFound { series_id: String },
+    #[error("Latest item not found for source with ID: {source_id}")]
+    ItemNotFound { source_id: String },
 
-    #[error("Series finished for series ID: {series_id}")]
-    FinishedSeries { series_id: String },
+    #[error("Source finished for source ID: {source_id}")]
+    SourceFinished { source_id: String },
 
-    #[error("Empty series for series ID: {series_id}")]
-    EmptySeries { series_id: String },
+    #[error("Empty source for source ID: {source_id}")]
+    EmptySource { source_id: String },
 
     #[error("Invalid or missing data in API response: {field}")]
     MissingField { field: String },
 
-    #[error("Invalid series ID: {series_id}")]
-    InvalidSeriesId { series_id: String },
+    #[error("Invalid source ID: {source_id}")]
+    InvalidSourceId { source_id: String },
 
     #[error("API returned error: {message}")]
     ApiError { message: String },

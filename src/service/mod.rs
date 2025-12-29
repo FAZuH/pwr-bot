@@ -1,2 +1,2 @@
 pub mod error;
-pub mod series_feed_subscription_service;
+pub mod feed_subscription_service;

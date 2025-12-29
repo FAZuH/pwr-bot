@@ -22,12 +22,12 @@ use serde_json::Map;
 use serde_json::Value;
 
 use crate::feed::BaseFeed;
+use crate::feed::Feed;
 use crate::feed::FeedInfo;
+use crate::feed::FeedItem;
+use crate::feed::FeedSource;
 use crate::feed::error::SeriesFeedError;
 use crate::feed::error::UrlParseError;
-use crate::feed::series_feed::SeriesFeed;
-use crate::feed::series_feed::SeriesItem;
-use crate::feed::series_feed::SeriesLatest;
 
 type Json<'a> = &'a Map<String, Value>;
 
@@ -139,7 +139,7 @@ impl MangaDexSeriesFeed {
 
     async fn get_cover_url(&self, id: &str) -> Result<String, SeriesFeedError> {
         debug!(
-            "Fetching cover from {} for series_id: {id}",
+            "Fetching cover from {} for source_id: {id}",
             self.base.info.name
         );
         let request = self
@@ -163,8 +163,8 @@ impl MangaDexSeriesFeed {
 
     fn validate_uuid(&self, uuid: &String) -> Result<(), SeriesFeedError> {
         if uuid::Uuid::parse_str(uuid).is_err() {
-            return Err(SeriesFeedError::InvalidSeriesId {
-                series_id: uuid.to_string(),
+            return Err(SeriesFeedError::InvalidSourceId {
+                source_id: uuid.to_string(),
             });
         }
         Ok(())
@@ -198,14 +198,14 @@ impl MangaDexSeriesFeed {
 }
 
 #[async_trait]
-impl SeriesFeed for MangaDexSeriesFeed {
-    async fn get_info(&self, id: &str) -> Result<SeriesItem, SeriesFeedError> {
+impl Feed for MangaDexSeriesFeed {
+    async fn fetch_source(&self, id: &str) -> Result<FeedSource, SeriesFeedError> {
         debug!(
-            "Fetching info from {} for series_id: {id}",
+            "Fetching info from {} for source_id: {id}",
             self.base.info.name
         );
-        let series_id = id.to_string();
-        self.validate_uuid(&series_id.clone())?;
+        let source_id = id.to_string();
+        self.validate_uuid(&source_id.clone())?;
 
         let request = self
             .base
@@ -215,32 +215,32 @@ impl SeriesFeed for MangaDexSeriesFeed {
         let resp = self.send_get_json(request).await?;
         let data = self.get_data_from_resp(&resp)?;
         let attr = self.get_attr_from_data(data)?;
-        let title = self.get_title_from_attr(attr)?;
+        let name = self.get_title_from_attr(attr)?;
         let description = self.get_description_from_attr(attr)?;
-        let cover_url = Some(self.get_cover_url(&series_id).await?);
+        let image_url = Some(self.get_cover_url(&source_id).await?);
 
-        info!("Successfully fetched latest manga for series_id: {series_id}");
+        info!("Successfully fetched latest manga for source_id: {source_id}");
 
-        Ok(SeriesItem {
-            title,
-            url: self.get_url_from_id(&series_id),
-            cover_url,
-            id: series_id,
+        Ok(FeedSource {
+            name,
+            url: self.get_url_from_id(&source_id),
+            image_url,
+            id: source_id,
             description,
         })
     }
 
-    async fn get_latest(&self, id: &str) -> Result<SeriesLatest, SeriesFeedError> {
+    async fn fetch_latest(&self, id: &str) -> Result<FeedItem, SeriesFeedError> {
         debug!(
-            "Fetching latest from {} for series_id: {id}",
+            "Fetching latest from {} for source_id: {id}",
             self.base.info.name
         );
-        let series_id = id.to_string();
+        let source_id = id.to_string();
 
         let request = self
             .base
             .client
-            .get(format!("{}/manga/{series_id}/feed", self.base.info.api_url))
+            .get(format!("{}/manga/{source_id}/feed", self.base.info.api_url))
             .query(&[
                 ("order[createdAt]", "desc"),
                 ("limit", "1"),
@@ -266,7 +266,7 @@ impl SeriesFeed for MangaDexSeriesFeed {
                 })?
                 .to_string();
 
-            let latest = c["attributes"]["chapter"]
+            let title = c["attributes"]["chapter"]
                 .as_str()
                 .ok_or_else(|| SeriesFeedError::MissingField {
                     field: "data.0.attributes.chapter".to_string(),
@@ -284,19 +284,19 @@ impl SeriesFeed for MangaDexSeriesFeed {
                 .map(|dt| dt.with_timezone(&Utc))
                 .map_err(|_| SeriesFeedError::InvalidTime { time: publish_at })?;
 
-            info!("Successfully fetched latest manga for series_id: {series_id}");
+            info!("Successfully fetched latest manga for source_id: {source_id}");
 
-            Ok(SeriesLatest {
+            Ok(FeedItem {
                 id,
-                url: self.get_url_from_id(&series_id),
-                series_id,
-                latest,
+                url: self.get_url_from_id(&source_id),
+                source_id,
+                title,
                 published,
             })
         } else {
-            warn!("No chapters found in data for series_id: {series_id}");
-            Err(SeriesFeedError::EmptySeries {
-                series_id: series_id.to_string(),
+            warn!("No chapters found in data for source_id: {source_id}");
+            Err(SeriesFeedError::EmptySource {
+                source_id: source_id.to_string(),
             })
         }
     }

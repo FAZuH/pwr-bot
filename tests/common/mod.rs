@@ -5,12 +5,12 @@ use std::sync::RwLock;
 use async_trait::async_trait;
 use pwr_bot::database::Database;
 use pwr_bot::feed::BaseFeed;
+use pwr_bot::feed::Feed;
 use pwr_bot::feed::FeedInfo;
+use pwr_bot::feed::FeedItem;
+use pwr_bot::feed::FeedSource;
 use pwr_bot::feed::error::SeriesFeedError;
 use pwr_bot::feed::error::UrlParseError;
-use pwr_bot::feed::series_feed::SeriesFeed;
-use pwr_bot::feed::series_feed::SeriesItem;
-use pwr_bot::feed::series_feed::SeriesLatest;
 use uuid::Uuid;
 
 pub async fn setup_db() -> (Arc<Database>, PathBuf) {
@@ -45,8 +45,8 @@ pub struct MockFeed {
 #[derive(Default, Clone)]
 #[allow(dead_code)]
 pub struct MockFeedState {
-    pub series_item: SeriesItem,
-    pub series_latest: SeriesLatest,
+    pub feed_source: FeedSource,
+    pub feed_item: FeedItem,
 }
 
 #[allow(dead_code)]
@@ -69,23 +69,23 @@ impl MockFeed {
         }
     }
 
-    pub fn set_latest(&self, latest: SeriesLatest) {
-        self.state.write().unwrap().series_latest = latest;
+    pub fn set_latest(&self, latest: FeedItem) {
+        self.state.write().unwrap().feed_item = latest;
     }
 
-    pub fn set_info(&self, item: SeriesItem) {
-        self.state.write().unwrap().series_item = item;
+    pub fn set_info(&self, item: FeedSource) {
+        self.state.write().unwrap().feed_source = item;
     }
 }
 
 #[async_trait]
-impl SeriesFeed for MockFeed {
-    async fn get_latest(&self, _id: &str) -> Result<SeriesLatest, SeriesFeedError> {
-        Ok(self.state.read().unwrap().series_latest.clone())
+impl Feed for MockFeed {
+    async fn fetch_latest(&self, _id: &str) -> Result<FeedItem, SeriesFeedError> {
+        Ok(self.state.read().unwrap().feed_item.clone())
     }
 
-    async fn get_info(&self, _id: &str) -> Result<SeriesItem, SeriesFeedError> {
-        Ok(self.state.read().unwrap().series_item.clone())
+    async fn fetch_source(&self, _id: &str) -> Result<FeedSource, SeriesFeedError> {
+        Ok(self.state.read().unwrap().feed_source.clone())
     }
 
     fn get_id_from_url<'a>(&self, url: &'a str) -> Result<&'a str, UrlParseError> {
