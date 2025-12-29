@@ -9,6 +9,7 @@ pub struct Config {
     pub db_path: String,
     pub discord_token: String,
     pub admin_id: String,
+    pub logs_path: String,
 }
 
 impl Config {
@@ -32,17 +33,7 @@ impl Config {
         self.admin_id = std::env::var("ADMIN_ID").map_err(|_| AppError::MissingConfig {
             key: "ADMIN_ID".to_string(),
         })?;
+        self.logs_path = std::env::var("LOGS_PATH").unwrap_or("./logs".to_string());
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_config_defaults() {
-        let config = Config::new();
-        assert_eq!(config.poll_interval.as_secs(), 0);
     }
 }

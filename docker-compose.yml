@@ -8,7 +8,8 @@ services:
       context: .
       dockerfile: Dockerfile
     volumes:
-      - app-data:/app/data
+      - data:/app/data
+      - logs:/app/logs
     environment:
       - POLL_INTERVAL=${POLL_INTERVAL:-180}
       - DATABASE_PATH=${DATABASE_PATH:-data/data.db}
@@ -19,4 +20,5 @@ services:
     restart: unless-stopped
       
 volumes:
-  app-data:
+  data:
+  logs:

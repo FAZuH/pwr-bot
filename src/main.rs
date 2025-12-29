@@ -4,6 +4,7 @@ pub mod database;
 pub mod error;
 pub mod event;
 pub mod feed;
+pub mod logging;
 pub mod publisher;
 pub mod service;
 pub mod subscriber;
@@ -20,6 +21,7 @@ use crate::config::Config;
 use crate::database::Database;
 use crate::event::event_bus::EventBus;
 use crate::feed::feeds::Feeds;
+use crate::logging::setup_logging;
 use crate::publisher::series_feed_publisher::SeriesFeedPublisher;
 use crate::subscriber::discord_dm_subscriber::DiscordDmSubscriber;
 use crate::subscriber::discord_guild_subscriber::DiscordGuildSubscriber;
@@ -28,19 +30,22 @@ use crate::subscriber::discord_guild_subscriber::DiscordGuildSubscriber;
 async fn main() -> anyhow::Result<()> {
     let init_start = Instant::now();
     dotenv().ok();
-    env_logger::init();
+
     info!("Starting pwr-bot...");
 
-    debug!("Instantiating Config...");
+    debug!("Setting up Config...");
     let mut config = Config::new();
     config.load()?;
     let config = Arc::new(config);
 
-    debug!("Instantiating EventBus...");
+    debug!("Setting up Config...");
+    setup_logging(&config)?;
+
+    debug!("Setting up EventBus...");
     let event_bus = Arc::new(EventBus::new());
 
     // Setup database
-    debug!("Instantiating Database...");
+    debug!("Setting up Database...");
     let db = Arc::new(Database::new(&config.db_url, &config.db_path).await?);
     info!("Running database migrations...");
     db.run_migrations().await?;
@@ -50,7 +55,7 @@ async fn main() -> anyhow::Result<()> {
     );
 
     // Setup sources
-    debug!("Instantiating Sources...");
+    debug!("Setting up Sources...");
     let feeds = Arc::new(Feeds::new());
 
     // Setup & start bot
@@ -64,7 +69,7 @@ async fn main() -> anyhow::Result<()> {
     );
 
     // Setup subscribers
-    debug!("Instantiating Subscribers...");
+    debug!("Setting up Subscribers...");
     let dm_subscriber = DiscordDmSubscriber::new(bot.clone(), db.clone());
     let webhook_subscriber = DiscordGuildSubscriber::new(bot.clone(), db.clone());
     event_bus
@@ -76,7 +81,7 @@ async fn main() -> anyhow::Result<()> {
     );
 
     // Setup publishers
-    debug!("Instantiating Publishers...");
+    debug!("Setting up Publishers...");
     SeriesFeedPublisher::new(
         db.clone(),
         event_bus.clone(),
