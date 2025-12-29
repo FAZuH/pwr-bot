@@ -57,6 +57,7 @@ impl MangaDexSeriesFeed {
             // under MangaDex's domain
             logo_url: "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/manga-dex.png"
                 .to_string(),
+            tags: "series".to_string(),
         };
         // NOTE: See https://api.mangadex.org/docs/2-limitations/
         // Because GET /manga/{id} is not specified on #endpoint-specific-rate-limits,

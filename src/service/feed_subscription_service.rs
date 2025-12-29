@@ -172,7 +172,7 @@ impl FeedSubscriptionService {
                     description: feed_source.description,
                     url: feed_source.url,
                     cover_url: feed_source.image_url.unwrap_or("".to_string()),
-                    tags: "series".to_string(),
+                    tags: source.get_base().info.tags.clone(),
                     ..Default::default()
                 };
                 feed.id = self.db.feed_table.insert(&feed).await?;

@@ -36,6 +36,7 @@ impl AniListSeriesFeed {
             api_url: "https://graphql.anilist.co".to_string(),
             copyright_notice: "© AniList LLC 2025".to_string(),
             logo_url: "https://anilist.co/img/icons/android-chrome-192x192.png".to_string(),
+            tags: "series".to_string(),
         };
         // TODO: See https://docs.anilist.co/guide/rate-limiting.
         // "The API is currently in a degraded state and is limited to 30 requests per minute."

@@ -60,6 +60,7 @@ impl MockFeed {
             api_url: format!("https://api.{}", domain),
             copyright_notice: "Mock".to_string(),
             logo_url: "".to_string(),
+            tags: "series".to_string(),
         };
         let client = reqwest::Client::new();
 

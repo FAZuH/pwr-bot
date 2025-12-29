@@ -11,7 +11,7 @@ use chrono::Utc;
 use crate::feed::error::SeriesFeedError;
 use crate::feed::error::UrlParseError;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct FeedInfo {
     /// The name of the feed source, e.g., "MangaDex", "AniList"
     pub name: String,
@@ -27,6 +27,8 @@ pub struct FeedInfo {
     pub copyright_notice: String,
     /// https://anilist.co/img/icons/icon.svg
     pub logo_url: String,
+    /// Feed tags. Mainly used for grouping and filtering
+    pub tags: String,
 }
 
 #[derive(Clone, Debug)]
@@ -94,8 +96,7 @@ mod tests {
             api_hostname: "test.com".to_string(),
             api_domain: "test.com".to_string(),
             api_url: "https://test.com".to_string(),
-            copyright_notice: "".to_string(),
-            logo_url: "".to_string(),
+            ..Default::default()
         };
         let client = reqwest::Client::new();
         let base = BaseFeed::new(info, client);
