@@ -44,7 +44,10 @@ async fn main() -> anyhow::Result<()> {
     let db = Arc::new(Database::new(&config.db_url, &config.db_path).await?);
     info!("Running database migrations...");
     db.run_migrations().await?;
-    info!("Database setup complete ({:.2}s).", init_start.elapsed().as_secs_f64());
+    info!(
+        "Database setup complete ({:.2}s).",
+        init_start.elapsed().as_secs_f64()
+    );
 
     // Setup sources
     debug!("Instantiating Sources...");
@@ -55,7 +58,10 @@ async fn main() -> anyhow::Result<()> {
     let mut bot = Bot::new(config.clone(), db.clone(), feeds.clone()).await?;
     bot.start();
     let bot = Arc::new(bot);
-    info!("Bot setup complete ({:.2}s).", init_start.elapsed().as_secs_f64());
+    info!(
+        "Bot setup complete ({:.2}s).",
+        init_start.elapsed().as_secs_f64()
+    );
 
     // Setup subscribers
     debug!("Instantiating Subscribers...");
@@ -64,7 +70,10 @@ async fn main() -> anyhow::Result<()> {
     event_bus
         .register_subcriber(dm_subscriber.into())
         .register_subcriber(webhook_subscriber.into());
-    info!("Subscribers setup complete ({:.2}s).", init_start.elapsed().as_secs_f64());
+    info!(
+        "Subscribers setup complete ({:.2}s).",
+        init_start.elapsed().as_secs_f64()
+    );
 
     // Setup publishers
     debug!("Instantiating Publishers...");
@@ -75,11 +84,17 @@ async fn main() -> anyhow::Result<()> {
         config.poll_interval,
     )
     .start()?;
-    info!("Publishers setup complete ({:.2}s).", init_start.elapsed().as_secs_f64());
+    info!(
+        "Publishers setup complete ({:.2}s).",
+        init_start.elapsed().as_secs_f64()
+    );
 
     // Listen for exit signal
     let init_done = init_start.elapsed();
-    info!("pwr-bot is up in {:.2}s. Press Ctrl+C to stop.", init_done.as_secs_f64());
+    info!(
+        "pwr-bot is up in {:.2}s. Press Ctrl+C to stop.",
+        init_done.as_secs_f64()
+    );
     tokio::signal::ctrl_c().await?;
     info!("Ctrl+C received, shutting down.");
     // Stop publishers
