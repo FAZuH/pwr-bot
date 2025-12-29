@@ -20,6 +20,11 @@ use poise::serenity_prelude::ClientBuilder;
 use poise::serenity_prelude::GatewayIntents;
 use poise::serenity_prelude::Http;
 use poise::serenity_prelude::UserId;
+use serenity::all::CreateComponent;
+use serenity::all::CreateContainer;
+use serenity::all::CreateContainerComponent;
+use serenity::all::CreateTextDisplay;
+use serenity::all::MessageFlags;
 use serenity::all::Token;
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
@@ -139,12 +144,6 @@ impl Bot {
     }
 
     async fn on_error(error: poise::FrameworkError<'_, Data, Error>) {
-        use serenity::all::CreateComponent;
-        use serenity::all::CreateContainer;
-        use serenity::all::CreateContainerComponent;
-        use serenity::all::CreateTextDisplay;
-        use serenity::all::MessageFlags;
-
         match error {
             poise::FrameworkError::Command { error, ctx, .. } => {
                 error!("Error in command `{}`: {:?}", ctx.command().name, error);
