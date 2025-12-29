@@ -1,10 +1,12 @@
 use async_trait::async_trait;
 use sqlx::SqlitePool;
+use sqlx::sqlite::SqliteArguments;
 
 use crate::database::error::DatabaseError;
 use crate::database::model::FeedItemModel;
 use crate::database::model::FeedModel;
 use crate::database::model::FeedSubscriptionModel;
+use crate::database::model::ServerSettingsModel;
 use crate::database::model::SubscriberModel;
 use crate::database::model::SubscriberType;
 
@@ -35,11 +37,87 @@ pub trait Table<T, ID>: TableBase {
     async fn replace(&self, model: &T) -> Result<ID, DatabaseError>;
 }
 
+// Helper trait to handle binding parameters, especially for casting u64 to i64 for SQLite
+pub trait BindParam<'q> {
+    fn bind_param<O>(
+        self,
+        query: sqlx::query::QueryAs<'q, sqlx::Sqlite, O, SqliteArguments<'q>>,
+    ) -> sqlx::query::QueryAs<'q, sqlx::Sqlite, O, SqliteArguments<'q>>;
+    fn bind_param_q(
+        self,
+        query: sqlx::query::Query<'q, sqlx::Sqlite, SqliteArguments<'q>>,
+    ) -> sqlx::query::Query<'q, sqlx::Sqlite, SqliteArguments<'q>>;
+}
+
+macro_rules! impl_bind_param {
+    ($t:ty) => {
+        impl<'q> BindParam<'q> for $t {
+            fn bind_param<O>(
+                self,
+                query: sqlx::query::QueryAs<'q, sqlx::Sqlite, O, SqliteArguments<'q>>,
+            ) -> sqlx::query::QueryAs<'q, sqlx::Sqlite, O, SqliteArguments<'q>> {
+                query.bind(self)
+            }
+            fn bind_param_q(
+                self,
+                query: sqlx::query::Query<'q, sqlx::Sqlite, SqliteArguments<'q>>,
+            ) -> sqlx::query::Query<'q, sqlx::Sqlite, SqliteArguments<'q>> {
+                query.bind(self)
+            }
+        }
+    };
+}
+
+// Implement for reference types that are passed to .bind()
+impl_bind_param!(&'q i32);
+impl_bind_param!(&'q i64);
+impl_bind_param!(&'q String);
+impl_bind_param!(&'q Option<String>);
+impl_bind_param!(&'q SubscriberType);
+impl_bind_param!(&'q chrono::DateTime<chrono::Utc>);
+
+// For Json
+impl<'q, T: serde::Serialize + for<'a> serde::Deserialize<'a> + Send + Sync + 'static> BindParam<'q>
+    for &'q sqlx::types::Json<T>
+{
+    fn bind_param<O>(
+        self,
+        query: sqlx::query::QueryAs<'q, sqlx::Sqlite, O, SqliteArguments<'q>>,
+    ) -> sqlx::query::QueryAs<'q, sqlx::Sqlite, O, SqliteArguments<'q>> {
+        query.bind(self)
+    }
+    fn bind_param_q(
+        self,
+        query: sqlx::query::Query<'q, sqlx::Sqlite, SqliteArguments<'q>>,
+    ) -> sqlx::query::Query<'q, sqlx::Sqlite, SqliteArguments<'q>> {
+        query.bind(self)
+    }
+}
+
+// Special case for u64 (casting to i64)
+impl<'q> BindParam<'q> for &'q u64 {
+    fn bind_param<O>(
+        self,
+        query: sqlx::query::QueryAs<'q, sqlx::Sqlite, O, SqliteArguments<'q>>,
+    ) -> sqlx::query::QueryAs<'q, sqlx::Sqlite, O, SqliteArguments<'q>> {
+        query.bind(*self as i64)
+    }
+    fn bind_param_q(
+        self,
+        query: sqlx::query::Query<'q, sqlx::Sqlite, SqliteArguments<'q>>,
+    ) -> sqlx::query::Query<'q, sqlx::Sqlite, SqliteArguments<'q>> {
+        query.bind(*self as i64)
+    }
+}
+
 macro_rules! impl_table {
     (
         $struct_name:ident,
         $model:ty,
         $table:expr,
+        $pk:ident,
+        $id_type:ty,
+        $db_id_type:ty,
         $create_sql:expr,
         $cols:expr,
         $vals:expr,
@@ -83,59 +161,68 @@ macro_rules! impl_table {
         }
 
         #[async_trait]
-        impl Table<$model, i32> for $struct_name {
+        impl Table<$model, $id_type> for $struct_name {
             async fn select_all(&self) -> Result<Vec<$model>, DatabaseError> {
                 Ok(sqlx::query_as::<_, $model>(concat!("SELECT * FROM ", $table))
                     .fetch_all(&self.base.pool)
                     .await?)
             }
 
-            async fn select(&self, id: &i32) -> Result<$model, DatabaseError> {
+            async fn select(&self, id: &$id_type) -> Result<$model, DatabaseError> {
+                let query = sqlx::query_as::<_, $model>(concat!("SELECT * FROM ", $table, " WHERE ", stringify!($pk), " = ? LIMIT 1"));
+                let query = BindParam::bind_param(id, query);
                 Ok(
-                    sqlx::query_as::<_, $model>(concat!("SELECT * FROM ", $table, " WHERE id = ? LIMIT 1"))
-                        .bind(id)
+                    query
                         .fetch_one(&self.base.pool)
                         .await?,
                 )
             }
 
-            async fn insert(&self, model: &$model) -> Result<i32, DatabaseError> {
-                let row: (i32,) = sqlx::query_as(concat!(
-                        "INSERT INTO ", $table, " (", $cols, ") VALUES (", $vals, ") RETURNING id"
-                    ))
-                    $( .bind(&model.$field) )+
-                    .fetch_one(&self.base.pool)
-                    .await?;
-                Ok(row.0)
+            async fn insert(&self, model: &$model) -> Result<$id_type, DatabaseError> {
+                let mut query = sqlx::query_as(concat!(
+                        "INSERT INTO ", $table, " (", $cols, ") VALUES (", $vals, ") RETURNING ", stringify!($pk)
+                    ));
+
+                $(
+                    query = BindParam::bind_param(&model.$field, query);
+                )+
+
+                let row: ($db_id_type,) = query.fetch_one(&self.base.pool).await?;
+                Ok(row.0 as $id_type)
             }
 
             async fn update(&self, model: &$model) -> Result<(), DatabaseError> {
-                sqlx::query(concat!(
-                        "UPDATE ", $table, " SET ", $update_set, " WHERE id = ?"
-                    ))
-                    $( .bind(&model.$field) )+
-                    .bind(model.id)
-                    .execute(&self.base.pool)
-                    .await?;
+                let mut query = sqlx::query(concat!(
+                        "UPDATE ", $table, " SET ", $update_set, " WHERE ", stringify!($pk), " = ?"
+                    ));
+
+                $(
+                    query = BindParam::bind_param_q(&model.$field, query);
+                )+
+                query = BindParam::bind_param_q(&model.$pk, query);
+
+                query.execute(&self.base.pool).await?;
                 Ok(())
             }
 
-            async fn delete(&self, id: &i32) -> Result<(), DatabaseError> {
-                sqlx::query(concat!("DELETE FROM ", $table, " WHERE id = ?"))
-                    .bind(id)
-                    .execute(&self.base.pool)
-                    .await?;
+            async fn delete(&self, id: &$id_type) -> Result<(), DatabaseError> {
+                let query = sqlx::query(concat!("DELETE FROM ", $table, " WHERE ", stringify!($pk), " = ?"));
+                let query = BindParam::bind_param_q(id, query);
+                query.execute(&self.base.pool).await?;
                 Ok(())
             }
 
-            async fn replace(&self, model: &$model) -> Result<i32, DatabaseError> {
-                let row: (i32,) = sqlx::query_as(concat!(
-                        "REPLACE INTO ", $table, " (", $cols, ") VALUES (", $vals, ") RETURNING id"
-                    ))
-                    $( .bind(&model.$field) )+
-                    .fetch_one(&self.base.pool)
-                    .await?;
-                Ok(row.0)
+            async fn replace(&self, model: &$model) -> Result<$id_type, DatabaseError> {
+                let mut query = sqlx::query_as(concat!(
+                        "REPLACE INTO ", $table, " (", $cols, ") VALUES (", $vals, ") RETURNING ", stringify!($pk)
+                    ));
+
+                $(
+                    query = BindParam::bind_param(&model.$field, query);
+                )+
+
+                let row: ($db_id_type,) = query.fetch_one(&self.base.pool).await?;
+                Ok(row.0 as $id_type)
             }
         }
     };
@@ -149,6 +236,9 @@ impl_table!(
     FeedTable,
     FeedModel,
     "feeds",
+    id,
+    i32,
+    i32,
     r#"CREATE TABLE IF NOT EXISTS feeds (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
@@ -182,24 +272,32 @@ impl FeedTable {
         )
     }
 
-    pub async fn select_all_by_url_contains(
+    pub async fn select_by_name_and_subscriber_id(
         &self,
-        pattern: &str,
+        subscriber_id: &i32,
+        name_search: &str,
+        limit: impl Into<Option<u32>>,
     ) -> Result<Vec<FeedModel>, DatabaseError> {
-        Ok(
-            sqlx::query_as::<_, FeedModel>("SELECT * FROM feeds WHERE url LIKE ?")
-                .bind(format!("%{}%", pattern))
-                .fetch_all(&self.base.pool)
-                .await?,
+        let limit = limit.into().unwrap_or(25);
+        let search_pattern = format!("%{}%", name_search.to_lowercase());
+        Ok(sqlx::query_as::<_, FeedModel>(
+            r#"
+                SELECT * FROM feeds 
+                WHERE LOWER(name) LIKE ? 
+                    AND id IN (
+                        SELECT feed_id
+                        FROM feed_subscriptions
+                        WHERE subscriber_id = ?
+                    )
+                ORDER BY name
+                LIMIT ?
+                "#,
         )
-    }
-
-    pub async fn delete_all_by_url_contains(&self, pattern: &str) -> Result<(), DatabaseError> {
-        sqlx::query("DELETE FROM feeds WHERE url LIKE ?")
-            .bind(format!("%{}%", pattern))
-            .execute(&self.base.pool)
-            .await?;
-        Ok(())
+        .bind(search_pattern)
+        .bind(subscriber_id)
+        .bind(limit)
+        .fetch_all(&self.base.pool)
+        .await?)
     }
 }
 
@@ -211,6 +309,9 @@ impl_table!(
     FeedItemTable,
     FeedItemModel,
     "feed_items",
+    id,
+    i32,
+    i32,
     r#"CREATE TABLE IF NOT EXISTS feed_items (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         feed_id INTEGER NOT NULL,
@@ -272,6 +373,9 @@ impl_table!(
     SubscriberTable,
     SubscriberModel,
     "subscribers",
+    id,
+    i32,
+    i32,
     r#"CREATE TABLE IF NOT EXISTS subscribers (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         type TEXT NOT NULL,
@@ -330,6 +434,9 @@ impl_table!(
     FeedSubscriptionTable,
     FeedSubscriptionModel,
     "feed_subscriptions",
+    id,
+    i32,
+    i32,
     r#"CREATE TABLE IF NOT EXISTS feed_subscriptions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         feed_id INTEGER NOT NULL,
@@ -458,3 +565,22 @@ impl FeedSubscriptionTable {
         Ok(())
     }
 }
+
+// ============================================================================
+// ServerSettingsTable
+// ============================================================================
+
+impl_table!(
+    ServerSettingsTable,
+    ServerSettingsModel,
+    "server_settings",
+    guild_id,
+    u64,
+    i64,
+    // Note: Table creation handled by migration
+    "",
+    "guild_id, settings",
+    "?, ?",
+    "guild_id = ?, settings = ?",
+    [guild_id, settings]
+);

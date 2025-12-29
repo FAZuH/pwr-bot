@@ -79,3 +79,41 @@ impl Default for EventBus {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::AtomicI32;
+    use std::sync::atomic::Ordering;
+
+    use tokio::time::Duration;
+    use tokio::time::sleep;
+
+    use super::*;
+
+    #[derive(Clone)]
+    struct TestEvent {
+        val: i32,
+    }
+
+    #[tokio::test]
+    async fn test_event_bus() {
+        let bus = EventBus::new();
+        let counter = Arc::new(AtomicI32::new(0));
+        let counter_clone = counter.clone();
+
+        bus.register_callback(move |event: TestEvent| {
+            let c = counter_clone.clone();
+            async move {
+                c.fetch_add(event.val, Ordering::SeqCst);
+                Ok(())
+            }
+        });
+
+        bus.publish(TestEvent { val: 10 });
+
+        // Wait a bit for async spawn
+        sleep(Duration::from_millis(50)).await;
+
+        assert_eq!(counter.load(Ordering::SeqCst), 10);
+    }
+}

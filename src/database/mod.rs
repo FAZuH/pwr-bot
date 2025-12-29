@@ -8,6 +8,7 @@ use sqlx::sqlite::SqliteConnectOptions;
 use crate::database::table::FeedItemTable;
 use crate::database::table::FeedSubscriptionTable;
 use crate::database::table::FeedTable;
+use crate::database::table::ServerSettingsTable;
 use crate::database::table::SubscriberTable;
 use crate::database::table::TableBase;
 
@@ -21,6 +22,7 @@ pub struct Database {
     pub feed_item_table: FeedItemTable,
     pub subscriber_table: SubscriberTable,
     pub feed_subscription_table: FeedSubscriptionTable,
+    pub server_settings_table: ServerSettingsTable,
 }
 
 impl Database {
@@ -44,6 +46,7 @@ impl Database {
         let feed_item_table = FeedItemTable::new(pool.clone());
         let subscriber_table = SubscriberTable::new(pool.clone());
         let feed_subscription_table = FeedSubscriptionTable::new(pool.clone());
+        let server_settings_table = ServerSettingsTable::new(pool.clone());
 
         Ok(Self {
             pool,
@@ -51,6 +54,7 @@ impl Database {
             feed_item_table,
             subscriber_table,
             feed_subscription_table,
+            server_settings_table,
         })
     }
 
@@ -64,6 +68,7 @@ impl Database {
         self.feed_item_table.drop_table().await?;
         self.subscriber_table.drop_table().await?;
         self.feed_subscription_table.drop_table().await?;
+        self.server_settings_table.drop_table().await?;
         Ok(())
     }
 
@@ -72,6 +77,7 @@ impl Database {
         self.feed_item_table.delete_all().await?;
         self.subscriber_table.delete_all().await?;
         self.feed_subscription_table.delete_all().await?;
+        self.server_settings_table.delete_all().await?;
         Ok(())
     }
 }

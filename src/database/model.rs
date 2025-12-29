@@ -1,12 +1,8 @@
-use std::fmt::Display;
-
 use chrono::DateTime;
 use chrono::Utc;
 use serde::Deserialize;
 use serde::Serialize;
 use sqlx::FromRow;
-
-use crate::database::error::DatabaseError;
 
 /// Notification target type for feed updates.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, sqlx::Type, Default, PartialEq, Eq)]
@@ -45,7 +41,7 @@ pub struct FeedModel {
 /// Tracks the history of updates for a content source. Each new episode,
 /// chapter, or post creates a new version entry. The latest version can be
 /// determined by querying for the most recent `published` timestamp.
-#[derive(FromRow, Serialize, Default)]
+#[derive(FromRow, Serialize, Default, Clone)]
 pub struct FeedItemModel {
     #[serde(default)]
     pub id: i32,
@@ -63,7 +59,7 @@ pub struct FeedItemModel {
 /// Represents either a Discord guild channel or a direct message conversation
 /// with a user. Multiple subscribers can follow the same feed, and a single
 /// subscriber can follow multiple feeds (via `FeedSubscriptionModel`).
-#[derive(FromRow, Serialize, Default)]
+#[derive(FromRow, Serialize, Default, Clone)]
 pub struct SubscriberModel {
     #[serde(default)]
     pub id: i32,
@@ -74,41 +70,12 @@ pub struct SubscriberModel {
     pub target_id: String,
 }
 
-impl SubscriberModel {
-    /// Parses the target_id for a Guild subscriber into (guild_id, channel_id).
-    ///
-    /// # Errors
-    /// Returns [`DatabaseError::ParseError`] if called on a
-    /// non-Guild subscriber or if target_id format is invalid.
-    pub fn parse_guild_target_id(&self) -> Result<(&str, &str), DatabaseError> {
-        if self.r#type != SubscriberType::Guild {
-            return Err(DatabaseError::ParseError {
-                message: format!(
-                    "Cannot parse guild target_id from {:?} subscriber",
-                    self.r#type
-                ),
-            });
-        }
-
-        self.target_id
-            .split_once(":")
-            .ok_or_else(|| DatabaseError::InternalError {
-                message: format!("Invalid target_id format: {}", self.target_id),
-            })
-    }
-
-    /// Formats a guild_id and channel_id into the target_id format used by Guild subscribers.
-    pub fn format_guild_target_id(guild_id: impl Display, channel_id: impl Display) -> String {
-        format!("{}:{}", guild_id, channel_id)
-    }
-}
-
 /// Links subscribers to the feeds they're monitoring.
 ///
 /// Junction table implementing the many-to-many relationship between feeds
 /// and subscribers. When a new `FeedVersionModel` is published, query this
 /// table to find all subscribers that need to be notified.
-#[derive(FromRow, Serialize, Default)]
+#[derive(FromRow, Serialize, Default, Clone)]
 pub struct FeedSubscriptionModel {
     #[serde(default)]
     pub id: i32,
@@ -116,4 +83,24 @@ pub struct FeedSubscriptionModel {
     pub feed_id: i32,
     #[serde(default)]
     pub subscriber_id: i32,
+}
+
+#[derive(FromRow, Serialize, Deserialize, Default, Clone, Debug)]
+pub struct ServerSettingsModel {
+    #[serde(default)]
+    #[sqlx(try_from = "i64")]
+    pub guild_id: u64,
+    pub settings: sqlx::types::Json<ServerSettings>,
+}
+
+#[derive(Serialize, Deserialize, Default, Clone, Debug)]
+pub struct ServerSettings {
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(default)]
+    pub channel_id: Option<String>,
+    #[serde(default)]
+    pub subscribe_role_id: Option<String>,
+    #[serde(default)]
+    pub unsubscribe_role_id: Option<String>,
 }

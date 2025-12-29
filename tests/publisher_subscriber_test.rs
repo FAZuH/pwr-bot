@@ -1,273 +1,143 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use async_trait::async_trait;
-use futures::lock::Mutex;
-use httpmock::Mock;
-use httpmock::prelude::*;
-use pwr_bot::database::database::Database;
-use pwr_bot::database::model::latest_results_model::LatestResultModel;
-use pwr_bot::database::model::subscribers_model::SubscribersModel;
-use pwr_bot::database::table::table::Table;
+use chrono::Utc;
+use pwr_bot::database::model::SubscriberType;
+use pwr_bot::database::table::Table;
 use pwr_bot::event::event_bus::EventBus;
-use pwr_bot::event::manga_update_event::MangaUpdateEvent;
-use pwr_bot::event::series_update_event::SeriesUpdateEvent;
-use pwr_bot::feed::anilist_series_feed::AniListSeriesFeed;
-use pwr_bot::feed::mangadex_series_feed::MangaDexSeriesFeed;
-use pwr_bot::publisher::anime_update_publisher::AnimeUpdatePublisher;
-use pwr_bot::publisher::manga_update_publisher::MangaUpdatePublisher;
-use pwr_bot::subscriber::subscriber::Subscriber;
-use serde_json::json;
+use pwr_bot::event::feed_update_event::FeedUpdateEvent;
+use pwr_bot::feed::FeedItem;
+use pwr_bot::feed::FeedSource;
+use pwr_bot::feed::feeds::Feeds;
+use pwr_bot::publisher::series_feed_publisher::SeriesFeedPublisher;
+use pwr_bot::service::feed_subscription_service::FeedSubscriptionService;
+use pwr_bot::service::feed_subscription_service::SubscribeResult;
+use pwr_bot::service::feed_subscription_service::SubscriberTarget;
 use tokio::time::sleep;
 
-#[derive(Clone)]
-struct MockMangaSubscriber {
-    pub received_events: Arc<Mutex<Vec<MangaUpdateEvent>>>,
-}
-impl MockMangaSubscriber {
-    fn new() -> Self {
-        Self {
-            received_events: Arc::new(Mutex::new(Vec::new())),
-        }
-    }
-}
-#[async_trait]
-impl Subscriber<MangaUpdateEvent> for MockMangaSubscriber {
-    async fn callback(&self, event: MangaUpdateEvent) -> anyhow::Result<()> {
-        self.received_events.lock().await.push(event);
-        Ok(())
-    }
-}
+mod common;
 
-#[derive(Clone)]
-struct MockAnimeSubscriber {
-    pub received_events: Arc<Mutex<Vec<SeriesUpdateEvent>>>,
-}
-impl MockAnimeSubscriber {
-    fn new() -> Self {
-        Self {
-            received_events: Arc::new(Mutex::new(Vec::new())),
-        }
-    }
-}
-#[async_trait]
-impl Subscriber<SeriesUpdateEvent> for MockAnimeSubscriber {
-    async fn callback(&self, event: SeriesUpdateEvent) -> anyhow::Result<()> {
-        self.received_events.lock().await.push(event);
-        Ok(())
-    }
-}
+#[tokio::test]
+async fn test_subscription_and_publishing() {
+    let (db, db_path) = common::setup_db().await;
+    let event_bus = Arc::new(EventBus::new());
 
-async fn wait_for_request(mock: &Mock<'_>, threshhold: usize) {
-    while mock.hits() < threshhold {
+    // Setup Feeds
+    let mut feeds = Feeds::new();
+    let mock_domain = "mock.test";
+    let mock_feed = Arc::new(common::MockFeed::new(mock_domain));
+    feeds.add_feed(mock_feed.clone());
+    let feeds = Arc::new(feeds);
+
+    // Setup Service
+    let service = Arc::new(FeedSubscriptionService {
+        db: db.clone(),
+        feeds: feeds.clone(),
+    });
+
+    // 1. Prepare Mock Data
+    let source_id = "123";
+    let url = format!("https://{}/title/{}", mock_domain, source_id);
+
+    mock_feed.set_info(FeedSource {
+        id: source_id.to_string(),
+        name: "Test Name".to_string(),
+        url: url.clone(),
+        description: "Desc".to_string(),
+        image_url: None,
+    });
+
+    let initial_latest = FeedItem {
+        id: "ch1".to_string(),
+        source_id: source_id.to_string(),
+        title: "Chapter 1".to_string(),
+        url: format!("{}/chapter/1", url),
+        published: Utc::now(),
+    };
+    mock_feed.set_latest(initial_latest.clone());
+
+    // 2. Test Subscribe
+    let target = SubscriberTarget {
+        subscriber_type: SubscriberType::Dm,
+        target_id: "user1".to_string(),
+    };
+
+    let subscriber = service
+        .get_or_create_subscriber(&target)
+        .await
+        .expect("Failed to get or create subscriber");
+
+    let result = service
+        .subscribe(&url, &subscriber)
+        .await
+        .expect("Subscribe failed");
+    match result {
+        SubscribeResult::Success { feed } => {
+            assert_eq!(feed.name, "Test Name");
+            assert_eq!(feed.url, url);
+        }
+        _ => panic!("Expected Success"),
+    }
+
+    // Verify DB
+    let subs = db.feed_subscription_table.select_all().await.unwrap();
+    assert_eq!(subs.len(), 1);
+
+    // 3. Test Publisher
+    // Setup Event Listener
+    let event_received = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let event_received_clone = event_received.clone();
+
+    event_bus.register_callback(move |_event: FeedUpdateEvent| {
+        event_received_clone.store(true, std::sync::atomic::Ordering::SeqCst);
+        async { Ok(()) }
+    });
+
+    // Start Publisher
+    let publisher = SeriesFeedPublisher::new(
+        db.clone(),
+        event_bus.clone(),
+        feeds.clone(),
+        Duration::from_millis(100), // Fast poll
+    );
+    publisher
+        .clone()
+        .start()
+        .expect("Failed to start publisher");
+
+    // Update Mock Data
+    let new_latest = FeedItem {
+        id: "ch2".to_string(),
+        source_id: source_id.to_string(),
+        title: "Chapter 2".to_string(),
+        url: format!("{}/chapter/2", url),
+        published: Utc::now(),
+    };
+    mock_feed.set_latest(new_latest);
+
+    // Wait for poll
+    let mut attempts = 0;
+    while !event_received.load(std::sync::atomic::Ordering::SeqCst) && attempts < 50 {
         sleep(Duration::from_millis(100)).await;
+        attempts += 1;
     }
-}
 
-#[tokio::test]
-async fn test_manga_publisher_and_subscriber() -> anyhow::Result<()> {
-    // 0:Setup
-    let bus = Arc::new(EventBus::new());
-    let db = Arc::new(Database::new("sqlite://test.db", "test.db").await?);
-    db.drop_all_tables().await?;
-    db.create_all_tables().await?;
-    let server = MockServer::start();
-    let source = Arc::new(MangaDexSeriesFeed::new_with_url(server.url("")));
-    // 0:Setup:Subscriber
-    let subscriber = Arc::new(MockMangaSubscriber::new());
-    bus.register_subcriber(subscriber.clone()).await;
-    // 0:Setup:Publisher
-    let publisher = MangaUpdatePublisher::new(
-        db.clone(),
-        bus.clone(),
-        source.clone(),
-        Duration::from_secs(u64::MAX),
+    assert!(
+        event_received.load(std::sync::atomic::Ordering::SeqCst),
+        "Publisher did not fire event"
     );
-    // 0:Setup:Populate db
-    let series_id = "789";
-    let latest_update_id = db
-        .latest_results_table
-        .insert(&LatestResultModel {
-            url: series_id.to_string(),
-            r#type: "manga".to_string(),
-            latest: "41".to_string(),
-            ..Default::default()
-        })
-        .await?;
-    db.subscribers_table
-        .insert(&SubscribersModel {
-            latest_update_id,
-            subscriber_type: "manga".to_string(),
-            ..Default::default()
-        })
-        .await?;
 
-    // 1:Setup:Mock initial API response
-    let mut mock = server.mock(|when, then| {
-        when.method(GET).path(format!("/manga/{}/feed", series_id));
-        then.status(200)
-            .header("content-type", "application/json")
-            .json_body(json!({
-                "data": [{
-                    "id": "999",  // New series latest
-                    "attributes": { "chapter": "42", "publishAt": "2025-07-14T02:35:03+00:00" }
-                }]
-            }));
-    });
+    // Verify DB update
+    let db_latest = db
+        .feed_item_table
+        .select_latest_by_feed_id(1)
+        .await
+        .unwrap();
+    // Assuming feed ID is 1 because it's the first feed.
 
-    // 1:Act:Start publisher and wait for it to run
-    publisher.clone().start()?;
-    wait_for_request(&mock, 1).await;
-    publisher.clone().stop()?;
+    assert_eq!(db_latest.description, "Chapter 2");
 
-    // 1:Assert:Verify manga update event
-    mock.assert();
-    assert_eq!(subscriber.received_events.lock().await.len(), 1);
-
-    // 2:Setup
-    subscriber.received_events.lock().await.clear();
-
-    // 2:Act:Run again with same data
-    publisher.clone().start()?;
-    wait_for_request(&mock, 2).await;
-    publisher.clone().stop()?;
-
-    // 2:Assert:No new event should be published
-    assert_eq!(subscriber.received_events.lock().await.len(), 0);
-
-    // 3:Setup:Mock updated API response
-    mock.delete();
-    let mock_updated = server.mock(|when, then| {
-        when.method(GET).path(format!("/manga/{}/feed", "789"));
-        then.status(200)
-            .header("content-type", "application/json")
-            .json_body(json!({
-                "data": [{
-                    "id": "1000", // Newer series latest
-                    "attributes": { "chapter": "43", "publishAt": "2025-07-15T02:35:03+00:00" }
-                }]
-            }));
-    });
-
-    // 3:Act:Run again with new data
-    publisher.clone().start()?;
-    wait_for_request(&mock_updated, 1).await;
-    publisher.clone().stop()?;
-
-    // 3:Assert:Verify new event
-    mock_updated.assert();
-    assert_eq!(subscriber.received_events.lock().await.len(), 1);
-
-    // 0:Teardown
-    db.drop_all_tables().await?;
-    Ok(())
-}
-
-#[tokio::test]
-async fn test_anime_publisher_and_subscriber() -> anyhow::Result<()> {
-    // 0:Setup
-    let bus = Arc::new(EventBus::new());
-    let db = Arc::new(Database::new("sqlite://test.db", "test.db").await?);
-    db.drop_all_tables().await?;
-    db.create_all_tables().await?;
-    let server = MockServer::start();
-    let source = Arc::new(AniListSeriesFeed::new_with_url(server.url("")));
-    // 0:Setup:Subscriber
-    let subscriber = Arc::new(MockAnimeSubscriber::new());
-    bus.register_subcriber(subscriber.clone()).await;
-    // 0:Setup:Publisher
-    let publisher = AnimeUpdatePublisher::new(
-        db.clone(),
-        bus.clone(),
-        source.clone(),
-        Duration::from_secs(u64::MAX),
-    );
-    // 0:Setup:Populate db
-    let series_id = "456";
-    let latest_update_id = db
-        .latest_results_table
-        .insert(&LatestResultModel {
-            url: series_id.to_string(),
-            r#type: "anime".to_string(),
-            latest: "4".to_string(),
-            ..Default::default()
-        })
-        .await?;
-    db.subscribers_table
-        .insert(&SubscribersModel {
-            latest_update_id,
-            subscriber_type: "anime".to_string(),
-            ..Default::default()
-        })
-        .await?;
-
-    // 1:Setup:Mock initial API response
-    let mut mock = server.mock(|when, then| {
-        when.method(POST).path("/");
-        then.status(200)
-            .header("content-type", "application/json")
-            .json_body(json!({
-                "data": {
-                    "Media": {
-                        "title": { "romaji": "Test Anime" },
-                        "nextAiringEpisode": {
-                            "airingAt": 1721779200,
-                            "episode": 5
-                        }
-                    }
-                }
-            }));
-    });
-
-    // 1:Act:Start publisher and wait for it to run
-    publisher.clone().start()?;
-    wait_for_request(&mock, 1).await;
-    publisher.clone().stop()?;
-
-    // 1:Assert:Verify anime update event
-    mock.assert();
-    assert_eq!(subscriber.received_events.lock().await.len(), 1);
-
-    // 2:Setup
-    subscriber.received_events.lock().await.clear();
-
-    // 2:Act:Run again with same data
-    publisher.clone().start()?;
-    wait_for_request(&mock, 2).await;
-    publisher.clone().stop()?;
-
-    // 2:Assert:No new event should be published
-    assert_eq!(subscriber.received_events.lock().await.len(), 0);
-
-    // 3:Setup:Mock updated API response
-    mock.delete();
-    let mock_updated = server.mock(|when, then| {
-        when.method(POST).path("/");
-        then.status(200)
-            .header("content-type", "application/json")
-            .json_body(json!({
-                "data": {
-                    "Media": {
-                        "title": { "romaji": "Test Anime" },
-                        "nextAiringEpisode": {
-                            "airingAt": 1721865600,
-                            "episode": 6
-                        }
-                    }
-                }
-            }));
-    });
-
-    // 3:Act:Run again with new data
-    publisher.clone().start()?;
-    wait_for_request(&mock_updated, 1).await;
-    publisher.clone().stop()?;
-
-    // 3:Assert:Verify new event
-    mock_updated.assert();
-    assert_eq!(subscriber.received_events.lock().await.len(), 1);
-
-    // 0:Teardown
-    db.drop_all_tables().await?;
-    Ok(())
+    // Cleanup
+    publisher.stop().unwrap();
+    common::teardown_db(db_path).await;
 }

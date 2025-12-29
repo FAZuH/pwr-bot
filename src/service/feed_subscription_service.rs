@@ -9,6 +9,8 @@ use crate::database::error::DatabaseError;
 use crate::database::model::FeedItemModel;
 use crate::database::model::FeedModel;
 use crate::database::model::FeedSubscriptionModel;
+use crate::database::model::ServerSettings;
+use crate::database::model::ServerSettingsModel;
 use crate::database::model::SubscriberModel;
 use crate::database::model::SubscriberType;
 use crate::database::table::Table;
@@ -17,20 +19,19 @@ use crate::feed::error::SeriesFeedError;
 use crate::feed::feeds::Feeds;
 use crate::service::error::ServiceError;
 
-pub struct SeriesFeedSubscriptionService {
+pub struct FeedSubscriptionService {
     pub db: Arc<Database>,
     pub feeds: Arc<Feeds>,
 }
 
-impl SeriesFeedSubscriptionService {
+impl FeedSubscriptionService {
     // Core subscription operations
     pub async fn subscribe(
         &self,
         url: &str,
-        target: SubscriberTarget,
+        subscriber: &SubscriberModel,
     ) -> Result<SubscribeResult, ServiceError> {
         let feed = self.get_or_create_feed(url).await?;
-        let subscriber = self.get_or_create_subscriber(&target).await?;
 
         match self.create_subscription(feed.id, subscriber.id).await {
             Ok(_) => Ok(SubscribeResult::Success { feed }),
@@ -51,7 +52,7 @@ impl SeriesFeedSubscriptionService {
     pub async fn unsubscribe(
         &self,
         url: &str,
-        target: SubscriberTarget,
+        subscriber: &SubscriberModel,
     ) -> Result<UnsubscribeResult, ServiceError> {
         let source =
             self.feeds
@@ -79,8 +80,6 @@ impl SeriesFeedSubscriptionService {
             }
         };
 
-        let subscriber = self.get_or_create_subscriber(&target).await?;
-
         match self
             .db
             .feed_subscription_table
@@ -101,11 +100,10 @@ impl SeriesFeedSubscriptionService {
     }
     pub async fn list_paginated_subscriptions(
         &self,
-        target: &SubscriberTarget,
+        subscriber: &SubscriberModel,
         page: impl Into<u32>,
         per_page: impl Into<u32>,
     ) -> Result<Vec<SubscriptionInfo>, ServiceError> {
-        let subscriber = self.get_or_create_subscriber(target).await?;
         let page = page.into() - 1;
 
         let mut ret = vec![];
@@ -129,15 +127,30 @@ impl SeriesFeedSubscriptionService {
         Ok(ret)
     }
 
-    pub async fn get_subscription_count(&self, subscriber_id: i32) -> Result<u32, ServiceError> {
+    pub async fn get_subscription_count(
+        &self,
+        subscriber: &SubscriberModel,
+    ) -> Result<u32, ServiceError> {
         Ok(self
             .db
             .feed_subscription_table
-            .count_by_subscriber_id(subscriber_id)
+            .count_by_subscriber_id(subscriber.id)
             .await?)
     }
 
-    async fn get_or_create_feed(&self, url: &str) -> Result<FeedModel, ServiceError> {
+    pub async fn search_subcriptions(
+        &self,
+        subscriber: &SubscriberModel,
+        partial: &str,
+    ) -> Result<Vec<FeedModel>, ServiceError> {
+        Ok(self
+            .db
+            .feed_table
+            .select_by_name_and_subscriber_id(&subscriber.id, partial, 25)
+            .await?)
+    }
+
+    pub async fn get_or_create_feed(&self, url: &str) -> Result<FeedModel, ServiceError> {
         let source =
             self.feeds
                 .get_feed_by_url(url)
@@ -153,15 +166,15 @@ impl SeriesFeedSubscriptionService {
             Ok(res) => res,
             Err(_) => {
                 // Feed doesn't exist, create it
-                let series_latest = source.get_latest(&normalized_url).await?;
-                let series_info = source.get_info(&normalized_url).await?;
+                let feed_item = source.fetch_latest(id).await?;
+                let feed_source = source.fetch_source(id).await?;
 
                 let mut feed = FeedModel {
-                    name: series_info.title,
-                    description: series_info.description,
-                    url: series_info.url,
-                    cover_url: series_info.cover_url.unwrap_or("".to_string()),
-                    tags: "series".to_string(),
+                    name: feed_source.name,
+                    description: feed_source.description,
+                    url: feed_source.url,
+                    cover_url: feed_source.image_url.unwrap_or("".to_string()),
+                    tags: source.get_base().info.tags.clone(),
                     ..Default::default()
                 };
                 feed.id = self.db.feed_table.insert(&feed).await?;
@@ -169,8 +182,8 @@ impl SeriesFeedSubscriptionService {
                 // Create initial version
                 let version = FeedItemModel {
                     feed_id: feed.id,
-                    description: series_latest.latest,
-                    published: series_latest.published,
+                    description: feed_item.title,
+                    published: feed_item.published,
                     ..Default::default()
                 };
                 self.db.feed_item_table.insert(&version).await?;
@@ -193,16 +206,39 @@ impl SeriesFeedSubscriptionService {
             Ok(res) => res,
             Err(_) => {
                 // Subscriber doesn't exist, create it
-                let subscriber = SubscriberModel {
+                let mut subscriber = SubscriberModel {
                     r#type: target.subscriber_type,
                     target_id: target.target_id.clone(),
                     ..Default::default()
                 };
-                self.db.subscriber_table.insert(&subscriber).await?;
+                subscriber.id = self.db.subscriber_table.insert(&subscriber).await?;
                 subscriber
             }
         };
         Ok(subscriber)
+    }
+
+    pub async fn get_server_settings(&self, guild_id: u64) -> Result<ServerSettings, ServiceError> {
+        match self.db.server_settings_table.select(&guild_id).await {
+            Ok(model) => Ok(model.settings.0),
+            Err(DatabaseError::BackendError(sqlx::Error::RowNotFound)) => {
+                Ok(ServerSettings::default())
+            }
+            Err(e) => Err(ServiceError::DatabaseError(e)),
+        }
+    }
+
+    pub async fn update_server_settings(
+        &self,
+        guild_id: u64,
+        settings: ServerSettings,
+    ) -> Result<(), ServiceError> {
+        let model = ServerSettingsModel {
+            guild_id,
+            settings: sqlx::types::Json(settings),
+        };
+        self.db.server_settings_table.replace(&model).await?;
+        Ok(())
     }
 
     async fn create_subscription(

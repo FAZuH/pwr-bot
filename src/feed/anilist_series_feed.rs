@@ -14,12 +14,12 @@ use log::info;
 use serde_json::Value;
 
 use crate::feed::BaseFeed;
+use crate::feed::Feed;
 use crate::feed::FeedInfo;
-use crate::feed::SeriesItem;
+use crate::feed::FeedItem;
+use crate::feed::FeedSource;
 use crate::feed::error::SeriesFeedError;
 use crate::feed::error::UrlParseError;
-use crate::feed::series_feed::SeriesFeed;
-use crate::feed::series_feed::SeriesLatest;
 
 pub struct AniListSeriesFeed {
     pub base: BaseFeed,
@@ -30,12 +30,13 @@ impl AniListSeriesFeed {
     pub fn new() -> Self {
         let info = FeedInfo {
             name: "AniList".to_string(),
-            feed_type: "Episode".to_string(),
+            feed_item_name: "Episode".to_string(),
             api_hostname: "graphql.anilist.co".to_string(),
             api_domain: "anilist.co".to_string(),
             api_url: "https://graphql.anilist.co".to_string(),
             copyright_notice: "© AniList LLC 2025".to_string(),
             logo_url: "https://anilist.co/img/icons/android-chrome-192x192.png".to_string(),
+            tags: "series".to_string(),
         };
         // TODO: See https://docs.anilist.co/guide/rate-limiting.
         // "The API is currently in a degraded state and is limited to 30 requests per minute."
@@ -50,13 +51,13 @@ impl AniListSeriesFeed {
 
     async fn request(
         &self,
-        series_id: &str,
+        source_id: &str,
         query: &str,
     ) -> Result<serde_json::Value, SeriesFeedError> {
-        let series_id_num = Self::validate_id(series_id)?;
+        let source_id_num = Self::validate_id(source_id)?;
         let json = serde_json::json!({
             "query": query,
-            "variables": { "id": series_id_num }
+            "variables": { "id": source_id_num }
         });
 
         let request = self.base.client.post(&self.base.info.api_url).json(&json);
@@ -96,26 +97,26 @@ impl AniListSeriesFeed {
         self.base.client.execute(req).await
     }
 
-    /// Validate series_id format (should be numeric for AniList)
-    fn validate_id(series_id: &str) -> Result<i32, SeriesFeedError> {
-        let series_id_num =
-            series_id
+    /// Validate source_id format (should be numeric for AniList)
+    fn validate_id(source_id: &str) -> Result<i32, SeriesFeedError> {
+        let source_id_num =
+            source_id
                 .parse::<i32>()
-                .map_err(|_| SeriesFeedError::InvalidSeriesId {
-                    series_id: series_id.to_string(),
+                .map_err(|_| SeriesFeedError::InvalidSourceId {
+                    source_id: source_id.to_string(),
                 })?;
-        Ok(series_id_num)
+        Ok(source_id_num)
     }
 }
 
 #[async_trait]
-impl SeriesFeed for AniListSeriesFeed {
-    async fn get_latest(&self, id: &str) -> Result<SeriesLatest, SeriesFeedError> {
+impl Feed for AniListSeriesFeed {
+    async fn fetch_latest(&self, id: &str) -> Result<FeedItem, SeriesFeedError> {
         debug!(
-            "Fetching latest from {} for series_id: {id}",
+            "Fetching latest from {} for source_id: {id}",
             self.base.info.name
         );
-        let series_id = id.to_string();
+        let source_id = id.to_string();
 
         let query = r#"
         query ($id: Int) {
@@ -126,13 +127,13 @@ impl SeriesFeed for AniListSeriesFeed {
           }
         }
         "#;
-        let response_json = self.request(&series_id, query).await?;
+        let response_json = self.request(&source_id, query).await?;
 
         // Extract fields
         let airing_schedule = response_json["data"]["AiringSchedule"]
             .as_object()
-            .ok_or_else(|| SeriesFeedError::SeriesLatestNotFound {
-                series_id: series_id.clone(),
+            .ok_or_else(|| SeriesFeedError::ItemNotFound {
+                source_id: source_id.clone(),
             })?;
 
         let timestamp_s =
@@ -147,7 +148,7 @@ impl SeriesFeed for AniListSeriesFeed {
                 message: format!("Invalid data.airingSchedule.airingAt: {timestamp_s}"),
             })?;
 
-        let latest = airing_schedule
+        let title = airing_schedule
             .get("episode")
             .ok_or_else(|| SeriesFeedError::MissingField {
                 field: "data.AiringSchedule.episode".to_string(),
@@ -164,23 +165,23 @@ impl SeriesFeed for AniListSeriesFeed {
         let published = DateTime::from_timestamp(timestamp, 0)
             .ok_or_else(|| SeriesFeedError::InvalidTimestamp { timestamp })?;
 
-        info!("Successfully fetched anime for series_id: {series_id}");
+        info!("Successfully fetched anime for source_id: {source_id}");
 
-        Ok(SeriesLatest {
+        Ok(FeedItem {
             id,
-            url: self.get_url_from_id(&series_id),
-            series_id,
-            latest,
+            url: self.get_url_from_id(&source_id),
+            source_id,
+            title,
             published,
         })
     }
 
-    async fn get_info(&self, id: &str) -> Result<SeriesItem, SeriesFeedError> {
+    async fn fetch_source(&self, id: &str) -> Result<FeedSource, SeriesFeedError> {
         debug!(
-            "Fetching info from {} for series_id: {id}",
+            "Fetching info from {} for source_id: {id}",
             self.base.info.name
         );
-        let series_id = id.to_string();
+        let source_id = id.to_string();
 
         let query = r#"
             query ($id: Int) {
@@ -193,16 +194,16 @@ impl SeriesFeed for AniListSeriesFeed {
               }
             }
         "#;
-        let response_json = self.request(&series_id, query).await?;
+        let response_json = self.request(&source_id, query).await?;
 
         // Extract fields
         let media = response_json["data"]["Media"].as_object().ok_or_else(|| {
-            SeriesFeedError::SeriesItemNotFound {
-                series_id: series_id.clone(),
+            SeriesFeedError::SourceNotFound {
+                source_id: source_id.clone(),
             }
         })?;
 
-        let title = media["title"]["romaji"]
+        let name = media["title"]["romaji"]
             .as_str()
             .unwrap_or("Unknown")
             .to_string();
@@ -212,18 +213,18 @@ impl SeriesFeed for AniListSeriesFeed {
             .unwrap_or("Unknown")
             .to_string();
 
-        let cover_url = Some(
+        let image_url = Some(
             media["coverImage"]["extraLarge"]
                 .as_str()
                 .unwrap_or("Unknown")
                 .to_string(),
         );
 
-        Ok(SeriesItem {
-            id: series_id,
-            title,
+        Ok(FeedSource {
+            id: source_id,
+            name,
             url: self.get_url_from_id(id),
-            cover_url,
+            image_url,
             description,
         })
     }

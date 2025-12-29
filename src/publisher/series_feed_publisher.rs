@@ -20,6 +20,7 @@ use serenity::all::CreateTextDisplay;
 use serenity::all::CreateThumbnail;
 use serenity::all::CreateUnfurledMediaItem;
 use serenity::all::MessageFlags;
+use tokio::time::Sleep;
 use tokio::time::sleep;
 
 use crate::database::Database;
@@ -97,18 +98,16 @@ impl SeriesFeedPublisher {
 
         // Get all feeds containing tag "series"
         let feeds = self.db.feed_table.select_all_by_tag("series").await?;
+        let feeds_len = feeds.len();
         info!("Found {} feeds to check.", feeds.len());
 
-        // Use .max(1) to prevent division by zero
-        let feeds_count = feeds.len().max(1) as u64;
-        let interval = Duration::from_millis(self.poll_interval.as_millis() as u64 / feeds_count);
         for feed in feeds {
             let id = feed.id;
             let name = feed.name.clone();
             if let Err(e) = self.check_feed(feed).await {
                 error!("Error checking feed id `{id}` ({name}): {e:?}");
             };
-            sleep(interval).await;
+            Self::check_feed_wait(feeds_len, &self.poll_interval).await;
         }
 
         debug!("Finished checking for feed updates.");
@@ -150,10 +149,10 @@ impl SeriesFeedPublisher {
         // NOTE: Should've been checked already in commands.rs
 
         // Fetch current state from source
-        let new_latest = match series_feed.get_latest(series_id).await {
+        let new_latest = match series_feed.fetch_latest(series_id).await {
             Ok(series) => series,
             Err(e) => {
-                if matches!(e, SeriesFeedError::FinishedSeries { .. }) {
+                if matches!(e, SeriesFeedError::SourceFinished { .. }) {
                     info!(
                         "Feed {} is finished. Removing from database.",
                         self.get_feed_desc(&feed)
@@ -170,11 +169,11 @@ impl SeriesFeedPublisher {
         debug!(
             "Current version for {}: {}",
             self.get_feed_desc(&feed),
-            new_latest.latest
+            new_latest.title
         );
 
         // Check if version changed
-        if new_latest.latest == old_latest.description {
+        if new_latest.title == old_latest.description {
             debug!("No new version for {}.", self.get_feed_desc(&feed));
             return Ok(());
         }
@@ -182,14 +181,14 @@ impl SeriesFeedPublisher {
             "New version found for {}: {} -> {}",
             self.get_feed_desc(&feed),
             old_latest.description,
-            new_latest.latest
+            new_latest.title
         );
 
         // Insert new version into database
         let new_feed_item = FeedItemModel {
             id: 0, // Will be set by database
             feed_id: feed.id,
-            description: new_latest.latest.clone(),
+            description: new_latest.title.clone(),
             published: new_latest.published,
         };
         self.db.feed_item_table.replace(&new_feed_item).await?;
@@ -241,10 +240,10 @@ Published on <t:{}>
 **[Open in browser ↗]({})**",
             feed.name,
             feed_desc,
-            feed_info.feed_type,
+            feed_info.feed_item_name,
             old_feed_item.description,
             old_feed_item.published.timestamp(),
-            feed_info.feed_type,
+            feed_info.feed_item_name,
             new_feed_item.description,
             new_feed_item.published.timestamp(),
             feed.url
@@ -270,5 +269,32 @@ Published on <t:{}>
         CreateMessage::new()
             .flags(MessageFlags::IS_COMPONENTS_V2)
             .components(vec![CreateComponent::Container(container)])
+    }
+
+    fn check_feed_wait(feeds_length: usize, poll_interval: &Duration) -> Sleep {
+        sleep(Self::calculate_feed_interval(feeds_length, poll_interval))
+    }
+
+    fn calculate_feed_interval(feeds_length: usize, poll_interval: &Duration) -> Duration {
+        let feeds_count = feeds_length.max(1) as u64;
+        Duration::from_millis(poll_interval.as_millis() as u64 / feeds_count)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_feed_interval_calculation() {
+        assert_eq!(
+            SeriesFeedPublisher::calculate_feed_interval(10, &Duration::from_secs(60)),
+            Duration::from_secs(6)
+        );
+
+        assert_eq!(
+            SeriesFeedPublisher::calculate_feed_interval(0, &Duration::from_secs(60)),
+            Duration::from_secs(60) // Division by 1 when length is 0
+        );
     }
 }
