@@ -8,9 +8,9 @@ use sqlx::sqlite::SqliteConnectOptions;
 use crate::database::table::FeedItemTable;
 use crate::database::table::FeedSubscriptionTable;
 use crate::database::table::FeedTable;
+use crate::database::table::ServerSettingsTable;
 use crate::database::table::SubscriberTable;
 use crate::database::table::TableBase;
-use crate::database::table::ServerSettingsTable;
 
 pub mod error;
 pub mod model;

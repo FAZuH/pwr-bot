@@ -9,10 +9,10 @@ use crate::database::error::DatabaseError;
 use crate::database::model::FeedItemModel;
 use crate::database::model::FeedModel;
 use crate::database::model::FeedSubscriptionModel;
-use crate::database::model::SubscriberModel;
-use crate::database::model::SubscriberType;
 use crate::database::model::ServerSettings;
 use crate::database::model::ServerSettingsModel;
+use crate::database::model::SubscriberModel;
+use crate::database::model::SubscriberType;
 use crate::database::table::Table;
 use crate::feed::error::FeedError;
 use crate::feed::error::SeriesFeedError;
@@ -218,16 +218,8 @@ impl FeedSubscriptionService {
         Ok(subscriber)
     }
 
-    pub async fn get_server_settings(
-        &self,
-        guild_id: u64,
-    ) -> Result<ServerSettings, ServiceError> {
-        match self
-            .db
-            .server_settings_table
-            .select(&guild_id)
-            .await
-        {
+    pub async fn get_server_settings(&self, guild_id: u64) -> Result<ServerSettings, ServiceError> {
+        match self.db.server_settings_table.select(&guild_id).await {
             Ok(model) => Ok(model.settings.0),
             Err(DatabaseError::BackendError(sqlx::Error::RowNotFound)) => {
                 Ok(ServerSettings::default())

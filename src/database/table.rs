@@ -6,9 +6,9 @@ use crate::database::error::DatabaseError;
 use crate::database::model::FeedItemModel;
 use crate::database::model::FeedModel;
 use crate::database::model::FeedSubscriptionModel;
+use crate::database::model::ServerSettingsModel;
 use crate::database::model::SubscriberModel;
 use crate::database::model::SubscriberType;
-use crate::database::model::ServerSettingsModel;
 
 pub struct BaseTable {
     pub pool: SqlitePool,
@@ -39,21 +39,33 @@ pub trait Table<T, ID>: TableBase {
 
 // Helper trait to handle binding parameters, especially for casting u64 to i64 for SQLite
 pub trait BindParam<'q> {
-    fn bind_param<O>(self, query: sqlx::query::QueryAs<'q, sqlx::Sqlite, O, SqliteArguments<'q>>) -> sqlx::query::QueryAs<'q, sqlx::Sqlite, O, SqliteArguments<'q>>;
-    fn bind_param_q(self, query: sqlx::query::Query<'q, sqlx::Sqlite, SqliteArguments<'q>>) -> sqlx::query::Query<'q, sqlx::Sqlite, SqliteArguments<'q>>;
+    fn bind_param<O>(
+        self,
+        query: sqlx::query::QueryAs<'q, sqlx::Sqlite, O, SqliteArguments<'q>>,
+    ) -> sqlx::query::QueryAs<'q, sqlx::Sqlite, O, SqliteArguments<'q>>;
+    fn bind_param_q(
+        self,
+        query: sqlx::query::Query<'q, sqlx::Sqlite, SqliteArguments<'q>>,
+    ) -> sqlx::query::Query<'q, sqlx::Sqlite, SqliteArguments<'q>>;
 }
 
 macro_rules! impl_bind_param {
     ($t:ty) => {
         impl<'q> BindParam<'q> for $t {
-            fn bind_param<O>(self, query: sqlx::query::QueryAs<'q, sqlx::Sqlite, O, SqliteArguments<'q>>) -> sqlx::query::QueryAs<'q, sqlx::Sqlite, O, SqliteArguments<'q>> {
+            fn bind_param<O>(
+                self,
+                query: sqlx::query::QueryAs<'q, sqlx::Sqlite, O, SqliteArguments<'q>>,
+            ) -> sqlx::query::QueryAs<'q, sqlx::Sqlite, O, SqliteArguments<'q>> {
                 query.bind(self)
             }
-            fn bind_param_q(self, query: sqlx::query::Query<'q, sqlx::Sqlite, SqliteArguments<'q>>) -> sqlx::query::Query<'q, sqlx::Sqlite, SqliteArguments<'q>> {
+            fn bind_param_q(
+                self,
+                query: sqlx::query::Query<'q, sqlx::Sqlite, SqliteArguments<'q>>,
+            ) -> sqlx::query::Query<'q, sqlx::Sqlite, SqliteArguments<'q>> {
                 query.bind(self)
             }
         }
-    }
+    };
 }
 
 // Implement for reference types that are passed to .bind()
@@ -65,21 +77,35 @@ impl_bind_param!(&'q SubscriberType);
 impl_bind_param!(&'q chrono::DateTime<chrono::Utc>);
 
 // For Json
-impl<'q, T: serde::Serialize + for<'a> serde::Deserialize<'a> + Send + Sync + 'static> BindParam<'q> for &'q sqlx::types::Json<T> {
-    fn bind_param<O>(self, query: sqlx::query::QueryAs<'q, sqlx::Sqlite, O, SqliteArguments<'q>>) -> sqlx::query::QueryAs<'q, sqlx::Sqlite, O, SqliteArguments<'q>> {
+impl<'q, T: serde::Serialize + for<'a> serde::Deserialize<'a> + Send + Sync + 'static> BindParam<'q>
+    for &'q sqlx::types::Json<T>
+{
+    fn bind_param<O>(
+        self,
+        query: sqlx::query::QueryAs<'q, sqlx::Sqlite, O, SqliteArguments<'q>>,
+    ) -> sqlx::query::QueryAs<'q, sqlx::Sqlite, O, SqliteArguments<'q>> {
         query.bind(self)
     }
-    fn bind_param_q(self, query: sqlx::query::Query<'q, sqlx::Sqlite, SqliteArguments<'q>>) -> sqlx::query::Query<'q, sqlx::Sqlite, SqliteArguments<'q>> {
+    fn bind_param_q(
+        self,
+        query: sqlx::query::Query<'q, sqlx::Sqlite, SqliteArguments<'q>>,
+    ) -> sqlx::query::Query<'q, sqlx::Sqlite, SqliteArguments<'q>> {
         query.bind(self)
     }
 }
 
 // Special case for u64 (casting to i64)
 impl<'q> BindParam<'q> for &'q u64 {
-    fn bind_param<O>(self, query: sqlx::query::QueryAs<'q, sqlx::Sqlite, O, SqliteArguments<'q>>) -> sqlx::query::QueryAs<'q, sqlx::Sqlite, O, SqliteArguments<'q>> {
+    fn bind_param<O>(
+        self,
+        query: sqlx::query::QueryAs<'q, sqlx::Sqlite, O, SqliteArguments<'q>>,
+    ) -> sqlx::query::QueryAs<'q, sqlx::Sqlite, O, SqliteArguments<'q>> {
         query.bind(*self as i64)
     }
-    fn bind_param_q(self, query: sqlx::query::Query<'q, sqlx::Sqlite, SqliteArguments<'q>>) -> sqlx::query::Query<'q, sqlx::Sqlite, SqliteArguments<'q>> {
+    fn bind_param_q(
+        self,
+        query: sqlx::query::Query<'q, sqlx::Sqlite, SqliteArguments<'q>>,
+    ) -> sqlx::query::Query<'q, sqlx::Sqlite, SqliteArguments<'q>> {
         query.bind(*self as i64)
     }
 }
@@ -156,8 +182,8 @@ macro_rules! impl_table {
                 let mut query = sqlx::query_as(concat!(
                         "INSERT INTO ", $table, " (", $cols, ") VALUES (", $vals, ") RETURNING ", stringify!($pk)
                     ));
-                
-                $( 
+
+                $(
                     query = BindParam::bind_param(&model.$field, query);
                 )+
 
@@ -170,7 +196,7 @@ macro_rules! impl_table {
                         "UPDATE ", $table, " SET ", $update_set, " WHERE ", stringify!($pk), " = ?"
                     ));
 
-                $( 
+                $(
                     query = BindParam::bind_param_q(&model.$field, query);
                 )+
                 query = BindParam::bind_param_q(&model.$pk, query);
@@ -190,8 +216,8 @@ macro_rules! impl_table {
                 let mut query = sqlx::query_as(concat!(
                         "REPLACE INTO ", $table, " (", $cols, ") VALUES (", $vals, ") RETURNING ", stringify!($pk)
                     ));
-                
-                $( 
+
+                $(
                     query = BindParam::bind_param(&model.$field, query);
                 )+
 
