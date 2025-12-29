@@ -1,5 +1,6 @@
 /// Cog to manage feed subscriptions
 use std::fmt::Display;
+use std::str::FromStr;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -35,6 +36,7 @@ use crate::bot::error::BotError;
 use crate::database::model::ServerSettings;
 use crate::database::model::SubscriberModel;
 use crate::database::model::SubscriberType;
+use crate::error::AppError;
 use crate::service::feed_subscription_service::SubscribeResult;
 use crate::service::feed_subscription_service::SubscriberTarget;
 use crate::service::feed_subscription_service::UnsubscribeResult;
@@ -108,13 +110,17 @@ impl FeedsCog {
 
         ctx.defer().await?;
 
-        let guild_id = ctx.guild_id().unwrap(); // Safe because of guild_only
-        let guild_id_u64 = guild_id.get();
+        let guild_id = ctx
+            .guild_id()
+            .ok_or_else(|| AppError::AssertionError {
+                msg: "Cannot get guild id".to_string(),
+            })?
+            .get();
 
         let mut settings = ctx
             .data()
             .feed_subscription_service
-            .get_server_settings(guild_id_u64)
+            .get_server_settings(guild_id)
             .await?;
 
         let msg_handle = ctx.send(FeedsCog::create_settings_reply(&settings)).await?;
@@ -127,14 +133,41 @@ impl FeedsCog {
             .stream();
 
         while let Some(interaction) = collector.next().await {
-            if let ComponentInteractionDataKind::ChannelSelect { values } = &interaction.data.kind
-                && let Some(channel_id) = values.first()
-            {
-                settings.channel_id = Some(channel_id.to_string());
-                ctx.data()
-                    .feed_subscription_service
-                    .update_server_settings(guild_id_u64, settings.clone())
-                    .await?;
+            match &interaction.data.kind {
+                ComponentInteractionDataKind::ChannelSelect { values }
+                    if interaction.data.custom_id == "server_settings_channel" =>
+                {
+                    if let Some(channel_id) = values.first() {
+                        settings.channel_id = Some(channel_id.to_string());
+                        ctx.data()
+                            .feed_subscription_service
+                            .update_server_settings(guild_id, settings.clone())
+                            .await?;
+                    }
+                }
+                ComponentInteractionDataKind::RoleSelect { values }
+                    if interaction.data.custom_id == "server_settings_sub_role" =>
+                {
+                    if let Some(role_id) = values.first() {
+                        settings.subscribe_role_id = Some(role_id.to_string());
+                        ctx.data()
+                            .feed_subscription_service
+                            .update_server_settings(guild_id, settings.clone())
+                            .await?;
+                    }
+                }
+                ComponentInteractionDataKind::RoleSelect { values }
+                    if interaction.data.custom_id == "server_settings_unsub_role" =>
+                {
+                    if let Some(role_id) = values.first() {
+                        settings.unsubscribe_role_id = Some(role_id.to_string());
+                        ctx.data()
+                            .feed_subscription_service
+                            .update_server_settings(guild_id, settings.clone())
+                            .await?;
+                    }
+                }
+                _ => {}
             }
 
             interaction
@@ -158,48 +191,69 @@ impl FeedsCog {
     }
 
     fn create_settings_components(settings: &ServerSettings) -> Vec<CreateComponent<'_>> {
-        let channel_text = match &settings.channel_id {
-            Some(id) => format!("<#{}>", id),
-            None => "Not configured".to_string(),
+        let notification_channel_text = "### Notification Channel\n\n> Select which channel to publish server feed notifications to.";
+        let subscribe_permissions_text = "### Subscribe Permissions\n\n> Select who are able to subscribe new feeds to this server.";
+        let unsubscribe_permissions_text = "### Unsubscribe Permissions\n\n> Select who are able to unsubscribe existing feeds from this server.";
+
+        // Helper to parsing ids
+        let parse_ids = |id: &Option<String>| {
+            id.as_ref()
+                .and_then(|id| poise::serenity_prelude::RoleId::from_str(id).ok())
+                .into_iter()
+                .collect::<Vec<_>>()
+        };
+        let parse_channel_ids = |id: &Option<String>| {
+            id.as_ref()
+                .and_then(|id| {
+                    poise::serenity_prelude::ChannelId::from_str(id)
+                        .ok()
+                        .map(GenericChannelId::from)
+                })
+                .into_iter()
+                .collect::<Vec<_>>()
         };
 
-        let text = CreateTextDisplay::new(format!(
-            "### Server Feed Settings
-
-**Notification Channel**: {}
-",
-            channel_text
-        ));
-
-        let container = CreateContainer::new(vec![CreateContainerComponent::TextDisplay(text)]);
-
-        // Channel Select Menu
-        let default_channels = settings
-            .channel_id
-            .as_ref()
-            .map(|id| {
-                use std::str::FromStr;
-                let cid = poise::serenity_prelude::ChannelId::from_str(id).unwrap_or_default();
-                GenericChannelId::from(cid)
-            })
-            .into_iter()
-            .collect::<Vec<_>>();
-
-        let select_menu = CreateSelectMenu::new(
+        let channel_select = CreateSelectMenu::new(
             "server_settings_channel",
             CreateSelectMenuKind::Channel {
                 channel_types: Some(vec![ChannelType::Text, ChannelType::News].into()),
-                default_channels: Some(default_channels.into()),
+                default_channels: Some(parse_channel_ids(&settings.channel_id).into()),
             },
         )
-        .placeholder("Select a channel for feed notifications");
+        .placeholder("Select a notification channel");
 
-        let action_row = CreateActionRow::SelectMenu(select_menu);
+        let sub_role_select = CreateSelectMenu::new(
+            "server_settings_sub_role",
+            CreateSelectMenuKind::Role {
+                default_roles: Some(parse_ids(&settings.subscribe_role_id).into()),
+            },
+        )
+        .placeholder("Select role for subscribe permission");
 
-        vec![
-            CreateComponent::Container(container),
-            CreateComponent::ActionRow(action_row),
-        ]
+        let unsub_role_select = CreateSelectMenu::new(
+            "server_settings_unsub_role",
+            CreateSelectMenuKind::Role {
+                default_roles: Some(parse_ids(&settings.unsubscribe_role_id).into()),
+            },
+        )
+        .placeholder("Select role for unsubscribe permission");
+
+        let container = CreateComponent::Container(CreateContainer::new(vec![
+            CreateContainerComponent::TextDisplay(CreateTextDisplay::new(
+                notification_channel_text,
+            )),
+            CreateContainerComponent::ActionRow(CreateActionRow::SelectMenu(channel_select)),
+            CreateContainerComponent::TextDisplay(CreateTextDisplay::new(
+                subscribe_permissions_text,
+            )),
+            CreateContainerComponent::ActionRow(CreateActionRow::SelectMenu(sub_role_select)),
+            CreateContainerComponent::TextDisplay(CreateTextDisplay::new(
+                unsubscribe_permissions_text,
+            )),
+            CreateContainerComponent::ActionRow(CreateActionRow::SelectMenu(unsub_role_select)),
+        ]));
+
+        vec![container]
     }
 
     /// Subscribe to a feed
@@ -566,7 +620,7 @@ impl FeedsCog {
             })?;
 
         let ret = match send_into {
-            SendInto::Server => SubscriberModel::format_guild_target_id(guild_id),
+            SendInto::Server => guild_id.to_string(),
             SendInto::DM => ctx.author().id.to_string(),
         };
         Ok(ret)

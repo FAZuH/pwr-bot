@@ -121,6 +121,8 @@ async fn test_server_settings_service() {
     // 2. Update settings
     let new_settings = ServerSettings {
         channel_id: Some("chan_456".to_string()),
+        subscribe_role_id: Some("role_123".to_string()),
+        unsubscribe_role_id: Some("role_456".to_string()),
     };
     service
         .update_server_settings(guild_id, new_settings.clone())
@@ -133,6 +135,8 @@ async fn test_server_settings_service() {
         .await
         .expect("Failed to get updated settings");
     assert_eq!(fetched.channel_id, Some("chan_456".to_string()));
+    assert_eq!(fetched.subscribe_role_id, Some("role_123".to_string()));
+    assert_eq!(fetched.unsubscribe_role_id, Some("role_456".to_string()));
 
     common::teardown_db(db_path).await;
 }

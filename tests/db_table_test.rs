@@ -387,6 +387,8 @@ async fn test_server_settings_table_crud() {
     // 1. Insert (using replace actually, or insert)
     let settings = ServerSettings {
         channel_id: Some("123".to_string()),
+        subscribe_role_id: None,
+        unsubscribe_role_id: None,
     };
     let model = ServerSettingsModel {
         guild_id: 1234567890,
