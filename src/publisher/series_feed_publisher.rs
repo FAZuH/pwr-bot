@@ -237,7 +237,7 @@ Published on <t:{}>
 **New {}**: {}
 Published on <t:{}>
 
-**[Open in browser ↗]({})",
+**[Open in browser ↗]({})**",
             feed.name,
             feed_desc,
             feed_info.feed_item_name,
