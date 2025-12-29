@@ -42,7 +42,7 @@ impl AniListSeriesFeed {
         // "The API is currently in a degraded state and is limited to 30 requests per minute."
         // We will use the ratelimit headers `X-RateLimit-Limit` and `X-RateLimit-Remaining` when
         // the API is fully restored.
-        let limiter = RateLimiter::direct(Quota::per_second(NonZeroU32::new(30).unwrap()));
+        let limiter = RateLimiter::direct(Quota::per_minute(NonZeroU32::new(30).unwrap()));
         Self {
             base: BaseFeed::new(info, reqwest::Client::new()),
             limiter,
