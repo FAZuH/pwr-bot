@@ -20,6 +20,7 @@ use serenity::all::CreateTextDisplay;
 use serenity::all::CreateThumbnail;
 use serenity::all::CreateUnfurledMediaItem;
 use serenity::all::MessageFlags;
+use tokio::time::Sleep;
 use tokio::time::sleep;
 
 use crate::database::Database;
@@ -97,18 +98,16 @@ impl SeriesFeedPublisher {
 
         // Get all feeds containing tag "series"
         let feeds = self.db.feed_table.select_all_by_tag("series").await?;
+        let feeds_len = feeds.len();
         info!("Found {} feeds to check.", feeds.len());
 
-        // Use .max(1) to prevent division by zero
-        let feeds_count = feeds.len().max(1) as u64;
-        let interval = Duration::from_millis(self.poll_interval.as_millis() as u64 / feeds_count);
         for feed in feeds {
             let id = feed.id;
             let name = feed.name.clone();
             if let Err(e) = self.check_feed(feed).await {
                 error!("Error checking feed id `{id}` ({name}): {e:?}");
             };
-            sleep(interval).await;
+            Self::check_feed_wait(feeds_len, &self.poll_interval).await;
         }
 
         debug!("Finished checking for feed updates.");
@@ -270,5 +269,32 @@ Published on <t:{}>
         CreateMessage::new()
             .flags(MessageFlags::IS_COMPONENTS_V2)
             .components(vec![CreateComponent::Container(container)])
+    }
+
+    fn check_feed_wait(feeds_length: usize, poll_interval: &Duration) -> Sleep {
+        sleep(Self::calculate_feed_interval(feeds_length, poll_interval))
+    }
+
+    fn calculate_feed_interval(feeds_length: usize, poll_interval: &Duration) -> Duration {
+        let feeds_count = feeds_length.max(1) as u64;
+        Duration::from_millis(poll_interval.as_millis() as u64 / feeds_count)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_feed_interval_calculation() {
+        assert_eq!(
+            SeriesFeedPublisher::calculate_feed_interval(10, &Duration::from_secs(60)),
+            Duration::from_secs(6)
+        );
+
+        assert_eq!(
+            SeriesFeedPublisher::calculate_feed_interval(0, &Duration::from_secs(60)),
+            Duration::from_secs(60) // Division by 1 when length is 0
+        );
     }
 }
