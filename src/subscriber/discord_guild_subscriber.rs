@@ -13,6 +13,7 @@ use crate::bot::Bot;
 use crate::database::Database;
 use crate::database::model::SubscriberModel;
 use crate::database::model::SubscriberType;
+use crate::database::table::Table;
 use crate::event::Event;
 use crate::event::feed_update_event::FeedUpdateEvent;
 use crate::subscriber::Subscriber;
@@ -54,10 +55,15 @@ impl DiscordGuildSubscriber {
         sub: &SubscriberModel,
         message: CreateMessage<'_>,
     ) -> anyhow::Result<()> {
-        let (guild_id, channel_id) = sub.parse_guild_target_id()?;
+        let guild_id_str = &sub.target_id;
+        let guild_id = GuildId::from_str(guild_id_str)?;
 
-        let guild_id = GuildId::from_str(guild_id)?;
-        let channel_id = ChannelId::from_str(channel_id)?;
+        let settings = self.db.server_settings_table.select(guild_id_str).await?;
+        let channel_id_str = settings.settings.0.channel_id.ok_or_else(|| {
+            anyhow::anyhow!("No channel configured for guild {}", guild_id_str)
+        })?;
+
+        let channel_id = ChannelId::from_str(&channel_id_str)?;
 
         debug!("Fetching channel id `{}`.", channel_id);
         let channel = channel_id
@@ -71,7 +77,7 @@ impl DiscordGuildSubscriber {
         channel.send_message(&self.bot.http, message).await?;
 
         info!(
-            "Successfully sent DM to fetched user id `{}` ({}).",
+            "Successfully sent message to fetched channel id `{}` ({}).",
             channel_id, channel.base.name
         );
         Ok(())
