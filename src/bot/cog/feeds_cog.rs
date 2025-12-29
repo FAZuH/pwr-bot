@@ -108,9 +108,6 @@ impl FeedsCog {
 
         let send_into = send_into.unwrap_or(SendInto::DM);
 
-        let subscriber_type = SubscriberType::from(&send_into);
-        let target_id = FeedsCog::get_target_id(ctx, &send_into)?;
-
         let urls_split: Vec<&str> = links.split(',').map(|s| s.trim()).collect();
         if urls_split.len() > 10 {
             Err(BotError::InvalidCommandArgument {
@@ -119,6 +116,18 @@ impl FeedsCog {
                     .to_string(),
             })?
         };
+
+        let subscriber_type = SubscriberType::from(&send_into);
+        let target_id = FeedsCog::get_target_id(ctx, &send_into)?;
+        let target = SubscriberTarget {
+            subscriber_type,
+            target_id: target_id.clone(),
+        };
+        let subscriber = ctx
+            .data()
+            .series_feed_subscription_service
+            .get_or_create_subscriber(&target)
+            .await?;
 
         let mut states: Vec<String> = vec!["⏳ ﻿ Processing...".to_string(); urls_split.len()];
 
@@ -129,15 +138,10 @@ impl FeedsCog {
 
         // NOTE: Can be done concurrently
         for (i, url) in urls_split.iter().enumerate() {
-            let target = SubscriberTarget {
-                subscriber_type,
-                target_id: target_id.clone(),
-            };
-
             let sub_result = ctx
                 .data()
                 .series_feed_subscription_service
-                .subscribe(url, target)
+                .subscribe(url, &subscriber)
                 .await;
 
             states[i] = sub_result.map_or_else(|e| format!("❌ {e}"), |res| res.to_string());
@@ -182,9 +186,6 @@ impl FeedsCog {
 
         let send_into = send_into.unwrap_or(SendInto::DM);
 
-        let subscriber_type = SubscriberType::from(&send_into);
-        let target_id = FeedsCog::get_target_id(ctx, &send_into)?;
-
         let urls_split: Vec<&str> = links.split(',').map(|s| s.trim()).collect();
         if urls_split.len() > 10 {
             Err(BotError::InvalidCommandArgument {
@@ -193,6 +194,18 @@ impl FeedsCog {
                     .to_string(),
             })?
         };
+
+        let subscriber_type = SubscriberType::from(&send_into);
+        let target_id = FeedsCog::get_target_id(ctx, &send_into)?;
+        let target = SubscriberTarget {
+            subscriber_type,
+            target_id: target_id.clone(),
+        };
+        let subscriber = ctx
+            .data()
+            .series_feed_subscription_service
+            .get_or_create_subscriber(&target)
+            .await?;
 
         let mut states: Vec<String> = vec!["⏳ ﻿ Processing...".to_string(); urls_split.len()];
 
@@ -203,15 +216,10 @@ impl FeedsCog {
 
         // NOTE: Can be done concurrently
         for (i, url) in urls_split.iter().enumerate() {
-            let target = SubscriberTarget {
-                subscriber_type,
-                target_id: target_id.clone(),
-            };
-
             let unsub_result = ctx
                 .data()
                 .series_feed_subscription_service
-                .unsubscribe(url, target)
+                .unsubscribe(url, &subscriber)
                 .await;
 
             states[i] = unsub_result.map_or_else(|e| format!("❌ {e}"), |res| res.to_string());
@@ -272,7 +280,7 @@ impl FeedsCog {
         let items = ctx
             .data()
             .series_feed_subscription_service
-            .get_subscription_count(subscriber.id)
+            .get_subscription_count(&subscriber)
             .await?;
 
         // Create navigation component
@@ -284,7 +292,7 @@ impl FeedsCog {
             .send(
                 CreateReply::new()
                     .flags(MessageFlags::IS_COMPONENTS_V2)
-                    .components(FeedsCog::create_page(&ctx, &target, &navigation).await?),
+                    .components(FeedsCog::create_page(&ctx, &subscriber, &navigation).await?),
             )
             .await?;
 
@@ -294,7 +302,7 @@ impl FeedsCog {
                     ctx,
                     CreateReply::new()
                         .flags(MessageFlags::IS_COMPONENTS_V2)
-                        .components(FeedsCog::create_page(&ctx, &target, &navigation).await?),
+                        .components(FeedsCog::create_page(&ctx, &subscriber, &navigation).await?),
                 )
                 .await?;
         }
@@ -304,14 +312,14 @@ impl FeedsCog {
 
     async fn create_page<'a>(
         ctx: &Context<'_>,
-        target: &SubscriberTarget,
+        subscriber: &SubscriberModel,
         navigation: &'a PageNavigationComponent<'_>,
     ) -> anyhow::Result<Vec<CreateComponent<'a>>> {
         let subscriptions = ctx
             .data()
             .series_feed_subscription_service
             .list_paginated_subscriptions(
-                target,
+                subscriber,
                 navigation.pagination.current_page,
                 navigation.pagination.per_page,
             )
