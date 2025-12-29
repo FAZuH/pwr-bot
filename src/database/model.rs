@@ -72,13 +72,6 @@ pub struct SubscriberModel {
     pub target_id: String,
 }
 
-impl SubscriberModel {
-    /// Formats a guild_id into the target_id format used by Guild subscribers.
-    pub fn format_guild_target_id(guild_id: impl Display) -> String {
-        guild_id.to_string()
-    }
-}
-
 /// Links subscribers to the feeds they're monitoring.
 ///
 /// Junction table implementing the many-to-many relationship between feeds
@@ -106,16 +99,4 @@ pub struct ServerSettingsModel {
 pub struct ServerSettings {
     #[serde(default)]
     pub channel_id: Option<String>,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_format_guild_target_id() {
-        let gid = "123456";
-        let target = SubscriberModel::format_guild_target_id(gid);
-        assert_eq!(target, "123456");
-    }
 }
