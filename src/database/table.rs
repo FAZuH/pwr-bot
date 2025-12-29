@@ -7,6 +7,7 @@ use crate::database::model::FeedModel;
 use crate::database::model::FeedSubscriptionModel;
 use crate::database::model::SubscriberModel;
 use crate::database::model::SubscriberType;
+use crate::database::model::ServerSettingsModel;
 
 pub struct BaseTable {
     pub pool: SqlitePool,
@@ -464,5 +465,102 @@ impl FeedSubscriptionTable {
             .execute(&self.base.pool)
             .await?;
         Ok(())
+    }
+}
+
+// ============================================================================
+// ServerSettingsTable
+// ============================================================================
+
+pub struct ServerSettingsTable {
+    base: BaseTable,
+}
+
+impl ServerSettingsTable {
+    pub fn new(pool: SqlitePool) -> Self {
+        Self {
+            base: BaseTable::new(pool),
+        }
+    }
+}
+
+#[async_trait]
+impl TableBase for ServerSettingsTable {
+    async fn create_table(&self) -> Result<(), DatabaseError> {
+        // Table created via migration
+        Ok(())
+    }
+
+    async fn drop_table(&self) -> Result<(), DatabaseError> {
+        sqlx::query("DROP TABLE IF EXISTS server_settings")
+            .execute(&self.base.pool)
+            .await?;
+        Ok(())
+    }
+
+    async fn delete_all(&self) -> Result<(), DatabaseError> {
+        sqlx::query("DELETE FROM server_settings")
+            .execute(&self.base.pool)
+            .await?;
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl Table<ServerSettingsModel, String> for ServerSettingsTable {
+    async fn select_all(&self) -> Result<Vec<ServerSettingsModel>, DatabaseError> {
+        Ok(sqlx::query_as::<_, ServerSettingsModel>("SELECT * FROM server_settings")
+            .fetch_all(&self.base.pool)
+            .await?)
+    }
+
+    async fn select(&self, id: &String) -> Result<ServerSettingsModel, DatabaseError> {
+        Ok(
+            sqlx::query_as::<_, ServerSettingsModel>(
+                "SELECT * FROM server_settings WHERE guild_id = ? LIMIT 1",
+            )
+            .bind(id)
+            .fetch_one(&self.base.pool)
+            .await?,
+        )
+    }
+
+    async fn insert(&self, model: &ServerSettingsModel) -> Result<String, DatabaseError> {
+        let row: (String,) = sqlx::query_as(
+            "INSERT INTO server_settings (guild_id, settings) VALUES (?, ?) RETURNING guild_id",
+        )
+        .bind(&model.guild_id)
+        .bind(&model.settings)
+        .fetch_one(&self.base.pool)
+        .await?;
+        Ok(row.0)
+    }
+
+    async fn update(&self, model: &ServerSettingsModel) -> Result<(), DatabaseError> {
+        sqlx::query("UPDATE server_settings SET settings = ? WHERE guild_id = ?")
+            .bind(&model.settings)
+            .bind(&model.guild_id)
+            .execute(&self.base.pool)
+            .await?;
+        Ok(())
+    }
+
+    async fn delete(&self, id: &String) -> Result<(), DatabaseError> {
+        sqlx::query("DELETE FROM server_settings WHERE guild_id = ?")
+            .bind(id)
+            .execute(&self.base.pool)
+            .await?;
+        Ok(())
+    }
+
+    async fn replace(&self, model: &ServerSettingsModel) -> Result<String, DatabaseError> {
+        let row: (String,) = sqlx::query_as(
+            "REPLACE INTO server_settings (guild_id, settings) VALUES (?, ?) RETURNING guild_id",
+        )
+        .bind(&model.guild_id)
+        .bind(&model.settings)
+        .fetch_one(&self.base.pool)
+        .await?;
+        Ok(row.0)
     }
 }
