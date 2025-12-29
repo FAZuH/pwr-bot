@@ -724,7 +724,128 @@ impl FeedsCog {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use serenity::all::GuildId;
+    use serenity::all::UserId;
 
-        Ok(ret)
+    use super::*;
+
+    #[test]
+    fn test_get_target_id_dm_returns_author_id() {
+        let result = FeedsCog::get_target_id_inner(
+            Some(GuildId::new(999)),
+            UserId::new(12345),
+            &SendInto::DM,
+        );
+        assert_eq!(result.unwrap(), "12345");
+    }
+
+    #[test]
+    fn test_get_target_id_server_returns_guild_id() {
+        let result = FeedsCog::get_target_id_inner(
+            Some(GuildId::new(999)),
+            UserId::new(12345),
+            &SendInto::Server,
+        );
+        assert_eq!(result.unwrap(), "999");
+    }
+
+    #[test]
+    fn test_get_target_id_server_without_guild_fails() {
+        let result = FeedsCog::get_target_id_inner(None, UserId::new(12345), &SendInto::Server);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            BotError::InvalidCommandArgument { parameter, reason } => {
+                assert_eq!(parameter, "Server");
+                assert!(reason.contains("have to be in a server"));
+            }
+            _ => panic!("Expected InvalidCommandArgument error"),
+        }
+    }
+
+    #[test]
+    fn test_send_into_to_subscriber_type() {
+        assert!(matches!(
+            SubscriberType::from(&SendInto::DM),
+            SubscriberType::Dm
+        ));
+        assert!(matches!(
+            SubscriberType::from(&SendInto::Server),
+            SubscriberType::Guild
+        ));
+    }
+
+    #[test]
+    fn test_send_into_display() {
+        assert_eq!(SendInto::DM.to_string(), "dm");
+        assert_eq!(SendInto::Server.to_string(), "server");
+    }
+
+    #[test]
+    fn test_check_permissions_admin_always_passes() {
+        let result = FeedsCog::check_permissions_inner(true, &[], &None, false);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_check_permissions_with_required_role() {
+        let role_id = RoleId::new(123);
+        let user_roles = vec![role_id];
+        let result =
+            FeedsCog::check_permissions_inner(false, &user_roles, &Some("123".to_string()), false);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_check_permissions_without_required_role_fails() {
+        let user_roles = vec![RoleId::new(456)];
+        let result =
+            FeedsCog::check_permissions_inner(false, &user_roles, &Some("123".to_string()), false);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_check_permissions_manage_guild_when_no_role_configured() {
+        let result = FeedsCog::check_permissions_inner(false, &[], &None, true);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_check_permissions_fails_without_any_permissions() {
+        let result = FeedsCog::check_permissions_inner(false, &[], &None, false);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            BotError::PermissionDenied(msg) => {
+                assert!(msg.contains("Manage Server"));
+            }
+            _ => panic!("Expected PermissionDenied error"),
+        }
+    }
+
+    #[test]
+    fn test_validate_urls_accepts_valid_count() {
+        let urls = vec!["url1", "url2", "url3"];
+        assert!(FeedsCog::validate_urls(&urls).is_ok());
+    }
+
+    #[test]
+    fn test_validate_urls_rejects_too_many() {
+        let urls = vec!["url"; 11];
+        let result = FeedsCog::validate_urls(&urls);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            BotError::InvalidCommandArgument { parameter, reason } => {
+                assert_eq!(parameter, "links");
+                assert!(reason.contains("no more than 10"));
+            }
+            _ => panic!("Expected InvalidCommandArgument error"),
+        }
+    }
+
+    #[test]
+    fn test_validate_urls_accepts_exactly_ten() {
+        let urls = vec!["url"; 10];
+        assert!(FeedsCog::validate_urls(&urls).is_ok());
     }
 }
