@@ -410,6 +410,7 @@ mod server_settings_table_tests {
         ServerSettingsModel {
             guild_id,
             settings: sqlx::types::Json(ServerSettings {
+                enabled: Some(true),
                 channel_id: Some(chan.to_string()),
                 subscribe_role_id: None,
                 unsubscribe_role_id: None,

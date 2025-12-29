@@ -120,6 +120,7 @@ async fn test_server_settings_service() {
 
     // 2. Update settings
     let new_settings = ServerSettings {
+        enabled: Some(false),
         channel_id: Some("chan_456".to_string()),
         subscribe_role_id: Some("role_123".to_string()),
         unsubscribe_role_id: Some("role_456".to_string()),
