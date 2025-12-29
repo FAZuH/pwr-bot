@@ -76,10 +76,13 @@ impl MangaDexSeriesFeed {
             && let Some(error_array) = errors.as_array()
             && let Some(first_error) = error_array.first()
         {
-            let message = first_error["message"]
-                .as_str()
+            let message = first_error
+                .get("detail")
+                .and_then(|v| v.as_str())
+                .or_else(|| first_error.get("title").and_then(|v| v.as_str()))
                 .unwrap_or("Unknown API error")
                 .to_string();
+
             return Err(SeriesFeedError::ApiError { message });
         }
         Ok(())
@@ -138,28 +141,37 @@ impl MangaDexSeriesFeed {
             .to_string())
     }
 
-    async fn get_cover_url(&self, id: &str) -> Result<String, SeriesFeedError> {
-        debug!(
-            "Fetching cover from {} for source_id: {id}",
-            self.base.info.name
-        );
-        let request = self
-            .base
-            .client
-            .get(format!("{}/cover/{id}", self.base.info.api_url));
-
-        let resp = self.send_get_json(request).await?;
-        let attr = self.get_attr_from_data(&resp)?;
-
-        let cover_filename = attr
-            .get("fileName")
+    async fn get_cover_url(
+        &self,
+        manga_id: &str,
+        data: &Value,
+    ) -> Result<String, SeriesFeedError> {
+        let relationships = data
+            .get("relationships")
+            .and_then(|v| v.as_array())
             .ok_or_else(|| SeriesFeedError::MissingField {
-                field: "data.attributes.fileName".to_string(),
-            })?
-            .to_string();
+                field: "data.relationships".to_string(),
+            })?;
 
-        let ret = format!("https://uploads.mangadex.org/covers/{id}/{cover_filename}");
-        Ok(ret)
+        let cover_art = relationships
+            .iter()
+            .find(|rel| rel.get("type").and_then(|v| v.as_str()) == Some("cover_art"))
+            .ok_or_else(|| SeriesFeedError::MissingField {
+                field: "cover_art relationship".to_string(),
+            })?;
+
+        let cover_filename = cover_art
+            .get("attributes")
+            .and_then(|v| v.as_object())
+            .and_then(|attr| attr.get("fileName"))
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| SeriesFeedError::MissingField {
+                field: "cover_art.attributes.fileName".to_string(),
+            })?;
+
+        Ok(format!(
+            "https://uploads.mangadex.org/covers/{manga_id}/{cover_filename}"
+        ))
     }
 
     fn validate_uuid(&self, uuid: &String) -> Result<(), SeriesFeedError> {
@@ -208,17 +220,17 @@ impl Feed for MangaDexSeriesFeed {
         let source_id = id.to_string();
         self.validate_uuid(&source_id.clone())?;
 
-        let request = self
-            .base
-            .client
-            .get(format!("{}/manga/{id}", self.base.info.api_url));
+        let request = self.base.client.get(format!(
+            "{}/manga/{id}?includes[]=cover_art",
+            self.base.info.api_url
+        ));
 
         let resp = self.send_get_json(request).await?;
         let data = self.get_data_from_resp(&resp)?;
         let attr = self.get_attr_from_data(data)?;
         let name = self.get_title_from_attr(attr)?;
         let description = self.get_description_from_attr(attr)?;
-        let image_url = Some(self.get_cover_url(&source_id).await?);
+        let image_url = Some(self.get_cover_url(&source_id, data).await?);
 
         info!("Successfully fetched latest manga for source_id: {source_id}");
 

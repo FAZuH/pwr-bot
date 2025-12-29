@@ -12,11 +12,12 @@ services:
       - logs:/app/logs
     environment:
       - POLL_INTERVAL=${POLL_INTERVAL:-180}
-      - DATABASE_PATH=${DATABASE_PATH:-data/data.db}
+      - DATABASE_PATH=${DATABASE_PATH:-./data/data.db}
       - DATABASE_URL=${DATABASE_URL:-sqlite://data/data.db}
       - DISCORD_TOKEN=${DISCORD_TOKEN:?error}
       - RUST_LOG=${RUST_LOG:-pwr_bot=info}
       - ADMIN_ID=${ADMIN_ID:?error}
+      - LOGS_PATH=${LOGS_PATH:-./logs}
     restart: unless-stopped
       
 volumes:
