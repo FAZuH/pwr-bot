@@ -240,10 +240,10 @@ Published on <t:{}>
 **[Open in browser ↗]({})",
             feed.name,
             feed_desc,
-            feed_info.feed_type,
+            feed_info.feed_item_name,
             old_feed_item.description,
             old_feed_item.published.timestamp(),
-            feed_info.feed_type,
+            feed_info.feed_item_name,
             new_feed_item.description,
             new_feed_item.published.timestamp(),
             feed.url

@@ -72,7 +72,7 @@ impl Bot {
         let framework: Box<Framework<Data, Error>> =
             Box::new(poise::Framework::builder().options(options).build());
 
-        let series_feed_subscription_service = Arc::new(FeedSubscriptionService {
+        let feed_subscription_service = Arc::new(FeedSubscriptionService {
             db: db.clone(),
             feeds: feeds.clone(),
         });
@@ -82,7 +82,7 @@ impl Bot {
             config,
             db,
             feeds,
-            feed_subscription_service: series_feed_subscription_service,
+            feed_subscription_service,
         });
 
         let client = ClientBuilder::new(token, intents)

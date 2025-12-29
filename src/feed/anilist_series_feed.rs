@@ -30,7 +30,7 @@ impl AniListSeriesFeed {
     pub fn new() -> Self {
         let info = FeedInfo {
             name: "AniList".to_string(),
-            feed_type: "Episode".to_string(),
+            feed_item_name: "Episode".to_string(),
             api_hostname: "graphql.anilist.co".to_string(),
             api_domain: "anilist.co".to_string(),
             api_url: "https://graphql.anilist.co".to_string(),

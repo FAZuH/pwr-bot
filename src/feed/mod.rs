@@ -16,7 +16,7 @@ pub struct FeedInfo {
     /// The name of the feed source, e.g., "MangaDex", "AniList"
     pub name: String,
     /// What do you call the item this feed publishes? e.g., "Episode", "Chapter"
-    pub feed_type: String,
+    pub feed_item_name: String,
     /// api.feed.tld
     pub api_hostname: String,
     /// feed.tld
@@ -90,7 +90,7 @@ mod tests {
     fn test_get_nth_path_from_url() {
         let info = FeedInfo {
             name: "Test".to_string(),
-            feed_type: "Type".to_string(),
+            feed_item_name: "Type".to_string(),
             api_hostname: "test.com".to_string(),
             api_domain: "test.com".to_string(),
             api_url: "https://test.com".to_string(),

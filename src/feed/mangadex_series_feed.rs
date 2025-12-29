@@ -48,7 +48,7 @@ impl MangaDexSeriesFeed {
 
         let info = FeedInfo {
             name: "MangaDex".to_string(),
-            feed_type: "Chapter".to_string(),
+            feed_item_name: "Chapter".to_string(),
             api_hostname: "api.mangadex.org".to_string(),
             api_domain: "mangadex.org".to_string(),
             api_url: "https://api.mangadex.org".to_string(),

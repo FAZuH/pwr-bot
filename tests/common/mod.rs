@@ -54,7 +54,7 @@ impl MockFeed {
     pub fn new(domain: &str) -> Self {
         let info = FeedInfo {
             name: "MockFeed".to_string(),
-            feed_type: "Chapter".to_string(),
+            feed_item_name: "Chapter".to_string(),
             api_hostname: format!("api.{}", domain),
             api_domain: domain.to_string(),
             api_url: format!("https://api.{}", domain),
