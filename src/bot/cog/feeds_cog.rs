@@ -9,8 +9,13 @@ use poise::CreateReply;
 use poise::ReplyHandle;
 use poise::serenity_prelude::AutocompleteChoice;
 use poise::serenity_prelude::CreateAutocompleteResponse;
+use serenity::all::ChannelType;
+use serenity::all::ComponentInteractionDataKind;
+use serenity::all::CreateActionRow;
 use serenity::all::CreateComponent;
 use serenity::all::CreateContainer;
+use serenity::all::CreateSelectMenu;
+use serenity::all::CreateSelectMenuKind;
 use serenity::all::CreateContainerComponent;
 use serenity::all::CreateSection;
 use serenity::all::CreateSectionAccessory;
@@ -19,12 +24,15 @@ use serenity::all::CreateTextDisplay;
 use serenity::all::CreateThumbnail;
 use serenity::all::CreateUnfurledMediaItem;
 use serenity::all::MessageFlags;
+use serenity::all::GenericChannelId;
+use serenity::all::ComponentInteractionCollector;
 
 use crate::bot::cog::Context;
 use crate::bot::cog::Error;
 use crate::bot::components::PageNavigationComponent;
 use crate::bot::components::Pagination;
 use crate::bot::error::BotError;
+use crate::database::model::ServerSettings;
 use crate::database::model::SubscriberModel;
 use crate::database::model::SubscriberType;
 use crate::service::feed_subscription_service::SubscribeResult;
@@ -93,6 +101,112 @@ impl Display for UnsubscribeResult {
 pub struct FeedsCog;
 
 impl FeedsCog {
+    /// Configure server feed settings
+    #[poise::command(slash_command, guild_only)]
+    pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
+        use serenity::futures::StreamExt;
+
+        ctx.defer().await?;
+
+        let guild_id = ctx.guild_id().unwrap(); // Safe because of guild_only
+        let guild_id_str = guild_id.to_string();
+
+        let mut settings = ctx
+            .data()
+            .feed_subscription_service
+            .get_server_settings(&guild_id_str)
+            .await?;
+
+        let msg_handle = ctx
+            .send(FeedsCog::create_settings_reply(&settings))
+            .await?;
+
+        let msg = msg_handle
+            .message()
+            .await?
+            .into_owned();
+
+        let mut collector = ComponentInteractionCollector::new(ctx.serenity_context())
+            .message_id(msg.id)
+            .timeout(Duration::from_secs(60))
+            .stream();
+
+        while let Some(interaction) = collector.next().await {
+            if let ComponentInteractionDataKind::ChannelSelect { values } = &interaction.data.kind {
+                if let Some(channel_id) = values.first() {
+                    settings.channel_id = Some(channel_id.to_string());
+                    ctx.data()
+                        .feed_subscription_service
+                        .update_server_settings(&guild_id_str, settings.clone())
+                        .await?;
+                }
+            }
+
+            interaction
+                .create_response(
+                    ctx.http(),
+                    poise::serenity_prelude::CreateInteractionResponse::UpdateMessage(
+                        poise::serenity_prelude::CreateInteractionResponseMessage::new()
+                            .components(FeedsCog::create_settings_components(&settings)),
+                    ),
+                )
+                .await?;
+        }
+
+        Ok(())
+    }
+
+    fn create_settings_reply(settings: &ServerSettings) -> CreateReply<'_> {
+        CreateReply::new()
+            .flags(MessageFlags::IS_COMPONENTS_V2)
+            .components(FeedsCog::create_settings_components(settings))
+    }
+
+    fn create_settings_components(settings: &ServerSettings) -> Vec<CreateComponent<'_>> {
+        let channel_text = match &settings.channel_id {
+            Some(id) => format!("<#{}>", id),
+            None => "Not configured".to_string(),
+        };
+
+        let text = CreateTextDisplay::new(format!(
+            "### Server Feed Settings
+
+**Notification Channel**: {}
+",
+            channel_text
+        ));
+
+        let container = CreateContainer::new(vec![CreateContainerComponent::TextDisplay(text)]);
+
+        // Channel Select Menu
+        let default_channels = settings
+            .channel_id
+            .as_ref()
+            .map(|id| {
+                use std::str::FromStr;
+                let cid = poise::serenity_prelude::ChannelId::from_str(id).unwrap_or_default();
+                GenericChannelId::from(cid)
+            })
+            .into_iter()
+            .collect::<Vec<_>>();
+
+        let select_menu = CreateSelectMenu::new(
+            "server_settings_channel",
+            CreateSelectMenuKind::Channel {
+                channel_types: Some(vec![ChannelType::Text, ChannelType::News].into()),
+                default_channels: Some(default_channels.into()),
+            },
+        )
+        .placeholder("Select a channel for feed notifications");
+
+        let action_row = CreateActionRow::SelectMenu(select_menu);
+
+        vec![
+            CreateComponent::Container(container),
+            CreateComponent::ActionRow(action_row),
+        ]
+    }
+
     /// Subscribe to a feed
     #[poise::command(slash_command)]
     pub async fn subscribe(
@@ -447,7 +561,7 @@ impl FeedsCog {
     }
 
     fn get_target_id(ctx: Context<'_>, send_into: &SendInto) -> Result<String, BotError> {
-        let channel_id = ctx.channel_id();
+        let _channel_id = ctx.channel_id();
         let guild_id = ctx
             .guild_id()
             .ok_or_else(|| BotError::InvalidCommandArgument {
@@ -457,7 +571,7 @@ impl FeedsCog {
             })?;
 
         let ret = match send_into {
-            SendInto::Server => SubscriberModel::format_guild_target_id(guild_id, channel_id),
+            SendInto::Server => SubscriberModel::format_guild_target_id(guild_id),
             SendInto::DM => ctx.author().id.to_string(),
         };
         Ok(ret)
