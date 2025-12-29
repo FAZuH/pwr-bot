@@ -1,4 +1,4 @@
-pub mod commands;
+pub mod cog;
 pub mod components;
 pub mod error;
 
@@ -24,7 +24,8 @@ use serenity::all::Token;
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
 
-use crate::bot::commands::Commands;
+use crate::bot::cog::feeds_cog::FeedsCog;
+use crate::bot::cog::owner_cog::OwnerCog;
 use crate::config::Config;
 use crate::database::Database;
 use crate::feed::feeds::Feeds;
@@ -48,11 +49,11 @@ impl Bot {
         info!("Initializing bot...");
         let options = FrameworkOptions::<Data, Error> {
             commands: vec![
-                Commands::subscribe(),
-                Commands::unsubscribe(),
-                Commands::subscriptions(),
-                Commands::dump_db(),
-                Commands::register(),
+                FeedsCog::subscribe(),
+                FeedsCog::unsubscribe(),
+                FeedsCog::subscriptions(),
+                OwnerCog::dump_db(),
+                OwnerCog::register(),
             ],
             on_error: |error| Box::pin(Bot::on_error(error)),
             prefix_options: poise::PrefixFrameworkOptions {

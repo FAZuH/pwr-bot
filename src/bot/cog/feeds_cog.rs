@@ -9,7 +9,6 @@ use poise::ChoiceParameter;
 use poise::CreateReply;
 use poise::ReplyHandle;
 use poise::serenity_prelude::AutocompleteChoice;
-use poise::serenity_prelude::CreateAttachment;
 use poise::serenity_prelude::CreateAutocompleteResponse;
 use serenity::all::CreateComponent;
 use serenity::all::CreateContainer;
@@ -22,7 +21,8 @@ use serenity::all::CreateThumbnail;
 use serenity::all::CreateUnfurledMediaItem;
 use serenity::all::MessageFlags;
 
-use crate::bot::Data;
+use crate::bot::cog::Context;
+use crate::bot::cog::Error;
 use crate::bot::components::PageNavigationComponent;
 use crate::bot::components::Pagination;
 use crate::bot::error::BotError;
@@ -32,9 +32,6 @@ use crate::database::table::Table;
 use crate::service::series_feed_subscription_service::SubscribeResult;
 use crate::service::series_feed_subscription_service::SubscriberTarget;
 use crate::service::series_feed_subscription_service::UnsubscribeResult;
-
-pub type Error = Box<dyn std::error::Error + Send + Sync>;
-pub type Context<'a> = poise::Context<'a, Data, Error>;
 
 #[derive(ChoiceParameter)]
 enum SendInto {
@@ -95,9 +92,9 @@ impl Display for UnsubscribeResult {
     }
 }
 
-pub struct Commands;
+pub struct FeedsCog;
 
-impl Commands {
+impl FeedsCog {
     /// Subscribe to an anime/manga series
     #[poise::command(slash_command)]
     pub async fn subscribe(
@@ -112,7 +109,7 @@ impl Commands {
         let send_into = send_into.unwrap_or(SendInto::DM);
 
         let subscriber_type = SubscriberType::from(&send_into);
-        let target_id = Commands::get_target_id(ctx, &send_into)?;
+        let target_id = FeedsCog::get_target_id(ctx, &send_into)?;
 
         let urls_split: Vec<&str> = links.split(',').map(|s| s.trim()).collect();
         if urls_split.len() > 10 {
@@ -186,7 +183,7 @@ impl Commands {
         let send_into = send_into.unwrap_or(SendInto::DM);
 
         let subscriber_type = SubscriberType::from(&send_into);
-        let target_id = Commands::get_target_id(ctx, &send_into)?;
+        let target_id = FeedsCog::get_target_id(ctx, &send_into)?;
 
         let urls_split: Vec<&str> = links.split(',').map(|s| s.trim()).collect();
         if urls_split.len() > 10 {
@@ -256,7 +253,7 @@ impl Commands {
         let sent_into = sent_into.unwrap_or(SendInto::DM);
 
         // Create target
-        let target_id = Commands::get_target_id(ctx, &sent_into)?;
+        let target_id = FeedsCog::get_target_id(ctx, &sent_into)?;
         let subscriber_type = SubscriberType::from(&sent_into);
         let target = SubscriberTarget {
             subscriber_type,
@@ -287,7 +284,7 @@ impl Commands {
             .send(
                 CreateReply::new()
                     .flags(MessageFlags::IS_COMPONENTS_V2)
-                    .components(Commands::create_page(&ctx, &target, &navigation).await?),
+                    .components(FeedsCog::create_page(&ctx, &target, &navigation).await?),
             )
             .await?;
 
@@ -297,7 +294,7 @@ impl Commands {
                     ctx,
                     CreateReply::new()
                         .flags(MessageFlags::IS_COMPONENTS_V2)
-                        .components(Commands::create_page(&ctx, &target, &navigation).await?),
+                        .components(FeedsCog::create_page(&ctx, &target, &navigation).await?),
                 )
                 .await?;
         }
@@ -357,45 +354,6 @@ impl Commands {
             let buttons = navigation.create_buttons();
             Ok(vec![container, buttons])
         }
-    }
-
-    #[poise::command(prefix_command, owners_only, hide_in_help)]
-    pub async fn register(ctx: Context<'_>) -> Result<(), Error> {
-        poise::builtins::register_application_commands_buttons(ctx).await?;
-        Ok(())
-    }
-
-    #[poise::command(prefix_command, owners_only, hide_in_help)]
-    pub async fn dump_db(ctx: Context<'_>) -> Result<(), Error> {
-        ctx.defer().await?;
-        let data = ctx.data();
-
-        let feeds = data.db.feed_table.select_all().await?;
-        let versions = data.db.feed_item_table.select_all().await?;
-        let subscribers = data.db.subscriber_table.select_all().await?;
-        let subscriptions = data.db.feed_subscription_table.select_all().await?;
-
-        let reply = CreateReply::default()
-            .content("Database dump:")
-            .attachment(CreateAttachment::bytes(
-                serde_json::to_string_pretty(&feeds)?,
-                "feeds.json",
-            ))
-            .attachment(CreateAttachment::bytes(
-                serde_json::to_string_pretty(&versions)?,
-                "feed_versions.json",
-            ))
-            .attachment(CreateAttachment::bytes(
-                serde_json::to_string_pretty(&subscribers)?,
-                "subscribers.json",
-            ))
-            .attachment(CreateAttachment::bytes(
-                serde_json::to_string_pretty(&subscriptions)?,
-                "subscriptions.json",
-            ));
-
-        ctx.send(reply).await?;
-        Ok(())
     }
 
     async fn autocomplete_subscriptions<'a>(
