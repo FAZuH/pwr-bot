@@ -1,3 +1,16 @@
+## [0.1.14](https://github.com/FAZuH/pwr-bot/compare/v0.1.13...v0.1.14) (2025-12-29)
+
+
+### Bug Fixes
+
+* **feed:** API error when subscribing to feeds [skip ci] ([87d1ce1](https://github.com/FAZuH/pwr-bot/commit/87d1ce1a33ece59f90c0341b1ff8b452284674d4))
+* **feed:** Wrong AniListSeriesFeed rate limiter ([6cca972](https://github.com/FAZuH/pwr-bot/commit/6cca972ef4dc8c9f19c22cdc0112055c4827a0ea))
+
+
+### Documentation
+
+* Add LOGS_PATH to docs [skip ci] ([5dceca7](https://github.com/FAZuH/pwr-bot/commit/5dceca7d198d65f949e7a8c53265d3dac87bba3f))
+
 ## [0.1.13](https://github.com/FAZuH/pwr-bot/compare/v0.1.12...v0.1.13) (2025-12-29)
 
 
@@ -36,6 +49,4 @@
 ### Performance Improvements
 
 * Improve API requests and database queries ([#10](https://github.com/FAZuH/pwr-bot/issues/10)) ([4cc9e0d](https://github.com/FAZuH/pwr-bot/commit/4cc9e0d5715c8ab355dca394df34d10ffb896228))
-
-## [0.1.9](https://github.com/FAZuH/pwr-bot/compare/v0.1.8...v0.1.9) (2025-12-28)
 
