@@ -3,4 +3,10 @@
 pub enum BotError {
     #[error("Invalid argument for {parameter}: {reason}")]
     InvalidCommandArgument { parameter: String, reason: String },
+
+    #[error("Permission denied: {0}")]
+    PermissionDenied(String),
+
+    #[error("Configuration error: {0}")]
+    ConfigurationError(String),
 }
