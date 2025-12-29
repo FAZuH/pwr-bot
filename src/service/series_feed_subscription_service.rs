@@ -140,7 +140,7 @@ impl SeriesFeedSubscriptionService {
     //     let subscriber = self.get_or_create_subscriber()
     // }
 
-    async fn get_or_create_feed(&self, url: &str) -> Result<FeedModel, ServiceError> {
+    pub async fn get_or_create_feed(&self, url: &str) -> Result<FeedModel, ServiceError> {
         let source =
             self.feeds
                 .get_feed_by_url(url)
