@@ -10,6 +10,7 @@ use poise::CreateReply;
 use poise::ReplyHandle;
 use poise::serenity_prelude::AutocompleteChoice;
 use poise::serenity_prelude::CreateAutocompleteResponse;
+use serenity::all::ChannelId;
 use serenity::all::ChannelType;
 use serenity::all::ComponentInteractionCollector;
 use serenity::all::ComponentInteractionDataKind;
@@ -22,6 +23,7 @@ use serenity::all::CreateSectionAccessory;
 use serenity::all::CreateSectionComponent;
 use serenity::all::CreateSelectMenu;
 use serenity::all::CreateSelectMenuKind;
+use serenity::all::CreateSelectMenuOption;
 use serenity::all::CreateTextDisplay;
 use serenity::all::CreateThumbnail;
 use serenity::all::CreateUnfurledMediaItem;
@@ -130,48 +132,73 @@ impl FeedsCog {
         let msg_handle = ctx.send(FeedsCog::create_settings_reply(&settings)).await?;
 
         let msg = msg_handle.message().await?.into_owned();
+        let author_id = ctx.author().id;
 
         let mut collector = ComponentInteractionCollector::new(ctx.serenity_context())
             .message_id(msg.id)
-            .timeout(Duration::from_secs(60))
+            .author_id(author_id)
+            .timeout(Duration::from_secs(120))
             .stream();
 
         while let Some(interaction) = collector.next().await {
+            // Check permissions for each interaction
+            if let Err(e) = FeedsCog::check_guild_permissions(ctx, &None).await {
+                interaction
+                    .create_response(
+                        ctx.http(),
+                        poise::serenity_prelude::CreateInteractionResponse::Message(
+                            poise::serenity_prelude::CreateInteractionResponseMessage::new()
+                                .content(format!("❌ {}", e))
+                                .flags(MessageFlags::EPHEMERAL),
+                        ),
+                    )
+                    .await?;
+                continue;
+            }
+
+            let mut should_update = true;
+
             match &interaction.data.kind {
+                ComponentInteractionDataKind::StringSelect { values }
+                    if interaction.data.custom_id == "server_settings_enabled" =>
+                {
+                    if let Some(value) = values.first() {
+                        settings.enabled = Some(value == "true");
+                    }
+                }
                 ComponentInteractionDataKind::ChannelSelect { values }
                     if interaction.data.custom_id == "server_settings_channel" =>
                 {
-                    if let Some(channel_id) = values.first() {
-                        settings.channel_id = Some(channel_id.to_string());
-                        ctx.data()
-                            .feed_subscription_service
-                            .update_server_settings(guild_id, settings.clone())
-                            .await?;
-                    }
+                    settings.channel_id = values.first().map(|id| id.to_string());
                 }
                 ComponentInteractionDataKind::RoleSelect { values }
                     if interaction.data.custom_id == "server_settings_sub_role" =>
                 {
-                    if let Some(role_id) = values.first() {
-                        settings.subscribe_role_id = Some(role_id.to_string());
-                        ctx.data()
-                            .feed_subscription_service
-                            .update_server_settings(guild_id, settings.clone())
-                            .await?;
-                    }
+                    settings.subscribe_role_id = if values.is_empty() {
+                        None
+                    } else {
+                        values.first().map(|id| id.to_string())
+                    };
                 }
                 ComponentInteractionDataKind::RoleSelect { values }
                     if interaction.data.custom_id == "server_settings_unsub_role" =>
                 {
-                    if let Some(role_id) = values.first() {
-                        settings.unsubscribe_role_id = Some(role_id.to_string());
-                        ctx.data()
-                            .feed_subscription_service
-                            .update_server_settings(guild_id, settings.clone())
-                            .await?;
-                    }
+                    settings.unsubscribe_role_id = if values.is_empty() {
+                        None
+                    } else {
+                        values.first().map(|id| id.to_string())
+                    };
                 }
-                _ => {}
+                _ => {
+                    should_update = false;
+                }
+            }
+
+            if should_update {
+                ctx.data()
+                    .feed_subscription_service
+                    .update_server_settings(guild_id, settings.clone())
+                    .await?;
             }
 
             interaction
@@ -195,65 +222,98 @@ impl FeedsCog {
     }
 
     fn create_settings_components(settings: &ServerSettings) -> Vec<CreateComponent<'_>> {
-        let notification_channel_text = "### Notification Channel\n\n> Select which channel to publish server feed notifications to.";
-        let subscribe_permissions_text = "### Subscribe Permissions\n\n> Select who are able to subscribe new feeds to this server.";
-        let unsubscribe_permissions_text = "### Unsubscribe Permissions\n\n> Select who are able to unsubscribe existing feeds from this server.";
-
-        // Helper to parsing ids
-        let parse_ids = |id: &Option<String>| {
+        let parse_role_id = |id: &Option<String>| {
             id.as_ref()
-                .and_then(|id| poise::serenity_prelude::RoleId::from_str(id).ok())
+                .and_then(|id| RoleId::from_str(id).ok())
                 .into_iter()
                 .collect::<Vec<_>>()
         };
-        let parse_channel_ids = |id: &Option<String>| {
+        let parse_channel_id = |id: &Option<String>| {
             id.as_ref()
-                .and_then(|id| {
-                    poise::serenity_prelude::ChannelId::from_str(id)
-                        .ok()
-                        .map(GenericChannelId::from)
-                })
+                .and_then(|id| ChannelId::from_str(id).ok().map(GenericChannelId::from))
                 .into_iter()
                 .collect::<Vec<_>>()
         };
+        let is_enabled = settings.enabled.unwrap_or(true);
 
+        // Status section
+        let status_text = format!(
+            "## Server Feed Settings\n\n> 🛈  {}",
+            if is_enabled {
+                format!(
+                    "Feed notifications are currently active. Notifications will be sent to <#{}>",
+                    settings.channel_id.clone().unwrap_or("Unknown".to_string())
+                )
+            } else {
+                "Feed notifications are currently paused. No notifications will be sent until re-enabled.".to_string()
+            }
+        );
+        let enabled_select = CreateSelectMenu::new(
+            "server_settings_enabled",
+            CreateSelectMenuKind::String {
+                options: vec![
+                    CreateSelectMenuOption::new("🟢 Enabled", "true").default_selection(is_enabled),
+                    CreateSelectMenuOption::new("🔴 Disabled", "false")
+                        .default_selection(!is_enabled),
+                ]
+                .into(),
+            },
+        )
+        .placeholder("Toggle feed notifications");
+
+        // Channel section
+        let channel_text =
+            "### Notification Channel\n\n> 🛈  Choose where feed updates will be posted.";
         let channel_select = CreateSelectMenu::new(
             "server_settings_channel",
             CreateSelectMenuKind::Channel {
                 channel_types: Some(vec![ChannelType::Text, ChannelType::News].into()),
-                default_channels: Some(parse_channel_ids(&settings.channel_id).into()),
+                default_channels: Some(parse_channel_id(&settings.channel_id).into()),
             },
         )
-        .placeholder("Select a notification channel");
+        .placeholder(if settings.channel_id.is_some() {
+            "Change notification channel"
+        } else {
+            "⚠️ Required: Select a notification channel"
+        });
 
+        // Permissions section
+        let sub_role_text = "### Subscribe Permission\n\n> 🛈  Who can add new feeds to this server. Leave empty to allow users with \"Manage Server\" permission.";
         let sub_role_select = CreateSelectMenu::new(
             "server_settings_sub_role",
             CreateSelectMenuKind::Role {
-                default_roles: Some(parse_ids(&settings.subscribe_role_id).into()),
+                default_roles: Some(parse_role_id(&settings.subscribe_role_id).into()),
             },
         )
-        .placeholder("Select role for subscribe permission");
+        .min_values(0)
+        .placeholder(if settings.subscribe_role_id.is_some() {
+            "Change subscribe role"
+        } else {
+            "Optional: Select role for subscribe permission"
+        });
 
+        let unsub_role_text = "### Unsubscribe Permission\n\n> 🛈  Who can remove feeds from this server. Leave empty to allow users with \"Manage Server\" permission.";
         let unsub_role_select = CreateSelectMenu::new(
             "server_settings_unsub_role",
             CreateSelectMenuKind::Role {
-                default_roles: Some(parse_ids(&settings.unsubscribe_role_id).into()),
+                default_roles: Some(parse_role_id(&settings.unsubscribe_role_id).into()),
             },
         )
-        .placeholder("Select role for unsubscribe permission");
+        .min_values(0)
+        .placeholder(if settings.unsubscribe_role_id.is_some() {
+            "Change unsubscribe role"
+        } else {
+            "Optional: Select role for unsubscribe permission"
+        });
 
         let container = CreateComponent::Container(CreateContainer::new(vec![
-            CreateContainerComponent::TextDisplay(CreateTextDisplay::new(
-                notification_channel_text,
-            )),
+            CreateContainerComponent::TextDisplay(CreateTextDisplay::new(status_text)),
+            CreateContainerComponent::ActionRow(CreateActionRow::SelectMenu(enabled_select)),
+            CreateContainerComponent::TextDisplay(CreateTextDisplay::new(channel_text)),
             CreateContainerComponent::ActionRow(CreateActionRow::SelectMenu(channel_select)),
-            CreateContainerComponent::TextDisplay(CreateTextDisplay::new(
-                subscribe_permissions_text,
-            )),
+            CreateContainerComponent::TextDisplay(CreateTextDisplay::new(sub_role_text)),
             CreateContainerComponent::ActionRow(CreateActionRow::SelectMenu(sub_role_select)),
-            CreateContainerComponent::TextDisplay(CreateTextDisplay::new(
-                unsubscribe_permissions_text,
-            )),
+            CreateContainerComponent::TextDisplay(CreateTextDisplay::new(unsub_role_text)),
             CreateContainerComponent::ActionRow(CreateActionRow::SelectMenu(unsub_role_select)),
         ]));
 

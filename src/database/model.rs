@@ -96,6 +96,8 @@ pub struct ServerSettingsModel {
 #[derive(Serialize, Deserialize, Default, Clone, Debug)]
 pub struct ServerSettings {
     #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(default)]
     pub channel_id: Option<String>,
     #[serde(default)]
     pub subscribe_role_id: Option<String>,
