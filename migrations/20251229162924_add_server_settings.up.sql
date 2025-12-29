@@ -1,5 +1,5 @@
 CREATE TABLE IF NOT EXISTS server_settings (
-    guild_id TEXT PRIMARY KEY,
+    guild_id INTEGER PRIMARY KEY,
     settings TEXT NOT NULL
 );
 

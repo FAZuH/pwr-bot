@@ -220,12 +220,12 @@ impl FeedSubscriptionService {
 
     pub async fn get_server_settings(
         &self,
-        guild_id: &str,
+        guild_id: u64,
     ) -> Result<ServerSettings, ServiceError> {
         match self
             .db
             .server_settings_table
-            .select(&guild_id.to_string())
+            .select(&guild_id)
             .await
         {
             Ok(model) => Ok(model.settings.0),
@@ -238,11 +238,11 @@ impl FeedSubscriptionService {
 
     pub async fn update_server_settings(
         &self,
-        guild_id: &str,
+        guild_id: u64,
         settings: ServerSettings,
     ) -> Result<(), ServiceError> {
         let model = ServerSettingsModel {
-            guild_id: guild_id.to_string(),
+            guild_id,
             settings: sqlx::types::Json(settings),
         };
         self.db.server_settings_table.replace(&model).await?;

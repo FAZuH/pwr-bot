@@ -109,7 +109,7 @@ async fn test_server_settings_service() {
 
     use pwr_bot::database::model::ServerSettings;
 
-    let guild_id = "guild_123";
+    let guild_id: u64 = 1234567890;
 
     // 1. Get default settings
     let settings = service

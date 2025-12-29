@@ -57,8 +57,9 @@ impl DiscordGuildSubscriber {
     ) -> anyhow::Result<()> {
         let guild_id_str = &sub.target_id;
         let guild_id = GuildId::from_str(guild_id_str)?;
+        let guild_id_u64 = guild_id.get();
 
-        let settings = self.db.server_settings_table.select(guild_id_str).await?;
+        let settings = self.db.server_settings_table.select(&guild_id_u64).await?;
         let channel_id_str = settings.settings.0.channel_id.ok_or_else(|| {
             anyhow::anyhow!("No channel configured for guild {}", guild_id_str)
         })?;

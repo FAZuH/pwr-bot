@@ -97,7 +97,8 @@ pub struct FeedSubscriptionModel {
 #[derive(FromRow, Serialize, Deserialize, Default, Clone, Debug)]
 pub struct ServerSettingsModel {
     #[serde(default)]
-    pub guild_id: String,
+    #[sqlx(try_from = "i64")]
+    pub guild_id: u64,
     pub settings: sqlx::types::Json<ServerSettings>,
 }
 
