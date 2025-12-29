@@ -26,9 +26,11 @@ use serenity::all::CreateTextDisplay;
 use serenity::all::CreateThumbnail;
 use serenity::all::CreateUnfurledMediaItem;
 use serenity::all::GenericChannelId;
+use serenity::all::GuildId;
 use serenity::all::MessageFlags;
 use serenity::all::Permissions;
 use serenity::all::RoleId;
+use serenity::all::UserId;
 
 use crate::bot::cog::Context;
 use crate::bot::cog::Error;
@@ -290,13 +292,7 @@ impl FeedsCog {
         }
 
         let urls_split: Vec<&str> = links.split(',').map(|s| s.trim()).collect();
-        if urls_split.len() > 10 {
-            Err(BotError::InvalidCommandArgument {
-                parameter: "links".to_string(),
-                reason: "Too many links provided. Please provide no more than 10 links at a time."
-                    .to_string(),
-            })?
-        };
+        FeedsCog::validate_urls(&urls_split)?;
 
         let subscriber_type = SubscriberType::from(&send_into);
         let target_id = FeedsCog::get_target_id(ctx, &send_into)?;
@@ -386,13 +382,7 @@ impl FeedsCog {
         }
 
         let urls_split: Vec<&str> = links.split(',').map(|s| s.trim()).collect();
-        if urls_split.len() > 10 {
-            Err(BotError::InvalidCommandArgument {
-                parameter: "links".to_string(),
-                reason: "Too many links provided. Please provide no more than 10 links at a time."
-                    .to_string(),
-            })?
-        };
+        FeedsCog::validate_urls(&urls_split)?;
 
         let subscriber_type = SubscriberType::from(&send_into);
         let target_id = FeedsCog::get_target_id(ctx, &send_into)?;
@@ -659,50 +649,82 @@ impl FeedsCog {
             .permissions
             .ok_or_else(|| anyhow::anyhow!("Could not user retrieve permissions"))?;
 
-        if permissions.contains(Permissions::ADMINISTRATOR) {
+        Ok(FeedsCog::check_permissions_inner(
+            permissions.contains(Permissions::ADMINISTRATOR),
+            &member.roles,
+            required_role_id,
+            permissions.contains(Permissions::MANAGE_GUILD),
+        )?)
+    }
+
+    fn get_target_id(ctx: Context<'_>, send_into: &SendInto) -> Result<String, BotError> {
+        Self::get_target_id_inner(ctx.guild_id(), ctx.author().id, send_into)
+    }
+
+    fn get_target_id_inner(
+        guild_id: Option<GuildId>,
+        author_id: UserId,
+        send_into: &SendInto,
+    ) -> Result<String, BotError> {
+        match send_into {
+            SendInto::Server => {
+                let guild_id = guild_id.ok_or_else(|| BotError::InvalidCommandArgument {
+                    parameter: send_into.name().to_string(),
+                    reason: "You have to be in a server to do this command with send_into: server"
+                        .to_string(),
+                })?;
+                Ok(guild_id.to_string())
+            }
+            SendInto::DM => Ok(author_id.to_string()),
+        }
+    }
+
+    fn validate_urls(urls: &[&str]) -> Result<(), BotError> {
+        if urls.len() > 10 {
+            return Err(BotError::InvalidCommandArgument {
+                parameter: "links".to_string(),
+                reason: "Too many links provided. Please provide no more than 10 links at a time."
+                    .to_string(),
+            });
+        }
+        Ok(())
+    }
+
+    fn check_permissions_inner(
+        is_admin: bool,
+        user_roles: &[RoleId],
+        required_role_id: &Option<String>,
+        has_manage_guild: bool,
+    ) -> Result<(), BotError> {
+        if is_admin {
             return Ok(());
         }
 
         if let Some(role_id_str) = required_role_id {
             if let Ok(role_id) = RoleId::from_str(role_id_str)
-                && member.roles.contains(&role_id)
+                && user_roles.contains(&role_id)
             {
                 return Ok(());
             }
 
-            // Role is configured but user doesn't have it
             return Err(BotError::PermissionDenied(format!(
                 "You need the <@&{}> role to perform this action.",
                 role_id_str
-            ))
-            .into());
+            )));
         }
 
-        // No specific role configured, check for MANAGE_GUILD
-        if permissions.contains(Permissions::MANAGE_GUILD) {
+        if has_manage_guild {
             return Ok(());
         }
 
         Err(BotError::PermissionDenied(
             "You need the `Manage Server` permission or a configured role to perform this action."
                 .to_string(),
-        )
-        .into())
+        ))
     }
+}
 
-    fn get_target_id(ctx: Context<'_>, send_into: &SendInto) -> Result<String, BotError> {
-        let guild_id = ctx
-            .guild_id()
-            .ok_or_else(|| BotError::InvalidCommandArgument {
-                parameter: send_into.name().to_string(),
-                reason: "You have to be in a server to do this command with send_into: server"
-                    .to_string(),
-            })?;
 
-        let ret = match send_into {
-            SendInto::Server => guild_id.to_string(),
-            SendInto::DM => ctx.author().id.to_string(),
-        };
         Ok(ret)
     }
 }
