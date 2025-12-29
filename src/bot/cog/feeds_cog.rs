@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::fmt::Display;
 use std::time::Duration;
 use std::time::Instant;
@@ -9,7 +8,6 @@ use poise::ChoiceParameter;
 use poise::CreateReply;
 use poise::ReplyHandle;
 use poise::serenity_prelude::AutocompleteChoice;
-use poise::serenity_prelude::CreateAttachment;
 use poise::serenity_prelude::CreateAutocompleteResponse;
 use serenity::all::CreateComponent;
 use serenity::all::CreateContainer;
@@ -22,19 +20,16 @@ use serenity::all::CreateThumbnail;
 use serenity::all::CreateUnfurledMediaItem;
 use serenity::all::MessageFlags;
 
-use crate::bot::Data;
+use crate::bot::cog::Context;
+use crate::bot::cog::Error;
 use crate::bot::components::PageNavigationComponent;
 use crate::bot::components::Pagination;
 use crate::bot::error::BotError;
 use crate::database::model::SubscriberModel;
 use crate::database::model::SubscriberType;
-use crate::database::table::Table;
 use crate::service::series_feed_subscription_service::SubscribeResult;
 use crate::service::series_feed_subscription_service::SubscriberTarget;
 use crate::service::series_feed_subscription_service::UnsubscribeResult;
-
-pub type Error = Box<dyn std::error::Error + Send + Sync>;
-pub type Context<'a> = poise::Context<'a, Data, Error>;
 
 #[derive(ChoiceParameter)]
 enum SendInto {
@@ -95,9 +90,9 @@ impl Display for UnsubscribeResult {
     }
 }
 
-pub struct Commands;
+pub struct FeedsCog;
 
-impl Commands {
+impl FeedsCog {
     /// Subscribe to an anime/manga series
     #[poise::command(slash_command)]
     pub async fn subscribe(
@@ -111,9 +106,6 @@ impl Commands {
 
         let send_into = send_into.unwrap_or(SendInto::DM);
 
-        let subscriber_type = SubscriberType::from(&send_into);
-        let target_id = Commands::get_target_id(ctx, &send_into)?;
-
         let urls_split: Vec<&str> = links.split(',').map(|s| s.trim()).collect();
         if urls_split.len() > 10 {
             Err(BotError::InvalidCommandArgument {
@@ -122,6 +114,18 @@ impl Commands {
                     .to_string(),
             })?
         };
+
+        let subscriber_type = SubscriberType::from(&send_into);
+        let target_id = FeedsCog::get_target_id(ctx, &send_into)?;
+        let target = SubscriberTarget {
+            subscriber_type,
+            target_id: target_id.clone(),
+        };
+        let subscriber = ctx
+            .data()
+            .series_feed_subscription_service
+            .get_or_create_subscriber(&target)
+            .await?;
 
         let mut states: Vec<String> = vec!["⏳ ﻿ Processing...".to_string(); urls_split.len()];
 
@@ -132,15 +136,10 @@ impl Commands {
 
         // NOTE: Can be done concurrently
         for (i, url) in urls_split.iter().enumerate() {
-            let target = SubscriberTarget {
-                subscriber_type,
-                target_id: target_id.clone(),
-            };
-
             let sub_result = ctx
                 .data()
                 .series_feed_subscription_service
-                .subscribe(url, target)
+                .subscribe(url, &subscriber)
                 .await;
 
             states[i] = sub_result.map_or_else(|e| format!("❌ {e}"), |res| res.to_string());
@@ -185,9 +184,6 @@ impl Commands {
 
         let send_into = send_into.unwrap_or(SendInto::DM);
 
-        let subscriber_type = SubscriberType::from(&send_into);
-        let target_id = Commands::get_target_id(ctx, &send_into)?;
-
         let urls_split: Vec<&str> = links.split(',').map(|s| s.trim()).collect();
         if urls_split.len() > 10 {
             Err(BotError::InvalidCommandArgument {
@@ -196,6 +192,18 @@ impl Commands {
                     .to_string(),
             })?
         };
+
+        let subscriber_type = SubscriberType::from(&send_into);
+        let target_id = FeedsCog::get_target_id(ctx, &send_into)?;
+        let target = SubscriberTarget {
+            subscriber_type,
+            target_id: target_id.clone(),
+        };
+        let subscriber = ctx
+            .data()
+            .series_feed_subscription_service
+            .get_or_create_subscriber(&target)
+            .await?;
 
         let mut states: Vec<String> = vec!["⏳ ﻿ Processing...".to_string(); urls_split.len()];
 
@@ -206,15 +214,10 @@ impl Commands {
 
         // NOTE: Can be done concurrently
         for (i, url) in urls_split.iter().enumerate() {
-            let target = SubscriberTarget {
-                subscriber_type,
-                target_id: target_id.clone(),
-            };
-
             let unsub_result = ctx
                 .data()
                 .series_feed_subscription_service
-                .unsubscribe(url, target)
+                .unsubscribe(url, &subscriber)
                 .await;
 
             states[i] = unsub_result.map_or_else(|e| format!("❌ {e}"), |res| res.to_string());
@@ -255,15 +258,13 @@ impl Commands {
         ctx.defer().await?;
         let sent_into = sent_into.unwrap_or(SendInto::DM);
 
-        // Create target
-        let target_id = Commands::get_target_id(ctx, &sent_into)?;
+        // Get subscriber
+        let target_id = FeedsCog::get_target_id(ctx, &sent_into)?;
         let subscriber_type = SubscriberType::from(&sent_into);
         let target = SubscriberTarget {
             subscriber_type,
             target_id,
         };
-
-        // Get subscriber
         let subscriber = ctx
             .data()
             .series_feed_subscription_service
@@ -275,7 +276,7 @@ impl Commands {
         let items = ctx
             .data()
             .series_feed_subscription_service
-            .get_subscription_count(subscriber.id)
+            .get_subscription_count(&subscriber)
             .await?;
 
         // Create navigation component
@@ -287,7 +288,7 @@ impl Commands {
             .send(
                 CreateReply::new()
                     .flags(MessageFlags::IS_COMPONENTS_V2)
-                    .components(Commands::create_page(&ctx, &target, &navigation).await?),
+                    .components(FeedsCog::create_page(&ctx, &subscriber, &navigation).await?),
             )
             .await?;
 
@@ -297,7 +298,7 @@ impl Commands {
                     ctx,
                     CreateReply::new()
                         .flags(MessageFlags::IS_COMPONENTS_V2)
-                        .components(Commands::create_page(&ctx, &target, &navigation).await?),
+                        .components(FeedsCog::create_page(&ctx, &subscriber, &navigation).await?),
                 )
                 .await?;
         }
@@ -307,14 +308,14 @@ impl Commands {
 
     async fn create_page<'a>(
         ctx: &Context<'_>,
-        target: &SubscriberTarget,
+        subscriber: &SubscriberModel,
         navigation: &'a PageNavigationComponent<'_>,
     ) -> anyhow::Result<Vec<CreateComponent<'a>>> {
         let subscriptions = ctx
             .data()
             .series_feed_subscription_service
             .list_paginated_subscriptions(
-                target,
+                subscriber,
                 navigation.pagination.current_page,
                 navigation.pagination.per_page,
             )
@@ -359,115 +360,68 @@ impl Commands {
         }
     }
 
-    #[poise::command(prefix_command, owners_only, hide_in_help)]
-    pub async fn register(ctx: Context<'_>) -> Result<(), Error> {
-        poise::builtins::register_application_commands_buttons(ctx).await?;
-        Ok(())
-    }
-
-    #[poise::command(prefix_command, owners_only, hide_in_help)]
-    pub async fn dump_db(ctx: Context<'_>) -> Result<(), Error> {
-        ctx.defer().await?;
-        let data = ctx.data();
-
-        let feeds = data.db.feed_table.select_all().await?;
-        let versions = data.db.feed_item_table.select_all().await?;
-        let subscribers = data.db.subscriber_table.select_all().await?;
-        let subscriptions = data.db.feed_subscription_table.select_all().await?;
-
-        let reply = CreateReply::default()
-            .content("Database dump:")
-            .attachment(CreateAttachment::bytes(
-                serde_json::to_string_pretty(&feeds)?,
-                "feeds.json",
-            ))
-            .attachment(CreateAttachment::bytes(
-                serde_json::to_string_pretty(&versions)?,
-                "feed_versions.json",
-            ))
-            .attachment(CreateAttachment::bytes(
-                serde_json::to_string_pretty(&subscribers)?,
-                "subscribers.json",
-            ))
-            .attachment(CreateAttachment::bytes(
-                serde_json::to_string_pretty(&subscriptions)?,
-                "subscriptions.json",
-            ));
-
-        ctx.send(reply).await?;
-        Ok(())
-    }
-
     async fn autocomplete_subscriptions<'a>(
         ctx: Context<'_>,
         partial: &str,
     ) -> CreateAutocompleteResponse<'a> {
         if partial.trim().is_empty() {
-            return CreateAutocompleteResponse::new().set_choices(vec![]);
+            return CreateAutocompleteResponse::new().set_choices(vec![AutocompleteChoice::from(
+                "Start typing to see suggestions",
+            )]);
         }
 
-        let data = ctx.data();
-        let user_id = ctx.author().id.to_string();
-
-        // Find subscriber
-        let subscriber = match data
-            .db
-            .subscriber_table
-            .select_by_type_and_target(&SubscriberType::Dm, &user_id)
+        // Get subscriber
+        let (target_id, subscriber_type) = match ctx.guild_id() {
+            Some(gid) => (
+                SubscriberModel::format_guild_target_id(gid, ctx.channel_id()),
+                SubscriberType::Guild,
+            ),
+            None => (ctx.author().id.to_string(), SubscriberType::Dm),
+        };
+        let target = SubscriberTarget {
+            subscriber_type,
+            target_id,
+        };
+        let subscriber = match ctx
+            .data()
+            .series_feed_subscription_service
+            .get_or_create_subscriber(&target)
             .await
         {
-            Ok(sub) => sub,
-            Err(e) => {
-                error!("Failed to fetch subscriber for user {}: {}", user_id, e);
-                return CreateAutocompleteResponse::new().set_choices(vec![]);
-            }
+            Ok(res) => res,
+            Err(_) => return CreateAutocompleteResponse::new(),
         };
 
-        // Get subscriptions
-        let subscriptions = match data
-            .db
-            .feed_subscription_table
-            .select_all_by_subscriber_id(subscriber.id)
+        // Get subscribed feeds
+        let mut feeds = match ctx
+            .data()
+            .series_feed_subscription_service
+            .search_subcriptions(&subscriber, partial)
             .await
         {
-            Ok(subs) => subs,
+            Ok(res) => res,
             Err(e) => {
                 error!("Failed to fetch subscriptions: {}", e);
                 return CreateAutocompleteResponse::new().set_choices(vec![]);
             }
         };
-
-        if subscriptions.is_empty() {
-            return CreateAutocompleteResponse::new().set_choices(vec![]);
+        if feeds.is_empty() {
+            return CreateAutocompleteResponse::new().set_choices(vec![AutocompleteChoice::from(
+                "You have no subscriptions yet. Subscribe first with `/subscribe` command",
+            )]);
         }
 
-        // Fetch feeds in parallel
-        // TODO: Do this in backend instead
-        let feed_ids: HashSet<i32> = subscriptions.into_iter().map(|s| s.feed_id).collect();
-        let futures = feed_ids.into_iter().map(|id| {
-            let db = &data.db;
-            async move { db.feed_table.select(&id).await.ok() }
-        });
-        let results = futures::future::join_all(futures).await;
+        // Sort the feeds for better UX
+        feeds.sort_by_key(|feed| feed.name.to_lowercase());
 
-        let partial_lower = partial.to_lowercase();
-        // 1. Collect into a Vec of Feeds
-        let mut matching_urls = results
-            .into_iter()
-            .flatten()
-            .filter(|feed| feed.url.to_lowercase().contains(&partial_lower))
-            .collect::<Vec<_>>();
-
-        // 2. Sort the Feeds
-        matching_urls.sort_by_key(|feed| feed.name.to_lowercase());
-
-        // 3. Map the Feeds into AutocompleteChoices
-        let mut choices = matching_urls
+        // Map the feeds into AutocompleteChoices
+        let mut choices = feeds
             .into_iter()
             .map(|feed| AutocompleteChoice::new(feed.name, feed.url))
             .collect::<Vec<_>>();
 
-        choices.truncate(25); // Discord autocomplete limit
+        // Discord autocomplete limit
+        choices.truncate(25);
         CreateAutocompleteResponse::new().set_choices(choices)
     }
 

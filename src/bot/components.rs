@@ -7,7 +7,7 @@ use serenity::all::CreateButton;
 use serenity::all::CreateComponent;
 use serenity::all::CreateInteractionResponse;
 
-use crate::bot::commands::Context;
+use crate::bot::cog::Context;
 
 pub struct Pagination {
     /// Current page number. Guaranteed to be >= 1 and <= pages

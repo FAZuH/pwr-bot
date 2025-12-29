@@ -27,10 +27,9 @@ impl SeriesFeedSubscriptionService {
     pub async fn subscribe(
         &self,
         url: &str,
-        target: SubscriberTarget,
+        subscriber: &SubscriberModel,
     ) -> Result<SubscribeResult, ServiceError> {
         let feed = self.get_or_create_feed(url).await?;
-        let subscriber = self.get_or_create_subscriber(&target).await?;
 
         match self.create_subscription(feed.id, subscriber.id).await {
             Ok(_) => Ok(SubscribeResult::Success { feed }),
@@ -51,7 +50,7 @@ impl SeriesFeedSubscriptionService {
     pub async fn unsubscribe(
         &self,
         url: &str,
-        target: SubscriberTarget,
+        subscriber: &SubscriberModel,
     ) -> Result<UnsubscribeResult, ServiceError> {
         let source =
             self.feeds
@@ -79,8 +78,6 @@ impl SeriesFeedSubscriptionService {
             }
         };
 
-        let subscriber = self.get_or_create_subscriber(&target).await?;
-
         match self
             .db
             .feed_subscription_table
@@ -101,11 +98,10 @@ impl SeriesFeedSubscriptionService {
     }
     pub async fn list_paginated_subscriptions(
         &self,
-        target: &SubscriberTarget,
+        subscriber: &SubscriberModel,
         page: impl Into<u32>,
         per_page: impl Into<u32>,
     ) -> Result<Vec<SubscriptionInfo>, ServiceError> {
-        let subscriber = self.get_or_create_subscriber(target).await?;
         let page = page.into() - 1;
 
         let mut ret = vec![];
@@ -129,15 +125,30 @@ impl SeriesFeedSubscriptionService {
         Ok(ret)
     }
 
-    pub async fn get_subscription_count(&self, subscriber_id: i32) -> Result<u32, ServiceError> {
+    pub async fn get_subscription_count(
+        &self,
+        subscriber: &SubscriberModel,
+    ) -> Result<u32, ServiceError> {
         Ok(self
             .db
             .feed_subscription_table
-            .count_by_subscriber_id(subscriber_id)
+            .count_by_subscriber_id(subscriber.id)
             .await?)
     }
 
-    async fn get_or_create_feed(&self, url: &str) -> Result<FeedModel, ServiceError> {
+    pub async fn search_subcriptions(
+        &self,
+        subscriber: &SubscriberModel,
+        partial: &str,
+    ) -> Result<Vec<FeedModel>, ServiceError> {
+        Ok(self
+            .db
+            .feed_table
+            .select_by_name_and_subscriber_id(&subscriber.id, partial, 25)
+            .await?)
+    }
+
+    pub async fn get_or_create_feed(&self, url: &str) -> Result<FeedModel, ServiceError> {
         let source =
             self.feeds
                 .get_feed_by_url(url)

@@ -182,24 +182,31 @@ impl FeedTable {
         )
     }
 
-    pub async fn select_all_by_url_contains(
+    pub async fn select_by_name_and_subscriber_id(
         &self,
-        pattern: &str,
+        subscriber_id: &i32,
+        name_search: &str,
+        limit: impl Into<Option<u32>>,
     ) -> Result<Vec<FeedModel>, DatabaseError> {
-        Ok(
-            sqlx::query_as::<_, FeedModel>("SELECT * FROM feeds WHERE url LIKE ?")
-                .bind(format!("%{}%", pattern))
-                .fetch_all(&self.base.pool)
-                .await?,
+        let limit = limit.into().unwrap_or(25);
+        let search_pattern = format!("%{}%", name_search.to_lowercase());
+        Ok(sqlx::query_as::<_, FeedModel>(
+            r#"
+                SELECT * FROM feeds 
+                WHERE LOWER(name) LIKE ? 
+                    AND id IN (
+                        SELECT feed_id
+                        FROM feed_subscriptions
+                        WHERE subscriber_id = ?
+                    )
+                LIMIT ?
+                "#,
         )
-    }
-
-    pub async fn delete_all_by_url_contains(&self, pattern: &str) -> Result<(), DatabaseError> {
-        sqlx::query("DELETE FROM feeds WHERE url LIKE ?")
-            .bind(format!("%{}%", pattern))
-            .execute(&self.base.pool)
-            .await?;
-        Ok(())
+        .bind(search_pattern)
+        .bind(subscriber_id)
+        .bind(limit)
+        .fetch_all(&self.base.pool)
+        .await?)
     }
 }
 

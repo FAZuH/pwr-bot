@@ -62,8 +62,13 @@ async fn test_subscription_and_publishing() {
         target_id: "user1".to_string(),
     };
 
+    let subscriber = service
+        .get_or_create_subscriber(&target)
+        .await
+        .expect("Failed to get or create subscriber");
+
     let result = service
-        .subscribe(&series_url, target)
+        .subscribe(&series_url, &subscriber)
         .await
         .expect("Subscribe failed");
     match result {
