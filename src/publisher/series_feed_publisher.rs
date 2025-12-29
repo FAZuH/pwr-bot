@@ -149,10 +149,10 @@ impl SeriesFeedPublisher {
         // NOTE: Should've been checked already in commands.rs
 
         // Fetch current state from source
-        let new_latest = match series_feed.get_latest(series_id).await {
+        let new_latest = match series_feed.fetch_latest(series_id).await {
             Ok(series) => series,
             Err(e) => {
-                if matches!(e, SeriesFeedError::FinishedSeries { .. }) {
+                if matches!(e, SeriesFeedError::SourceFinished { .. }) {
                     info!(
                         "Feed {} is finished. Removing from database.",
                         self.get_feed_desc(&feed)
@@ -169,11 +169,11 @@ impl SeriesFeedPublisher {
         debug!(
             "Current version for {}: {}",
             self.get_feed_desc(&feed),
-            new_latest.latest
+            new_latest.title
         );
 
         // Check if version changed
-        if new_latest.latest == old_latest.description {
+        if new_latest.title == old_latest.description {
             debug!("No new version for {}.", self.get_feed_desc(&feed));
             return Ok(());
         }
@@ -181,14 +181,14 @@ impl SeriesFeedPublisher {
             "New version found for {}: {} -> {}",
             self.get_feed_desc(&feed),
             old_latest.description,
-            new_latest.latest
+            new_latest.title
         );
 
         // Insert new version into database
         let new_feed_item = FeedItemModel {
             id: 0, // Will be set by database
             feed_id: feed.id,
-            description: new_latest.latest.clone(),
+            description: new_latest.title.clone(),
             published: new_latest.published,
         };
         self.db.feed_item_table.replace(&new_feed_item).await?;
@@ -237,13 +237,13 @@ Published on <t:{}>
 **New {}**: {}
 Published on <t:{}>
 
-**[Open in browser ↗]({})**",
+**[Open in browser ↗]({})",
             feed.name,
             feed_desc,
-            feed_info.feed_type,
+            feed_info.feed_item_name,
             old_feed_item.description,
             old_feed_item.published.timestamp(),
-            feed_info.feed_type,
+            feed_info.feed_item_name,
             new_feed_item.description,
             new_feed_item.published.timestamp(),
             feed.url

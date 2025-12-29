@@ -1,20 +1,22 @@
-use crate::feed::error::UrlParseError;
-use crate::feed::series_feed::SeriesItem;
-use crate::feed::series_feed::SeriesLatest;
-
 pub mod anilist_series_feed;
 
 pub mod error;
 pub mod feeds;
 pub mod mangadex_series_feed;
-pub mod series_feed;
 
-#[derive(Clone, Debug)]
+use async_trait::async_trait;
+use chrono::DateTime;
+use chrono::Utc;
+
+use crate::feed::error::SeriesFeedError;
+use crate::feed::error::UrlParseError;
+
+#[derive(Clone, Debug, Default)]
 pub struct FeedInfo {
     /// The name of the feed source, e.g., "MangaDex", "AniList"
     pub name: String,
     /// What do you call the item this feed publishes? e.g., "Episode", "Chapter"
-    pub feed_type: String,
+    pub feed_item_name: String,
     /// api.feed.tld
     pub api_hostname: String,
     /// feed.tld
@@ -25,6 +27,8 @@ pub struct FeedInfo {
     pub copyright_notice: String,
     /// https://anilist.co/img/icons/icon.svg
     pub logo_url: String,
+    /// Feed tags. Mainly used for grouping and filtering
+    pub tags: String,
 }
 
 #[derive(Clone, Debug)]
@@ -76,8 +80,8 @@ impl BaseFeed {
 
 #[non_exhaustive]
 pub enum FeedResult {
-    SeriesItem(SeriesItem),
-    SeriesLatest(SeriesLatest),
+    FeedSource(FeedSource),
+    FeedItem(FeedItem),
 }
 
 #[cfg(test)]
@@ -88,12 +92,11 @@ mod tests {
     fn test_get_nth_path_from_url() {
         let info = FeedInfo {
             name: "Test".to_string(),
-            feed_type: "Type".to_string(),
+            feed_item_name: "Type".to_string(),
             api_hostname: "test.com".to_string(),
             api_domain: "test.com".to_string(),
             api_url: "https://test.com".to_string(),
-            copyright_notice: "".to_string(),
-            logo_url: "".to_string(),
+            ..Default::default()
         };
         let client = reqwest::Client::new();
         let base = BaseFeed::new(info, client);
@@ -116,5 +119,75 @@ mod tests {
             base.get_nth_path_from_url(wrong_url, 0),
             Err(UrlParseError::InvalidFormat { .. })
         ));
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct FeedItem {
+    pub id: String,
+    pub source_id: String,
+    /// Title/Description of the update, e.g., "Chapter 100", "Episode 12", "My New Video".
+    pub title: String,
+    /// Url of the item, e.g., "https://mangadex.org/chapter/..."
+    pub url: String,
+    /// Timestamp of the update.
+    pub published: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct FeedSource {
+    pub id: String,
+    /// Human readable name/title, e.g., "One Piece", "PewDiePie".
+    pub name: String,
+    /// Description of the source.
+    pub description: String,
+    /// Url of the source, e.g., "https://mangadex.org/title/..."
+    pub url: String,
+    /// Cover/Avatar url.
+    pub image_url: Option<String>,
+}
+
+#[async_trait]
+pub trait Feed: Send + Sync {
+    async fn fetch_latest(&self, id: &str) -> Result<FeedItem, SeriesFeedError>;
+    async fn fetch_source(&self, id: &str) -> Result<FeedSource, SeriesFeedError>;
+    fn get_id_from_url<'a>(&self, url: &'a str) -> Result<&'a str, UrlParseError>;
+    /// Returns the URL for a source given its ID.
+    /// The returned URL is the public URL of the source, not the API URL.
+    fn get_url_from_id(&self, id: &str) -> String;
+    fn get_base(&self) -> &BaseFeed;
+    fn extract_error_message(&self, error: &serde_json::Value) -> String {
+        let mut parts = Vec::new();
+
+        // Try to extract common API error fields
+        if let Some(title) = error.get("title").and_then(|v| v.as_str()) {
+            parts.push(format!("title: {}", title));
+        }
+
+        if let Some(detail) = error.get("detail").and_then(|v| v.as_str()) {
+            parts.push(format!("detail: {}", detail));
+        }
+
+        if let Some(status) = error.get("status").and_then(|v| v.as_str()) {
+            parts.push(format!("status: {}", status));
+        }
+
+        if let Some(code) = error.get("code").and_then(|v| v.as_str()) {
+            parts.push(format!("code: {}", code));
+        }
+
+        // Fallback to message if available
+        if parts.is_empty()
+            && let Some(message) = error.get("message").and_then(|v| v.as_str())
+        {
+            parts.push(format!("message: {}", message));
+        }
+
+        // If we still have nothing useful, dump the whole error object
+        if parts.is_empty() {
+            format!("raw_error: {}", error)
+        } else {
+            parts.join(", ")
+        }
     }
 }

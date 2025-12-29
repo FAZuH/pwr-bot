@@ -17,12 +17,12 @@ use crate::feed::error::SeriesFeedError;
 use crate::feed::feeds::Feeds;
 use crate::service::error::ServiceError;
 
-pub struct SeriesFeedSubscriptionService {
+pub struct FeedSubscriptionService {
     pub db: Arc<Database>,
     pub feeds: Arc<Feeds>,
 }
 
-impl SeriesFeedSubscriptionService {
+impl FeedSubscriptionService {
     // Core subscription operations
     pub async fn subscribe(
         &self,
@@ -164,15 +164,15 @@ impl SeriesFeedSubscriptionService {
             Ok(res) => res,
             Err(_) => {
                 // Feed doesn't exist, create it
-                let series_latest = source.get_latest(&normalized_url).await?;
-                let series_info = source.get_info(&normalized_url).await?;
+                let feed_item = source.fetch_latest(id).await?;
+                let feed_source = source.fetch_source(id).await?;
 
                 let mut feed = FeedModel {
-                    name: series_info.title,
-                    description: series_info.description,
-                    url: series_info.url,
-                    cover_url: series_info.cover_url.unwrap_or("".to_string()),
-                    tags: "series".to_string(),
+                    name: feed_source.name,
+                    description: feed_source.description,
+                    url: feed_source.url,
+                    cover_url: feed_source.image_url.unwrap_or("".to_string()),
+                    tags: source.get_base().info.tags.clone(),
                     ..Default::default()
                 };
                 feed.id = self.db.feed_table.insert(&feed).await?;
@@ -180,8 +180,8 @@ impl SeriesFeedSubscriptionService {
                 // Create initial version
                 let version = FeedItemModel {
                     feed_id: feed.id,
-                    description: series_latest.latest,
-                    published: series_latest.published,
+                    description: feed_item.title,
+                    published: feed_item.published,
                     ..Default::default()
                 };
                 self.db.feed_item_table.insert(&version).await?;
