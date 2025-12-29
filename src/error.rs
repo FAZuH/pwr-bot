@@ -9,6 +9,9 @@ pub enum AppError {
 
     #[error("Missing config with key \"{key}\"")]
     MissingConfig { key: String },
+
+    #[error("Error in app configuration: {msg}")]
+    ConfigurationError { msg: String },
 }
 
 pub enum AppErrorKind {
