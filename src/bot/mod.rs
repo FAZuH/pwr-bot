@@ -77,19 +77,21 @@ impl Bot {
 
         tokio::spawn(async move {
             info!("Connecting bot to Discord...");
-            match client_builder.await {
-                Ok(built_client) => {
-                    *client.lock().await = Some(built_client);
+            let built_client = client_builder
+                .await
+                .expect("Failed to build Discord client");
 
-                    if let Err(e) = client.lock().await.as_mut().unwrap().start().await {
-                        error!("Bot client crashed: {}", e);
-                    }
-                    info!("Bot connected to Discord.");
-                }
-                Err(e) => {
-                    error!("Failed to build client: {}", e);
-                }
-            }
+            *client.lock().await = Some(built_client);
+            info!("Bot connected to Discord.");
+
+            client
+                .lock()
+                .await
+                .as_mut()
+                .unwrap()
+                .start()
+                .await
+                .expect("Bot client crashed");
         });
 
         info!("Bot client start initiated.");
