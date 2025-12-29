@@ -11,6 +11,8 @@ use crate::database::model::FeedModel;
 use crate::database::model::FeedSubscriptionModel;
 use crate::database::model::SubscriberModel;
 use crate::database::model::SubscriberType;
+use crate::database::model::ServerSettings;
+use crate::database::model::ServerSettingsModel;
 use crate::database::table::Table;
 use crate::feed::error::FeedError;
 use crate::feed::error::SeriesFeedError;
@@ -214,6 +216,37 @@ impl FeedSubscriptionService {
             }
         };
         Ok(subscriber)
+    }
+
+    pub async fn get_server_settings(
+        &self,
+        guild_id: &str,
+    ) -> Result<ServerSettings, ServiceError> {
+        match self
+            .db
+            .server_settings_table
+            .select(&guild_id.to_string())
+            .await
+        {
+            Ok(model) => Ok(model.settings.0),
+            Err(DatabaseError::BackendError(sqlx::Error::RowNotFound)) => {
+                Ok(ServerSettings::default())
+            }
+            Err(e) => Err(ServiceError::DatabaseError(e)),
+        }
+    }
+
+    pub async fn update_server_settings(
+        &self,
+        guild_id: &str,
+        settings: ServerSettings,
+    ) -> Result<(), ServiceError> {
+        let model = ServerSettingsModel {
+            guild_id: guild_id.to_string(),
+            settings: sqlx::types::Json(settings),
+        };
+        self.db.server_settings_table.replace(&model).await?;
+        Ok(())
     }
 
     async fn create_subscription(
