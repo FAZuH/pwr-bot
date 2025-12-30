@@ -132,20 +132,11 @@ impl MangaDexSeriesFeed {
         })
     }
 
-    fn get_description_from_attr(&self, attr: Json) -> Result<String, SeriesFeedError> {
-        Ok(attr["description"]["en"]
-            .as_str()
-            .ok_or_else(|| SeriesFeedError::MissingField {
-                field: "description.en".to_string(),
-            })?
-            .to_string())
+    fn get_description_from_attr(&self, attr: Json) -> String {
+        attr["description"]["en"].as_str().unwrap_or("").to_string()
     }
 
-    async fn get_cover_url(
-        &self,
-        manga_id: &str,
-        data: &Value,
-    ) -> Result<String, SeriesFeedError> {
+    async fn get_cover_url(&self, manga_id: &str, data: &Value) -> Result<String, SeriesFeedError> {
         let relationships = data
             .get("relationships")
             .and_then(|v| v.as_array())
@@ -229,7 +220,7 @@ impl Feed for MangaDexSeriesFeed {
         let data = self.get_data_from_resp(&resp)?;
         let attr = self.get_attr_from_data(data)?;
         let name = self.get_title_from_attr(attr)?;
-        let description = self.get_description_from_attr(attr)?;
+        let description = self.get_description_from_attr(attr);
         let image_url = Some(self.get_cover_url(&source_id, data).await?);
 
         info!("Successfully fetched latest manga for source_id: {source_id}");

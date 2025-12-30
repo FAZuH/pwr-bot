@@ -70,13 +70,13 @@ async fn test_get_or_create_feed() {
         image_url: None,
     });
 
-    mock_feed.set_latest(FeedItem {
+    mock_feed.set_latest(Some(FeedItem {
         id: "ch-1".to_string(),
         source_id: source_id.to_string(),
         title: "Chapter 1".to_string(),
         url: format!("{}/chapter/1", url),
         published: Utc::now(),
-    });
+    }));
 
     // 1. Create new feed
     let feed1 = service
@@ -94,6 +94,31 @@ async fn test_get_or_create_feed() {
         .expect("Failed to get feed");
     assert_eq!(feed1.id, feed2.id);
     assert_eq!(feed1.url, feed2.url);
+
+    // 3. Get feed with empty latest
+    let source_id = "manga-2";
+    let url = format!("https://{}/title/{}", mock_domain, source_id);
+    mock_feed.set_info(FeedSource {
+        id: source_id.to_string(),
+        name: "Test Manga 2".to_string(),
+        description: "A test manga 2".to_string(),
+        url: url.clone(),
+        image_url: None,
+    });
+    mock_feed.set_latest(None);
+
+    let feed3 = service
+        .get_or_create_feed(&url)
+        .await
+        .expect("Failed to create feed");
+
+    let feed4 = service
+        .get_or_create_feed(&url)
+        .await
+        .expect("Failed to get feed");
+
+    assert_eq!(feed3.id, feed4.id);
+    assert_eq!(feed3.url, feed4.url);
 
     common::teardown_db(db_path).await;
 }
