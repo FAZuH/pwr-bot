@@ -132,6 +132,7 @@ async fn test_subscription_and_publishing() {
         .feed_item_table
         .select_latest_by_feed_id(1)
         .await
+        .unwrap()
         .unwrap();
     // Assuming feed ID is 1 because it's the first feed.
 

@@ -135,7 +135,8 @@ impl SeriesFeedPublisher {
             .db
             .feed_item_table
             .select_latest_by_feed_id(feed.id)
-            .await?;
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("Latest feed item not found"))?;
 
         let series_feed = self.feeds.get_feed_by_url(&feed.url).ok_or_else(|| {
             DatabaseError::InternalError {

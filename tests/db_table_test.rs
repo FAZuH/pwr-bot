@@ -99,24 +99,24 @@ mod feed_table_tests {
         let id = create_feed!(db, "Test Feed", { description: "Test Description" });
         assert!(id > 0);
 
-        let fetched = db.feed_table.select(&id).await.unwrap();
+        let fetched = db.feed_table.select(&id).await.unwrap().unwrap();
         assert_eq!(fetched.name, "Test Feed");
     });
 
     db_test!(update, |db| {
         let id = create_feed!(db, "Original");
-        let mut data = db.feed_table.select(&id).await.unwrap();
+        let mut data = db.feed_table.select(&id).await.unwrap().unwrap();
 
         data.name = "Updated".to_string();
         db.feed_table.update(&data).await.expect("Failed to update");
 
-        let fetched = db.feed_table.select(&id).await.unwrap();
+        let fetched = db.feed_table.select(&id).await.unwrap().unwrap();
         assert_eq!(fetched.name, "Updated");
     });
 
     db_test!(replace, |db| {
         let id = create_feed!(db, "Original", { description: "Old" });
-        let mut data = db.feed_table.select(&id).await.unwrap();
+        let mut data = db.feed_table.select(&id).await.unwrap().unwrap();
 
         data.description = "Replaced".to_string();
         let new_id = db
@@ -125,14 +125,14 @@ mod feed_table_tests {
             .await
             .expect("Failed to replace");
 
-        let fetched = db.feed_table.select(&new_id).await.unwrap();
+        let fetched = db.feed_table.select(&new_id).await.unwrap().unwrap();
         assert_eq!(fetched.description, "Replaced");
     });
 
     db_test!(delete, |db| {
         let id = create_feed!(db, "Test");
         db.feed_table.delete(&id).await.expect("Failed to delete");
-        assert!(db.feed_table.select(&id).await.is_err());
+        assert!(db.feed_table.select(&id).await.unwrap().is_none());
     });
 
     db_test!(select_by_url, |db| {
@@ -141,6 +141,7 @@ mod feed_table_tests {
             .feed_table
             .select_by_url("https://unique.com")
             .await
+            .unwrap()
             .unwrap();
         assert_eq!(fetched.name, "Feed");
     });
@@ -204,6 +205,7 @@ mod feed_item_table_tests {
             .feed_item_table
             .select_latest_by_feed_id(feed_id)
             .await
+            .unwrap()
             .unwrap();
         assert_eq!(latest.description, "Chapter 2");
     });
@@ -226,11 +228,11 @@ mod feed_item_table_tests {
         let feed_id = create_feed!(db, "Feed");
         let item_id = create_item!(db, feed_id, "Original");
 
-        let mut item = db.feed_item_table.select(&item_id).await.unwrap();
+        let mut item = db.feed_item_table.select(&item_id).await.unwrap().unwrap();
         item.description = "Updated".to_string();
         db.feed_item_table.update(&item).await.unwrap();
 
-        let fetched = db.feed_item_table.select(&item_id).await.unwrap();
+        let fetched = db.feed_item_table.select(&item_id).await.unwrap().unwrap();
         assert_eq!(fetched.description, "Updated");
     });
 
@@ -262,6 +264,7 @@ mod subscriber_table_tests {
             .subscriber_table
             .select_by_type_and_target(&SubscriberType::Dm, "user1")
             .await
+            .unwrap()
             .unwrap();
         assert_eq!(fetched.id, id);
     });
@@ -426,7 +429,12 @@ mod server_settings_table_tests {
             .unwrap();
         assert_eq!(id, 123);
 
-        let fetched = db.server_settings_table.select(&123).await.unwrap();
+        let fetched = db
+            .server_settings_table
+            .select(&123)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(fetched.settings.0.channel_id, Some("c1".to_string()));
     });
 
@@ -439,7 +447,12 @@ mod server_settings_table_tests {
         let updated = create_settings(123, "c2");
         db.server_settings_table.update(&updated).await.unwrap();
 
-        let fetched = db.server_settings_table.select(&123).await.unwrap();
+        let fetched = db
+            .server_settings_table
+            .select(&123)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(fetched.settings.0.channel_id, Some("c2".to_string()));
     });
 
@@ -450,6 +463,12 @@ mod server_settings_table_tests {
             .unwrap();
 
         db.server_settings_table.delete(&123).await.unwrap();
-        assert!(db.server_settings_table.select(&123).await.is_err());
+        assert!(
+            db.server_settings_table
+                .select(&123)
+                .await
+                .unwrap()
+                .is_none()
+        );
     });
 }

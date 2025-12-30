@@ -31,7 +31,7 @@ pub trait TableBase {
 pub trait Table<T, ID>: TableBase {
     async fn select_all(&self) -> Result<Vec<T>, DatabaseError>;
     async fn insert(&self, model: &T) -> Result<ID, DatabaseError>;
-    async fn select(&self, id: &ID) -> Result<T, DatabaseError>;
+    async fn select(&self, id: &ID) -> Result<Option<T>, DatabaseError>;
     async fn update(&self, model: &T) -> Result<(), DatabaseError>;
     async fn delete(&self, id: &ID) -> Result<(), DatabaseError>;
     async fn replace(&self, model: &T) -> Result<ID, DatabaseError>;
@@ -168,12 +168,12 @@ macro_rules! impl_table {
                     .await?)
             }
 
-            async fn select(&self, id: &$id_type) -> Result<$model, DatabaseError> {
+            async fn select(&self, id: &$id_type) -> Result<Option<$model>, DatabaseError> {
                 let query = sqlx::query_as::<_, $model>(concat!("SELECT * FROM ", $table, " WHERE ", stringify!($pk), " = ? LIMIT 1"));
                 let query = BindParam::bind_param(id, query);
                 Ok(
                     query
-                        .fetch_one(&self.base.pool)
+                        .fetch_optional(&self.base.pool)
                         .await?,
                 )
             }
@@ -254,11 +254,11 @@ impl_table!(
 );
 
 impl FeedTable {
-    pub async fn select_by_url(&self, url: &str) -> Result<FeedModel, DatabaseError> {
+    pub async fn select_by_url(&self, url: &str) -> Result<Option<FeedModel>, DatabaseError> {
         Ok(
             sqlx::query_as::<_, FeedModel>("SELECT * FROM feeds WHERE url = ? LIMIT 1")
                 .bind(url)
-                .fetch_one(&self.base.pool)
+                .fetch_optional(&self.base.pool)
                 .await?,
         )
     }
@@ -333,12 +333,12 @@ impl FeedItemTable {
     pub async fn select_latest_by_feed_id(
         &self,
         feed_id: i32,
-    ) -> Result<FeedItemModel, DatabaseError> {
+    ) -> Result<Option<FeedItemModel>, DatabaseError> {
         Ok(sqlx::query_as::<_, FeedItemModel>(
             "SELECT * FROM feed_items WHERE feed_id = ? ORDER BY published DESC LIMIT 1",
         )
         .bind(feed_id)
-        .fetch_one(&self.base.pool)
+        .fetch_optional(&self.base.pool)
         .await?)
     }
 
@@ -415,13 +415,13 @@ impl SubscriberTable {
         &self,
         r#type: &SubscriberType,
         target_id: &str,
-    ) -> Result<SubscriberModel, DatabaseError> {
+    ) -> Result<Option<SubscriberModel>, DatabaseError> {
         Ok(sqlx::query_as::<_, SubscriberModel>(
             "SELECT * FROM subscribers WHERE type = ? AND target_id = ? LIMIT 1",
         )
         .bind(r#type)
         .bind(target_id)
-        .fetch_one(&self.base.pool)
+        .fetch_optional(&self.base.pool)
         .await?)
     }
 }

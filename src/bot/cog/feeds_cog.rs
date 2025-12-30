@@ -582,18 +582,21 @@ impl FeedsCog {
 
         let mut container_components = vec![];
         for sub in subscriptions {
-            let text = CreateTextDisplay::new(format!(
-                "### {}
-
-    - **Last version**: {}
-    - **Last updated**: <t:{}>
-    - **Source**: <{}>
-    ﻿",
-                sub.feed.name,
-                sub.feed_latest.description,
-                sub.feed_latest.published.timestamp(),
-                sub.feed.url
-            ));
+            let text = if let Some(latest) = sub.feed_latest {
+                CreateTextDisplay::new(format!(
+                    "### {}\n\n- **Last version**: {}\n- **Last updated**: <t:{}>\n- **Source**: <{}>",
+                    sub.feed.name,
+                    latest.description,
+                    latest.published.timestamp(),
+                    sub.feed.url
+                ))
+            } else {
+                // Note: You need to provide the feed name and URL for this case too
+                CreateTextDisplay::new(format!(
+                    "### {}\n\n> No latest version found.\n\n- **Source**: <{}>",
+                    sub.feed.name, sub.feed.url
+                ))
+            };
             let thumbnail = CreateThumbnail::new(CreateUnfurledMediaItem::new(sub.feed.cover_url));
 
             container_components.push(CreateContainerComponent::Section(CreateSection::new(
