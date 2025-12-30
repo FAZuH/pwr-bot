@@ -1,3 +1,11 @@
+## [0.1.15](https://github.com/FAZuH/pwr-bot/compare/v0.1.14...v0.1.15) (2025-12-30)
+
+
+### Bug Fixes
+
+* Error on empty MangaDex feed description [skip ci] ([d13d839](https://github.com/FAZuH/pwr-bot/commit/d13d8398ac4f434f1666d489d3090cdb256f0014))
+* Error when subscribing to AniList feed that is not yet aired ([55282ad](https://github.com/FAZuH/pwr-bot/commit/55282adb621a8f70779908013c4ee6c480b6907a))
+
 ## [0.1.14](https://github.com/FAZuH/pwr-bot/compare/v0.1.13...v0.1.14) (2025-12-29)
 
 
@@ -42,11 +50,4 @@
 * **bot:** Improve bot initialization [skip ci] ([e055f1d](https://github.com/FAZuH/pwr-bot/commit/e055f1d64224027dc0366a8f8a3f415b71c68a0f))
 
 ## [0.1.11](https://github.com/FAZuH/pwr-bot/compare/v0.1.10...v0.1.11) (2025-12-28)
-
-## [0.1.10](https://github.com/FAZuH/pwr-bot/compare/v0.1.9...v0.1.10) (2025-12-28)
-
-
-### Performance Improvements
-
-* Improve API requests and database queries ([#10](https://github.com/FAZuH/pwr-bot/issues/10)) ([4cc9e0d](https://github.com/FAZuH/pwr-bot/commit/4cc9e0d5715c8ab355dca394df34d10ffb896228))
 
