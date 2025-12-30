@@ -21,12 +21,12 @@ use crate::feed::FeedSource;
 use crate::feed::error::SeriesFeedError;
 use crate::feed::error::UrlParseError;
 
-pub struct AniListSeriesFeed {
+pub struct AniListFeed {
     pub base: BaseFeed,
     limiter: RateLimiter<NotKeyed, InMemoryState, QuantaClock>,
 }
 
-impl AniListSeriesFeed {
+impl AniListFeed {
     pub fn new() -> Self {
         let info = FeedInfo {
             name: "AniList".to_string(),
@@ -110,7 +110,7 @@ impl AniListSeriesFeed {
 }
 
 #[async_trait]
-impl Feed for AniListSeriesFeed {
+impl Feed for AniListFeed {
     async fn fetch_latest(&self, id: &str) -> Result<FeedItem, SeriesFeedError> {
         debug!(
             "Fetching latest from {} for source_id: {id}",
@@ -242,15 +242,15 @@ impl Feed for AniListSeriesFeed {
     }
 }
 
-impl PartialEq for AniListSeriesFeed {
+impl PartialEq for AniListFeed {
     fn eq(&self, other: &Self) -> bool {
         self.base.info.api_url == other.base.info.api_url
     }
 }
 
-impl Eq for AniListSeriesFeed {}
+impl Eq for AniListFeed {}
 
-impl Hash for AniListSeriesFeed {
+impl Hash for AniListFeed {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.base.info.api_url.hash(state);
     }

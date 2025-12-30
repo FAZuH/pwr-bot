@@ -3,20 +3,20 @@ use std::sync::Arc;
 use crate::feed::Feed;
 use crate::feed::FeedItem;
 use crate::feed::FeedSource;
-use crate::feed::anilist_series_feed::AniListSeriesFeed;
+use crate::feed::anilist_feed::AniListFeed;
 use crate::feed::error::SeriesFeedError;
-use crate::feed::mangadex_series_feed::MangaDexSeriesFeed;
+use crate::feed::mangadex_feed::MangaDexFeed;
 
 pub struct Feeds {
     feeds: Vec<Arc<dyn Feed>>,
-    pub anilist_feed: Arc<AniListSeriesFeed>,
-    pub mangadex_feed: Arc<MangaDexSeriesFeed>,
+    pub anilist_feed: Arc<AniListFeed>,
+    pub mangadex_feed: Arc<MangaDexFeed>,
 }
 
 impl Feeds {
     pub fn new() -> Self {
-        let anilist_feed = Arc::new(AniListSeriesFeed::new());
-        let mangadex_feed = Arc::new(MangaDexSeriesFeed::new());
+        let anilist_feed = Arc::new(AniListFeed::new());
+        let mangadex_feed = Arc::new(MangaDexFeed::new());
 
         let mut _self = Self {
             feeds: Vec::new(),

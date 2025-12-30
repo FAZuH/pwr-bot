@@ -1,8 +1,8 @@
-pub mod anilist_series_feed;
+pub mod anilist_feed;
 
 pub mod error;
 pub mod feeds;
-pub mod mangadex_series_feed;
+pub mod mangadex_feed;
 
 use async_trait::async_trait;
 use chrono::DateTime;

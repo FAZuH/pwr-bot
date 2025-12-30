@@ -31,12 +31,12 @@ use crate::feed::error::UrlParseError;
 
 type Json<'a> = &'a Map<String, Value>;
 
-pub struct MangaDexSeriesFeed {
+pub struct MangaDexFeed {
     pub base: BaseFeed,
     limiter: RateLimiter<NotKeyed, InMemoryState, QuantaClock>,
 }
 
-impl MangaDexSeriesFeed {
+impl MangaDexFeed {
     pub fn new() -> Self {
         let mut headers = HeaderMap::new();
         headers.insert(USER_AGENT, HeaderValue::from_static("pwr-bot/0.1"));
@@ -202,7 +202,7 @@ impl MangaDexSeriesFeed {
 }
 
 #[async_trait]
-impl Feed for MangaDexSeriesFeed {
+impl Feed for MangaDexFeed {
     async fn fetch_source(&self, id: &str) -> Result<FeedSource, SeriesFeedError> {
         debug!(
             "Fetching info from {} for source_id: {id}",
@@ -318,15 +318,15 @@ impl Feed for MangaDexSeriesFeed {
     }
 }
 
-impl PartialEq for MangaDexSeriesFeed {
+impl PartialEq for MangaDexFeed {
     fn eq(&self, other: &Self) -> bool {
         self.base.info.api_url == other.base.info.api_url
     }
 }
 
-impl Eq for MangaDexSeriesFeed {}
+impl Eq for MangaDexFeed {}
 
-impl Hash for MangaDexSeriesFeed {
+impl Hash for MangaDexFeed {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.base.info.api_url.hash(state);
     }
