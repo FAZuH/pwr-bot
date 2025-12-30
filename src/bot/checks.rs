@@ -11,14 +11,18 @@ pub async fn check_guild_permissions(
     ctx: Context<'_>,
     required_role_id: &Option<String>,
 ) -> Result<(), Error> {
-    let member = ctx.author_member().await.ok_or(BotError::GuildOnlyCommand)?;
+    let member = ctx
+        .author_member()
+        .await
+        .ok_or(BotError::GuildOnlyCommand)?;
 
     let permissions = member
         .permissions
         .ok_or_else(|| anyhow::anyhow!("Could not user retrieve permissions"))?;
 
     Ok(check_permissions_inner(
-        permissions.contains(Permissions::ADMINISTRATOR) || permissions.contains(Permissions::MANAGE_GUILD),
+        permissions.contains(Permissions::ADMINISTRATOR)
+            || permissions.contains(Permissions::MANAGE_GUILD),
         &member.roles,
         required_role_id,
     )?)
