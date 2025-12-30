@@ -152,7 +152,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: pwr-bot
-          path: target/release/pwr-bot
+          path: target/release
 
       - name: Create Release and Upload Files
         if: ${{ needs.changelog.outputs.skipped != 'true' }}
