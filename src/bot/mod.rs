@@ -30,7 +30,7 @@ use serenity::all::Token;
 type Error = Box<dyn std::error::Error + Send + Sync>;
 
 use crate::bot::cog::feeds_cog::FeedsCog;
-use crate::bot::cog::owner_cog::OwnerCog;
+use crate::bot::cog::admin_cog::AdminCog;
 use crate::config::Config;
 use crate::database::Database;
 use crate::feed::feeds::Feeds;
@@ -104,8 +104,8 @@ impl Bot {
                 FeedsCog::subscribe(),
                 FeedsCog::unsubscribe(),
                 FeedsCog::subscriptions(),
-                OwnerCog::dump_db(),
-                OwnerCog::register(),
+                AdminCog::dump_db(),
+                AdminCog::register(),
             ],
             on_error: |error| Box::pin(Self::on_error(error)),
             prefix_options: poise::PrefixFrameworkOptions {

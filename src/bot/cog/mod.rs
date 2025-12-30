@@ -1,5 +1,5 @@
 pub mod feeds_cog;
-pub mod owner_cog;
+pub mod admin_cog;
 
 use crate::bot::Data;
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
