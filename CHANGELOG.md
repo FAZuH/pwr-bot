@@ -1,3 +1,22 @@
+## [0.1.16](https://github.com/FAZuH/pwr-bot/compare/v0.1.15...v0.1.16) (2025-12-30)
+
+
+### New Features
+
+* **bot:** Show supported feeds when using /subscribe ([71581a9](https://github.com/FAZuH/pwr-bot/commit/71581a9234667d496c8796cc7a8d28c332feb8ff))
+
+
+### Bug Fixes
+
+* Fix errors when subscribed to a feed with no items ([f4e62cc](https://github.com/FAZuH/pwr-bot/commit/f4e62cce880cd6fdc2567e57d1894b2b72c51c50))
+* Remove extra empty page in /subscriptions when items are multiples of 10 ([e826944](https://github.com/FAZuH/pwr-bot/commit/e82694434b3db13f24290bf3f78a5c3b31115647))
+
+
+### Documentation
+
+* Add MIT license [skip ci] ([3da4457](https://github.com/FAZuH/pwr-bot/commit/3da4457a62e80704b0a6aa3a291cc8605240ff7e))
+* Improve README [skip ci] ([14cf620](https://github.com/FAZuH/pwr-bot/commit/14cf62051aeaa2ec8b25fb7e3d8275ee67e25b7f))
+
 ## [0.1.15](https://github.com/FAZuH/pwr-bot/compare/v0.1.14...v0.1.15) (2025-12-30)
 
 
@@ -48,6 +67,4 @@
 ### Performance Improvements
 
 * **bot:** Improve bot initialization [skip ci] ([e055f1d](https://github.com/FAZuH/pwr-bot/commit/e055f1d64224027dc0366a8f8a3f415b71c68a0f))
-
-## [0.1.11](https://github.com/FAZuH/pwr-bot/compare/v0.1.10...v0.1.11) (2025-12-28)
 
