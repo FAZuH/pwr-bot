@@ -1,4 +1,4 @@
-// Credit: Workflow configs inspired from https://github.com/Wynntils/Wynntils
+// Credit: Workflow configs based on https://github.com/Wynntils/Wynntils
 const fs = require("fs");
 
 exports.preCommit = (props) => {
