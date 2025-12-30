@@ -30,11 +30,13 @@ use serenity::all::Token;
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
 
-use crate::bot::cog::feeds_cog::FeedsCog;
 use crate::bot::cog::admin_cog::AdminCog;
+use crate::bot::cog::feeds_cog::FeedsCog;
+use crate::bot::error::BotError;
 use crate::config::Config;
 use crate::database::Database;
 use crate::feed::feeds::Feeds;
+use crate::service::error::ServiceError;
 use crate::service::feed_subscription_service::FeedSubscriptionService;
 
 pub struct Data {
@@ -149,12 +151,34 @@ impl Bot {
     async fn on_error(error: poise::FrameworkError<'_, Data, Error>) {
         match error {
             poise::FrameworkError::Command { error, ctx, .. } => {
-                error!("Error in command `{}`: {:?}", ctx.command().name, error);
+                let (error_title, error_description) =
+                    if let Some(bot_error) = error.downcast_ref::<BotError>() {
+                        ("❌ Action Failed", bot_error.to_string())
+                    } else if let Some(service_error) = error.downcast_ref::<ServiceError>() {
+                        // ServiceError is mostly transparent, so we can use its message
+                        ("❌ Service Error", service_error.to_string())
+                    } else {
+                        // Generic/Internal error
+                        error!(
+                            "Unexpected error in command `{}`: {:?}",
+                            ctx.command().name,
+                            error
+                        );
+                        (
+                            "❌ Internal Error",
+                            "An unexpected error occurred. Please contact the bot developer."
+                                .to_string(),
+                        )
+                    };
 
                 let error_message = format!(
-                    "## ❌ Command Error\n\n**Command:** `{}`\n**Error:** {}",
+                    "## {}
+
+**Command:** `{}`
+**Error:** {}",
+                    error_title,
                     ctx.command().name,
-                    error
+                    error_description
                 );
 
                 let components = vec![CreateComponent::Container(CreateContainer::new(vec![
@@ -170,14 +194,13 @@ impl Bot {
                     .await;
             }
             poise::FrameworkError::ArgumentParse { error, ctx, .. } => {
-                error!(
-                    "Argument parse error in `{}`: {}",
-                    ctx.command().name,
-                    error
-                );
-
                 let error_message = format!(
-                    "## ⚠️ Invalid Arguments\n\n**Command:** `{}`\n**Issue:** {}\n\n> Use `/help {}` for usage information.",
+                    "## ⚠️ Invalid Arguments
+
+**Command:** `{}`
+**Issue:** {}
+
+> Use `/help {}` for usage information.",
                     ctx.command().name,
                     error,
                     ctx.command().name
