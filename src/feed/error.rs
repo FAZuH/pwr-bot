@@ -1,18 +1,14 @@
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum UrlParseError {
-    #[error("Unsupported site: {site}.")]
+    #[error("The site `{site}` is not supported.")]
     UnsupportedSite { site: String },
 
-    #[error("Invalid URL format: {url}.")]
+    #[error("The URL `{url}` has an invalid format.")]
     InvalidFormat { url: String },
 
-    #[error("Missing identifier in URL: {url}")]
+    #[error("Could not find an identifier in the URL `{url}`.")]
     MissingId { url: String },
-    // #[error("Invalid URL scheme: {scheme}. Only http and https are supported")]
-    // InvalidScheme { scheme: String },
-    // #[error("Malformed URL: {url}")]
-    // MalformedUrl { url: String },
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -20,42 +16,42 @@ pub enum FeedError {
     #[error("HTTP request failed: {0}")]
     RequestFailed(#[from] reqwest::Error),
 
-    #[error("Failed to parse JSON response: {0}")]
+    #[error("Failed to parse API response: {0}")]
     JsonParseFailed(#[from] serde_json::Error),
 
-    #[error("Source not found with ID: {source_id}")]
+    #[error("Feed source not found (ID: {source_id}).")]
     SourceNotFound { source_id: String },
 
-    #[error("Latest item not found for source with ID: {source_id}")]
+    #[error("Latest item not found for feed (ID: {source_id}).")]
     ItemNotFound { source_id: String },
 
-    #[error("Source finished for source ID: {source_id}")]
+    #[error("Feed is finished (ID: {source_id}).")]
     SourceFinished { source_id: String },
 
-    #[error("Empty source for source ID: {source_id}")]
+    #[error("Feed source contains no items (ID: {source_id}).")]
     EmptySource { source_id: String },
 
-    #[error("Invalid or missing data in API response: {field}")]
+    #[error("Invalid data from API: missing field `{field}`.")]
     MissingField { field: String },
 
-    #[error("Invalid source ID: {source_id}")]
+    #[error("Invalid source ID: {source_id}.")]
     InvalidSourceId { source_id: String },
 
-    #[error("API returned error: {message}")]
+    #[error("Feed API error: {message}")]
     ApiError { message: String },
 
-    #[error("Invalid timestamp in response: {timestamp}")]
+    #[error("Invalid timestamp received: {timestamp}.")]
     InvalidTimestamp { timestamp: i64 },
 
-    #[error("Invalid time in response: {time}")]
+    #[error("Invalid time format received: {time}.")]
     InvalidTime { time: String },
 
-    #[error("Unsupported url: {url}")]
+    #[error("The URL `{url}` is not supported.")]
     UnsupportedUrl { url: String },
 
-    #[error("Unexpected result: {message}")]
+    #[error("Unexpected error: {message}")]
     UnexpectedResult { message: String },
 
-    #[error("URL parse error: {0}")]
+    #[error(transparent)]
     UrlParseFailed(#[from] UrlParseError),
 }

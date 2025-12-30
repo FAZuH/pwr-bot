@@ -137,21 +137,6 @@ impl FeedsCog {
             .stream();
 
         while let Some(interaction) = collector.next().await {
-            // Check permissions for each interaction
-            if let Err(e) = check_guild_permissions(ctx, &None).await {
-                interaction
-                    .create_response(
-                        ctx.http(),
-                        poise::serenity_prelude::CreateInteractionResponse::Message(
-                            poise::serenity_prelude::CreateInteractionResponseMessage::new()
-                                .content(format!("❌ {}", e))
-                                .flags(MessageFlags::EPHEMERAL),
-                        ),
-                    )
-                    .await?;
-                continue;
-            }
-
             let mut should_update = true;
 
             match &interaction.data.kind {
@@ -332,9 +317,7 @@ impl FeedsCog {
         let send_into = send_into.unwrap_or(SendInto::DM);
 
         if let SendInto::Server = send_into {
-            let guild_id = ctx.guild_id().ok_or_else(|| {
-                BotError::ConfigurationError("Command must be run in a server.".to_string())
-            })?;
+            let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?;
             let settings = ctx
                 .data()
                 .feed_subscription_service
@@ -346,6 +329,7 @@ impl FeedsCog {
                 )
                 .into());
             }
+            // Check if author is allowed to subscribe according to server settings
             check_guild_permissions(ctx, &settings.subscribe_role_id).await?;
         }
 
@@ -356,7 +340,7 @@ impl FeedsCog {
         let target_id = FeedsCog::get_target_id(ctx, &send_into)?;
         let target = SubscriberTarget {
             subscriber_type,
-            target_id: target_id.clone(),
+            target_id,
         };
         let subscriber = ctx
             .data()
@@ -422,9 +406,7 @@ impl FeedsCog {
         let send_into = send_into.unwrap_or(SendInto::DM);
 
         if let SendInto::Server = send_into {
-            let guild_id = ctx.guild_id().ok_or_else(|| {
-                BotError::ConfigurationError("Command must be run in a server.".to_string())
-            })?;
+            let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?;
             let settings = ctx
                 .data()
                 .feed_subscription_service
@@ -436,6 +418,7 @@ impl FeedsCog {
                 )
                 .into());
             }
+            // Check if author is allowed to unsubscribe according to server settings
             check_guild_permissions(ctx, &settings.unsubscribe_role_id).await?;
         }
 
@@ -446,7 +429,7 @@ impl FeedsCog {
         let target_id = FeedsCog::get_target_id(ctx, &send_into)?;
         let target = SubscriberTarget {
             subscriber_type,
-            target_id: target_id.clone(),
+            target_id,
         };
         let subscriber = ctx
             .data()
