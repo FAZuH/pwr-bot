@@ -1,7 +1,7 @@
+pub mod checks;
 pub mod cog;
 pub mod components;
 pub mod error;
-pub mod checks;
 
 use std::collections::HashSet;
 use std::str::FromStr;

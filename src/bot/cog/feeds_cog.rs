@@ -33,9 +33,9 @@ use serenity::all::MessageFlags;
 use serenity::all::RoleId;
 use serenity::all::UserId;
 
+use crate::bot::checks::check_guild_permissions;
 use crate::bot::cog::Context;
 use crate::bot::cog::Error;
-use crate::bot::checks::check_guild_permissions;
 use crate::bot::components::PageNavigationComponent;
 use crate::bot::components::Pagination;
 use crate::bot::error::BotError;
