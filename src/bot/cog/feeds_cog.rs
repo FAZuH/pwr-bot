@@ -596,7 +596,7 @@ impl FeedsCog {
             } else {
                 // Note: You need to provide the feed name and URL for this case too
                 CreateTextDisplay::new(format!(
-                    "### {}\n\n> No latest version found.\n\n- **Source**: <{}>",
+                    "### {}\n\n> No latest version found.\n- **Source**: <{}>",
                     sub.feed.name, sub.feed.url
                 ))
             };
@@ -621,7 +621,7 @@ impl FeedsCog {
         ctx: Context<'_>,
         partial: &str,
     ) -> CreateAutocompleteResponse<'a> {
-        let mut choices = Vec::new();
+        let mut choices = vec![AutocompleteChoice::new("Supported feeds are:", "foo")];
         let feeds = ctx.data().feeds.get_all_feeds();
 
         for feed in feeds {
