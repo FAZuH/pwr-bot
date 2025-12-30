@@ -9,4 +9,7 @@ pub enum BotError {
 
     #[error("Configuration error: {0}")]
     ConfigurationError(String),
+
+    #[error("You have to be in a server to use this command")]
+    GuildOnlyCommand,
 }

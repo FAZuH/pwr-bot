@@ -42,7 +42,6 @@ use crate::bot::error::BotError;
 use crate::database::model::ServerSettings;
 use crate::database::model::SubscriberModel;
 use crate::database::model::SubscriberType;
-use crate::error::AppError;
 use crate::service::feed_subscription_service::SubscribeResult;
 use crate::service::feed_subscription_service::SubscriberTarget;
 use crate::service::feed_subscription_service::UnsubscribeResult;
@@ -110,18 +109,15 @@ pub struct FeedsCog;
 
 impl FeedsCog {
     /// Configure server feed settings
-    #[poise::command(slash_command, guild_only)]
+    #[poise::command(
+        slash_command,
+        guild_only,
+        default_member_permissions = "ADMINISTRATOR | MANAGE_GUILD"
+    )]
     pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
         use serenity::futures::StreamExt;
-
         ctx.defer().await?;
-
-        let guild_id = ctx
-            .guild_id()
-            .ok_or_else(|| AppError::AssertionError {
-                msg: "Cannot get guild id".to_string(),
-            })?
-            .get();
+        let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?.get();
 
         let mut settings = ctx
             .data()
