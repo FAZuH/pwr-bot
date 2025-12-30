@@ -28,10 +28,10 @@ impl Config {
         self.db_path = std::env::var("DATABASE_PATH").unwrap_or("./data/data.db".to_string());
         self.discord_token =
             std::env::var("DISCORD_TOKEN").map_err(|_| AppError::MissingConfig {
-                key: "DISCORD_TOKEN".to_string(),
+                config: "DISCORD_TOKEN".to_string(),
             })?;
         self.admin_id = std::env::var("ADMIN_ID").map_err(|_| AppError::MissingConfig {
-            key: "ADMIN_ID".to_string(),
+            config: "ADMIN_ID".to_string(),
         })?;
         self.logs_path = std::env::var("LOGS_PATH").unwrap_or("./logs".to_string());
         Ok(())

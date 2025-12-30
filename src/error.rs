@@ -7,8 +7,8 @@ pub enum AppError {
     #[error("Assertion error: {msg}")]
     AssertionError { msg: String },
 
-    #[error("Missing config with key \"{key}\"")]
-    MissingConfig { key: String },
+    #[error("Missing config \"{config}\"")]
+    MissingConfig { config: String },
 
     #[error("Error in app configuration: {msg}")]
     ConfigurationError { msg: String },
