@@ -29,6 +29,10 @@ impl Feeds {
         _self
     }
 
+    pub fn get_all_feeds(&self) -> Vec<Arc<dyn Feed>> {
+        self.feeds.clone()
+    }
+
     /// Get feed id by URL
     pub fn get_feed_id_by_url<'a>(&self, url: &'a str) -> Result<&'a str, FeedError> {
         let feed = self

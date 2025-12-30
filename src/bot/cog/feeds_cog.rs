@@ -324,7 +324,9 @@ impl FeedsCog {
     #[poise::command(slash_command)]
     pub async fn subscribe(
         ctx: Context<'_>,
-        #[description = "Link(s) of the feeds. Separate links with commas (,)"] links: String,
+        #[description = "Link(s) of the feeds. Separate links with commas (,)"]
+        #[autocomplete = "Self::autocomplete_supported_feeds"]
+        links: String,
         #[description = "Where to send the notifications. Default to your DM"] send_into: Option<
             SendInto,
         >,
@@ -613,6 +615,28 @@ impl FeedsCog {
             let buttons = navigation.create_buttons();
             Ok(vec![container, buttons])
         }
+    }
+
+    async fn autocomplete_supported_feeds<'a>(
+        ctx: Context<'_>,
+        partial: &str,
+    ) -> CreateAutocompleteResponse<'a> {
+        let mut choices = Vec::new();
+        let feeds = ctx.data().feeds.get_all_feeds();
+
+        for feed in feeds {
+            let info = &feed.get_base().info;
+            let name = format!("{} ({})", info.name, info.api_domain);
+            if partial.is_empty()
+                || name.to_lowercase().contains(&partial.to_lowercase())
+                || info.api_domain.contains(&partial.to_lowercase())
+            {
+                choices.push(AutocompleteChoice::new(name, info.api_domain.clone()));
+            }
+        }
+
+        choices.truncate(25);
+        CreateAutocompleteResponse::new().set_choices(choices)
     }
 
     async fn autocomplete_subscriptions<'a>(
