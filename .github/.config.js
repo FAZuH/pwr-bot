@@ -71,6 +71,20 @@ async function getOptions() {
   options.recommendedBumpOpts.whatBump = whatBump;
   options.whatBump = whatBump;
 
+  if (options.writerOpts && options.writerOpts.transform) {
+    const originalTransform = options.writerOpts.transform;
+    options.writerOpts.transform = (commit, context) => {
+      const skipCiRegex = / \[skip ci\]/g;
+      if (commit.header) {
+        commit.header = commit.header.replace(skipCiRegex, "");
+      }
+      if (commit.subject) {
+        commit.subject = commit.subject.replace(skipCiRegex, "");
+      }
+      return originalTransform(commit, context);
+    };
+  }
+
   return options;
 }
 
