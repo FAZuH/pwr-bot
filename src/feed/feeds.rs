@@ -4,7 +4,7 @@ use crate::feed::Feed;
 use crate::feed::FeedItem;
 use crate::feed::FeedSource;
 use crate::feed::anilist_feed::AniListFeed;
-use crate::feed::error::SeriesFeedError;
+use crate::feed::error::FeedError;
 use crate::feed::mangadex_feed::MangaDexFeed;
 
 pub struct Feeds {
@@ -30,10 +30,10 @@ impl Feeds {
     }
 
     /// Get feed id by URL
-    pub fn get_feed_id_by_url<'a>(&self, url: &'a str) -> Result<&'a str, SeriesFeedError> {
+    pub fn get_feed_id_by_url<'a>(&self, url: &'a str) -> Result<&'a str, FeedError> {
         let feed = self
             .get_feed_by_url(url)
-            .ok_or_else(|| SeriesFeedError::UnsupportedUrl {
+            .ok_or_else(|| FeedError::UnsupportedUrl {
                 url: url.to_string(),
             })?;
 
@@ -42,10 +42,10 @@ impl Feeds {
     }
 
     /// Get feed by URL and call fetch_latest
-    pub async fn fetch_latest_by_url(&self, url: &str) -> Result<FeedItem, SeriesFeedError> {
+    pub async fn fetch_latest_by_url(&self, url: &str) -> Result<FeedItem, FeedError> {
         let feed = self
             .get_feed_by_url(url)
-            .ok_or_else(|| SeriesFeedError::UnsupportedUrl {
+            .ok_or_else(|| FeedError::UnsupportedUrl {
                 url: url.to_string(),
             })?;
         let source_id = self.get_feed_id_by_url(url)?;
@@ -53,10 +53,10 @@ impl Feeds {
     }
 
     /// Get feed by URL and call fetch_source
-    pub async fn fetch_source_by_url(&self, url: &str) -> Result<FeedSource, SeriesFeedError> {
+    pub async fn fetch_source_by_url(&self, url: &str) -> Result<FeedSource, FeedError> {
         let feed = self
             .get_feed_by_url(url)
-            .ok_or_else(|| SeriesFeedError::UnsupportedUrl {
+            .ok_or_else(|| FeedError::UnsupportedUrl {
                 url: url.to_string(),
             })?;
         let source_id = self.get_feed_id_by_url(url)?;

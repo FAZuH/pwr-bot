@@ -16,7 +16,7 @@ pub enum UrlParseError {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum SeriesFeedError {
+pub enum FeedError {
     #[error("HTTP request failed: {0}")]
     RequestFailed(#[from] reqwest::Error),
 
@@ -58,10 +58,4 @@ pub enum SeriesFeedError {
 
     #[error("URL parse error: {0}")]
     UrlParseFailed(#[from] UrlParseError),
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum FeedError {
-    #[error("SeriesFeedError: {0}")]
-    SeriesFeedError(#[from] SeriesFeedError),
 }

@@ -15,7 +15,6 @@ use crate::database::model::SubscriberModel;
 use crate::database::model::SubscriberType;
 use crate::database::table::Table;
 use crate::feed::error::FeedError;
-use crate::feed::error::SeriesFeedError;
 use crate::feed::feeds::Feeds;
 use crate::service::error::ServiceError;
 
@@ -54,15 +53,15 @@ impl FeedSubscriptionService {
         url: &str,
         subscriber: &SubscriberModel,
     ) -> Result<UnsubscribeResult, ServiceError> {
-        let source =
-            self.feeds
-                .get_feed_by_url(url)
-                .ok_or_else(|| SeriesFeedError::UnsupportedUrl {
-                    url: url.to_string(),
-                })?;
+        let source = self
+            .feeds
+            .get_feed_by_url(url)
+            .ok_or_else(|| FeedError::UnsupportedUrl {
+                url: url.to_string(),
+            })?;
         let id = source
             .get_id_from_url(url)
-            .map_err(SeriesFeedError::UrlParseFailed)?;
+            .map_err(FeedError::UrlParseFailed)?;
         let normalized_url = source.get_url_from_id(id);
 
         let feed = match self.db.feed_table.select_by_url(&normalized_url).await {
@@ -151,15 +150,15 @@ impl FeedSubscriptionService {
     }
 
     pub async fn get_or_create_feed(&self, url: &str) -> Result<FeedModel, ServiceError> {
-        let source =
-            self.feeds
-                .get_feed_by_url(url)
-                .ok_or_else(|| SeriesFeedError::UnsupportedUrl {
-                    url: url.to_string(),
-                })?;
+        let source = self
+            .feeds
+            .get_feed_by_url(url)
+            .ok_or_else(|| FeedError::UnsupportedUrl {
+                url: url.to_string(),
+            })?;
         let id = source
             .get_id_from_url(url)
-            .map_err(SeriesFeedError::UrlParseFailed)?;
+            .map_err(FeedError::UrlParseFailed)?;
         let normalized_url = source.get_url_from_id(id);
 
         let feed = match self.db.feed_table.select_by_url(&normalized_url).await {
@@ -285,10 +284,4 @@ pub struct SubscriberTarget {
 pub struct SubscriptionInfo {
     pub feed: FeedModel,
     pub feed_latest: FeedItemModel,
-}
-
-impl From<SeriesFeedError> for ServiceError {
-    fn from(err: SeriesFeedError) -> Self {
-        ServiceError::FeedError(FeedError::SeriesFeedError(err))
-    }
 }

@@ -18,7 +18,7 @@ use crate::feed::Feed;
 use crate::feed::FeedInfo;
 use crate::feed::FeedItem;
 use crate::feed::FeedSource;
-use crate::feed::error::SeriesFeedError;
+use crate::feed::error::FeedError;
 use crate::feed::error::UrlParseError;
 
 pub struct AniListFeed {
@@ -49,11 +49,7 @@ impl AniListFeed {
         }
     }
 
-    async fn request(
-        &self,
-        source_id: &str,
-        query: &str,
-    ) -> Result<serde_json::Value, SeriesFeedError> {
+    async fn request(&self, source_id: &str, query: &str) -> Result<serde_json::Value, FeedError> {
         let source_id_num = Self::validate_id(source_id)?;
         let json = serde_json::json!({
             "query": query,
@@ -69,7 +65,7 @@ impl AniListFeed {
         Ok(response_json)
     }
 
-    fn check_api_errors(&self, resp: &Value) -> Result<(), SeriesFeedError> {
+    fn check_api_errors(&self, resp: &Value) -> Result<(), FeedError> {
         if let Some(errors) = resp.get("errors")
             && let Some(error_array) = errors.as_array()
         {
@@ -78,7 +74,7 @@ impl AniListFeed {
                 .map(|e| self.extract_error_message(e))
                 .collect::<Vec<String>>()
                 .join(" | ");
-            return Err(SeriesFeedError::ApiError { message: err_msg });
+            return Err(FeedError::ApiError { message: err_msg });
         }
         Ok(())
     }
@@ -98,20 +94,19 @@ impl AniListFeed {
     }
 
     /// Validate source_id format (should be numeric for AniList)
-    fn validate_id(source_id: &str) -> Result<i32, SeriesFeedError> {
-        let source_id_num =
-            source_id
-                .parse::<i32>()
-                .map_err(|_| SeriesFeedError::InvalidSourceId {
-                    source_id: source_id.to_string(),
-                })?;
+    fn validate_id(source_id: &str) -> Result<i32, FeedError> {
+        let source_id_num = source_id
+            .parse::<i32>()
+            .map_err(|_| FeedError::InvalidSourceId {
+                source_id: source_id.to_string(),
+            })?;
         Ok(source_id_num)
     }
 }
 
 #[async_trait]
 impl Feed for AniListFeed {
-    async fn fetch_latest(&self, id: &str) -> Result<FeedItem, SeriesFeedError> {
+    async fn fetch_latest(&self, id: &str) -> Result<FeedItem, FeedError> {
         debug!(
             "Fetching latest from {} for source_id: {id}",
             self.base.info.name
@@ -132,38 +127,38 @@ impl Feed for AniListFeed {
         // Extract fields
         let airing_schedule = response_json["data"]["AiringSchedule"]
             .as_object()
-            .ok_or_else(|| SeriesFeedError::ItemNotFound {
+            .ok_or_else(|| FeedError::ItemNotFound {
                 source_id: source_id.clone(),
             })?;
 
         let timestamp_s =
             airing_schedule
                 .get("airingAt")
-                .ok_or_else(|| SeriesFeedError::MissingField {
+                .ok_or_else(|| FeedError::MissingField {
                     field: "data.AiringSchedule.airingAt".to_string(),
                 })?;
         let timestamp = timestamp_s
             .as_i64()
-            .ok_or_else(|| SeriesFeedError::UnexpectedResult {
+            .ok_or_else(|| FeedError::UnexpectedResult {
                 message: format!("Invalid data.airingSchedule.airingAt: {timestamp_s}"),
             })?;
 
         let title = airing_schedule
             .get("episode")
-            .ok_or_else(|| SeriesFeedError::MissingField {
+            .ok_or_else(|| FeedError::MissingField {
                 field: "data.AiringSchedule.episode".to_string(),
             })?
             .to_string();
 
         let id = airing_schedule
             .get("id")
-            .ok_or_else(|| SeriesFeedError::MissingField {
+            .ok_or_else(|| FeedError::MissingField {
                 field: "data.AiringSchedule.id".to_string(),
             })?
             .to_string();
 
         let published = DateTime::from_timestamp(timestamp, 0)
-            .ok_or_else(|| SeriesFeedError::InvalidTimestamp { timestamp })?;
+            .ok_or_else(|| FeedError::InvalidTimestamp { timestamp })?;
 
         info!("Successfully fetched anime for source_id: {source_id}");
 
@@ -176,7 +171,7 @@ impl Feed for AniListFeed {
         })
     }
 
-    async fn fetch_source(&self, id: &str) -> Result<FeedSource, SeriesFeedError> {
+    async fn fetch_source(&self, id: &str) -> Result<FeedSource, FeedError> {
         debug!(
             "Fetching info from {} for source_id: {id}",
             self.base.info.name
@@ -198,7 +193,7 @@ impl Feed for AniListFeed {
 
         // Extract fields
         let media = response_json["data"]["Media"].as_object().ok_or_else(|| {
-            SeriesFeedError::SourceNotFound {
+            FeedError::SourceNotFound {
                 source_id: source_id.clone(),
             }
         })?;
