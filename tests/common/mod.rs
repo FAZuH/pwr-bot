@@ -9,7 +9,7 @@ use pwr_bot::feed::Feed;
 use pwr_bot::feed::FeedInfo;
 use pwr_bot::feed::FeedItem;
 use pwr_bot::feed::FeedSource;
-use pwr_bot::feed::error::SeriesFeedError;
+use pwr_bot::feed::error::FeedError;
 use pwr_bot::feed::error::UrlParseError;
 use uuid::Uuid;
 
@@ -81,17 +81,17 @@ impl MockFeed {
 
 #[async_trait]
 impl Feed for MockFeed {
-    async fn fetch_latest(&self, id: &str) -> Result<FeedItem, SeriesFeedError> {
+    async fn fetch_latest(&self, id: &str) -> Result<FeedItem, FeedError> {
         if let Some(feed_item) = &self.state.read().unwrap().feed_item {
             Ok(feed_item.clone())
         } else {
-            Err(SeriesFeedError::ItemNotFound {
+            Err(FeedError::ItemNotFound {
                 source_id: id.to_string(),
             })
         }
     }
 
-    async fn fetch_source(&self, _id: &str) -> Result<FeedSource, SeriesFeedError> {
+    async fn fetch_source(&self, _id: &str) -> Result<FeedSource, FeedError> {
         Ok(self.state.read().unwrap().feed_source.clone())
     }
 

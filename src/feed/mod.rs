@@ -1,14 +1,14 @@
-pub mod anilist_series_feed;
+pub mod anilist_feed;
 
 pub mod error;
 pub mod feeds;
-pub mod mangadex_series_feed;
+pub mod mangadex_feed;
 
 use async_trait::async_trait;
 use chrono::DateTime;
 use chrono::Utc;
 
-use crate::feed::error::SeriesFeedError;
+use crate::feed::error::FeedError;
 use crate::feed::error::UrlParseError;
 
 #[derive(Clone, Debug, Default)]
@@ -149,8 +149,8 @@ pub struct FeedSource {
 
 #[async_trait]
 pub trait Feed: Send + Sync {
-    async fn fetch_latest(&self, id: &str) -> Result<FeedItem, SeriesFeedError>;
-    async fn fetch_source(&self, id: &str) -> Result<FeedSource, SeriesFeedError>;
+    async fn fetch_latest(&self, id: &str) -> Result<FeedItem, FeedError>;
+    async fn fetch_source(&self, id: &str) -> Result<FeedSource, FeedError>;
     fn get_id_from_url<'a>(&self, url: &'a str) -> Result<&'a str, UrlParseError>;
     /// Returns the URL for a source given its ID.
     /// The returned URL is the public URL of the source, not the API URL.

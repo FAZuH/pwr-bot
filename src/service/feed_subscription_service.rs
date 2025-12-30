@@ -15,7 +15,6 @@ use crate::database::model::SubscriberModel;
 use crate::database::model::SubscriberType;
 use crate::database::table::Table;
 use crate::feed::error::FeedError;
-use crate::feed::error::SeriesFeedError;
 use crate::feed::feeds::Feeds;
 use crate::service::error::ServiceError;
 
@@ -54,29 +53,23 @@ impl FeedSubscriptionService {
         url: &str,
         subscriber: &SubscriberModel,
     ) -> Result<UnsubscribeResult, ServiceError> {
-        let source =
-            self.feeds
-                .get_feed_by_url(url)
-                .ok_or_else(|| SeriesFeedError::UnsupportedUrl {
-                    url: url.to_string(),
-                })?;
+        let source = self
+            .feeds
+            .get_feed_by_url(url)
+            .ok_or_else(|| FeedError::UnsupportedUrl {
+                url: url.to_string(),
+            })?;
         let id = source
             .get_id_from_url(url)
-            .map_err(SeriesFeedError::UrlParseFailed)?;
+            .map_err(FeedError::UrlParseFailed)?;
         let normalized_url = source.get_url_from_id(id);
 
-        let feed = match self.db.feed_table.select_by_url(&normalized_url).await {
-            Ok(feed) => feed,
-            Err(err) => {
-                if let DatabaseError::BackendError(sqlx::Error::RowNotFound) = &err {
-                    return Ok(UnsubscribeResult::NoneSubscribed {
-                        url: url.to_string(),
-                    });
-                } else {
-                    return Err(ServiceError::UnexpectedResult {
-                        message: err.to_string(),
-                    });
-                }
+        let feed = match self.db.feed_table.select_by_url(&normalized_url).await? {
+            Some(feed) => feed,
+            None => {
+                return Ok(UnsubscribeResult::NoneSubscribed {
+                    url: url.to_string(),
+                });
             }
         };
 
@@ -115,7 +108,14 @@ impl FeedSubscriptionService {
             .await?;
         for sub in subscriptions {
             // Existence guaranteed by FOREIGN KEY constraint
-            let feed = self.db.feed_table.select(&sub.feed_id).await?;
+            let feed = self
+                .db
+                .feed_table
+                .select(&sub.feed_id)
+                .await?
+                .ok_or_else(|| ServiceError::UnexpectedResult {
+                    message: "Feed not found".to_string(),
+                })?;
             let feed_latest = self
                 .db
                 .feed_item_table
@@ -151,20 +151,20 @@ impl FeedSubscriptionService {
     }
 
     pub async fn get_or_create_feed(&self, url: &str) -> Result<FeedModel, ServiceError> {
-        let source =
-            self.feeds
-                .get_feed_by_url(url)
-                .ok_or_else(|| SeriesFeedError::UnsupportedUrl {
-                    url: url.to_string(),
-                })?;
+        let source = self
+            .feeds
+            .get_feed_by_url(url)
+            .ok_or_else(|| FeedError::UnsupportedUrl {
+                url: url.to_string(),
+            })?;
         let id = source
             .get_id_from_url(url)
-            .map_err(SeriesFeedError::UrlParseFailed)?;
+            .map_err(FeedError::UrlParseFailed)?;
         let normalized_url = source.get_url_from_id(id);
 
-        let feed = match self.db.feed_table.select_by_url(&normalized_url).await {
-            Ok(res) => res,
-            Err(_) => {
+        let feed = match self.db.feed_table.select_by_url(&normalized_url).await? {
+            Some(res) => res,
+            None => {
                 // Feed doesn't exist, create it
                 let feed_source = source.fetch_source(id).await?;
 
@@ -202,10 +202,10 @@ impl FeedSubscriptionService {
             .db
             .subscriber_table
             .select_by_type_and_target(&target.subscriber_type, &target.target_id)
-            .await
+            .await?
         {
-            Ok(res) => res,
-            Err(_) => {
+            Some(res) => res,
+            None => {
                 // Subscriber doesn't exist, create it
                 let mut subscriber = SubscriberModel {
                     r#type: target.subscriber_type,
@@ -220,12 +220,9 @@ impl FeedSubscriptionService {
     }
 
     pub async fn get_server_settings(&self, guild_id: u64) -> Result<ServerSettings, ServiceError> {
-        match self.db.server_settings_table.select(&guild_id).await {
-            Ok(model) => Ok(model.settings.0),
-            Err(DatabaseError::BackendError(sqlx::Error::RowNotFound)) => {
-                Ok(ServerSettings::default())
-            }
-            Err(e) => Err(ServiceError::DatabaseError(e)),
+        match self.db.server_settings_table.select(&guild_id).await? {
+            Some(model) => Ok(model.settings.0),
+            None => Ok(ServerSettings::default()),
         }
     }
 
@@ -284,11 +281,5 @@ pub struct SubscriberTarget {
 
 pub struct SubscriptionInfo {
     pub feed: FeedModel,
-    pub feed_latest: FeedItemModel,
-}
-
-impl From<SeriesFeedError> for ServiceError {
-    fn from(err: SeriesFeedError) -> Self {
-        ServiceError::FeedError(FeedError::SeriesFeedError(err))
-    }
+    pub feed_latest: Option<FeedItemModel>,
 }

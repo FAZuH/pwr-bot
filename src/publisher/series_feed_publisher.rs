@@ -31,7 +31,7 @@ use crate::database::table::Table;
 use crate::event::event_bus::EventBus;
 use crate::event::feed_update_event::FeedUpdateEvent;
 use crate::feed::FeedInfo;
-use crate::feed::error::SeriesFeedError;
+use crate::feed::error::FeedError;
 use crate::feed::feeds::Feeds;
 
 pub struct SeriesFeedPublisher {
@@ -135,7 +135,8 @@ impl SeriesFeedPublisher {
             .db
             .feed_item_table
             .select_latest_by_feed_id(feed.id)
-            .await?;
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("Latest feed item not found"))?;
 
         let series_feed = self.feeds.get_feed_by_url(&feed.url).ok_or_else(|| {
             DatabaseError::InternalError {
@@ -152,7 +153,7 @@ impl SeriesFeedPublisher {
         let new_latest = match series_feed.fetch_latest(series_id).await {
             Ok(series) => series,
             Err(e) => {
-                if matches!(e, SeriesFeedError::SourceFinished { .. }) {
+                if matches!(e, FeedError::SourceFinished { .. }) {
                     info!(
                         "Feed {} is finished. Removing from database.",
                         self.get_feed_desc(&feed)

@@ -324,7 +324,9 @@ impl FeedsCog {
     #[poise::command(slash_command)]
     pub async fn subscribe(
         ctx: Context<'_>,
-        #[description = "Link(s) of the feeds. Separate links with commas (,)"] links: String,
+        #[description = "Link(s) of the feeds. Separate links with commas (,)"]
+        #[autocomplete = "Self::autocomplete_supported_feeds"]
+        links: String,
         #[description = "Where to send the notifications. Default to your DM"] send_into: Option<
             SendInto,
         >,
@@ -531,8 +533,9 @@ impl FeedsCog {
             .await?;
 
         // Create navigation component
+        let pages = items.div_ceil(per_page);
         let mut navigation =
-            PageNavigationComponent::new(&ctx, Pagination::new(items / per_page + 1, per_page, 1));
+            PageNavigationComponent::new(&ctx, Pagination::new(pages, per_page, 1));
 
         // Run feedback loop until timeout
         let reply = ctx
@@ -582,18 +585,21 @@ impl FeedsCog {
 
         let mut container_components = vec![];
         for sub in subscriptions {
-            let text = CreateTextDisplay::new(format!(
-                "### {}
-
-    - **Last version**: {}
-    - **Last updated**: <t:{}>
-    - **Source**: <{}>
-    ﻿",
-                sub.feed.name,
-                sub.feed_latest.description,
-                sub.feed_latest.published.timestamp(),
-                sub.feed.url
-            ));
+            let text = if let Some(latest) = sub.feed_latest {
+                CreateTextDisplay::new(format!(
+                    "### {}\n\n- **Last version**: {}\n- **Last updated**: <t:{}>\n- **Source**: <{}>",
+                    sub.feed.name,
+                    latest.description,
+                    latest.published.timestamp(),
+                    sub.feed.url
+                ))
+            } else {
+                // Note: You need to provide the feed name and URL for this case too
+                CreateTextDisplay::new(format!(
+                    "### {}\n\n> No latest version found.\n\n- **Source**: <{}>",
+                    sub.feed.name, sub.feed.url
+                ))
+            };
             let thumbnail = CreateThumbnail::new(CreateUnfurledMediaItem::new(sub.feed.cover_url));
 
             container_components.push(CreateContainerComponent::Section(CreateSection::new(
@@ -609,6 +615,28 @@ impl FeedsCog {
             let buttons = navigation.create_buttons();
             Ok(vec![container, buttons])
         }
+    }
+
+    async fn autocomplete_supported_feeds<'a>(
+        ctx: Context<'_>,
+        partial: &str,
+    ) -> CreateAutocompleteResponse<'a> {
+        let mut choices = Vec::new();
+        let feeds = ctx.data().feeds.get_all_feeds();
+
+        for feed in feeds {
+            let info = &feed.get_base().info;
+            let name = format!("{} ({})", info.name, info.api_domain);
+            if partial.is_empty()
+                || name.to_lowercase().contains(&partial.to_lowercase())
+                || info.api_domain.contains(&partial.to_lowercase())
+            {
+                choices.push(AutocompleteChoice::new(name, info.api_domain.clone()));
+            }
+        }
+
+        choices.truncate(25);
+        CreateAutocompleteResponse::new().set_choices(choices)
     }
 
     async fn autocomplete_subscriptions<'a>(
