@@ -5,9 +5,11 @@ Discord bot that sends feed update notifications to your DM or server.
 ## Table of Contents
 
 - [Features](#features)
+- [Discord Setup](#discord-setup)
 - [Installation & Usage](#installation--usage)
     - [Docker (Recommended)](#docker-recommended)
     - [Manual (Rust)](#manual-rust)
+- [Command Registration](#command-registration)
 - [Configuration](#configuration)
 - [Notes and Tips](#notes-and-tips)
 - [Bug Reports and Feature Requests](#bug-reports-and-feature-requests)
@@ -28,6 +30,24 @@ Discord bot that sends feed update notifications to your DM or server.
 <img width="555" height="327" alt="image" src="https://github.com/user-attachments/assets/7d551bb4-b919-49b0-a5d3-832438001f65" />
 <img width="619" height="299" alt="image" src="https://github.com/user-attachments/assets/e13b24c8-084b-4800-b189-643c7560b56c" />
 <img width="607" height="515" alt="image" src="https://github.com/user-attachments/assets/b1a4ac6a-07ed-4465-bfe1-c7d34292f43d" />
+
+## Discord Setup
+
+Before running the bot, you need to create a Discord application:
+
+1.  Go to the [Discord Developer Portal](https://discord.com/developers/applications).
+2.  Create a **New Application** and give it a name.
+3.  Navigate to the **Bot** tab:
+    - Click **Reset Token** to get your `DISCORD_TOKEN`.
+    - Under **Privileged Gateway Intents**, enable **Message Content Intent**.
+4.  Navigate to **OAuth2 -> URL Generator**:
+    - Select Scopes: `bot`, `applications.commands`.
+    - Select Bot Permissions:
+        - `View Channels`
+        - `Send Messages`
+        - `Embed Links`
+        - `Read Message History` (Required for the `!register` command)
+5.  Use the generated URL to invite the bot to your server.
 
 ## Installation & Usage
 
@@ -124,6 +144,16 @@ If you prefer to run the container directly without `docker compose` or cloning 
     ```sh
     cargo run --release
     ```
+
+## Command Registration
+
+After the bot is running and invited to your server, you need to register the slash commands:
+
+1.  In any channel the bot has access to, type `!register`.
+2.  The bot will respond with buttons to register the commands.
+3.  Click **Register in guild** (immediate) or **Register globally** (may take up to an hour).
+
+<img width="617" height="91" alt="image" src="https://github.com/user-attachments/assets/c0f508aa-e373-4df7-a574-01183eee4a98" />
 
 ## Configuration
 
