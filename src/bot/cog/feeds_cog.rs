@@ -531,8 +531,9 @@ impl FeedsCog {
             .await?;
 
         // Create navigation component
+        let pages = items.div_ceil(per_page);
         let mut navigation =
-            PageNavigationComponent::new(&ctx, Pagination::new(items / per_page + 1, per_page, 1));
+            PageNavigationComponent::new(&ctx, Pagination::new(pages, per_page, 1));
 
         // Run feedback loop until timeout
         let reply = ctx
