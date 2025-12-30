@@ -46,7 +46,7 @@ pub struct MockFeed {
 #[allow(dead_code)]
 pub struct MockFeedState {
     pub feed_source: FeedSource,
-    pub feed_item: FeedItem,
+    pub feed_item: Option<FeedItem>,
 }
 
 #[allow(dead_code)]
@@ -70,7 +70,7 @@ impl MockFeed {
         }
     }
 
-    pub fn set_latest(&self, latest: FeedItem) {
+    pub fn set_latest(&self, latest: Option<FeedItem>) {
         self.state.write().unwrap().feed_item = latest;
     }
 
@@ -81,8 +81,14 @@ impl MockFeed {
 
 #[async_trait]
 impl Feed for MockFeed {
-    async fn fetch_latest(&self, _id: &str) -> Result<FeedItem, SeriesFeedError> {
-        Ok(self.state.read().unwrap().feed_item.clone())
+    async fn fetch_latest(&self, id: &str) -> Result<FeedItem, SeriesFeedError> {
+        if let Some(feed_item) = &self.state.read().unwrap().feed_item {
+            Ok(feed_item.clone())
+        } else {
+            Err(SeriesFeedError::ItemNotFound {
+                source_id: id.to_string(),
+            })
+        }
     }
 
     async fn fetch_source(&self, _id: &str) -> Result<FeedSource, SeriesFeedError> {

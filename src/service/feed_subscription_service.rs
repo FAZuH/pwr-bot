@@ -166,7 +166,6 @@ impl FeedSubscriptionService {
             Ok(res) => res,
             Err(_) => {
                 // Feed doesn't exist, create it
-                let feed_item = source.fetch_latest(id).await?;
                 let feed_source = source.fetch_source(id).await?;
 
                 let mut feed = FeedModel {
@@ -179,14 +178,16 @@ impl FeedSubscriptionService {
                 };
                 feed.id = self.db.feed_table.insert(&feed).await?;
 
-                // Create initial version
-                let version = FeedItemModel {
-                    feed_id: feed.id,
-                    description: feed_item.title,
-                    published: feed_item.published,
-                    ..Default::default()
-                };
-                self.db.feed_item_table.insert(&version).await?;
+                if let Ok(feed_latest) = source.fetch_latest(id).await {
+                    // Create initial version
+                    let version = FeedItemModel {
+                        feed_id: feed.id,
+                        description: feed_latest.title,
+                        published: feed_latest.published,
+                        ..Default::default()
+                    };
+                    self.db.feed_item_table.insert(&version).await?;
+                }
 
                 feed
             }

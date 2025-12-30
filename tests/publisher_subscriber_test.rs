@@ -54,7 +54,7 @@ async fn test_subscription_and_publishing() {
         url: format!("{}/chapter/1", url),
         published: Utc::now(),
     };
-    mock_feed.set_latest(initial_latest.clone());
+    mock_feed.set_latest(Some(initial_latest.clone()));
 
     // 2. Test Subscribe
     let target = SubscriberTarget {
@@ -113,7 +113,7 @@ async fn test_subscription_and_publishing() {
         url: format!("{}/chapter/2", url),
         published: Utc::now(),
     };
-    mock_feed.set_latest(new_latest);
+    mock_feed.set_latest(Some(new_latest));
 
     // Wait for poll
     let mut attempts = 0;
