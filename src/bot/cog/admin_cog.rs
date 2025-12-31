@@ -3,9 +3,9 @@ use poise::CreateReply;
 use poise::samples::create_application_commands;
 use serenity::all::CreateAttachment;
 
+use crate::bot::checks::check_guild_permissions;
 use crate::bot::cog::Context;
 use crate::bot::cog::Error;
-use crate::bot::checks::check_guild_permissions;
 use crate::bot::error::BotError;
 use crate::database::table::Table;
 
