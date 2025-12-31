@@ -30,10 +30,10 @@ use serenity::all::CreateUnfurledMediaItem;
 use serenity::all::GenericChannelId;
 use serenity::all::GuildId;
 use serenity::all::MessageFlags;
-use serenity::all::Permissions;
 use serenity::all::RoleId;
 use serenity::all::UserId;
 
+use crate::bot::checks::check_guild_permissions;
 use crate::bot::cog::Context;
 use crate::bot::cog::Error;
 use crate::bot::components::PageNavigationComponent;
@@ -42,7 +42,6 @@ use crate::bot::error::BotError;
 use crate::database::model::ServerSettings;
 use crate::database::model::SubscriberModel;
 use crate::database::model::SubscriberType;
-use crate::error::AppError;
 use crate::service::feed_subscription_service::SubscribeResult;
 use crate::service::feed_subscription_service::SubscriberTarget;
 use crate::service::feed_subscription_service::UnsubscribeResult;
@@ -110,18 +109,15 @@ pub struct FeedsCog;
 
 impl FeedsCog {
     /// Configure server feed settings
-    #[poise::command(slash_command, guild_only)]
+    #[poise::command(
+        slash_command,
+        guild_only,
+        default_member_permissions = "ADMINISTRATOR | MANAGE_GUILD"
+    )]
     pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
         use serenity::futures::StreamExt;
-
         ctx.defer().await?;
-
-        let guild_id = ctx
-            .guild_id()
-            .ok_or_else(|| AppError::AssertionError {
-                msg: "Cannot get guild id".to_string(),
-            })?
-            .get();
+        let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?.get();
 
         let mut settings = ctx
             .data()
@@ -141,21 +137,6 @@ impl FeedsCog {
             .stream();
 
         while let Some(interaction) = collector.next().await {
-            // Check permissions for each interaction
-            if let Err(e) = FeedsCog::check_guild_permissions(ctx, &None).await {
-                interaction
-                    .create_response(
-                        ctx.http(),
-                        poise::serenity_prelude::CreateInteractionResponse::Message(
-                            poise::serenity_prelude::CreateInteractionResponseMessage::new()
-                                .content(format!("❌ {}", e))
-                                .flags(MessageFlags::EPHEMERAL),
-                        ),
-                    )
-                    .await?;
-                continue;
-            }
-
             let mut should_update = true;
 
             match &interaction.data.kind {
@@ -336,9 +317,7 @@ impl FeedsCog {
         let send_into = send_into.unwrap_or(SendInto::DM);
 
         if let SendInto::Server = send_into {
-            let guild_id = ctx.guild_id().ok_or_else(|| {
-                BotError::ConfigurationError("Command must be run in a server.".to_string())
-            })?;
+            let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?;
             let settings = ctx
                 .data()
                 .feed_subscription_service
@@ -346,11 +325,12 @@ impl FeedsCog {
                 .await?;
             if settings.channel_id.is_none() {
                 return Err(BotError::ConfigurationError(
-                    "Server feed settings are not configured. An administrator must run `/settings` to configure a notification channel first.".to_string(),
+                    "Server feed settings are not configured. A server admin must run `/settings` to configure a notification channel first.".to_string(),
                 )
                 .into());
             }
-            FeedsCog::check_guild_permissions(ctx, &settings.subscribe_role_id).await?;
+            // Check if author is allowed to subscribe according to server settings
+            check_guild_permissions(ctx, &settings.subscribe_role_id).await?;
         }
 
         let urls_split: Vec<&str> = links.split(',').map(|s| s.trim()).collect();
@@ -360,7 +340,7 @@ impl FeedsCog {
         let target_id = FeedsCog::get_target_id(ctx, &send_into)?;
         let target = SubscriberTarget {
             subscriber_type,
-            target_id: target_id.clone(),
+            target_id,
         };
         let subscriber = ctx
             .data()
@@ -426,9 +406,7 @@ impl FeedsCog {
         let send_into = send_into.unwrap_or(SendInto::DM);
 
         if let SendInto::Server = send_into {
-            let guild_id = ctx.guild_id().ok_or_else(|| {
-                BotError::ConfigurationError("Command must be run in a server.".to_string())
-            })?;
+            let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?;
             let settings = ctx
                 .data()
                 .feed_subscription_service
@@ -440,7 +418,8 @@ impl FeedsCog {
                 )
                 .into());
             }
-            FeedsCog::check_guild_permissions(ctx, &settings.unsubscribe_role_id).await?;
+            // Check if author is allowed to unsubscribe according to server settings
+            check_guild_permissions(ctx, &settings.unsubscribe_role_id).await?;
         }
 
         let urls_split: Vec<&str> = links.split(',').map(|s| s.trim()).collect();
@@ -450,7 +429,7 @@ impl FeedsCog {
         let target_id = FeedsCog::get_target_id(ctx, &send_into)?;
         let target = SubscriberTarget {
             subscriber_type,
-            target_id: target_id.clone(),
+            target_id,
         };
         let subscriber = ctx
             .data()
@@ -596,7 +575,7 @@ impl FeedsCog {
             } else {
                 // Note: You need to provide the feed name and URL for this case too
                 CreateTextDisplay::new(format!(
-                    "### {}\n\n> No latest version found.\n\n- **Source**: <{}>",
+                    "### {}\n\n> No latest version found.\n- **Source**: <{}>",
                     sub.feed.name, sub.feed.url
                 ))
             };
@@ -621,7 +600,7 @@ impl FeedsCog {
         ctx: Context<'_>,
         partial: &str,
     ) -> CreateAutocompleteResponse<'a> {
-        let mut choices = Vec::new();
+        let mut choices = vec![AutocompleteChoice::new("Supported feeds are:", "foo")];
         let feeds = ctx.data().feeds.get_all_feeds();
 
         for feed in feeds {
@@ -725,26 +704,6 @@ impl FeedsCog {
         CreateAutocompleteResponse::new().set_choices(choices)
     }
 
-    async fn check_guild_permissions(
-        ctx: Context<'_>,
-        required_role_id: &Option<String>,
-    ) -> Result<(), Error> {
-        let member = ctx.author_member().await.ok_or_else(|| {
-            BotError::ConfigurationError("Command must be run in a server.".to_string())
-        })?;
-
-        let permissions = member
-            .permissions
-            .ok_or_else(|| anyhow::anyhow!("Could not user retrieve permissions"))?;
-
-        Ok(FeedsCog::check_permissions_inner(
-            permissions.contains(Permissions::ADMINISTRATOR),
-            &member.roles,
-            required_role_id,
-            permissions.contains(Permissions::MANAGE_GUILD),
-        )?)
-    }
-
     fn get_target_id(ctx: Context<'_>, send_into: &SendInto) -> Result<String, BotError> {
         Self::get_target_id_inner(ctx.guild_id(), ctx.author().id, send_into)
     }
@@ -776,39 +735,6 @@ impl FeedsCog {
             });
         }
         Ok(())
-    }
-
-    fn check_permissions_inner(
-        is_admin: bool,
-        user_roles: &[RoleId],
-        required_role_id: &Option<String>,
-        has_manage_guild: bool,
-    ) -> Result<(), BotError> {
-        if is_admin {
-            return Ok(());
-        }
-
-        if let Some(role_id_str) = required_role_id {
-            if let Ok(role_id) = RoleId::from_str(role_id_str)
-                && user_roles.contains(&role_id)
-            {
-                return Ok(());
-            }
-
-            return Err(BotError::PermissionDenied(format!(
-                "You need the <@&{}> role to perform this action.",
-                role_id_str
-            )));
-        }
-
-        if has_manage_guild {
-            return Ok(());
-        }
-
-        Err(BotError::PermissionDenied(
-            "You need the `Manage Server` permission or a configured role to perform this action."
-                .to_string(),
-        ))
     }
 }
 
@@ -868,47 +794,6 @@ mod tests {
     fn test_send_into_display() {
         assert_eq!(SendInto::DM.to_string(), "dm");
         assert_eq!(SendInto::Server.to_string(), "server");
-    }
-
-    #[test]
-    fn test_check_permissions_admin_always_passes() {
-        let result = FeedsCog::check_permissions_inner(true, &[], &None, false);
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_check_permissions_with_required_role() {
-        let role_id = RoleId::new(123);
-        let user_roles = vec![role_id];
-        let result =
-            FeedsCog::check_permissions_inner(false, &user_roles, &Some("123".to_string()), false);
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_check_permissions_without_required_role_fails() {
-        let user_roles = vec![RoleId::new(456)];
-        let result =
-            FeedsCog::check_permissions_inner(false, &user_roles, &Some("123".to_string()), false);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_check_permissions_manage_guild_when_no_role_configured() {
-        let result = FeedsCog::check_permissions_inner(false, &[], &None, true);
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_check_permissions_fails_without_any_permissions() {
-        let result = FeedsCog::check_permissions_inner(false, &[], &None, false);
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            BotError::PermissionDenied(msg) => {
-                assert!(msg.contains("Manage Server"));
-            }
-            _ => panic!("Expected PermissionDenied error"),
-        }
     }
 
     #[test]

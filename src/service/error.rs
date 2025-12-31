@@ -7,9 +7,9 @@ pub enum ServiceError {
     #[error("Unexpected result: {message}")]
     UnexpectedResult { message: String },
 
-    #[error("FeedError: {0}")]
+    #[error(transparent)]
     FeedError(#[from] FeedError),
 
-    #[error("DatabaseError: {0}")]
+    #[error(transparent)]
     DatabaseError(#[from] DatabaseError),
 }

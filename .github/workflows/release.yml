@@ -1,4 +1,4 @@
-# Credit: Workflow configs inspired from https://github.com/Wynntils/Wynntils
+# Credit: Workflow configs based on https://github.com/Wynntils/Wynntils
 
 name: Release & Deploy
 
@@ -45,7 +45,7 @@ jobs:
         with:
           github-token: ${{ secrets.PRIVATE_TOKEN }}
           git-user-name: "faz-bot"
-          git-user-email: "fazuhhh@proton.me"
+          git-user-email: "mail@fazuh.com"
           pre-commit: ./.github/.pre-commit.js
           config-file-path: ./.github/.config.js
           version-file: ./version.json

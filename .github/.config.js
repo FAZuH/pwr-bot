@@ -1,4 +1,6 @@
-// Credit: Workflow configs inspired from https://github.com/Wynntils/Wynntils
+// Credit: Workflow configs based on https://github.com/Wynntils/Wynntils
+//
+// https://github.com/conventional-changelog/conventional-changelog-config-spec/blob/master/versions/2.2.0/README.md
 "use strict";
 const config = require("conventional-changelog-conventionalcommits");
 
@@ -19,10 +21,7 @@ function whatBump(commits) {
       commit.header.startsWith("feat(major)")
     ) {
       releaseType = 0;
-      break;
-    }
-
-    if (
+    } else if (
       (commit.header.startsWith("feat!") || commit.header.startsWith("fix!")) &&
       releaseType > 1
     ) {
@@ -52,13 +51,11 @@ function whatBump(commits) {
 async function getOptions() {
   let options = await config({
     types: [
-      // Unhide all types except "ci" so that they show up on generated changelog
-      // Default values:
-      // https://github.com/conventional-changelog/conventional-changelog/blob/master/packages/conventional-changelog-conventionalcommits/writer-opts.js
       { type: "feat", section: "New Features" },
       { type: "feature", section: "New Features" },
       { type: "fix", section: "Bug Fixes" },
       { type: "perf", section: "Performance Improvements" },
+      { type: "ui", section: "UI/UX Changes" },
       { type: "revert", section: "Reverts" },
       { type: "docs", section: "Documentation" },
       { type: "style", section: "Styles", hidden: true },
@@ -73,6 +70,20 @@ async function getOptions() {
   // Both of these are used in different places...
   options.recommendedBumpOpts.whatBump = whatBump;
   options.whatBump = whatBump;
+
+  if (options.writerOpts && options.writerOpts.transform) {
+    const originalTransform = options.writerOpts.transform;
+    options.writerOpts.transform = (commit, context) => {
+      const skipCiRegex = / \[skip ci\]/g;
+      if (commit.header) {
+        commit.header = commit.header.replace(skipCiRegex, "");
+      }
+      if (commit.subject) {
+        commit.subject = commit.subject.replace(skipCiRegex, "");
+      }
+      return originalTransform(commit, context);
+    };
+  }
 
   return options;
 }
