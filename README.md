@@ -138,9 +138,14 @@ If you prefer to run the container directly without `docker compose` or cloning 
 
 After the bot is running and invited to your server, you need to register the slash commands:
 
-1.  In any channel the bot has access to, type `!register`.
+1.  In any channel the bot has access to, type `!register_owner`.
 2.  The bot will respond with buttons to register the commands.
 3.  Click **Register in guild** (immediate) or **Register globally** (may take up to an hour).
+
+> [!note]
+> Note that `!register_owner` command requires your Discord user ID to match environment variable's `ADMIN_ID`.
+> 
+> Users in other servers with "Administrator" or "Manage Server" permissions can simply run `!register` or `!unregister`.
 
 <img width="617" height="91" alt="image" src="https://github.com/user-attachments/assets/c0f508aa-e373-4df7-a574-01183eee4a98" />
 
