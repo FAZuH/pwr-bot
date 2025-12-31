@@ -1,3 +1,24 @@
+## [0.1.17](https://github.com/FAZuH/pwr-bot/compare/v0.1.16...v0.1.17) (2025-12-31)
+
+
+### New Features
+
+* **bot:** Add register and unregister commands ([8f47240](https://github.com/FAZuH/pwr-bot/commit/8f4724099d22e6a8ee44660b8ca357cbd1a3691f))
+* **bot:** Improve bot messages ([cb08adf](https://github.com/FAZuH/pwr-bot/commit/cb08adf5ddafaff0d7e398a95037637a2dce72da))
+
+
+### UI/UX Changes
+
+* **bot:** Improve Discord error messages ([9b284bc](https://github.com/FAZuH/pwr-bot/commit/9b284bcfbbd4576b8dee04e94d466982d69ca732))
+* **bot:** Rename register command to register_owner ([08d4b95](https://github.com/FAZuH/pwr-bot/commit/08d4b95875bd60204d14fec806f7942ee1b5a0a8))
+
+
+### Documentation
+
+* Add "Discord Setup" and "Command Registration" sections to README ([1218dcf](https://github.com/FAZuH/pwr-bot/commit/1218dcfce74616e45d874b571499cb4210edf29e))
+* **bot:** Update command registration guide in README ([09a3029](https://github.com/FAZuH/pwr-bot/commit/09a30292581b223bd8a568b50dc963ac19872768))
+* Modify README for non-Docker installation ([086507f](https://github.com/FAZuH/pwr-bot/commit/086507fb600914a85a71bb6b271a02260ffd00bf))
+
 ## [0.1.16](https://github.com/FAZuH/pwr-bot/compare/v0.1.15...v0.1.16) (2025-12-30)
 
 
@@ -14,15 +35,15 @@
 
 ### Documentation
 
-* Add MIT license [skip ci] ([3da4457](https://github.com/FAZuH/pwr-bot/commit/3da4457a62e80704b0a6aa3a291cc8605240ff7e))
-* Improve README [skip ci] ([14cf620](https://github.com/FAZuH/pwr-bot/commit/14cf62051aeaa2ec8b25fb7e3d8275ee67e25b7f))
+* Add MIT license ([3da4457](https://github.com/FAZuH/pwr-bot/commit/3da4457a62e80704b0a6aa3a291cc8605240ff7e))
+* Improve README ([14cf620](https://github.com/FAZuH/pwr-bot/commit/14cf62051aeaa2ec8b25fb7e3d8275ee67e25b7f))
 
 ## [0.1.15](https://github.com/FAZuH/pwr-bot/compare/v0.1.14...v0.1.15) (2025-12-30)
 
 
 ### Bug Fixes
 
-* Error on empty MangaDex feed description [skip ci] ([d13d839](https://github.com/FAZuH/pwr-bot/commit/d13d8398ac4f434f1666d489d3090cdb256f0014))
+* Error on empty MangaDex feed description ([d13d839](https://github.com/FAZuH/pwr-bot/commit/d13d8398ac4f434f1666d489d3090cdb256f0014))
 * Error when subscribing to AniList feed that is not yet aired ([55282ad](https://github.com/FAZuH/pwr-bot/commit/55282adb621a8f70779908013c4ee6c480b6907a))
 
 ## [0.1.14](https://github.com/FAZuH/pwr-bot/compare/v0.1.13...v0.1.14) (2025-12-29)
@@ -30,41 +51,18 @@
 
 ### Bug Fixes
 
-* **feed:** API error when subscribing to feeds [skip ci] ([87d1ce1](https://github.com/FAZuH/pwr-bot/commit/87d1ce1a33ece59f90c0341b1ff8b452284674d4))
+* **feed:** API error when subscribing to feeds ([87d1ce1](https://github.com/FAZuH/pwr-bot/commit/87d1ce1a33ece59f90c0341b1ff8b452284674d4))
 * **feed:** Wrong AniListSeriesFeed rate limiter ([6cca972](https://github.com/FAZuH/pwr-bot/commit/6cca972ef4dc8c9f19c22cdc0112055c4827a0ea))
 
 
 ### Documentation
 
-* Add LOGS_PATH to docs [skip ci] ([5dceca7](https://github.com/FAZuH/pwr-bot/commit/5dceca7d198d65f949e7a8c53265d3dac87bba3f))
+* Add LOGS_PATH to docs ([5dceca7](https://github.com/FAZuH/pwr-bot/commit/5dceca7d198d65f949e7a8c53265d3dac87bba3f))
 
 ## [0.1.13](https://github.com/FAZuH/pwr-bot/compare/v0.1.12...v0.1.13) (2025-12-29)
 
 
 ### New Features
 
-* Add rolling file logging [skip ci] ([1089ec2](https://github.com/FAZuH/pwr-bot/commit/1089ec260cd9ca896400ba9227ff374f7237b298))
-
-## [0.1.12](https://github.com/FAZuH/pwr-bot/compare/v0.1.11...v0.1.12) (2025-12-29)
-
-
-### New Features
-
-* **bot:** Add enabled option in feed /settings ([f41e8a2](https://github.com/FAZuH/pwr-bot/commit/f41e8a2599950c5b122e1250640122897ae33524))
-* **bot:** Add permission checks on feeds commands ([98dfa93](https://github.com/FAZuH/pwr-bot/commit/98dfa93437a905f7dfbf35638b1c4c0ef79f3366))
-* **bot:** Add role settings for subscriptions ([895ad1e](https://github.com/FAZuH/pwr-bot/commit/895ad1eacd7f0dd5c8730a84a6c113f792096ab3))
-* **bot:** Add settings command and update target id generation ([b556af9](https://github.com/FAZuH/pwr-bot/commit/b556af9a824ac98e9d62a837676a0641c2ca80e0))
-* **db:** Add server_settings table and update subscriber logic ([1cd1e62](https://github.com/FAZuH/pwr-bot/commit/1cd1e625fc59a34f3e2538b016166fb670534e74))
-* **service:** Implement server settings business logic ([1fd1076](https://github.com/FAZuH/pwr-bot/commit/1fd1076337951b00ae67b609ca6097918e7d158b))
-
-
-### Bug Fixes
-
-* Fix /unsubscribe autocomplete not showing DM subscriptions when in a guild [skip ci] ([d6bbdac](https://github.com/FAZuH/pwr-bot/commit/d6bbdac0f44072d71339a4d2709578fc623829c0))
-* **publisher:** Fix incorrect format on published message ([e80841f](https://github.com/FAZuH/pwr-bot/commit/e80841fd6599df18e0107849e6fd84045927ffdb))
-
-
-### Performance Improvements
-
-* **bot:** Improve bot initialization [skip ci] ([e055f1d](https://github.com/FAZuH/pwr-bot/commit/e055f1d64224027dc0366a8f8a3f415b71c68a0f))
+* Add rolling file logging ([1089ec2](https://github.com/FAZuH/pwr-bot/commit/1089ec260cd9ca896400ba9227ff374f7237b298))
 
