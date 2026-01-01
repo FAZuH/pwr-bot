@@ -29,7 +29,7 @@ pub struct AniListFeed {
 impl AniListFeed {
     pub fn new() -> Self {
         let info = FeedInfo {
-            name: "AniList".to_string(),
+            name: "AniList Anime".to_string(),
             feed_item_name: "Episode".to_string(),
             api_hostname: "graphql.anilist.co".to_string(),
             api_domain: "anilist.co".to_string(),
