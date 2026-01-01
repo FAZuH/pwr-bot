@@ -138,13 +138,16 @@ impl SeriesFeedPublisher {
             .await?
             .ok_or_else(|| anyhow::anyhow!("Latest feed item not found"))?;
 
-        let series_feed = self.feeds.get_platform_by_source_url(&feed.source_url).ok_or_else(|| {
-            DatabaseError::InternalError {
-                message: format!("Series feed source with url {} not found.", feed.source_url),
-            }
-            // NOTE: This means an invalid URL has been inserted to db due to insufficient
-            // checks
-        })?;
+        let series_feed = self
+            .feeds
+            .get_platform_by_source_url(&feed.source_url)
+            .ok_or_else(|| {
+                DatabaseError::InternalError {
+                    message: format!("Series feed source with url {} not found.", feed.source_url),
+                }
+                // NOTE: This means an invalid URL has been inserted to db due to insufficient
+                // checks
+            })?;
 
         let series_id = self.feeds.get_id_from_source_url(&feed.source_url)?;
         // NOTE: Should've been checked already in commands.rs

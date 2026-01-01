@@ -54,7 +54,11 @@ pub struct Bot {
 }
 
 impl Bot {
-    pub async fn new(config: Arc<Config>, db: Arc<Database>, platforms: Arc<Platforms>) -> Result<Self> {
+    pub async fn new(
+        config: Arc<Config>,
+        db: Arc<Database>,
+        platforms: Arc<Platforms>,
+    ) -> Result<Self> {
         info!("Initializing bot...");
 
         let framework = Self::create_framework(&config)?;

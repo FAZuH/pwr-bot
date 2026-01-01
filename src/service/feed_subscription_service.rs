@@ -91,6 +91,7 @@ impl FeedSubscriptionService {
 
     /// # Performance
     /// * DB calls: 1 + 2*N
+    ///
     /// Where N is number of subscriptions found for given page
     pub async fn list_paginated_subscriptions(
         &self,
@@ -165,13 +166,21 @@ impl FeedSubscriptionService {
     /// * DB calls: 1 + 1? + 1??
     /// * API calls: 2?
     pub async fn get_or_create_feed(&self, source_url: &str) -> Result<FeedModel, ServiceError> {
-        let platform = self.platforms.get_platform_by_source_url(source_url).ok_or_else(|| {
-            FeedError::UnsupportedUrl { url: source_url.to_string() }
-        })?;
+        let platform = self
+            .platforms
+            .get_platform_by_source_url(source_url)
+            .ok_or_else(|| FeedError::UnsupportedUrl {
+                url: source_url.to_string(),
+            })?;
         let source_id = platform.get_id_from_source_url(source_url)?;
 
         // DB 1
-        let feed = match self.db.feed_table.select_by_source_id(&platform.get_id(), &source_id).await? {
+        let feed = match self
+            .db
+            .feed_table
+            .select_by_source_id(platform.get_id(), source_id)
+            .await?
+        {
             Some(res) => res,
             None => {
                 // Feed doesn't exist, create it
@@ -245,14 +254,24 @@ impl FeedSubscriptionService {
     ///
     /// # Performance
     /// * DB calls: 1
-    pub async fn get_feed_by_source_url(&self, source_url: &str) -> Result<Option<FeedModel>, ServiceError> {
-        let platform = self.platforms.get_platform_by_source_url(source_url).ok_or_else(|| {
-            FeedError::UnsupportedUrl { url: source_url.to_string() }
-        })?;
+    pub async fn get_feed_by_source_url(
+        &self,
+        source_url: &str,
+    ) -> Result<Option<FeedModel>, ServiceError> {
+        let platform = self
+            .platforms
+            .get_platform_by_source_url(source_url)
+            .ok_or_else(|| FeedError::UnsupportedUrl {
+                url: source_url.to_string(),
+            })?;
         let source_id = platform.get_id_from_source_url(source_url)?;
 
         // DB 1
-        Ok(self.db.feed_table.select_by_source_id(&platform.get_id(), &source_id).await?)
+        Ok(self
+            .db
+            .feed_table
+            .select_by_source_id(platform.get_id(), source_id)
+            .await?)
     }
 
     /// # Performance

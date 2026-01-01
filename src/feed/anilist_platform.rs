@@ -14,10 +14,10 @@ use log::info;
 use serde_json::Value;
 
 use crate::feed::BasePlatform;
-use crate::feed::Platform;
-use crate::feed::PlatformInfo;
 use crate::feed::FeedItem;
 use crate::feed::FeedSource;
+use crate::feed::Platform;
+use crate::feed::PlatformInfo;
 use crate::feed::error::FeedError;
 
 pub struct AniListPlatform {

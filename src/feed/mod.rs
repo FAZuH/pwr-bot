@@ -30,11 +30,10 @@
 //!
 //! See [`MangaDexPlatform`] for a reference implementation.
 
-
-pub mod error;
-pub mod platforms;
 pub mod anilist_platform;
+pub mod error;
 pub mod mangadex_platform;
+pub mod platforms;
 
 use async_trait::async_trait;
 use chrono::DateTime;
@@ -236,4 +235,3 @@ mod tests {
         ));
     }
 }
-

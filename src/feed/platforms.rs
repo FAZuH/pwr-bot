@@ -29,11 +29,11 @@ impl Platforms {
 
     /// Extract source id of a source url.
     pub fn get_id_from_source_url<'a>(&self, source_url: &'a str) -> Result<&'a str, FeedError> {
-        let feed = self
-            .get_platform_by_source_url(source_url)
-            .ok_or_else(|| FeedError::UnsupportedUrl {
+        let feed = self.get_platform_by_source_url(source_url).ok_or_else(|| {
+            FeedError::UnsupportedUrl {
                 url: source_url.to_string(),
-            })?;
+            }
+        })?;
 
         let ret = feed.get_id_from_source_url(source_url)?;
         Ok(ret)
@@ -88,7 +88,10 @@ mod tests {
             Platforms::extract_domain("https://example.com/foo/bar"),
             "example.com"
         );
-        assert_eq!(Platforms::extract_domain("http://example.com"), "example.com");
+        assert_eq!(
+            Platforms::extract_domain("http://example.com"),
+            "example.com"
+        );
         assert_eq!(Platforms::extract_domain("example.com/foo"), "example.com");
         assert_eq!(Platforms::extract_domain("example.com"), "example.com");
         assert_eq!(
