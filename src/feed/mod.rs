@@ -134,6 +134,8 @@ pub struct FeedItem {
 pub struct FeedSource {
     /// Identifier for this feed source.
     pub id: String,
+    /// Identifier to get items for this feed source.
+    pub items_id: String,
     /// Human readable name/title, e.g., "One Piece", "PewDiePie".
     pub name: String,
     /// Description of the source.
@@ -146,13 +148,21 @@ pub struct FeedSource {
 
 #[async_trait]
 pub trait Platform: Send + Sync {
-    async fn fetch_latest(&self, id: &str) -> Result<FeedItem, FeedError>;
-    async fn fetch_source(&self, id: &str) -> Result<FeedSource, FeedError>;
+    /// Fetch latest item of a feed source based on items id.
+    async fn fetch_latest(&self, items_id: &str) -> Result<FeedItem, FeedError>;
+    /// Fetch feed source information based on source id.
+    async fn fetch_source(&self, source_id: &str) -> Result<FeedSource, FeedError>;
     /// Extract source id of a source url.
-    fn get_id_from_source_url<'a>(&self, source_url: &'a str) -> Result<&'a str, UrlParseError>;
+    fn get_id_from_source_url<'a>(&self, source_url: &'a str) -> Result<&'a str, FeedError>;
     /// Get source url from a source id.
     fn get_source_url_from_id(&self, source_id: &str) -> String;
     fn get_base(&self) -> &BasePlatform;
+    fn get_info(&self) -> &PlatformInfo {
+        &self.get_base().info
+    }
+    fn get_id(&self) -> &'_ str {
+        &self.get_info().name
+    }
     fn extract_error_message(&self, error: &serde_json::Value) -> String {
         let mut parts = Vec::new();
 

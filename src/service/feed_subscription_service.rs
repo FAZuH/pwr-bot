@@ -53,18 +53,7 @@ impl FeedSubscriptionService {
         source_url: &str,
         subscriber: &SubscriberModel,
     ) -> Result<UnsubscribeResult, ServiceError> {
-        let source = self
-            .platforms
-            .get_platform_by_source_url(source_url)
-            .ok_or_else(|| FeedError::UnsupportedUrl {
-                url: source_url.to_string(),
-            })?;
-        let id = source
-            .get_id_from_source_url(source_url)
-            .map_err(FeedError::UrlParseFailed)?;
-        let normalized_url = source.get_source_url_from_id(id);
-
-        let feed = match self.db.feed_table.select_by_url(&normalized_url).await? {
+        let feed = match self.get_feed_by_source_url(source_url).await? {
             Some(feed) => feed,
             None => {
                 return Ok(UnsubscribeResult::NoneSubscribed {
@@ -150,35 +139,31 @@ impl FeedSubscriptionService {
             .await?)
     }
 
-    pub async fn get_or_create_feed(&self, url: &str) -> Result<FeedModel, ServiceError> {
-        let source = self
-            .platforms
-            .get_platform_by_source_url(url)
-            .ok_or_else(|| FeedError::UnsupportedUrl {
-                url: url.to_string(),
-            })?;
-        let id = source
-            .get_id_from_source_url(url)
-            .map_err(FeedError::UrlParseFailed)?;
-        let normalized_url = source.get_source_url_from_id(id);
+    pub async fn get_or_create_feed(&self, source_url: &str) -> Result<FeedModel, ServiceError> {
+        let platform = self.platforms.get_platform_by_source_url(source_url).ok_or_else(|| {
+            FeedError::UnsupportedUrl { url: source_url.to_string() }
+        })?;
+        let source_id = platform.get_id_from_source_url(source_url)?;
 
-        let feed = match self.db.feed_table.select_by_url(&normalized_url).await? {
+        let feed = match self.db.feed_table.select_by_source_id(&platform.get_id(), &source_id).await? {
             Some(res) => res,
             None => {
                 // Feed doesn't exist, create it
-                let feed_source = source.fetch_source(id).await?;
+                let feed_source = platform.fetch_source(source_id).await?;
 
                 let mut feed = FeedModel {
                     name: feed_source.name,
                     description: feed_source.description,
-                    url: feed_source.url,
+                    platform_id: platform.get_id().to_string(),
+                    source_id: source_id.to_string(),
+                    items_id: feed_source.items_id,
                     cover_url: feed_source.image_url.unwrap_or("".to_string()),
-                    tags: source.get_base().info.tags.clone(),
+                    tags: platform.get_info().tags.clone(),
                     ..Default::default()
                 };
                 feed.id = self.db.feed_table.insert(&feed).await?;
 
-                if let Ok(feed_latest) = source.fetch_latest(id).await {
+                if let Ok(feed_latest) = platform.fetch_latest(&feed.items_id).await {
                     // Create initial version
                     let version = FeedItemModel {
                         feed_id: feed.id,
@@ -194,6 +179,7 @@ impl FeedSubscriptionService {
         };
         Ok(feed)
     }
+
     pub async fn get_or_create_subscriber(
         &self,
         target: &SubscriberTarget,
@@ -219,6 +205,23 @@ impl FeedSubscriptionService {
         Ok(subscriber)
     }
 
+    /// Get [`FeedModel`] by source url.
+    ///
+    /// Returns `Some(FeedModel)` if found. `None` otherwise.
+    ///
+    /// # Performance
+    /// * DB calls: 1
+    pub async fn get_feed_by_source_url(&self, source_url: &str) -> Result<Option<FeedModel>, ServiceError> {
+        let platform = self.platforms.get_platform_by_source_url(source_url).ok_or_else(|| {
+            FeedError::UnsupportedUrl { url: source_url.to_string() }
+        })?;
+        let source_id = platform.get_id_from_source_url(source_url)?;
+
+        Ok(self.db.feed_table.select_by_source_id(&platform.get_id(), &source_id).await?)
+    }
+
+    /// # Performance
+    /// * DB calls: 1
     pub async fn get_server_settings(&self, guild_id: u64) -> Result<ServerSettings, ServiceError> {
         match self.db.server_settings_table.select(&guild_id).await? {
             Some(model) => Ok(model.settings.0),
@@ -226,6 +229,8 @@ impl FeedSubscriptionService {
         }
     }
 
+    /// # Performance
+    /// * DB calls: 1
     pub async fn update_server_settings(
         &self,
         guild_id: u64,

@@ -268,6 +268,16 @@ impl FeedTable {
         )
     }
 
+    pub async fn select_by_source_id(&self, platform_id: &str, source_id: &str) -> Result<Option<FeedModel>, DatabaseError> {
+        Ok(
+            sqlx::query_as::<_, FeedModel>("SELECT * FROM feeds WHERE platform_id = ? AND source_id = ?")
+                .bind(platform_id)
+                .bind(source_id)
+                .fetch_optional(&self.base.pool)
+                .await?,
+        )
+    }
+
     pub async fn select_by_name_and_subscriber_id(
         &self,
         subscriber_id: &i32,
