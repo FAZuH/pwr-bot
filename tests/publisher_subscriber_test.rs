@@ -8,7 +8,7 @@ use pwr_bot::event::event_bus::EventBus;
 use pwr_bot::event::feed_update_event::FeedUpdateEvent;
 use pwr_bot::feed::FeedItem;
 use pwr_bot::feed::FeedSource;
-use pwr_bot::feed::feeds::Feeds;
+use pwr_bot::feed::platforms::Platforms;
 use pwr_bot::publisher::series_feed_publisher::SeriesFeedPublisher;
 use pwr_bot::service::feed_subscription_service::FeedSubscriptionService;
 use pwr_bot::service::feed_subscription_service::SubscribeResult;
@@ -23,16 +23,16 @@ async fn test_subscription_and_publishing() {
     let event_bus = Arc::new(EventBus::new());
 
     // Setup Feeds
-    let mut feeds = Feeds::new();
+    let mut feeds = Platforms::new();
     let mock_domain = "mock.test";
     let mock_feed = Arc::new(common::MockFeed::new(mock_domain));
-    feeds.add_feed(mock_feed.clone());
+    feeds.add_platform(mock_feed.clone());
     let feeds = Arc::new(feeds);
 
     // Setup Service
     let service = Arc::new(FeedSubscriptionService {
         db: db.clone(),
-        feeds: feeds.clone(),
+        platforms: feeds.clone(),
     });
 
     // 1. Prepare Mock Data

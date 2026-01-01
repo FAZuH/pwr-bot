@@ -15,12 +15,12 @@ use crate::database::model::SubscriberModel;
 use crate::database::model::SubscriberType;
 use crate::database::table::Table;
 use crate::feed::error::FeedError;
-use crate::feed::feeds::Feeds;
+use crate::feed::platforms::Platforms;
 use crate::service::error::ServiceError;
 
 pub struct FeedSubscriptionService {
     pub db: Arc<Database>,
-    pub feeds: Arc<Feeds>,
+    pub platforms: Arc<Platforms>,
 }
 
 impl FeedSubscriptionService {
@@ -50,25 +50,25 @@ impl FeedSubscriptionService {
     }
     pub async fn unsubscribe(
         &self,
-        url: &str,
+        source_url: &str,
         subscriber: &SubscriberModel,
     ) -> Result<UnsubscribeResult, ServiceError> {
         let source = self
-            .feeds
-            .get_feed_by_url(url)
+            .platforms
+            .get_platform_by_source_url(source_url)
             .ok_or_else(|| FeedError::UnsupportedUrl {
-                url: url.to_string(),
+                url: source_url.to_string(),
             })?;
         let id = source
-            .get_id_from_url(url)
+            .get_id_from_source_url(source_url)
             .map_err(FeedError::UrlParseFailed)?;
-        let normalized_url = source.get_url_from_id(id);
+        let normalized_url = source.get_source_url_from_id(id);
 
         let feed = match self.db.feed_table.select_by_url(&normalized_url).await? {
             Some(feed) => feed,
             None => {
                 return Ok(UnsubscribeResult::NoneSubscribed {
-                    url: url.to_string(),
+                    url: source_url.to_string(),
                 });
             }
         };
@@ -152,15 +152,15 @@ impl FeedSubscriptionService {
 
     pub async fn get_or_create_feed(&self, url: &str) -> Result<FeedModel, ServiceError> {
         let source = self
-            .feeds
-            .get_feed_by_url(url)
+            .platforms
+            .get_platform_by_source_url(url)
             .ok_or_else(|| FeedError::UnsupportedUrl {
                 url: url.to_string(),
             })?;
         let id = source
-            .get_id_from_url(url)
+            .get_id_from_source_url(url)
             .map_err(FeedError::UrlParseFailed)?;
-        let normalized_url = source.get_url_from_id(id);
+        let normalized_url = source.get_source_url_from_id(id);
 
         let feed = match self.db.feed_table.select_by_url(&normalized_url).await? {
             Some(res) => res,

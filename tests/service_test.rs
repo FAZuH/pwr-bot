@@ -4,7 +4,7 @@ use chrono::Utc;
 use pwr_bot::database::model::SubscriberType;
 use pwr_bot::feed::FeedItem;
 use pwr_bot::feed::FeedSource;
-use pwr_bot::feed::feeds::Feeds;
+use pwr_bot::feed::platforms::Platforms;
 use pwr_bot::service::feed_subscription_service::FeedSubscriptionService;
 use pwr_bot::service::feed_subscription_service::SubscriberTarget;
 
@@ -13,10 +13,10 @@ mod common;
 #[tokio::test]
 async fn test_get_or_create_subscriber() {
     let (db, db_path) = common::setup_db().await;
-    let feeds = Arc::new(Feeds::new());
+    let feeds = Arc::new(Platforms::new());
     let service = FeedSubscriptionService {
         db: db.clone(),
-        feeds: feeds.clone(),
+        platforms: feeds.clone(),
     };
 
     let target = SubscriberTarget {
@@ -48,15 +48,15 @@ async fn test_get_or_create_feed() {
     let (db, db_path) = common::setup_db().await;
 
     // Setup Mock Feed
-    let mut feeds = Feeds::new();
+    let mut feeds = Platforms::new();
     let mock_domain = "test.com";
     let mock_feed = Arc::new(common::MockFeed::new(mock_domain));
-    feeds.add_feed(mock_feed.clone());
+    feeds.add_platform(mock_feed.clone());
     let feeds = Arc::new(feeds);
 
     let service = FeedSubscriptionService {
         db: db.clone(),
-        feeds: feeds.clone(),
+        platforms: feeds.clone(),
     };
 
     let source_id = "manga-1";
@@ -126,10 +126,10 @@ async fn test_get_or_create_feed() {
 #[tokio::test]
 async fn test_server_settings_service() {
     let (db, db_path) = common::setup_db().await;
-    let feeds = Arc::new(Feeds::new());
+    let feeds = Arc::new(Platforms::new());
     let service = FeedSubscriptionService {
         db: db.clone(),
-        feeds: feeds.clone(),
+        platforms: feeds.clone(),
     };
 
     use pwr_bot::database::model::ServerSettings;

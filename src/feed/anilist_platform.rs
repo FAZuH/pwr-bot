@@ -13,22 +13,22 @@ use log::debug;
 use log::info;
 use serde_json::Value;
 
-use crate::feed::BaseFeed;
-use crate::feed::Feed;
-use crate::feed::FeedInfo;
+use crate::feed::BasePlatform;
+use crate::feed::Platform;
+use crate::feed::PlatformInfo;
 use crate::feed::FeedItem;
 use crate::feed::FeedSource;
 use crate::feed::error::FeedError;
 use crate::feed::error::UrlParseError;
 
-pub struct AniListFeed {
-    pub base: BaseFeed,
+pub struct AniListPlatform {
+    pub base: BasePlatform,
     limiter: RateLimiter<NotKeyed, InMemoryState, QuantaClock>,
 }
 
-impl AniListFeed {
+impl AniListPlatform {
     pub fn new() -> Self {
-        let info = FeedInfo {
+        let info = PlatformInfo {
             name: "AniList Anime".to_string(),
             feed_item_name: "Episode".to_string(),
             api_hostname: "graphql.anilist.co".to_string(),
@@ -44,7 +44,7 @@ impl AniListFeed {
         // the API is fully restored.
         let limiter = RateLimiter::direct(Quota::per_minute(NonZeroU32::new(30).unwrap()));
         Self {
-            base: BaseFeed::new(info, reqwest::Client::new()),
+            base: BasePlatform::new(info, reqwest::Client::new()),
             limiter,
         }
     }
@@ -105,7 +105,7 @@ impl AniListFeed {
 }
 
 #[async_trait]
-impl Feed for AniListFeed {
+impl Platform for AniListPlatform {
     async fn fetch_latest(&self, id: &str) -> Result<FeedItem, FeedError> {
         debug!(
             "Fetching latest from {} for source_id: {id}",
@@ -164,7 +164,7 @@ impl Feed for AniListFeed {
 
         Ok(FeedItem {
             id,
-            url: self.get_url_from_id(&source_id),
+            url: self.get_source_url_from_id(&source_id),
             source_id,
             title,
             published,
@@ -218,34 +218,34 @@ impl Feed for AniListFeed {
         Ok(FeedSource {
             id: source_id,
             name,
-            url: self.get_url_from_id(id),
+            url: self.get_source_url_from_id(id),
             image_url,
             description,
         })
     }
 
-    fn get_id_from_url<'a>(&self, url: &'a str) -> Result<&'a str, UrlParseError> {
+    fn get_id_from_source_url<'a>(&self, url: &'a str) -> Result<&'a str, UrlParseError> {
         self.base.get_nth_path_from_url(url, 1)
     }
 
-    fn get_url_from_id(&self, id: &str) -> String {
+    fn get_source_url_from_id(&self, id: &str) -> String {
         format!("https://{}/anime/{}", self.base.info.api_domain, id)
     }
 
-    fn get_base(&self) -> &BaseFeed {
+    fn get_base(&self) -> &BasePlatform {
         &self.base
     }
 }
 
-impl PartialEq for AniListFeed {
+impl PartialEq for AniListPlatform {
     fn eq(&self, other: &Self) -> bool {
         self.base.info.api_url == other.base.info.api_url
     }
 }
 
-impl Eq for AniListFeed {}
+impl Eq for AniListPlatform {}
 
-impl Hash for AniListFeed {
+impl Hash for AniListPlatform {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.base.info.api_url.hash(state);
     }

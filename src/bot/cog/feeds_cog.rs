@@ -601,7 +601,7 @@ impl FeedsCog {
         partial: &str,
     ) -> CreateAutocompleteResponse<'a> {
         let mut choices = vec![AutocompleteChoice::new("Supported feeds are:", "foo")];
-        let feeds = ctx.data().feeds.get_all_feeds();
+        let feeds = ctx.data().platforms.get_all_platforms();
 
         for feed in feeds {
             let info = &feed.get_base().info;

@@ -4,9 +4,9 @@ use std::sync::RwLock;
 
 use async_trait::async_trait;
 use pwr_bot::database::Database;
-use pwr_bot::feed::BaseFeed;
-use pwr_bot::feed::Feed;
-use pwr_bot::feed::FeedInfo;
+use pwr_bot::feed::BasePlatform;
+use pwr_bot::feed::Platform;
+use pwr_bot::feed::PlatformInfo;
 use pwr_bot::feed::FeedItem;
 use pwr_bot::feed::FeedSource;
 use pwr_bot::feed::error::FeedError;
@@ -38,7 +38,7 @@ pub async fn teardown_db(db_path: PathBuf) {
 #[derive(Clone)]
 #[allow(dead_code)]
 pub struct MockFeed {
-    pub base: BaseFeed,
+    pub base: BasePlatform,
     pub state: Arc<RwLock<MockFeedState>>,
 }
 
@@ -52,7 +52,7 @@ pub struct MockFeedState {
 #[allow(dead_code)]
 impl MockFeed {
     pub fn new(domain: &str) -> Self {
-        let info = FeedInfo {
+        let info = PlatformInfo {
             name: "MockFeed".to_string(),
             feed_item_name: "Chapter".to_string(),
             api_hostname: format!("api.{}", domain),
@@ -65,7 +65,7 @@ impl MockFeed {
         let client = reqwest::Client::new();
 
         Self {
-            base: BaseFeed::new(info, client),
+            base: BasePlatform::new(info, client),
             state: Arc::new(RwLock::new(MockFeedState::default())),
         }
     }
@@ -80,7 +80,7 @@ impl MockFeed {
 }
 
 #[async_trait]
-impl Feed for MockFeed {
+impl Platform for MockFeed {
     async fn fetch_latest(&self, id: &str) -> Result<FeedItem, FeedError> {
         if let Some(feed_item) = &self.state.read().unwrap().feed_item {
             Ok(feed_item.clone())
@@ -95,15 +95,15 @@ impl Feed for MockFeed {
         Ok(self.state.read().unwrap().feed_source.clone())
     }
 
-    fn get_id_from_url<'a>(&self, url: &'a str) -> Result<&'a str, UrlParseError> {
+    fn get_id_from_source_url<'a>(&self, url: &'a str) -> Result<&'a str, UrlParseError> {
         self.base.get_nth_path_from_url(url, 1)
     }
 
-    fn get_url_from_id(&self, id: &str) -> String {
+    fn get_source_url_from_id(&self, id: &str) -> String {
         format!("https://{}/title/{}", self.base.info.api_domain, id)
     }
 
-    fn get_base(&self) -> &BaseFeed {
+    fn get_base(&self) -> &BasePlatform {
         &self.base
     }
 }
