@@ -11,6 +11,7 @@ use governor::state::InMemoryState;
 use governor::state::direct::NotKeyed;
 use log::debug;
 use log::info;
+use serde_json::Map;
 use serde_json::Value;
 
 use crate::feed::BasePlatform;
@@ -78,6 +79,93 @@ impl AniListPlatform {
         Ok(())
     }
 
+    fn get_airing_schedule<'a>(
+        &self,
+        resp: &'a Value,
+        source_id: &str,
+    ) -> Result<&'a Map<String, Value>, FeedError> {
+        resp.get("data")
+            .and_then(|d| d.get("AiringSchedule"))
+            .and_then(|v| v.as_object())
+            .ok_or_else(|| FeedError::ItemNotFound {
+                source_id: source_id.to_string(),
+            })
+    }
+
+    fn get_timestamp(&self, schedule: &Map<String, Value>) -> Result<i64, FeedError> {
+        let ts_val = schedule
+            .get("airingAt")
+            .ok_or_else(|| FeedError::MissingField {
+                field: "data.AiringSchedule.airingAt".to_string(),
+            })?;
+        ts_val.as_i64().ok_or_else(|| FeedError::UnexpectedResult {
+            message: format!("Invalid data.airingSchedule.airingAt: {ts_val}"),
+        })
+    }
+
+    fn get_episode(&self, schedule: &Map<String, Value>) -> Result<String, FeedError> {
+        Ok(schedule
+            .get("episode")
+            .ok_or_else(|| FeedError::MissingField {
+                field: "data.AiringSchedule.episode".to_string(),
+            })?
+            .to_string())
+    }
+
+    fn get_id(&self, schedule: &Map<String, Value>) -> Result<String, FeedError> {
+        Ok(schedule
+            .get("id")
+            .ok_or_else(|| FeedError::MissingField {
+                field: "data.AiringSchedule.id".to_string(),
+            })?
+            .to_string())
+    }
+
+    fn get_media<'a>(
+        &self,
+        resp: &'a Value,
+        source_id: &str,
+    ) -> Result<&'a Map<String, Value>, FeedError> {
+        resp.get("data")
+            .and_then(|d| d.get("Media"))
+            .and_then(|v| v.as_object())
+            .ok_or_else(|| FeedError::SourceNotFound {
+                source_id: source_id.to_string(),
+            })
+    }
+
+    fn get_title_romaji(&self, media: &Map<String, Value>) -> Result<String, FeedError> {
+        media
+            .get("title")
+            .and_then(|t| t.get("romaji"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .ok_or_else(|| FeedError::MissingField {
+                field: "data.Media.title.romaji".to_string(),
+            })
+    }
+
+    fn get_description(&self, media: &Map<String, Value>) -> Result<String, FeedError> {
+        media
+            .get("description")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .ok_or_else(|| FeedError::MissingField {
+                field: "data.Media.description".to_string(),
+            })
+    }
+
+    fn get_cover_image(&self, media: &Map<String, Value>) -> Result<String, FeedError> {
+        media
+            .get("coverImage")
+            .and_then(|c| c.get("extraLarge"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .ok_or_else(|| FeedError::MissingField {
+                field: "data.Media.coverImage.extraLarge".to_string(),
+            })
+    }
+
     async fn send(
         &self,
         request: reqwest::RequestBuilder,
@@ -123,38 +211,10 @@ impl Platform for AniListPlatform {
         "#;
         let response_json = self.request(&source_id, query).await?;
 
-        // Extract fields
-        let airing_schedule = response_json["data"]["AiringSchedule"]
-            .as_object()
-            .ok_or_else(|| FeedError::ItemNotFound {
-                source_id: source_id.clone(),
-            })?;
-
-        let timestamp_s =
-            airing_schedule
-                .get("airingAt")
-                .ok_or_else(|| FeedError::MissingField {
-                    field: "data.AiringSchedule.airingAt".to_string(),
-                })?;
-        let timestamp = timestamp_s
-            .as_i64()
-            .ok_or_else(|| FeedError::UnexpectedResult {
-                message: format!("Invalid data.airingSchedule.airingAt: {timestamp_s}"),
-            })?;
-
-        let title = airing_schedule
-            .get("episode")
-            .ok_or_else(|| FeedError::MissingField {
-                field: "data.AiringSchedule.episode".to_string(),
-            })?
-            .to_string();
-
-        let id = airing_schedule
-            .get("id")
-            .ok_or_else(|| FeedError::MissingField {
-                field: "data.AiringSchedule.id".to_string(),
-            })?
-            .to_string();
+        let airing_schedule = self.get_airing_schedule(&response_json, &source_id)?;
+        let timestamp = self.get_timestamp(airing_schedule)?;
+        let title = self.get_episode(airing_schedule)?;
+        let id = self.get_id(airing_schedule)?;
 
         let published = DateTime::from_timestamp(timestamp, 0)
             .ok_or_else(|| FeedError::InvalidTimestamp { timestamp })?;
@@ -188,33 +248,14 @@ impl Platform for AniListPlatform {
         "#;
         let response_json = self.request(&source_id, query).await?;
 
-        // Extract fields
-        let media = response_json["data"]["Media"].as_object().ok_or_else(|| {
-            FeedError::SourceNotFound {
-                source_id: source_id.clone(),
-            }
-        })?;
-
-        let name = media["title"]["romaji"]
-            .as_str()
-            .unwrap_or("Unknown")
-            .to_string();
-
-        let description = media["description"]
-            .as_str()
-            .unwrap_or("Unknown")
-            .to_string();
-
-        let image_url = Some(
-            media["coverImage"]["extraLarge"]
-                .as_str()
-                .unwrap_or("Unknown")
-                .to_string(),
-        );
+        let media = self.get_media(&response_json, &source_id)?;
+        let name = self.get_title_romaji(media)?;
+        let description = self.get_description(media)?;
+        let image_url = Some(self.get_cover_image(media)?);
 
         Ok(FeedSource {
             id: source_id.clone(),
-            items_id: source_id,
+            items_id: source_id.clone(),
             name,
             description,
             source_url: self.get_source_url_from_id(id),
