@@ -35,14 +35,14 @@ use crate::bot::cog::feeds_cog::FeedsCog;
 use crate::bot::error::BotError;
 use crate::config::Config;
 use crate::database::Database;
-use crate::feed::feeds::Feeds;
+use crate::feed::platforms::Platforms;
 use crate::service::error::ServiceError;
 use crate::service::feed_subscription_service::FeedSubscriptionService;
 
 pub struct Data {
     pub config: Arc<Config>,
     pub db: Arc<Database>,
-    pub feeds: Arc<Feeds>,
+    pub platforms: Arc<Platforms>,
     pub feed_subscription_service: Arc<FeedSubscriptionService>,
 }
 
@@ -54,11 +54,15 @@ pub struct Bot {
 }
 
 impl Bot {
-    pub async fn new(config: Arc<Config>, db: Arc<Database>, feeds: Arc<Feeds>) -> Result<Self> {
+    pub async fn new(
+        config: Arc<Config>,
+        db: Arc<Database>,
+        platforms: Arc<Platforms>,
+    ) -> Result<Self> {
         info!("Initializing bot...");
 
         let framework = Self::create_framework(&config)?;
-        let data = Self::create_data(config.clone(), db, feeds);
+        let data = Self::create_data(config.clone(), db, platforms);
         let (token, intents) = Self::create_client_config(&config)?;
 
         let client_builder = ClientBuilder::new(token.clone(), intents)
@@ -128,16 +132,16 @@ impl Bot {
         ))
     }
 
-    fn create_data(config: Arc<Config>, db: Arc<Database>, feeds: Arc<Feeds>) -> Arc<Data> {
+    fn create_data(config: Arc<Config>, db: Arc<Database>, feeds: Arc<Platforms>) -> Arc<Data> {
         let feed_subscription_service = Arc::new(FeedSubscriptionService {
             db: db.clone(),
-            feeds: feeds.clone(),
+            platforms: feeds.clone(),
         });
 
         Arc::new(Data {
             config,
             db,
-            feeds,
+            platforms: feeds,
             feed_subscription_service,
         })
     }

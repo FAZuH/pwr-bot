@@ -20,7 +20,7 @@ use crate::bot::Bot;
 use crate::config::Config;
 use crate::database::Database;
 use crate::event::event_bus::EventBus;
-use crate::feed::feeds::Feeds;
+use crate::feed::platforms::Platforms;
 use crate::logging::setup_logging;
 use crate::publisher::series_feed_publisher::SeriesFeedPublisher;
 use crate::subscriber::discord_dm_subscriber::DiscordDmSubscriber;
@@ -55,12 +55,12 @@ async fn main() -> anyhow::Result<()> {
     );
 
     // Setup sources
-    debug!("Setting up Sources...");
-    let feeds = Arc::new(Feeds::new());
+    debug!("Setting up Platforms...");
+    let platforms = Arc::new(Platforms::new());
 
     // Setup & start bot
     info!("Starting bot...");
-    let mut bot = Bot::new(config.clone(), db.clone(), feeds.clone()).await?;
+    let mut bot = Bot::new(config.clone(), db.clone(), platforms.clone()).await?;
     bot.start();
     let bot = Arc::new(bot);
     info!(
@@ -85,7 +85,7 @@ async fn main() -> anyhow::Result<()> {
     SeriesFeedPublisher::new(
         db.clone(),
         event_bus.clone(),
-        feeds.clone(),
+        platforms.clone(),
         config.poll_interval,
     )
     .start()?;

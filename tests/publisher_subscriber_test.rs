@@ -8,7 +8,7 @@ use pwr_bot::event::event_bus::EventBus;
 use pwr_bot::event::feed_update_event::FeedUpdateEvent;
 use pwr_bot::feed::FeedItem;
 use pwr_bot::feed::FeedSource;
-use pwr_bot::feed::feeds::Feeds;
+use pwr_bot::feed::platforms::Platforms;
 use pwr_bot::publisher::series_feed_publisher::SeriesFeedPublisher;
 use pwr_bot::service::feed_subscription_service::FeedSubscriptionService;
 use pwr_bot::service::feed_subscription_service::SubscribeResult;
@@ -23,16 +23,16 @@ async fn test_subscription_and_publishing() {
     let event_bus = Arc::new(EventBus::new());
 
     // Setup Feeds
-    let mut feeds = Feeds::new();
+    let mut feeds = Platforms::new();
     let mock_domain = "mock.test";
     let mock_feed = Arc::new(common::MockFeed::new(mock_domain));
-    feeds.add_feed(mock_feed.clone());
+    feeds.add_platform(mock_feed.clone());
     let feeds = Arc::new(feeds);
 
     // Setup Service
     let service = Arc::new(FeedSubscriptionService {
         db: db.clone(),
-        feeds: feeds.clone(),
+        platforms: feeds.clone(),
     });
 
     // 1. Prepare Mock Data
@@ -41,8 +41,9 @@ async fn test_subscription_and_publishing() {
 
     mock_feed.set_info(FeedSource {
         id: source_id.to_string(),
+        items_id: "abc".to_string(),
         name: "Test Name".to_string(),
-        url: url.clone(),
+        source_url: url.clone(),
         description: "Desc".to_string(),
         image_url: None,
     });
@@ -51,7 +52,7 @@ async fn test_subscription_and_publishing() {
         id: "ch1".to_string(),
         source_id: source_id.to_string(),
         title: "Chapter 1".to_string(),
-        url: format!("{}/chapter/1", url),
+        item_url: format!("{}/chapter/1", url),
         published: Utc::now(),
     };
     mock_feed.set_latest(Some(initial_latest.clone()));
@@ -74,7 +75,7 @@ async fn test_subscription_and_publishing() {
     match result {
         SubscribeResult::Success { feed } => {
             assert_eq!(feed.name, "Test Name");
-            assert_eq!(feed.url, url);
+            assert_eq!(feed.source_url, url);
         }
         _ => panic!("Expected Success"),
     }
@@ -110,7 +111,7 @@ async fn test_subscription_and_publishing() {
         id: "ch2".to_string(),
         source_id: source_id.to_string(),
         title: "Chapter 2".to_string(),
-        url: format!("{}/chapter/2", url),
+        item_url: format!("{}/chapter/2", url),
         published: Utc::now(),
     };
     mock_feed.set_latest(Some(new_latest));

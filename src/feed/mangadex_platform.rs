@@ -21,22 +21,21 @@ use reqwest::header::USER_AGENT;
 use serde_json::Map;
 use serde_json::Value;
 
-use crate::feed::BaseFeed;
-use crate::feed::Feed;
-use crate::feed::FeedInfo;
+use crate::feed::BasePlatform;
 use crate::feed::FeedItem;
 use crate::feed::FeedSource;
+use crate::feed::Platform;
+use crate::feed::PlatformInfo;
 use crate::feed::error::FeedError;
-use crate::feed::error::UrlParseError;
 
 type Json<'a> = &'a Map<String, Value>;
 
-pub struct MangaDexFeed {
-    pub base: BaseFeed,
+pub struct MangaDexPlatform {
+    pub base: BasePlatform,
     limiter: RateLimiter<NotKeyed, InMemoryState, QuantaClock>,
 }
 
-impl MangaDexFeed {
+impl MangaDexPlatform {
     pub fn new() -> Self {
         let mut headers = HeaderMap::new();
         headers.insert(USER_AGENT, HeaderValue::from_static("pwr-bot/0.1"));
@@ -46,7 +45,7 @@ impl MangaDexFeed {
             .build()
             .expect("Failed to create client");
 
-        let info = FeedInfo {
+        let info = PlatformInfo {
             name: "MangaDex".to_string(),
             feed_item_name: "Chapter".to_string(),
             api_hostname: "api.mangadex.org".to_string(),
@@ -66,7 +65,7 @@ impl MangaDexFeed {
         let limiter = RateLimiter::direct(Quota::per_second(NonZeroU32::new(5).unwrap()));
 
         Self {
-            base: BaseFeed::new(info, client),
+            base: BasePlatform::new(info, client),
             limiter,
         }
     }
@@ -198,17 +197,17 @@ impl MangaDexFeed {
 }
 
 #[async_trait]
-impl Feed for MangaDexFeed {
-    async fn fetch_source(&self, id: &str) -> Result<FeedSource, FeedError> {
+impl Platform for MangaDexPlatform {
+    async fn fetch_source(&self, source_id: &str) -> Result<FeedSource, FeedError> {
         debug!(
-            "Fetching info from {} for source_id: {id}",
+            "Fetching info from {} for source_id: {source_id}",
             self.base.info.name
         );
-        let source_id = id.to_string();
+        let source_id = source_id.to_string();
         self.validate_uuid(&source_id.clone())?;
 
         let request = self.base.client.get(format!(
-            "{}/manga/{id}?includes[]=cover_art",
+            "{}/manga/{source_id}?includes[]=cover_art",
             self.base.info.api_url
         ));
 
@@ -218,24 +217,26 @@ impl Feed for MangaDexFeed {
         let name = self.get_title_from_attr(attr)?;
         let description = self.get_description_from_attr(attr);
         let image_url = Some(self.get_cover_url(&source_id, data).await?);
+        let source_url = self.get_source_url_from_id(&source_id);
 
         info!("Successfully fetched latest manga for source_id: {source_id}");
 
         Ok(FeedSource {
+            items_id: source_id.clone(),
             name,
-            url: self.get_url_from_id(&source_id),
+            source_url,
             image_url,
             id: source_id,
             description,
         })
     }
 
-    async fn fetch_latest(&self, id: &str) -> Result<FeedItem, FeedError> {
+    async fn fetch_latest(&self, items_id: &str) -> Result<FeedItem, FeedError> {
         debug!(
-            "Fetching latest from {} for source_id: {id}",
+            "Fetching latest from {} for source_id: {items_id}",
             self.base.info.name
         );
-        let source_id = id.to_string();
+        let source_id = items_id.to_string();
 
         let request = self
             .base
@@ -286,7 +287,7 @@ impl Feed for MangaDexFeed {
 
             Ok(FeedItem {
                 id,
-                url: self.get_url_from_id(&source_id),
+                item_url: self.get_source_url_from_id(&source_id),
                 source_id,
                 title,
                 published,
@@ -299,28 +300,28 @@ impl Feed for MangaDexFeed {
         }
     }
 
-    fn get_id_from_url<'a>(&self, url: &'a str) -> Result<&'a str, UrlParseError> {
-        self.base.get_nth_path_from_url(url, 1)
+    fn get_id_from_source_url<'a>(&self, url: &'a str) -> Result<&'a str, FeedError> {
+        Ok(self.base.get_nth_path_from_url(url, 1)?)
     }
 
-    fn get_url_from_id(&self, id: &str) -> String {
+    fn get_source_url_from_id(&self, id: &str) -> String {
         format!("https://{}/title/{}", self.base.info.api_domain, id)
     }
 
-    fn get_base(&self) -> &BaseFeed {
+    fn get_base(&self) -> &BasePlatform {
         &self.base
     }
 }
 
-impl PartialEq for MangaDexFeed {
+impl PartialEq for MangaDexPlatform {
     fn eq(&self, other: &Self) -> bool {
         self.base.info.api_url == other.base.info.api_url
     }
 }
 
-impl Eq for MangaDexFeed {}
+impl Eq for MangaDexPlatform {}
 
-impl Hash for MangaDexFeed {
+impl Hash for MangaDexPlatform {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.base.info.api_url.hash(state);
     }

@@ -39,10 +39,12 @@ macro_rules! create_feed {
             #[allow(unused_mut)]
             let mut feed = FeedModel {
                 name: $name.to_string(),
-                url: format!("https://{}.com", $name.replace(" ", "").to_lowercase()),
+                platform_id: $name.replace(" ", "").to_lowercase(),
+                source_url: format!("https://{}.com", $name.replace(" ", "").to_lowercase()),
                 ..Default::default()
             };
-            $(feed.$field = $val.into();)* $db.feed_table.insert(&feed).await.expect("Failed to insert feed")
+            $(feed.$field = $val.into();)*
+            $db.feed_table.insert(&feed).await.expect("Failed to insert feed")
         }
     };
 }
@@ -135,11 +137,11 @@ mod feed_table_tests {
         assert!(db.feed_table.select(&id).await.unwrap().is_none());
     });
 
-    db_test!(select_by_url, |db| {
-        create_feed!(db, "Feed", { url: "https://unique.com" });
+    db_test!(select_by_source_id, |db| {
+        create_feed!(db, "Feed", { platform_id: "anilist", source_id: "frieren" });
         let fetched = db
             .feed_table
-            .select_by_url("https://unique.com")
+            .select_by_source_id("anilist", "frieren")
             .await
             .unwrap()
             .unwrap();

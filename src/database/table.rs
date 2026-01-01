@@ -169,7 +169,7 @@ macro_rules! impl_table {
             }
 
             async fn select(&self, id: &$id_type) -> Result<Option<$model>, DatabaseError> {
-                let query = sqlx::query_as::<_, $model>(concat!("SELECT * FROM ", $table, " WHERE ", stringify!($pk), " = ? LIMIT 1"));
+                let query = sqlx::query_as::<_, $model>(concat!("SELECT * FROM ", $table, " WHERE ", stringify!($pk), " = ?"));
                 let query = BindParam::bind_param(id, query);
                 Ok(
                     query
@@ -243,26 +243,31 @@ impl_table!(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
         description TEXT DEFAULT NULL,
-        url TEXT NOT NULL UNIQUE,
+        platform_id TEXT NOT NULL,
+        source_id TEXT NOT NULL,
+        items_id TEXT NOT NULL,
+        source_url TEXT NOT NULL,
         cover_url TEXT DEFAULT NULL,
-        tags TEXT DEFAULT NULL
+        tags TEXT DEFAULT NULL,
+        UNIQUE(platform_id, source_id),
+        UNIQUE(cover_url)
     )"#,
-    "name, description, url, cover_url, tags",
-    "?, ?, ?, ?, ?",
-    "name = ?, description = ?, url = ?, cover_url = ?, tags = ?",
-    [name, description, url, cover_url, tags]
+    "name, description, platform_id, source_id, items_id, source_url, cover_url, tags",
+    "?, ?, ?, ?, ?, ?, ?, ?",
+    "name = ?, description = ?, platform_id = ?, source_id = ?, items_id = ?, source_url = ?, cover_url = ?, tags = ?",
+    [
+        name,
+        description,
+        platform_id,
+        source_id,
+        items_id,
+        source_url,
+        cover_url,
+        tags
+    ]
 );
 
 impl FeedTable {
-    pub async fn select_by_url(&self, url: &str) -> Result<Option<FeedModel>, DatabaseError> {
-        Ok(
-            sqlx::query_as::<_, FeedModel>("SELECT * FROM feeds WHERE url = ? LIMIT 1")
-                .bind(url)
-                .fetch_optional(&self.base.pool)
-                .await?,
-        )
-    }
-
     pub async fn select_all_by_tag(&self, tag: &str) -> Result<Vec<FeedModel>, DatabaseError> {
         Ok(
             sqlx::query_as::<_, FeedModel>("SELECT * FROM feeds WHERE tags LIKE ?")
@@ -270,6 +275,20 @@ impl FeedTable {
                 .fetch_all(&self.base.pool)
                 .await?,
         )
+    }
+
+    pub async fn select_by_source_id(
+        &self,
+        platform_id: &str,
+        source_id: &str,
+    ) -> Result<Option<FeedModel>, DatabaseError> {
+        Ok(sqlx::query_as::<_, FeedModel>(
+            "SELECT * FROM feeds WHERE platform_id = ? AND source_id = ?",
+        )
+        .bind(platform_id)
+        .bind(source_id)
+        .fetch_optional(&self.base.pool)
+        .await?)
     }
 
     pub async fn select_by_name_and_subscriber_id(
