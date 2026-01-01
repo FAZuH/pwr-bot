@@ -1,3 +1,21 @@
+## [0.1.18](https://github.com/FAZuH/pwr-bot/compare/v0.1.17...v0.1.18) (2026-01-01)
+
+
+### New Features
+
+* **feed:** Add comick.dev feed source for manga ([7196370](https://github.com/FAZuH/pwr-bot/commit/7196370a0e02626b5043dfdbce26de064bcfcb70))
+
+
+### Bug Fixes
+
+* Fix internal error on command registration ([95829fc](https://github.com/FAZuH/pwr-bot/commit/95829fcefd2b307729a7ac0871f5d2f67579ae14))
+* **publisher:** Fix feed API error in publisher ([d0144be](https://github.com/FAZuH/pwr-bot/commit/d0144be2675b2d28363f2633206b41562a315f02))
+
+
+### Documentation
+
+* Add Comick support to README ([67c8f9d](https://github.com/FAZuH/pwr-bot/commit/67c8f9d89ccc637129a1d101849d47146095a2a7))
+
 ## [0.1.17](https://github.com/FAZuH/pwr-bot/compare/v0.1.16...v0.1.17) (2025-12-31)
 
 
@@ -58,11 +76,4 @@
 ### Documentation
 
 * Add LOGS_PATH to docs ([5dceca7](https://github.com/FAZuH/pwr-bot/commit/5dceca7d198d65f949e7a8c53265d3dac87bba3f))
-
-## [0.1.13](https://github.com/FAZuH/pwr-bot/compare/v0.1.12...v0.1.13) (2025-12-29)
-
-
-### New Features
-
-* Add rolling file logging ([1089ec2](https://github.com/FAZuH/pwr-bot/commit/1089ec260cd9ca896400ba9227ff374f7237b298))
 
