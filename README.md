@@ -17,7 +17,7 @@ Discord bot that sends feed update notifications to your DM or server.
 
 ## Features
 
-- **Multi-Source Support:** Subscribe to updates from AniList and MangaDex.
+- **Multi-Source Support:** Subscribe to updates from AniList, MangaDex, and Comick.
 - **Flexible Notifications:** Receive updates via Discord Direct Messages (DMs) or server channels.
 - **Lightning Fast:** *(Metrics based on v0.1.15)*
   - Application initialization: **~0.3s**
