@@ -253,7 +253,7 @@ impl_table!(
         UNIQUE(cover_url)
     )"#,
     "name, description, platform_id, source_id, items_id, source_url, cover_url, tags",
-    "?, ?, ?, ?, ?, ?, ?",
+    "?, ?, ?, ?, ?, ?, ?, ?",
     "name = ?, description = ?, platform_id = ?, source_id = ?, items_id = ?, source_url = ?, cover_url = ?, tags = ?",
     [
         name,
@@ -261,6 +261,7 @@ impl_table!(
         platform_id,
         source_id,
         items_id,
+        source_url,
         cover_url,
         tags
     ]

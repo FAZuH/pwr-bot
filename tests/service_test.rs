@@ -64,6 +64,7 @@ async fn test_get_or_create_feed() {
 
     mock_feed.set_info(FeedSource {
         id: source_id.to_string(),
+        items_id: "abc".to_string(),
         name: "Test Manga".to_string(),
         source_url: url.clone(),
         description: "A test manga".to_string(),
@@ -100,6 +101,7 @@ async fn test_get_or_create_feed() {
     let url = format!("https://{}/title/{}", mock_domain, source_id);
     mock_feed.set_info(FeedSource {
         id: source_id.to_string(),
+        items_id: "abc".to_string(),
         name: "Test Manga 2".to_string(),
         description: "A test manga 2".to_string(),
         source_url: url.clone(),

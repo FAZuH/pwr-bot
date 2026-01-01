@@ -1,28 +1,86 @@
 -- Add up migration script here
-ALTER TABLE feeds ADD COLUMN platform_id TEXT NOT NULL;
-ALTER TABLE feeds ADD COLUMN source_id TEXT NOT NULL;
-ALTER TABLE feeds ADD COLUMN item_ids TEXT NOT NULL;
 
--- Up until this point, we only support feeds platforms MangaDex and AniList.
--- We can transform `feeds.url` to `feeds.source_id` and `feeds.item_id` simply by:
---
--- * MangaDex: "https://mangadex.org/title/{uuid}" -> "{id}"
--- * AniList: "https://anilist.co/anime/{id}" -> "{id}"
+PRAGMA foreign_keys = OFF;
 
--- Convert MangaDex URLs: https://mangadex.org/title/{uuid} -> source_id={uuid}, item_id={uuid}, platform_id='MangaDex'
-UPDATE feeds
-SET platform_id = 'MangaDex',
-    source_id = SUBSTR(url, LENGTH('https://mangadex.org/title/') + 1),
-    items_id = SUBSTR(url, LENGTH('https://mangadex.org/title/') + 1)
-WHERE url LIKE 'https://mangadex.org/title/%';
+-- Backup dependent tables
+CREATE TEMPORARY TABLE feed_items_backup AS SELECT * FROM feed_items;
+CREATE TEMPORARY TABLE feed_subscriptions_backup AS SELECT * FROM feed_subscriptions;
 
--- Convert AniList URLs: https://anilist.co/anime/{id} -> source_id={id}, item_id={id}, platform_id='AniList Anime'
-UPDATE feeds
-SET platform_id = 'AniList Anime',
-    source_id = SUBSTR(url, LENGTH('https://anilist.co/anime/') + 1),
-    items_id = SUBSTR(url, LENGTH('https://anilist.co/anime/') + 1)
-WHERE url LIKE 'https://anilist.co/anime/%';
+-- Drop dependent tables
+DROP TABLE feed_items;
+DROP TABLE feed_subscriptions;
+
+-- Create new feeds table with new schema
+CREATE TABLE feeds_new (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    description TEXT DEFAULT NULL,
+    cover_url TEXT DEFAULT NULL,
+    tags TEXT DEFAULT NULL,
+    platform_id TEXT NOT NULL,
+    source_id TEXT NOT NULL,
+    items_id TEXT NOT NULL,
+    source_url TEXT NOT NULL
+);
+
+-- Copy and transform data
+INSERT INTO feeds_new (id, name, description, cover_url, tags, platform_id, source_id, items_id, source_url)
+SELECT 
+    id,
+    name,
+    description,
+    cover_url,
+    tags,
+    CASE
+        WHEN url LIKE 'https://mangadex.org/title/%' THEN 'MangaDex'
+        WHEN url LIKE 'https://anilist.co/anime/%' THEN 'AniList Anime'
+    END,
+    CASE
+        WHEN url LIKE 'https://mangadex.org/title/%' THEN SUBSTR(url, LENGTH('https://mangadex.org/title/') + 1)
+        WHEN url LIKE 'https://anilist.co/anime/%' THEN SUBSTR(url, LENGTH('https://anilist.co/anime/') + 1)
+    END,
+    CASE
+        WHEN url LIKE 'https://mangadex.org/title/%' THEN SUBSTR(url, LENGTH('https://mangadex.org/title/') + 1)
+        WHEN url LIKE 'https://anilist.co/anime/%' THEN SUBSTR(url, LENGTH('https://anilist.co/anime/') + 1)
+    END,
+    url
+FROM feeds;
+
+DROP TABLE feeds;
+ALTER TABLE feeds_new RENAME TO feeds;
 
 CREATE UNIQUE INDEX idx_feeds_platform_source ON feeds(platform_id, source_id);
 
-ALTER TABLE feeds RENAME COLUMN url TO source_url;
+-- Recreate dependent tables
+CREATE TABLE feed_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    feed_id INTEGER NOT NULL,
+    description TEXT NOT NULL,
+    published TIMESTAMP NOT NULL,
+    UNIQUE(feed_id, published),
+    FOREIGN KEY (feed_id) REFERENCES feeds(id)
+        ON DELETE CASCADE
+        ON UPDATE CASCADE
+);
+
+CREATE TABLE feed_subscriptions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    feed_id INTEGER NOT NULL,
+    subscriber_id INTEGER NOT NULL,
+    UNIQUE(feed_id, subscriber_id),
+    FOREIGN KEY (feed_id) REFERENCES feeds(id)
+        ON DELETE CASCADE
+        ON UPDATE CASCADE,
+    FOREIGN KEY (subscriber_id) REFERENCES subscribers(id)
+        ON DELETE CASCADE
+        ON UPDATE CASCADE
+);
+
+-- Restore data
+INSERT INTO feed_items SELECT * FROM feed_items_backup;
+INSERT INTO feed_subscriptions SELECT * FROM feed_subscriptions_backup;
+
+DROP TABLE feed_items_backup;
+DROP TABLE feed_subscriptions_backup;
+
+PRAGMA foreign_keys = ON;

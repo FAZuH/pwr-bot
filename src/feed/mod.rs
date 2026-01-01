@@ -8,27 +8,6 @@
 //! - **Platform**: External service that hosts content (e.g., MangaDex, AniList)
 //! - **Feed Source**: Specific content source on a platform (e.g., "One Punch Man" on MangaDex)
 //! - **Feed Item**: Individual updates within a source (e.g., chapters, episodes)
-//!
-//! # Usage
-//!
-//! ```rust
-//! use pwr_bot::feed::mangadex_platform::MangaDexPlatform;
-//!
-//! let platform = MangaDexPlatform::new();
-//! let source = platform.fetch_source("id").await?;
-//! let latest_item = platform.fetch_latest("id").await?;
-//! ```
-//!
-//! # Implementing New Platforms
-//!
-//! To add support for a new platform:
-//!
-//! 1. Implement the [`Platform`] trait
-//! 2. Define platform-specific error handling
-//! 3. Add rate limiting if needed
-//! 4. Register in [`crate::feed::platforms::Platforms`] collection
-//!
-//! See [`MangaDexPlatform`] for a reference implementation.
 
 pub mod anilist_platform;
 pub mod error;

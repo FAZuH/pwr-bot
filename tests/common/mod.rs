@@ -10,7 +10,6 @@ use pwr_bot::feed::FeedSource;
 use pwr_bot::feed::Platform;
 use pwr_bot::feed::PlatformInfo;
 use pwr_bot::feed::error::FeedError;
-use pwr_bot::feed::error::UrlParseError;
 use uuid::Uuid;
 
 pub async fn setup_db() -> (Arc<Database>, PathBuf) {
@@ -95,8 +94,8 @@ impl Platform for MockFeed {
         Ok(self.state.read().unwrap().feed_source.clone())
     }
 
-    fn get_id_from_source_url<'a>(&self, url: &'a str) -> Result<&'a str, UrlParseError> {
-        self.base.get_nth_path_from_url(url, 1)
+    fn get_id_from_source_url<'a>(&self, url: &'a str) -> Result<&'a str, FeedError> {
+        Ok(self.base.get_nth_path_from_url(url, 1)?)
     }
 
     fn get_source_url_from_id(&self, id: &str) -> String {

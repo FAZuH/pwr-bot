@@ -41,6 +41,7 @@ async fn test_subscription_and_publishing() {
 
     mock_feed.set_info(FeedSource {
         id: source_id.to_string(),
+        items_id: "abc".to_string(),
         name: "Test Name".to_string(),
         source_url: url.clone(),
         description: "Desc".to_string(),

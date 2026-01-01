@@ -188,14 +188,15 @@ impl FeedSubscriptionService {
                 let feed_source = platform.fetch_source(source_id).await?;
 
                 let mut feed = FeedModel {
+                    id: 0,
                     name: feed_source.name,
                     description: feed_source.description,
                     platform_id: platform.get_id().to_string(),
                     source_id: source_id.to_string(),
                     items_id: feed_source.items_id,
+                    source_url: feed_source.source_url,
                     cover_url: feed_source.image_url.unwrap_or("".to_string()),
                     tags: platform.get_info().tags.clone(),
-                    ..Default::default()
                 };
                 // DB 1?
                 feed.id = self.db.feed_table.insert(&feed).await?;
@@ -204,10 +205,10 @@ impl FeedSubscriptionService {
                 if let Ok(feed_latest) = platform.fetch_latest(&feed.items_id).await {
                     // Create initial version
                     let version = FeedItemModel {
+                        id: 0,
                         feed_id: feed.id,
                         description: feed_latest.title,
                         published: feed_latest.published,
-                        ..Default::default()
                     };
                     // DB 1??
                     self.db.feed_item_table.insert(&version).await?;
