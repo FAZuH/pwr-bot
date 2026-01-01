@@ -179,7 +179,7 @@ impl MangaDexPlatform {
 
     fn get_first_chapter<'a>(
         &self,
-        chapters: &'a Vec<Value>,
+        chapters: &'a [Value],
         source_id: &str,
     ) -> Result<&'a Value, FeedError> {
         chapters.first().ok_or_else(|| {
