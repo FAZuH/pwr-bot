@@ -75,11 +75,11 @@ impl Display for SubscribeResult {
         let msg = match self {
             SubscribeResult::Success { feed } => format!(
                 "✅ **Successfully** subscribed to [{}](<{}>)",
-                feed.name, feed.url
+                feed.name, feed.source_url
             ),
             SubscribeResult::AlreadySubscribed { feed } => format!(
                 "❌ You are **already subscribed** to [{}](<{}>)",
-                feed.name, feed.url
+                feed.name, feed.source_url
             ),
         };
         write!(f, "{}", msg)
@@ -91,11 +91,11 @@ impl Display for UnsubscribeResult {
         let msg = match self {
             UnsubscribeResult::Success { feed } => format!(
                 "✅ **Successfully** unsubscribed from [{}](<{}>)",
-                feed.name, feed.url
+                feed.name, feed.source_url
             ),
             UnsubscribeResult::AlreadyUnsubscribed { feed } => format!(
                 "❌ You are **not subscribed** to [{}](<{}>)",
-                feed.name, feed.url
+                feed.name, feed.source_url
             ),
             UnsubscribeResult::NoneSubscribed { url } => {
                 format!("❌ You are **not subscribed** to <{}>", url)
@@ -570,13 +570,13 @@ impl FeedsCog {
                     sub.feed.name,
                     latest.description,
                     latest.published.timestamp(),
-                    sub.feed.url
+                    sub.feed.source_url
                 ))
             } else {
                 // Note: You need to provide the feed name and URL for this case too
                 CreateTextDisplay::new(format!(
                     "### {}\n\n> No latest version found.\n- **Source**: <{}>",
-                    sub.feed.name, sub.feed.url
+                    sub.feed.name, sub.feed.source_url
                 ))
             };
             let thumbnail = CreateThumbnail::new(CreateUnfurledMediaItem::new(sub.feed.cover_url));
@@ -696,7 +696,7 @@ impl FeedsCog {
         // Map the feeds into AutocompleteChoices
         let mut choices = feeds
             .into_iter()
-            .map(|feed| AutocompleteChoice::new(feed.name, feed.url))
+            .map(|feed| AutocompleteChoice::new(feed.name, feed.source_url))
             .collect::<Vec<_>>();
 
         // Discord autocomplete limit

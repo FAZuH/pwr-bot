@@ -138,15 +138,15 @@ impl SeriesFeedPublisher {
             .await?
             .ok_or_else(|| anyhow::anyhow!("Latest feed item not found"))?;
 
-        let series_feed = self.feeds.get_platform_by_source_url(&feed.url).ok_or_else(|| {
+        let series_feed = self.feeds.get_platform_by_source_url(&feed.source_url).ok_or_else(|| {
             DatabaseError::InternalError {
-                message: format!("Series feed source with url {} not found.", feed.url),
+                message: format!("Series feed source with url {} not found.", feed.source_url),
             }
             // NOTE: This means an invalid URL has been inserted to db due to insufficient
             // checks
         })?;
 
-        let series_id = self.feeds.get_id_from_source_url(&feed.url)?;
+        let series_id = self.feeds.get_id_from_source_url(&feed.source_url)?;
         // NOTE: Should've been checked already in commands.rs
 
         // Fetch current state from source
@@ -247,7 +247,7 @@ Published on <t:{}>
             feed_info.feed_item_name,
             new_feed_item.description,
             new_feed_item.published.timestamp(),
-            feed.url
+            feed.source_url
         );
         let text_footer = format!("-# {}", feed_info.copyright_notice);
 

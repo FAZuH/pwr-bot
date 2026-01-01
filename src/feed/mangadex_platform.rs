@@ -27,7 +27,6 @@ use crate::feed::PlatformInfo;
 use crate::feed::FeedItem;
 use crate::feed::FeedSource;
 use crate::feed::error::FeedError;
-use crate::feed::error::UrlParseError;
 
 type Json<'a> = &'a Map<String, Value>;
 
@@ -199,16 +198,16 @@ impl MangaDexPlatform {
 
 #[async_trait]
 impl Platform for MangaDexPlatform {
-    async fn fetch_source(&self, id: &str) -> Result<FeedSource, FeedError> {
+    async fn fetch_source(&self, source_id: &str) -> Result<FeedSource, FeedError> {
         debug!(
-            "Fetching info from {} for source_id: {id}",
+            "Fetching info from {} for source_id: {source_id}",
             self.base.info.name
         );
-        let source_id = id.to_string();
+        let source_id = source_id.to_string();
         self.validate_uuid(&source_id.clone())?;
 
         let request = self.base.client.get(format!(
-            "{}/manga/{id}?includes[]=cover_art",
+            "{}/manga/{source_id}?includes[]=cover_art",
             self.base.info.api_url
         ));
 
@@ -218,24 +217,26 @@ impl Platform for MangaDexPlatform {
         let name = self.get_title_from_attr(attr)?;
         let description = self.get_description_from_attr(attr);
         let image_url = Some(self.get_cover_url(&source_id, data).await?);
+        let source_url = self.get_source_url_from_id(&source_id);
 
         info!("Successfully fetched latest manga for source_id: {source_id}");
 
         Ok(FeedSource {
+            items_id: source_id.clone(),
             name,
-            url: self.get_source_url_from_id(&source_id),
+            source_url,
             image_url,
             id: source_id,
             description,
         })
     }
 
-    async fn fetch_latest(&self, id: &str) -> Result<FeedItem, FeedError> {
+    async fn fetch_latest(&self, items_id: &str) -> Result<FeedItem, FeedError> {
         debug!(
-            "Fetching latest from {} for source_id: {id}",
+            "Fetching latest from {} for source_id: {items_id}",
             self.base.info.name
         );
-        let source_id = id.to_string();
+        let source_id = items_id.to_string();
 
         let request = self
             .base
@@ -286,7 +287,7 @@ impl Platform for MangaDexPlatform {
 
             Ok(FeedItem {
                 id,
-                url: self.get_source_url_from_id(&source_id),
+                item_url: self.get_source_url_from_id(&source_id),
                 source_id,
                 title,
                 published,

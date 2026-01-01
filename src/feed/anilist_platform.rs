@@ -19,7 +19,6 @@ use crate::feed::PlatformInfo;
 use crate::feed::FeedItem;
 use crate::feed::FeedSource;
 use crate::feed::error::FeedError;
-use crate::feed::error::UrlParseError;
 
 pub struct AniListPlatform {
     pub base: BasePlatform,
@@ -164,7 +163,7 @@ impl Platform for AniListPlatform {
 
         Ok(FeedItem {
             id,
-            url: self.get_source_url_from_id(&source_id),
+            item_url: self.get_source_url_from_id(&source_id),
             source_id,
             title,
             published,
@@ -216,11 +215,12 @@ impl Platform for AniListPlatform {
         );
 
         Ok(FeedSource {
-            id: source_id,
+            id: source_id.clone(),
+            items_id: source_id,
             name,
-            url: self.get_source_url_from_id(id),
-            image_url,
             description,
+            source_url: self.get_source_url_from_id(id),
+            image_url,
         })
     }
 

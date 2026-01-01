@@ -125,7 +125,7 @@ pub struct FeedItem {
     /// Title/Description of the update, e.g., "Chapter 100", "Episode 12", "My New Video".
     pub title: String,
     /// Url of the item, e.g., "https://mangadex.org/chapter/..."
-    pub url: String,
+    pub item_url: String,
     /// Timestamp of the update.
     pub published: DateTime<Utc>,
 }
@@ -141,7 +141,7 @@ pub struct FeedSource {
     /// Description of the source.
     pub description: String,
     /// Url of the source, e.g., "https://mangadex.org/title/..."
-    pub url: String,
+    pub source_url: String,
     /// Cover/Avatar url.
     pub image_url: Option<String>,
 }

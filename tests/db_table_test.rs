@@ -136,7 +136,7 @@ mod feed_table_tests {
     });
 
     db_test!(select_by_url, |db| {
-        create_feed!(db, "Feed", { url: "https://unique.com" });
+        create_feed!(db, "Feed", { source_url: "https://unique.com" });
         let fetched = db
             .feed_table
             .select_by_url("https://unique.com")

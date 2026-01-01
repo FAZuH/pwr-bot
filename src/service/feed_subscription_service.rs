@@ -24,7 +24,10 @@ pub struct FeedSubscriptionService {
 }
 
 impl FeedSubscriptionService {
-    // Core subscription operations
+    /// Core subscription operations
+    ///
+    /// # Performance
+    /// * DB calls: 1
     pub async fn subscribe(
         &self,
         url: &str,
@@ -32,6 +35,7 @@ impl FeedSubscriptionService {
     ) -> Result<SubscribeResult, ServiceError> {
         let feed = self.get_or_create_feed(url).await?;
 
+        // DB 1
         match self.create_subscription(feed.id, subscriber.id).await {
             Ok(_) => Ok(SubscribeResult::Success { feed }),
             Err(err) => {
@@ -48,11 +52,14 @@ impl FeedSubscriptionService {
             }
         }
     }
+    /// # Performance
+    /// * DB calls: 1 + 1?
     pub async fn unsubscribe(
         &self,
         source_url: &str,
         subscriber: &SubscriberModel,
     ) -> Result<UnsubscribeResult, ServiceError> {
+        // DB 1
         let feed = match self.get_feed_by_source_url(source_url).await? {
             Some(feed) => feed,
             None => {
@@ -62,6 +69,7 @@ impl FeedSubscriptionService {
             }
         };
 
+        // DB 1?
         match self
             .db
             .feed_subscription_table
@@ -80,6 +88,10 @@ impl FeedSubscriptionService {
             }),
         }
     }
+
+    /// # Performance
+    /// * DB calls: 1 + 2*N
+    /// Where N is number of subscriptions found for given page
     pub async fn list_paginated_subscriptions(
         &self,
         subscriber: &SubscriberModel,
@@ -90,13 +102,16 @@ impl FeedSubscriptionService {
 
         let mut ret = vec![];
         // Existence guaranteed by FOREIGN KEY constraint
+        // DB 1
         let subscriptions = self
             .db
             .feed_subscription_table
             .select_paginated_by_subscriber_id(subscriber.id, page, per_page)
             .await?;
+        // DB N
         for sub in subscriptions {
             // Existence guaranteed by FOREIGN KEY constraint
+            // DB 1
             let feed = self
                 .db
                 .feed_table
@@ -105,6 +120,7 @@ impl FeedSubscriptionService {
                 .ok_or_else(|| ServiceError::UnexpectedResult {
                     message: "Feed not found".to_string(),
                 })?;
+            // DB 1
             let feed_latest = self
                 .db
                 .feed_item_table
@@ -116,10 +132,13 @@ impl FeedSubscriptionService {
         Ok(ret)
     }
 
+    /// # Performance
+    /// * DB calls: 1
     pub async fn get_subscription_count(
         &self,
         subscriber: &SubscriberModel,
     ) -> Result<u32, ServiceError> {
+        // DB 1
         Ok(self
             .db
             .feed_subscription_table
@@ -127,11 +146,14 @@ impl FeedSubscriptionService {
             .await?)
     }
 
+    /// # Performance
+    /// * DB calls: 1
     pub async fn search_subcriptions(
         &self,
         subscriber: &SubscriberModel,
         partial: &str,
     ) -> Result<Vec<FeedModel>, ServiceError> {
+        // DB 1
         Ok(self
             .db
             .feed_table
@@ -139,16 +161,21 @@ impl FeedSubscriptionService {
             .await?)
     }
 
+    /// # Performance
+    /// * DB calls: 1 + 1? + 1??
+    /// * API calls: 2?
     pub async fn get_or_create_feed(&self, source_url: &str) -> Result<FeedModel, ServiceError> {
         let platform = self.platforms.get_platform_by_source_url(source_url).ok_or_else(|| {
             FeedError::UnsupportedUrl { url: source_url.to_string() }
         })?;
         let source_id = platform.get_id_from_source_url(source_url)?;
 
+        // DB 1
         let feed = match self.db.feed_table.select_by_source_id(&platform.get_id(), &source_id).await? {
             Some(res) => res,
             None => {
                 // Feed doesn't exist, create it
+                // API 1?
                 let feed_source = platform.fetch_source(source_id).await?;
 
                 let mut feed = FeedModel {
@@ -161,8 +188,10 @@ impl FeedSubscriptionService {
                     tags: platform.get_info().tags.clone(),
                     ..Default::default()
                 };
+                // DB 1?
                 feed.id = self.db.feed_table.insert(&feed).await?;
 
+                // API 1?
                 if let Ok(feed_latest) = platform.fetch_latest(&feed.items_id).await {
                     // Create initial version
                     let version = FeedItemModel {
@@ -171,6 +200,7 @@ impl FeedSubscriptionService {
                         published: feed_latest.published,
                         ..Default::default()
                     };
+                    // DB 1??
                     self.db.feed_item_table.insert(&version).await?;
                 }
 
@@ -180,10 +210,13 @@ impl FeedSubscriptionService {
         Ok(feed)
     }
 
+    /// # Performance
+    /// * DB calls: 1 + 1?
     pub async fn get_or_create_subscriber(
         &self,
         target: &SubscriberTarget,
     ) -> Result<SubscriberModel, ServiceError> {
+        // DB 1
         let subscriber = match self
             .db
             .subscriber_table
@@ -198,6 +231,7 @@ impl FeedSubscriptionService {
                     target_id: target.target_id.clone(),
                     ..Default::default()
                 };
+                // DB 1?
                 subscriber.id = self.db.subscriber_table.insert(&subscriber).await?;
                 subscriber
             }
@@ -217,12 +251,14 @@ impl FeedSubscriptionService {
         })?;
         let source_id = platform.get_id_from_source_url(source_url)?;
 
+        // DB 1
         Ok(self.db.feed_table.select_by_source_id(&platform.get_id(), &source_id).await?)
     }
 
     /// # Performance
     /// * DB calls: 1
     pub async fn get_server_settings(&self, guild_id: u64) -> Result<ServerSettings, ServiceError> {
+        // DB 1
         match self.db.server_settings_table.select(&guild_id).await? {
             Some(model) => Ok(model.settings.0),
             None => Ok(ServerSettings::default()),
@@ -240,10 +276,13 @@ impl FeedSubscriptionService {
             guild_id,
             settings: sqlx::types::Json(settings),
         };
+        // DB 1
         self.db.server_settings_table.replace(&model).await?;
         Ok(())
     }
 
+    /// # Performance
+    /// * DB calls: 1
     async fn create_subscription(
         &self,
         feed_id: i32,

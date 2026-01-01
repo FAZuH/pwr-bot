@@ -65,7 +65,7 @@ async fn test_get_or_create_feed() {
     mock_feed.set_info(FeedSource {
         id: source_id.to_string(),
         name: "Test Manga".to_string(),
-        url: url.clone(),
+        source_url: url.clone(),
         description: "A test manga".to_string(),
         image_url: None,
     });
@@ -74,7 +74,7 @@ async fn test_get_or_create_feed() {
         id: "ch-1".to_string(),
         source_id: source_id.to_string(),
         title: "Chapter 1".to_string(),
-        url: format!("{}/chapter/1", url),
+        item_url: format!("{}/chapter/1", url),
         published: Utc::now(),
     }));
 
@@ -84,7 +84,7 @@ async fn test_get_or_create_feed() {
         .await
         .expect("Failed to create feed");
     assert_eq!(feed1.name, "Test Manga");
-    assert_eq!(feed1.url, url);
+    assert_eq!(feed1.source_url, url);
     assert!(feed1.id > 0);
 
     // 2. Get existing feed
@@ -93,7 +93,7 @@ async fn test_get_or_create_feed() {
         .await
         .expect("Failed to get feed");
     assert_eq!(feed1.id, feed2.id);
-    assert_eq!(feed1.url, feed2.url);
+    assert_eq!(feed1.source_url, feed2.source_url);
 
     // 3. Get feed with empty latest
     let source_id = "manga-2";
@@ -102,7 +102,7 @@ async fn test_get_or_create_feed() {
         id: source_id.to_string(),
         name: "Test Manga 2".to_string(),
         description: "A test manga 2".to_string(),
-        url: url.clone(),
+        source_url: url.clone(),
         image_url: None,
     });
     mock_feed.set_latest(None);
@@ -118,7 +118,7 @@ async fn test_get_or_create_feed() {
         .expect("Failed to get feed");
 
     assert_eq!(feed3.id, feed4.id);
-    assert_eq!(feed3.url, feed4.url);
+    assert_eq!(feed3.source_url, feed4.source_url);
 
     common::teardown_db(db_path).await;
 }
