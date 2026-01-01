@@ -11,7 +11,10 @@ pub async fn check_guild_permissions(
     ctx: Context<'_>,
     required_role_id: &Option<String>,
 ) -> Result<(), Error> {
-    let member = ctx.author_member().await.ok_or(BotError::GuildOnlyCommand)?;
+    let member = ctx
+        .author_member()
+        .await
+        .ok_or(BotError::GuildOnlyCommand)?;
     let permissions = ctx
         .guild()
         .ok_or(BotError::GuildOnlyCommand)?
