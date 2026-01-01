@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use crate::feed::Platform;
 use crate::feed::anilist_platform::AniListPlatform;
+use crate::feed::comick_platform::ComickPlatform;
 use crate::feed::error::FeedError;
 use crate::feed::mangadex_platform::MangaDexPlatform;
 
@@ -9,21 +10,25 @@ pub struct Platforms {
     platforms: Vec<Arc<dyn Platform>>,
     pub anilist: Arc<AniListPlatform>,
     pub mangadex: Arc<MangaDexPlatform>,
+    pub comick: Arc<ComickPlatform>,
 }
 
 impl Platforms {
     pub fn new() -> Self {
         let anilist = Arc::new(AniListPlatform::new());
         let mangadex = Arc::new(MangaDexPlatform::new());
+        let comick = Arc::new(ComickPlatform::new());
 
         let mut _self = Self {
             platforms: Vec::new(),
             anilist,
             mangadex,
+            comick,
         };
 
         _self.add_platform(_self.anilist.clone());
         _self.add_platform(_self.mangadex.clone());
+        _self.add_platform(_self.comick.clone());
         _self
     }
 

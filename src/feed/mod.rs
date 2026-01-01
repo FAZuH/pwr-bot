@@ -10,6 +10,7 @@
 //! - **Feed Item**: Individual updates within a source (e.g., chapters, episodes)
 
 pub mod anilist_platform;
+pub mod comick_platform;
 pub mod error;
 pub mod mangadex_platform;
 pub mod platforms;
