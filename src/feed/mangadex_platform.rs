@@ -21,22 +21,21 @@ use reqwest::header::USER_AGENT;
 use serde_json::Map;
 use serde_json::Value;
 
-use crate::feed::BaseFeed;
-use crate::feed::Feed;
-use crate::feed::FeedInfo;
+use crate::feed::BasePlatform;
 use crate::feed::FeedItem;
 use crate::feed::FeedSource;
+use crate::feed::Platform;
+use crate::feed::PlatformInfo;
 use crate::feed::error::FeedError;
-use crate::feed::error::UrlParseError;
 
 type Json<'a> = &'a Map<String, Value>;
 
-pub struct MangaDexFeed {
-    pub base: BaseFeed,
+pub struct MangaDexPlatform {
+    pub base: BasePlatform,
     limiter: RateLimiter<NotKeyed, InMemoryState, QuantaClock>,
 }
 
-impl MangaDexFeed {
+impl MangaDexPlatform {
     pub fn new() -> Self {
         let mut headers = HeaderMap::new();
         headers.insert(USER_AGENT, HeaderValue::from_static("pwr-bot/0.1"));
@@ -46,7 +45,7 @@ impl MangaDexFeed {
             .build()
             .expect("Failed to create client");
 
-        let info = FeedInfo {
+        let info = PlatformInfo {
             name: "MangaDex".to_string(),
             feed_item_name: "Chapter".to_string(),
             api_hostname: "api.mangadex.org".to_string(),
@@ -66,7 +65,7 @@ impl MangaDexFeed {
         let limiter = RateLimiter::direct(Quota::per_second(NonZeroU32::new(5).unwrap()));
 
         Self {
-            base: BaseFeed::new(info, client),
+            base: BasePlatform::new(info, client),
             limiter,
         }
     }
@@ -95,10 +94,10 @@ impl MangaDexFeed {
     }
 
     fn get_attr_from_data<'a>(&self, data: &'a Value) -> Result<&'a Map<String, Value>, FeedError> {
-        data["attributes"]
-            .as_object()
+        data.get("attributes")
+            .and_then(|v| v.as_object())
             .ok_or_else(|| FeedError::MissingField {
-                field: "data".to_string(),
+                field: "data.attributes".to_string(),
             })
     }
 
@@ -110,13 +109,17 @@ impl MangaDexFeed {
         let langs = ["en", "ja-ro", "ja"];
 
         for lang in langs {
-            if let Some(title) = attr["title"][lang].as_str() {
+            if let Some(title) = attr
+                .get("title")
+                .and_then(|t| t.get(lang))
+                .and_then(|v| v.as_str())
+            {
                 return Ok(title.to_string());
             }
 
-            if let Some(alt_titles) = attr["altTitles"].as_array() {
+            if let Some(alt_titles) = attr.get("altTitles").and_then(|v| v.as_array()) {
                 for alt_title in alt_titles {
-                    if let Some(title) = alt_title[lang].as_str() {
+                    if let Some(title) = alt_title.get(lang).and_then(|v| v.as_str()) {
                         return Ok(title.to_string());
                     }
                 }
@@ -129,16 +132,26 @@ impl MangaDexFeed {
     }
 
     fn get_description_from_attr(&self, attr: Json) -> String {
-        attr["description"]["en"].as_str().unwrap_or("").to_string()
+        attr.get("description")
+            .and_then(|d| d.get("en"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string()
     }
 
-    async fn get_cover_url(&self, manga_id: &str, data: &Value) -> Result<String, FeedError> {
-        let relationships = data
-            .get("relationships")
+    fn get_relationships_from_data<'a>(
+        &self,
+        data: &'a Value,
+    ) -> Result<&'a Vec<Value>, FeedError> {
+        data.get("relationships")
             .and_then(|v| v.as_array())
             .ok_or_else(|| FeedError::MissingField {
                 field: "data.relationships".to_string(),
-            })?;
+            })
+    }
+
+    fn get_cover_filename(&self, data: &Value) -> Result<String, FeedError> {
+        let relationships = self.get_relationships_from_data(data)?;
 
         let cover_art = relationships
             .iter()
@@ -147,18 +160,84 @@ impl MangaDexFeed {
                 field: "cover_art relationship".to_string(),
             })?;
 
-        let cover_filename = cover_art
+        cover_art
             .get("attributes")
             .and_then(|v| v.as_object())
             .and_then(|attr| attr.get("fileName"))
             .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
             .ok_or_else(|| FeedError::MissingField {
                 field: "cover_art.attributes.fileName".to_string(),
+            })
+    }
+
+    fn get_chapters_from_data<'a>(&self, data: &'a Value) -> Result<&'a Vec<Value>, FeedError> {
+        data.as_array().ok_or_else(|| FeedError::UnexpectedResult {
+            message: "data field is not an array".to_string(),
+        })
+    }
+
+    fn get_first_chapter<'a>(
+        &self,
+        chapters: &'a [Value],
+        source_id: &str,
+    ) -> Result<&'a Value, FeedError> {
+        chapters.first().ok_or_else(|| {
+            warn!("No chapters found in data for source_id: {source_id}");
+            FeedError::EmptySource {
+                source_id: source_id.to_string(),
+            }
+        })
+    }
+
+    fn get_chapter_id(&self, chapter: &Value) -> Result<String, FeedError> {
+        chapter
+            .get("id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| FeedError::MissingField {
+                field: "chapter.id".to_string(),
+            })
+            .map(|s| s.to_string())
+    }
+
+    fn get_chapter_attributes<'a>(
+        &self,
+        chapter: &'a Value,
+    ) -> Result<&'a Map<String, Value>, FeedError> {
+        chapter
+            .get("attributes")
+            .and_then(|v| v.as_object())
+            .ok_or_else(|| FeedError::MissingField {
+                field: "chapter.attributes".to_string(),
+            })
+    }
+
+    fn get_chapter_title(&self, attributes: &Map<String, Value>) -> Result<String, FeedError> {
+        attributes
+            .get("chapter")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| FeedError::MissingField {
+                field: "attributes.chapter".to_string(),
+            })
+            .map(|s| s.to_string())
+    }
+
+    fn get_chapter_publish_at(
+        &self,
+        attributes: &Map<String, Value>,
+    ) -> Result<DateTime<Utc>, FeedError> {
+        let date_str = attributes
+            .get("publishAt")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| FeedError::MissingField {
+                field: "attributes.publishAt".to_string(),
             })?;
 
-        Ok(format!(
-            "https://uploads.mangadex.org/covers/{manga_id}/{cover_filename}"
-        ))
+        DateTime::parse_from_rfc3339(date_str)
+            .map(|dt| dt.with_timezone(&Utc))
+            .map_err(|_| FeedError::InvalidTime {
+                time: date_str.to_string(),
+            })
     }
 
     fn validate_uuid(&self, uuid: &String) -> Result<(), FeedError> {
@@ -198,17 +277,17 @@ impl MangaDexFeed {
 }
 
 #[async_trait]
-impl Feed for MangaDexFeed {
-    async fn fetch_source(&self, id: &str) -> Result<FeedSource, FeedError> {
+impl Platform for MangaDexPlatform {
+    async fn fetch_source(&self, source_id: &str) -> Result<FeedSource, FeedError> {
         debug!(
-            "Fetching info from {} for source_id: {id}",
+            "Fetching info from {} for source_id: {source_id}",
             self.base.info.name
         );
-        let source_id = id.to_string();
+        let source_id = source_id.to_string();
         self.validate_uuid(&source_id.clone())?;
 
         let request = self.base.client.get(format!(
-            "{}/manga/{id}?includes[]=cover_art",
+            "{}/manga/{source_id}?includes[]=cover_art",
             self.base.info.api_url
         ));
 
@@ -217,25 +296,31 @@ impl Feed for MangaDexFeed {
         let attr = self.get_attr_from_data(data)?;
         let name = self.get_title_from_attr(attr)?;
         let description = self.get_description_from_attr(attr);
-        let image_url = Some(self.get_cover_url(&source_id, data).await?);
+
+        let cover_filename = self.get_cover_filename(data)?;
+        let image_url = Some(format!(
+            "https://uploads.mangadex.org/covers/{source_id}/{cover_filename}"
+        ));
+        let source_url = self.get_source_url_from_id(&source_id);
 
         info!("Successfully fetched latest manga for source_id: {source_id}");
 
         Ok(FeedSource {
+            items_id: source_id.clone(),
             name,
-            url: self.get_url_from_id(&source_id),
+            source_url,
             image_url,
             id: source_id,
             description,
         })
     }
 
-    async fn fetch_latest(&self, id: &str) -> Result<FeedItem, FeedError> {
+    async fn fetch_latest(&self, items_id: &str) -> Result<FeedItem, FeedError> {
         debug!(
-            "Fetching latest from {} for source_id: {id}",
+            "Fetching latest from {} for source_id: {items_id}",
             self.base.info.name
         );
-        let source_id = id.to_string();
+        let source_id = items_id.to_string();
 
         let request = self
             .base
@@ -252,75 +337,45 @@ impl Feed for MangaDexFeed {
 
         // Extract fields
         let data = self.get_data_from_resp(&resp)?;
-        let chapters = data.as_array().ok_or_else(|| FeedError::UnexpectedResult {
-            message: "data field is not an array".to_string(),
-        })?;
+        let chapters = self.get_chapters_from_data(data)?;
+        let chapter = self.get_first_chapter(chapters, &source_id)?;
+        let attributes = self.get_chapter_attributes(chapter)?;
 
-        if let Some(c) = chapters.first() {
-            let id = c["id"]
-                .as_str()
-                .ok_or_else(|| FeedError::MissingField {
-                    field: "data.0.id".to_string(),
-                })?
-                .to_string();
+        let id = self.get_chapter_id(chapter)?;
+        let title = self.get_chapter_title(attributes)?;
+        let published = self.get_chapter_publish_at(attributes)?;
 
-            let title = c["attributes"]["chapter"]
-                .as_str()
-                .ok_or_else(|| FeedError::MissingField {
-                    field: "data.0.attributes.chapter".to_string(),
-                })?
-                .to_string();
+        info!("Successfully fetched latest manga for source_id: {source_id}");
 
-            let publish_at = c["attributes"]["publishAt"]
-                .as_str()
-                .ok_or_else(|| FeedError::MissingField {
-                    field: "data.0.attributes.publishAt".to_string(),
-                })?
-                .to_string();
-
-            let published = DateTime::parse_from_rfc3339(&publish_at)
-                .map(|dt| dt.with_timezone(&Utc))
-                .map_err(|_| FeedError::InvalidTime { time: publish_at })?;
-
-            info!("Successfully fetched latest manga for source_id: {source_id}");
-
-            Ok(FeedItem {
-                id,
-                url: self.get_url_from_id(&source_id),
-                source_id,
-                title,
-                published,
-            })
-        } else {
-            warn!("No chapters found in data for source_id: {source_id}");
-            Err(FeedError::EmptySource {
-                source_id: source_id.to_string(),
-            })
-        }
+        Ok(FeedItem {
+            id,
+            title,
+            published,
+        })
     }
 
-    fn get_id_from_url<'a>(&self, url: &'a str) -> Result<&'a str, UrlParseError> {
-        self.base.get_nth_path_from_url(url, 1)
+    fn get_id_from_source_url<'a>(&self, url: &'a str) -> Result<&'a str, FeedError> {
+        Ok(self.base.get_nth_path_from_url(url, 1)?)
     }
 
-    fn get_url_from_id(&self, id: &str) -> String {
+    fn get_source_url_from_id(&self, id: &str) -> String {
         format!("https://{}/title/{}", self.base.info.api_domain, id)
     }
 
-    fn get_base(&self) -> &BaseFeed {
+    fn get_base(&self) -> &BasePlatform {
         &self.base
     }
 }
 
-impl PartialEq for MangaDexFeed {
+impl PartialEq for MangaDexPlatform {
     fn eq(&self, other: &Self) -> bool {
         self.base.info.api_url == other.base.info.api_url
     }
 }
 
-impl Eq for MangaDexFeed {}
+impl Eq for MangaDexPlatform {}
 
-impl Hash for MangaDexFeed {
+impl Hash for MangaDexPlatform {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.base.info.api_url.hash(state);
     }

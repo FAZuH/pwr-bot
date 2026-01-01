@@ -30,14 +30,14 @@ use crate::database::model::FeedModel;
 use crate::database::table::Table;
 use crate::event::event_bus::EventBus;
 use crate::event::feed_update_event::FeedUpdateEvent;
-use crate::feed::FeedInfo;
+use crate::feed::PlatformInfo;
 use crate::feed::error::FeedError;
-use crate::feed::feeds::Feeds;
+use crate::feed::platforms::Platforms;
 
 pub struct SeriesFeedPublisher {
     db: Arc<Database>,
     event_bus: Arc<EventBus>,
-    feeds: Arc<Feeds>,
+    feeds: Arc<Platforms>,
     poll_interval: Duration,
     running: AtomicBool,
 }
@@ -46,7 +46,7 @@ impl SeriesFeedPublisher {
     pub fn new(
         db: Arc<Database>,
         event_bus: Arc<EventBus>,
-        feeds: Arc<Feeds>,
+        feeds: Arc<Platforms>,
         poll_interval: Duration,
     ) -> Arc<Self> {
         info!(
@@ -138,19 +138,19 @@ impl SeriesFeedPublisher {
             .await?
             .ok_or_else(|| anyhow::anyhow!("Latest feed item not found"))?;
 
-        let series_feed = self.feeds.get_feed_by_url(&feed.url).ok_or_else(|| {
-            DatabaseError::InternalError {
-                message: format!("Series feed source with url {} not found.", feed.url),
-            }
-            // NOTE: This means an invalid URL has been inserted to db due to insufficient
-            // checks
-        })?;
-
-        let series_id = self.feeds.get_feed_id_by_url(&feed.url)?;
-        // NOTE: Should've been checked already in commands.rs
+        let platform = self
+            .feeds
+            .get_platform_by_source_url(&feed.source_url)
+            .ok_or_else(|| {
+                DatabaseError::InternalError {
+                    message: format!("Series feed source with url {} not found.", feed.source_url),
+                }
+                // NOTE: This means an invalid URL has been inserted to db due to insufficient
+                // checks
+            })?;
 
         // Fetch current state from source
-        let new_latest = match series_feed.fetch_latest(series_id).await {
+        let new_latest = match platform.fetch_latest(&feed.items_id).await {
             Ok(series) => series,
             Err(e) => {
                 if matches!(e, FeedError::SourceFinished { .. }) {
@@ -197,7 +197,7 @@ impl SeriesFeedPublisher {
         // Set vars
         let message = self.create_message(
             &feed,
-            &series_feed.get_base().info,
+            &platform.get_base().info,
             &old_latest,
             &new_feed_item,
         );
@@ -217,7 +217,7 @@ impl SeriesFeedPublisher {
     fn create_message(
         &self,
         feed: &FeedModel,
-        feed_info: &FeedInfo,
+        feed_info: &PlatformInfo,
         old_feed_item: &FeedItemModel,
         new_feed_item: &FeedItemModel,
     ) -> CreateMessage<'static> {
@@ -247,7 +247,7 @@ Published on <t:{}>
             feed_info.feed_item_name,
             new_feed_item.description,
             new_feed_item.published.timestamp(),
-            feed.url
+            feed.source_url
         );
         let text_footer = format!("-# {}", feed_info.copyright_notice);
 
