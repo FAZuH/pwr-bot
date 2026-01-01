@@ -138,7 +138,7 @@ impl SeriesFeedPublisher {
             .await?
             .ok_or_else(|| anyhow::anyhow!("Latest feed item not found"))?;
 
-        let series_feed = self
+        let platform = self
             .feeds
             .get_platform_by_source_url(&feed.source_url)
             .ok_or_else(|| {
@@ -149,11 +149,8 @@ impl SeriesFeedPublisher {
                 // checks
             })?;
 
-        let series_id = self.feeds.get_id_from_source_url(&feed.source_url)?;
-        // NOTE: Should've been checked already in commands.rs
-
         // Fetch current state from source
-        let new_latest = match series_feed.fetch_latest(series_id).await {
+        let new_latest = match platform.fetch_latest(&feed.items_id).await {
             Ok(series) => series,
             Err(e) => {
                 if matches!(e, FeedError::SourceFinished { .. }) {
@@ -200,7 +197,7 @@ impl SeriesFeedPublisher {
         // Set vars
         let message = self.create_message(
             &feed,
-            &series_feed.get_base().info,
+            &platform.get_base().info,
             &old_latest,
             &new_feed_item,
         );
