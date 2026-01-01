@@ -43,7 +43,7 @@ macro_rules! create_feed {
                 source_url: format!("https://{}.com", $name.replace(" ", "").to_lowercase()),
                 ..Default::default()
             };
-            $(feed.$field = $val.into();)* 
+            $(feed.$field = $val.into();)*
             $db.feed_table.insert(&feed).await.expect("Failed to insert feed")
         }
     };
