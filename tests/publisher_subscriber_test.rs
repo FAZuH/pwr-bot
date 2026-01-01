@@ -50,9 +50,7 @@ async fn test_subscription_and_publishing() {
 
     let initial_latest = FeedItem {
         id: "ch1".to_string(),
-        source_id: source_id.to_string(),
         title: "Chapter 1".to_string(),
-        item_url: format!("{}/chapter/1", url),
         published: Utc::now(),
     };
     mock_feed.set_latest(Some(initial_latest.clone()));
@@ -109,9 +107,7 @@ async fn test_subscription_and_publishing() {
     // Update Mock Data
     let new_latest = FeedItem {
         id: "ch2".to_string(),
-        source_id: source_id.to_string(),
         title: "Chapter 2".to_string(),
-        item_url: format!("{}/chapter/2", url),
         published: Utc::now(),
     };
     mock_feed.set_latest(Some(new_latest));

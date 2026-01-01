@@ -73,9 +73,7 @@ async fn test_get_or_create_feed() {
 
     mock_feed.set_latest(Some(FeedItem {
         id: "ch-1".to_string(),
-        source_id: source_id.to_string(),
         title: "Chapter 1".to_string(),
-        item_url: format!("{}/chapter/1", url),
         published: Utc::now(),
     }));
 

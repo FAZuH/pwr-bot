@@ -163,8 +163,6 @@ impl Platform for AniListPlatform {
 
         Ok(FeedItem {
             id,
-            item_url: self.get_source_url_from_id(&source_id),
-            source_id,
             title,
             published,
         })

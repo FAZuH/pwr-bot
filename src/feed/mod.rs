@@ -98,12 +98,8 @@ pub enum PlatformResult {
 pub struct FeedItem {
     /// Identifier for this feed item.
     pub id: String,
-    /// Identifier for the feed source of this feed item.
-    pub source_id: String,
     /// Title/Description of the update, e.g., "Chapter 100", "Episode 12", "My New Video".
     pub title: String,
-    /// Url of the item, e.g., "https://mangadex.org/chapter/..."
-    pub item_url: String,
     /// Timestamp of the update.
     pub published: DateTime<Utc>,
 }
