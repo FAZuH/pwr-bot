@@ -120,3 +120,22 @@ pub struct ServerSettings {
     #[serde(default)]
     pub unsubscribe_role_id: Option<String>,
 }
+
+#[derive(FromRow)]
+pub struct FeedWithLatestItemRow {
+    // Feed fields
+    pub id: i32,
+    pub name: String,
+    pub description: String,
+    pub platform_id: String,
+    pub source_id: String,
+    pub items_id: String,
+    pub source_url: String,
+    pub cover_url: String,
+    pub tags: String,
+
+    // FeedItem fields (nullable because of LEFT JOIN)
+    pub item_id: Option<i32>,
+    pub item_description: Option<String>,
+    pub item_published: Option<DateTime<Utc>>,
+}

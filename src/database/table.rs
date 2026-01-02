@@ -6,6 +6,7 @@ use crate::database::error::DatabaseError;
 use crate::database::model::FeedItemModel;
 use crate::database::model::FeedModel;
 use crate::database::model::FeedSubscriptionModel;
+use crate::database::model::FeedWithLatestItemRow;
 use crate::database::model::ServerSettingsModel;
 use crate::database::model::SubscriberModel;
 use crate::database::model::SubscriberType;
@@ -530,6 +531,45 @@ impl FeedSubscriptionTable {
 
         Ok(sqlx::query_as::<_, FeedSubscriptionModel>(
             "SELECT * FROM feed_subscriptions WHERE subscriber_id = ? ORDER BY id LIMIT ? OFFSET ?",
+        )
+        .bind(subscriber_id)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&self.base.pool)
+        .await?)
+    }
+
+    /// Get a paginated list of feeds a subscriber is following, with latest feed item
+    ///
+    /// # Arguments
+    /// * `page` - n-th page to show. Starts at 0.
+    /// * `per_page` - How many items to show per page.
+    pub async fn select_paginated_with_latest_by_subscriber_id(
+        &self,
+        subscriber_id: i32,
+        page: impl Into<u32>,
+        per_page: impl Into<u32>,
+    ) -> Result<Vec<FeedWithLatestItemRow>, DatabaseError> {
+        let page: u32 = page.into();
+        let per_page: u32 = per_page.into();
+
+        let limit = per_page;
+        let offset = per_page * page;
+
+        Ok(sqlx::query_as::<_, FeedWithLatestItemRow>(
+            r#"
+            SELECT 
+                f.id, f.name, f.description, f.platform_id, f.source_id, f.items_id, f.source_url, f.cover_url, f.tags,
+                fi.id as item_id, fi.description as item_description, fi.published as item_published
+            FROM feed_subscriptions fs
+            JOIN feeds f ON fs.feed_id = f.id
+            LEFT JOIN feed_items fi ON fi.id = (
+                SELECT id FROM feed_items WHERE feed_id = f.id ORDER BY published DESC LIMIT 1
+            )
+            WHERE fs.subscriber_id = ?
+            ORDER BY f.name
+            LIMIT ? OFFSET ?
+            "#
         )
         .bind(subscriber_id)
         .bind(limit)

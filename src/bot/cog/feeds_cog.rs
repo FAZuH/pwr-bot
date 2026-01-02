@@ -119,11 +119,7 @@ impl FeedsCog {
         ctx.defer().await?;
         let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?.get();
 
-        let mut settings = ctx
-            .data()
-            .feed_subscription_service
-            .get_server_settings(guild_id)
-            .await?;
+        let mut settings = ctx.data().service.get_server_settings(guild_id).await?;
 
         let msg_handle = ctx.send(FeedsCog::create_settings_reply(&settings)).await?;
 
@@ -177,7 +173,7 @@ impl FeedsCog {
 
             if should_update {
                 ctx.data()
-                    .feed_subscription_service
+                    .service
                     .update_server_settings(guild_id, settings.clone())
                     .await?;
             }
@@ -320,7 +316,7 @@ impl FeedsCog {
             let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?;
             let settings = ctx
                 .data()
-                .feed_subscription_service
+                .service
                 .get_server_settings(guild_id.get())
                 .await?;
             if settings.channel_id.is_none() {
@@ -342,11 +338,7 @@ impl FeedsCog {
             subscriber_type,
             target_id,
         };
-        let subscriber = ctx
-            .data()
-            .feed_subscription_service
-            .get_or_create_subscriber(&target)
-            .await?;
+        let subscriber = ctx.data().service.get_or_create_subscriber(&target).await?;
 
         let mut states: Vec<String> = vec!["⏳ ﻿ Processing...".to_string(); urls_split.len()];
 
@@ -357,11 +349,7 @@ impl FeedsCog {
 
         // NOTE: Can be done concurrently
         for (i, url) in urls_split.iter().enumerate() {
-            let sub_result = ctx
-                .data()
-                .feed_subscription_service
-                .subscribe(url, &subscriber)
-                .await;
+            let sub_result = ctx.data().service.subscribe(url, &subscriber).await;
 
             states[i] = sub_result.map_or_else(|e| format!("❌ {e}"), |res| res.to_string());
 
@@ -409,7 +397,7 @@ impl FeedsCog {
             let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?;
             let settings = ctx
                 .data()
-                .feed_subscription_service
+                .service
                 .get_server_settings(guild_id.get())
                 .await?;
             if settings.channel_id.is_none() {
@@ -431,11 +419,7 @@ impl FeedsCog {
             subscriber_type,
             target_id,
         };
-        let subscriber = ctx
-            .data()
-            .feed_subscription_service
-            .get_or_create_subscriber(&target)
-            .await?;
+        let subscriber = ctx.data().service.get_or_create_subscriber(&target).await?;
 
         let mut states: Vec<String> = vec!["⏳ ﻿ Processing...".to_string(); urls_split.len()];
 
@@ -446,11 +430,7 @@ impl FeedsCog {
 
         // NOTE: Can be done concurrently
         for (i, url) in urls_split.iter().enumerate() {
-            let unsub_result = ctx
-                .data()
-                .feed_subscription_service
-                .unsubscribe(url, &subscriber)
-                .await;
+            let unsub_result = ctx.data().service.unsubscribe(url, &subscriber).await;
 
             states[i] = unsub_result.map_or_else(|e| format!("❌ {e}"), |res| res.to_string());
 
@@ -497,17 +477,13 @@ impl FeedsCog {
             subscriber_type,
             target_id,
         };
-        let subscriber = ctx
-            .data()
-            .feed_subscription_service
-            .get_or_create_subscriber(&target)
-            .await?;
+        let subscriber = ctx.data().service.get_or_create_subscriber(&target).await?;
 
         // Get subscriber's subscription count
         let per_page = 10;
         let items = ctx
             .data()
-            .feed_subscription_service
+            .service
             .get_subscription_count(&subscriber)
             .await?;
 
@@ -546,7 +522,7 @@ impl FeedsCog {
     ) -> anyhow::Result<Vec<CreateComponent<'a>>> {
         let subscriptions = ctx
             .data()
-            .feed_subscription_service
+            .service
             .list_paginated_subscriptions(
                 subscriber,
                 navigation.pagination.current_page,
@@ -639,14 +615,14 @@ impl FeedsCog {
         });
         let user_subscriber = ctx
             .data()
-            .feed_subscription_service
+            .service
             .get_or_create_subscriber(&user_target)
             .await
             .ok();
         let guild_subscriber = match guild_target {
             Some(guild_target) => ctx
                 .data()
-                .feed_subscription_service
+                .service
                 .get_or_create_subscriber(&guild_target)
                 .await
                 .ok(),
@@ -660,7 +636,7 @@ impl FeedsCog {
         let mut user_feeds = match user_subscriber {
             Some(user_subscriber) => ctx
                 .data()
-                .feed_subscription_service
+                .service
                 .search_subcriptions(&user_subscriber, partial)
                 .await
                 .unwrap_or(vec![]),
@@ -669,7 +645,7 @@ impl FeedsCog {
         let mut guild_feeds = match guild_subscriber {
             Some(guild_subscriber) => ctx
                 .data()
-                .feed_subscription_service
+                .service
                 .search_subcriptions(&guild_subscriber, partial)
                 .await
                 .unwrap_or(vec![]),

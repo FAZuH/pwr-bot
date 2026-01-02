@@ -14,6 +14,7 @@ use crate::database::model::ServerSettingsModel;
 use crate::database::model::SubscriberModel;
 use crate::database::model::SubscriberType;
 use crate::database::table::Table;
+use crate::feed::PlatformInfo;
 use crate::feed::error::FeedError;
 use crate::feed::platforms::Platforms;
 use crate::service::error::ServiceError;
@@ -53,6 +54,82 @@ impl FeedSubscriptionService {
         }
     }
     /// # Performance
+    /// * DB calls: 1
+    pub async fn get_feeds_by_tag(&self, tag: &str) -> Result<Vec<FeedModel>, ServiceError> {
+        Ok(self.db.feed_table.select_all_by_tag(tag).await?)
+    }
+
+    /// Check for updates on a specific feed
+    pub async fn check_feed_update(
+        &self,
+        feed: &FeedModel,
+    ) -> Result<FeedUpdateResult, ServiceError> {
+        // Skip feeds with no subscribers
+        let subs = self
+            .db
+            .feed_subscription_table
+            .exists_by_feed_id(feed.id)
+            .await?;
+
+        if !subs {
+            return Ok(FeedUpdateResult::NoUpdate);
+        }
+
+        // Get the latest known version for this feed
+        let old_latest = self
+            .db
+            .feed_item_table
+            .select_latest_by_feed_id(feed.id)
+            .await?
+            .ok_or_else(|| ServiceError::UnexpectedResult {
+                message: "Latest feed item not found".to_string(),
+            })?;
+
+        let platform = self
+            .platforms
+            .get_platform_by_source_url(&feed.source_url)
+            .ok_or_else(|| {
+                ServiceError::DatabaseError(DatabaseError::InternalError {
+                    message: format!("Series feed source with url {} not found.", feed.source_url),
+                })
+            })?;
+
+        // Fetch current state from source
+        let new_latest = match platform.fetch_latest(&feed.items_id).await {
+            Ok(series) => series,
+            Err(e) => {
+                if matches!(e, FeedError::SourceFinished { .. }) {
+                    self.db.feed_table.delete(&feed.id).await?;
+                    return Ok(FeedUpdateResult::SourceFinished);
+                } else {
+                    return Err(e.into());
+                }
+            }
+        };
+
+        // Check if version changed
+        if new_latest.title == old_latest.description {
+            return Ok(FeedUpdateResult::NoUpdate);
+        }
+
+        // Insert new version into database
+        let new_feed_item = FeedItemModel {
+            id: 0,
+            feed_id: feed.id,
+            description: new_latest.title.clone(),
+            published: new_latest.published,
+        };
+        self.db.feed_item_table.replace(&new_feed_item).await?;
+
+        Ok(FeedUpdateResult::Updated {
+            feed: feed.clone(),
+            old_item: old_latest,
+            new_item: new_feed_item,
+            feed_info: platform.get_base().info.clone(),
+        })
+    }
+
+    /// # Performance
     /// * DB calls: 1 + 1?
     pub async fn unsubscribe(
         &self,
@@ -90,7 +167,7 @@ impl FeedSubscriptionService {
     }
 
     /// # Performance
-    /// * DB calls: 1 + 2*N
+    /// * DB calls: 1
     ///
     /// Where N is number of subscriptions found for given page
     pub async fn list_paginated_subscriptions(
@@ -101,35 +178,45 @@ impl FeedSubscriptionService {
     ) -> Result<Vec<SubscriptionInfo>, ServiceError> {
         let page = page.into() - 1;
 
-        let mut ret = vec![];
-        // Existence guaranteed by FOREIGN KEY constraint
         // DB 1
-        let subscriptions = self
+        let rows = self
             .db
             .feed_subscription_table
-            .select_paginated_by_subscriber_id(subscriber.id, page, per_page)
+            .select_paginated_with_latest_by_subscriber_id(subscriber.id, page, per_page)
             .await?;
-        // DB N
-        for sub in subscriptions {
-            // Existence guaranteed by FOREIGN KEY constraint
-            // DB 1
-            let feed = self
-                .db
-                .feed_table
-                .select(&sub.feed_id)
-                .await?
-                .ok_or_else(|| ServiceError::UnexpectedResult {
-                    message: "Feed not found".to_string(),
-                })?;
-            // DB 1
-            let feed_latest = self
-                .db
-                .feed_item_table
-                .select_latest_by_feed_id(feed.id)
-                .await?;
 
-            ret.push(SubscriptionInfo { feed, feed_latest });
-        }
+        let ret = rows
+            .into_iter()
+            .map(|row| {
+                let feed = FeedModel {
+                    id: row.id,
+                    name: row.name,
+                    description: row.description,
+                    platform_id: row.platform_id,
+                    source_id: row.source_id,
+                    items_id: row.items_id,
+                    source_url: row.source_url,
+                    cover_url: row.cover_url,
+                    tags: row.tags,
+                };
+
+                let feed_latest = if let (Some(id), Some(desc), Some(pub_date)) =
+                    (row.item_id, row.item_description, row.item_published)
+                {
+                    Some(FeedItemModel {
+                        id,
+                        feed_id: feed.id,
+                        description: desc,
+                        published: pub_date,
+                    })
+                } else {
+                    None
+                };
+
+                SubscriptionInfo { feed, feed_latest }
+            })
+            .collect();
+
         Ok(ret)
     }
 
@@ -346,4 +433,16 @@ pub struct SubscriberTarget {
 pub struct SubscriptionInfo {
     pub feed: FeedModel,
     pub feed_latest: Option<FeedItemModel>,
+}
+
+#[allow(clippy::large_enum_variant)]
+pub enum FeedUpdateResult {
+    NoUpdate,
+    Updated {
+        feed: FeedModel,
+        old_item: FeedItemModel,
+        new_item: FeedItemModel,
+        feed_info: PlatformInfo,
+    },
+    SourceFinished,
 }
