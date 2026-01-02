@@ -5,7 +5,7 @@ use chrono::Utc;
 use pwr_bot::database::model::SubscriberType;
 use pwr_bot::database::table::Table;
 use pwr_bot::event::event_bus::EventBus;
-use pwr_bot::event::feed_update_event::FeedUpdateEvent;
+use pwr_bot::event::FeedUpdateEvent;
 use pwr_bot::feed::FeedItem;
 use pwr_bot::feed::FeedSource;
 use pwr_bot::feed::platforms::Platforms;
