@@ -1,3 +1,10 @@
+## [0.1.19](https://github.com/FAZuH/pwr-bot/compare/v0.1.18...v0.1.19) (2026-01-02)
+
+
+### Bug Fixes
+
+* Fix Comick getting blocked by Cloudflare ([47e947a](https://github.com/FAZuH/pwr-bot/commit/47e947a2698d15ad3e6f0007c2b7c2f9372f7f22))
+
 ## [0.1.18](https://github.com/FAZuH/pwr-bot/compare/v0.1.17...v0.1.18) (2026-01-01)
 
 
@@ -63,17 +70,4 @@
 
 * Error on empty MangaDex feed description ([d13d839](https://github.com/FAZuH/pwr-bot/commit/d13d8398ac4f434f1666d489d3090cdb256f0014))
 * Error when subscribing to AniList feed that is not yet aired ([55282ad](https://github.com/FAZuH/pwr-bot/commit/55282adb621a8f70779908013c4ee6c480b6907a))
-
-## [0.1.14](https://github.com/FAZuH/pwr-bot/compare/v0.1.13...v0.1.14) (2025-12-29)
-
-
-### Bug Fixes
-
-* **feed:** API error when subscribing to feeds ([87d1ce1](https://github.com/FAZuH/pwr-bot/commit/87d1ce1a33ece59f90c0341b1ff8b452284674d4))
-* **feed:** Wrong AniListSeriesFeed rate limiter ([6cca972](https://github.com/FAZuH/pwr-bot/commit/6cca972ef4dc8c9f19c22cdc0112055c4827a0ea))
-
-
-### Documentation
-
-* Add LOGS_PATH to docs ([5dceca7](https://github.com/FAZuH/pwr-bot/commit/5dceca7d198d65f949e7a8c53265d3dac87bba3f))
 
