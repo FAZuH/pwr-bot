@@ -1,0 +1,12 @@
+{
+  "result": "error",
+  "errors": [
+    {
+      "id": "524eb5f9-8408-5783-b4fc-5b176572e923",
+      "status": 404,
+      "title": "not_found_http_exception",
+      "detail": "No route found for \"GET https://api.mangadex.org/manga/qwertyuiop\"",
+      "context": null
+    }
+  ]
+}

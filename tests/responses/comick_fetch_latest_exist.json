@@ -1,0 +1,338 @@
+{
+  "chapters": [
+    {
+      "id": 4540554,
+      "chap": "333",
+      "title": null,
+      "vol": null,
+      "lang": "en",
+      "created_at": "2025-12-27T15:44:40+01:00",
+      "updated_at": "2026-01-02T00:48:28+01:00",
+      "up_count": 9,
+      "down_count": 0,
+      "is_the_last_chapter": false,
+      "publish_at": "2025-12-27T14:44:40.000Z",
+      "view_count": 2943,
+      "group_name": [
+        "Official"
+      ],
+      "hid": "VHGgNAdL",
+      "identities": null,
+      "md_chapters_groups": [
+        {
+          "md_groups": {
+            "title": "Viz Media",
+            "slug": "viz-mediawtGo"
+          }
+        }
+      ]
+    },
+    {
+      "id": 4487724,
+      "chap": "332",
+      "title": "Call of the Night?",
+      "vol": null,
+      "lang": "en",
+      "created_at": "2025-12-10T00:13:41+01:00",
+      "updated_at": "2026-01-01T06:48:27+01:00",
+      "up_count": 8,
+      "down_count": 0,
+      "is_the_last_chapter": false,
+      "publish_at": "2025-12-09T23:13:42.000Z",
+      "view_count": 276,
+      "group_name": [
+        "Viz Media"
+      ],
+      "hid": "5NCNaM58",
+      "identities": {
+        "id": "b668cc8f-e6d9-4ae4-bea4-23f2d8f92d31",
+        "traits": {
+          "username": "Antithesitoon",
+          "gravatar": "https://secure.gravatar.com/avatar/fbfdf3a78e364134b590b9a8df79af8b?size=50&default=mp&rating=g"
+        }
+      },
+      "md_chapters_groups": [
+        {
+          "md_groups": {
+            "title": "Viz Media",
+            "slug": "viz-mediawtGo"
+          }
+        }
+      ]
+    },
+    {
+      "id": 4468302,
+      "chap": "331",
+      "title": "Episode 5: Signpost of the Stars—Chapter 1: Resemblance",
+      "vol": null,
+      "lang": "en",
+      "created_at": "2025-12-03T00:03:33+01:00",
+      "updated_at": "2026-01-02T00:48:28+01:00",
+      "up_count": 9,
+      "down_count": 0,
+      "is_the_last_chapter": false,
+      "publish_at": "2025-12-02T23:03:34.000Z",
+      "view_count": 33,
+      "group_name": [
+        "Viz Media"
+      ],
+      "hid": "VmTZ_wCe",
+      "identities": {
+        "id": "b668cc8f-e6d9-4ae4-bea4-23f2d8f92d31",
+        "traits": {
+          "username": "Antithesitoon",
+          "gravatar": "https://secure.gravatar.com/avatar/fbfdf3a78e364134b590b9a8df79af8b?size=50&default=mp&rating=g"
+        }
+      },
+      "md_chapters_groups": [
+        {
+          "md_groups": {
+            "title": "Viz Media",
+            "slug": "viz-mediawtGo"
+          }
+        }
+      ]
+    },
+    {
+      "id": 4437348,
+      "chap": "330",
+      "title": "Beyond Memory",
+      "vol": null,
+      "lang": "en",
+      "created_at": "2025-11-19T00:20:39+01:00",
+      "updated_at": "2025-12-30T01:48:41+01:00",
+      "up_count": 8,
+      "down_count": 0,
+      "is_the_last_chapter": false,
+      "publish_at": "2025-11-18T23:20:39.000Z",
+      "view_count": 43,
+      "group_name": [
+        "Viz Media"
+      ],
+      "hid": "35BryYRA",
+      "identities": {
+        "id": "b668cc8f-e6d9-4ae4-bea4-23f2d8f92d31",
+        "traits": {
+          "username": "Antithesitoon",
+          "gravatar": "https://secure.gravatar.com/avatar/fbfdf3a78e364134b590b9a8df79af8b?size=50&default=mp&rating=g"
+        }
+      },
+      "md_chapters_groups": [
+        {
+          "md_groups": {
+            "title": "Viz Media",
+            "slug": "viz-mediawtGo"
+          }
+        }
+      ]
+    },
+    {
+      "id": 4342752,
+      "chap": "329",
+      "title": "For You and Your Spouse",
+      "vol": null,
+      "lang": "en",
+      "created_at": "2025-11-12T00:17:23+01:00",
+      "updated_at": "2025-12-30T11:50:02+01:00",
+      "up_count": 12,
+      "down_count": 0,
+      "is_the_last_chapter": false,
+      "publish_at": "2025-11-11T23:17:24.000Z",
+      "view_count": 10,
+      "group_name": [
+        "Viz Media"
+      ],
+      "hid": "A5T3usEV",
+      "identities": {
+        "id": "b668cc8f-e6d9-4ae4-bea4-23f2d8f92d31",
+        "traits": {
+          "username": "Antithesitoon",
+          "gravatar": "https://secure.gravatar.com/avatar/fbfdf3a78e364134b590b9a8df79af8b?size=50&default=mp&rating=g"
+        }
+      },
+      "md_chapters_groups": [
+        {
+          "md_groups": {
+            "title": "Viz Media",
+            "slug": "viz-mediawtGo"
+          }
+        }
+      ]
+    },
+    {
+      "id": 4324030,
+      "chap": "328",
+      "title": "To You, 1,000 Years Later",
+      "vol": null,
+      "lang": "en",
+      "created_at": "2025-11-05T00:03:03+01:00",
+      "updated_at": "2025-12-31T00:48:55+01:00",
+      "up_count": 12,
+      "down_count": 0,
+      "is_the_last_chapter": false,
+      "publish_at": "2025-11-04T23:03:03.000Z",
+      "view_count": 34,
+      "group_name": [
+        "Official"
+      ],
+      "hid": "4ld2PVkI",
+      "identities": {
+        "id": "b668cc8f-e6d9-4ae4-bea4-23f2d8f92d31",
+        "traits": {
+          "username": "Antithesitoon",
+          "gravatar": "https://secure.gravatar.com/avatar/fbfdf3a78e364134b590b9a8df79af8b?size=50&default=mp&rating=g"
+        }
+      },
+      "md_chapters_groups": []
+    },
+    {
+      "id": 4303508,
+      "chap": "327",
+      "title": "Bad Feeling",
+      "vol": null,
+      "lang": "en",
+      "created_at": "2025-10-28T23:03:32+01:00",
+      "updated_at": "2025-12-31T00:48:55+01:00",
+      "up_count": 12,
+      "down_count": 0,
+      "is_the_last_chapter": false,
+      "publish_at": "2025-10-28T22:03:32.000Z",
+      "view_count": 34,
+      "group_name": [
+        "Official"
+      ],
+      "hid": "Bpym_sX7",
+      "identities": {
+        "id": "b668cc8f-e6d9-4ae4-bea4-23f2d8f92d31",
+        "traits": {
+          "username": "Antithesitoon",
+          "gravatar": "https://secure.gravatar.com/avatar/fbfdf3a78e364134b590b9a8df79af8b?size=50&default=mp&rating=g"
+        }
+      },
+      "md_chapters_groups": []
+    },
+    {
+      "id": 4264070,
+      "chap": "326",
+      "title": "Burning Blood",
+      "vol": null,
+      "lang": "en",
+      "created_at": "2025-10-15T00:10:40+02:00",
+      "updated_at": "2026-01-02T00:48:28+01:00",
+      "up_count": 8,
+      "down_count": 0,
+      "is_the_last_chapter": false,
+      "publish_at": "2025-10-14T22:10:41.000Z",
+      "view_count": 5,
+      "group_name": [
+        "Official"
+      ],
+      "hid": "mDQJwn_W",
+      "identities": {
+        "id": "b668cc8f-e6d9-4ae4-bea4-23f2d8f92d31",
+        "traits": {
+          "username": "Antithesitoon",
+          "gravatar": "https://secure.gravatar.com/avatar/fbfdf3a78e364134b590b9a8df79af8b?size=50&default=mp&rating=g"
+        }
+      },
+      "md_chapters_groups": []
+    },
+    {
+      "id": 4249449,
+      "chap": "325",
+      "title": "Reincarnation",
+      "vol": null,
+      "lang": "en",
+      "created_at": "2025-10-08T00:01:02+02:00",
+      "updated_at": "2025-12-30T13:49:49+01:00",
+      "up_count": 8,
+      "down_count": 0,
+      "is_the_last_chapter": false,
+      "publish_at": "2025-10-07T22:01:03.000Z",
+      "view_count": 11,
+      "group_name": [
+        "Official"
+      ],
+      "hid": "Jk4K5gp2",
+      "identities": {
+        "id": "b668cc8f-e6d9-4ae4-bea4-23f2d8f92d31",
+        "traits": {
+          "username": "Antithesitoon",
+          "gravatar": "https://secure.gravatar.com/avatar/fbfdf3a78e364134b590b9a8df79af8b?size=50&default=mp&rating=g"
+        }
+      },
+      "md_chapters_groups": []
+    },
+    {
+      "id": 4238871,
+      "chap": "324",
+      "title": "See You Tomorrow",
+      "vol": null,
+      "lang": "en",
+      "created_at": "2025-10-03T08:17:34+02:00",
+      "updated_at": "2025-10-07T01:45:23+02:00",
+      "up_count": 7,
+      "down_count": 0,
+      "is_the_last_chapter": false,
+      "publish_at": "2025-10-03T06:17:34.000Z",
+      "view_count": 0,
+      "group_name": null,
+      "hid": "q4pMyi5k",
+      "identities": {
+        "id": "b668cc8f-e6d9-4ae4-bea4-23f2d8f92d31",
+        "traits": {
+          "username": "Antithesitoon",
+          "gravatar": "https://secure.gravatar.com/avatar/fbfdf3a78e364134b590b9a8df79af8b?size=50&default=mp&rating=g"
+        }
+      },
+      "md_chapters_groups": []
+    },
+    {
+      "id": 4249695,
+      "chap": "324",
+      "title": null,
+      "vol": null,
+      "lang": "en",
+      "created_at": "2025-10-08T06:06:39+02:00",
+      "updated_at": "2025-10-19T14:19:24+02:00",
+      "up_count": 1,
+      "down_count": 0,
+      "is_the_last_chapter": false,
+      "publish_at": "2025-10-08T04:06:40.000Z",
+      "view_count": 0,
+      "group_name": [
+        "Official"
+      ],
+      "hid": "pS27UQXT",
+      "identities": null,
+      "md_chapters_groups": []
+    },
+    {
+      "id": 4238870,
+      "chap": "323",
+      "title": "FLY ME TO THE MOON Episode 4: The Sorcerer's Apprentice—Chapter 5: Connect",
+      "vol": null,
+      "lang": "en",
+      "created_at": "2025-10-03T08:17:11+02:00",
+      "updated_at": "2025-12-29T09:49:22+01:00",
+      "up_count": 1,
+      "down_count": 0,
+      "is_the_last_chapter": false,
+      "publish_at": "2025-10-03T06:17:11.000Z",
+      "view_count": 4,
+      "group_name": null,
+      "hid": "yzdiymia",
+      "identities": {
+        "id": "b668cc8f-e6d9-4ae4-bea4-23f2d8f92d31",
+        "traits": {
+          "username": "Antithesitoon",
+          "gravatar": "https://secure.gravatar.com/avatar/fbfdf3a78e364134b590b9a8df79af8b?size=50&default=mp&rating=g"
+        }
+      },
+      "md_chapters_groups": []
+    }
+  ],
+  "total": 693,
+  "checkVol2Chap1": false,
+  "limit": 12
+}

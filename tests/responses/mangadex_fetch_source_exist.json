@@ -1,0 +1,277 @@
+{
+  "result": "ok",
+  "response": "entity",
+  "data": {
+    "id": "0e017a08-835a-4cbe-ba63-576d5010a5a0",
+    "type": "manga",
+    "attributes": {
+      "title": {
+        "en": "Kuma Kuma Kuma Bear"
+      },
+      "altTitles": [
+        {
+          "ja": "くま　クマ　熊　ベアー(コミック)"
+        },
+        {
+          "ko": "곰 곰 곰 베어"
+        },
+        {
+          "cs": "Medvěd-Méďa-Brumla-Bear"
+        },
+        {
+          "kk": "Кума-Кума-Кума-Аю"
+        },
+        {
+          "ru": "Кума-Кума-Кума-Медведь"
+        },
+        {
+          "ru": "Ми-ми-мишка"
+        }
+      ],
+      "description": {
+        "en": "Yuna, a 15-year-old girl, started playing the world's first VRMMO. She has earned billions of yen in stocks and confines herself in her house playing the game without going to school. Today, a major update has arrived and she obtained a non-transferable rare bear outfit. But the equipment is so embarrassing that she can't wear it even in the game. Furthermore, when she answers the survey regarding the new update and relaunches the game, she appears in an unknown forest in the bear outfit. Where is this? Email from God? A different world? If she wears the bear outfit she's a cheat, if she takes it off she's a normal girl.",
+        "ja": "現実（こっち）で引きこもり、異世界（あっち）で冒険者!?\n\nゲーム廃人少女・ユナ（15歳）。株で稼いだ資金をもとに、ひとりでタワマンに絶賛引きこもり中。ある日、ゲームにアクセスすると全身クマだらけのチート装備をプレゼントされる。「…とはいえ、絶対着たくない」そう思ったユナだけど、全身クマ装備のまま、異世界（？）に入り込んでしまって…！？",
+        "ru": "Пятнадцатилетняя девочка Юна уже три года ведет жизнь хиккикомори. Друзей, школу и даже родителей ей заменяют Интернет и онлайн-игры. Год назад она начала играть в игру «Fantasy World Online» — RPG с виртуальной реальностью. Она заработала миллиарды и с помощью денег избавилась от присутствия родителей.  \n  \nИ вот, вышло новое глобальное обновление. Как игрок с большим стажем, она по акции получила уникальный костюм. Затем прошла опрос и вместо игры оказалась в глухом лесу. Письмо от Бога? Другой мир? Что за бред?  \n  \nВ своем новом костюме она читер. Без него обычная девочка. Так началось ее приключение, в котором она решила делать то, что ей захочется.",
+        "pt-br": "Yuna, uma garota de 15 anos de idade, é viciada em jogos VRMMO. Ela ganhou bilhões por ações na bolsa, e se confinou em casa para ficar jogando sem ir a escola. Um dia, ela ganha um set exclusivo e intransferível de urso no jogo. Mas o equipamento dá muita vergonha de se usar até mesmo no jogo. Após a nova atualização ela se vê presa no jogo com o set novo recém adquirido! E agora o que será de nossa protagonista?"
+      },
+      "isLocked": false,
+      "links": {
+        "al": "101449",
+        "ap": "kuma-kuma-kuma-bear",
+        "bw": "series/169130/list",
+        "kt": "40840",
+        "mu": "vb4q73k",
+        "mal": "113752",
+        "raw": "https://pash-up.jp/content/00000001"
+      },
+      "officialLinks": null,
+      "originalLanguage": "ja",
+      "lastVolume": "",
+      "lastChapter": "",
+      "publicationDemographic": "shounen",
+      "status": "ongoing",
+      "year": 2018,
+      "contentRating": "safe",
+      "tags": [
+        {
+          "id": "0bc90acb-ccc1-44ca-a34a-b9f3a73259d0",
+          "type": "tag",
+          "attributes": {
+            "name": {
+              "en": "Reincarnation"
+            },
+            "description": {},
+            "group": "theme",
+            "version": 1
+          },
+          "relationships": []
+        },
+        {
+          "id": "36fd93ea-e8b8-445e-b836-358f02b3d33d",
+          "type": "tag",
+          "attributes": {
+            "name": {
+              "en": "Monsters"
+            },
+            "description": {},
+            "group": "theme",
+            "version": 1
+          },
+          "relationships": []
+        },
+        {
+          "id": "391b0423-d847-456f-aff0-8b0cfc03066b",
+          "type": "tag",
+          "attributes": {
+            "name": {
+              "en": "Action"
+            },
+            "description": {},
+            "group": "genre",
+            "version": 1
+          },
+          "relationships": []
+        },
+        {
+          "id": "4d32cc48-9f00-4cca-9b5a-a839f0764984",
+          "type": "tag",
+          "attributes": {
+            "name": {
+              "en": "Comedy"
+            },
+            "description": {},
+            "group": "genre",
+            "version": 1
+          },
+          "relationships": []
+        },
+        {
+          "id": "87cc87cd-a395-47af-b27a-93258283bbc6",
+          "type": "tag",
+          "attributes": {
+            "name": {
+              "en": "Adventure"
+            },
+            "description": {},
+            "group": "genre",
+            "version": 1
+          },
+          "relationships": []
+        },
+        {
+          "id": "9438db5a-7e2a-4ac0-b39e-e0d95a34b8a8",
+          "type": "tag",
+          "attributes": {
+            "name": {
+              "en": "Video Games"
+            },
+            "description": {},
+            "group": "theme",
+            "version": 1
+          },
+          "relationships": []
+        },
+        {
+          "id": "a1f53773-c69a-4ce5-8cab-fffcd90b1565",
+          "type": "tag",
+          "attributes": {
+            "name": {
+              "en": "Magic"
+            },
+            "description": {},
+            "group": "theme",
+            "version": 1
+          },
+          "relationships": []
+        },
+        {
+          "id": "ace04997-f6bd-436e-b261-779182193d3d",
+          "type": "tag",
+          "attributes": {
+            "name": {
+              "en": "Isekai"
+            },
+            "description": {},
+            "group": "genre",
+            "version": 1
+          },
+          "relationships": []
+        },
+        {
+          "id": "cdc58593-87dd-415e-bbc0-2ec27bf404cc",
+          "type": "tag",
+          "attributes": {
+            "name": {
+              "en": "Fantasy"
+            },
+            "description": {},
+            "group": "genre",
+            "version": 1
+          },
+          "relationships": []
+        },
+        {
+          "id": "e5301a23-ebd9-49dd-a0cb-2add944c7fe9",
+          "type": "tag",
+          "attributes": {
+            "name": {
+              "en": "Slice of Life"
+            },
+            "description": {},
+            "group": "genre",
+            "version": 1
+          },
+          "relationships": []
+        },
+        {
+          "id": "ea2bc92d-1c26-4930-9b7c-d5c0dc1b6869",
+          "type": "tag",
+          "attributes": {
+            "name": {
+              "en": "Cooking"
+            },
+            "description": {},
+            "group": "theme",
+            "version": 1
+          },
+          "relationships": []
+        },
+        {
+          "id": "eabc5b4c-6aff-42f3-b657-3e90cbd00b75",
+          "type": "tag",
+          "attributes": {
+            "name": {
+              "en": "Supernatural"
+            },
+            "description": {},
+            "group": "theme",
+            "version": 1
+          },
+          "relationships": []
+        },
+        {
+          "id": "f4122d1c-3b44-44d0-9936-ff7502c39ad3",
+          "type": "tag",
+          "attributes": {
+            "name": {
+              "en": "Adaptation"
+            },
+            "description": {},
+            "group": "format",
+            "version": 1
+          },
+          "relationships": []
+        }
+      ],
+      "state": "published",
+      "chapterNumbersResetOnNewVolume": false,
+      "createdAt": "2019-04-01T11:34:44+00:00",
+      "updatedAt": "2025-11-27T13:47:02+00:00",
+      "version": 36,
+      "availableTranslatedLanguages": [
+        "vi",
+        "fr",
+        "es-la",
+        "en",
+        "pt-br",
+        "id",
+        "ru",
+        "tr"
+      ],
+      "latestUploadedChapter": "eb39609e-2e48-4434-af76-aff0b7be91c2"
+    },
+    "relationships": [
+      {
+        "id": "742bea86-c1ae-4893-bd06-805287991849",
+        "type": "author"
+      },
+      {
+        "id": "6bb96a73-681c-47a6-85a8-99b02ffb4dba",
+        "type": "artist"
+      },
+      {
+        "id": "ac0800ee-9a34-4caf-a67d-2e9b656c36fd",
+        "type": "cover_art",
+        "attributes": {
+          "description": "",
+          "volume": "13",
+          "fileName": "7c198c70-6ab4-4e45-838b-f3efd9f5f1c1.jpg",
+          "locale": "ja",
+          "createdAt": "2025-11-27T13:47:46+00:00",
+          "updatedAt": "2025-11-27T13:47:46+00:00",
+          "version": 1
+        }
+      },
+      {
+        "id": "5d10b8db-a6d2-4126-8098-fa53f1519b7c",
+        "type": "manga",
+        "related": "side_story"
+      },
+      {
+        "id": "f971a344-7b07-4f21-b07d-b5a37ce9085f",
+        "type": "manga",
+        "related": "side_story"
+      }
+    ]
+  }
+}
