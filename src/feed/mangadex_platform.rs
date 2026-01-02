@@ -293,8 +293,6 @@ impl Platform for MangaDexPlatform {
         ));
         let source_url = self.get_source_url_from_id(&source_id);
 
-        info!("Successfully fetched latest manga for source_id: {source_id}");
-
         Ok(FeedSource {
             items_id: source_id.clone(),
             name,
@@ -333,8 +331,6 @@ impl Platform for MangaDexPlatform {
         let id = self.get_chapter_id(chapter)?;
         let title = self.get_chapter_title(attributes)?;
         let published = self.get_chapter_publish_at(attributes)?;
-
-        info!("Successfully fetched latest manga for source_id: {source_id}");
 
         Ok(FeedItem {
             id,

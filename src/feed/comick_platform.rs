@@ -246,8 +246,6 @@ impl Platform for ComickPlatform {
         // We will assume image_url always exist for this platform until proven otherwise
         let image_url = Some(self.get_cover_url(comic)?);
 
-        info!("Successfully fetched latest manga for source_id: {slug}");
-
         Ok(FeedSource {
             id: slug.to_string(),
             items_id,
