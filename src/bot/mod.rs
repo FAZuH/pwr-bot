@@ -43,7 +43,7 @@ pub struct Data {
     pub config: Arc<Config>,
     pub db: Arc<Database>,
     pub platforms: Arc<Platforms>,
-    pub feed_subscription_service: Arc<FeedSubscriptionService>,
+    pub service: Arc<FeedSubscriptionService>,
 }
 
 pub struct Bot {
@@ -58,11 +58,12 @@ impl Bot {
         config: Arc<Config>,
         db: Arc<Database>,
         platforms: Arc<Platforms>,
+        service: Arc<FeedSubscriptionService>,
     ) -> Result<Self> {
         info!("Initializing bot...");
 
         let framework = Self::create_framework(&config)?;
-        let data = Self::create_data(config.clone(), db, platforms);
+        let data = Self::create_data(config.clone(), db, platforms, service);
         let (token, intents) = Self::create_client_config(&config)?;
 
         let client_builder = ClientBuilder::new(token.clone(), intents)
@@ -132,17 +133,12 @@ impl Bot {
         ))
     }
 
-    fn create_data(config: Arc<Config>, db: Arc<Database>, feeds: Arc<Platforms>) -> Arc<Data> {
-        let feed_subscription_service = Arc::new(FeedSubscriptionService {
-            db: db.clone(),
-            platforms: feeds.clone(),
-        });
-
+    fn create_data(config: Arc<Config>, db: Arc<Database>, platforms: Arc<Platforms>, service: Arc<FeedSubscriptionService>) -> Arc<Data> {
         Arc::new(Data {
             config,
             db,
-            platforms: feeds,
-            feed_subscription_service,
+            platforms,
+            service,
         })
     }
 

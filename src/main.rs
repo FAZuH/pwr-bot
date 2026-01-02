@@ -60,14 +60,14 @@ async fn main() -> anyhow::Result<()> {
     let platforms = Arc::new(Platforms::new());
 
     debug!("Setting up FeedSubscriptionService...");
-    let feed_subscription_service = Arc::new(FeedSubscriptionService {
+    let service = Arc::new(FeedSubscriptionService {
         db: db.clone(),
         platforms: platforms.clone(),
     });
 
     // Setup & start bot
     info!("Starting bot...");
-    let mut bot = Bot::new(config.clone(), db.clone(), platforms.clone()).await?;
+    let mut bot = Bot::new(config.clone(), db.clone(), platforms.clone(), service.clone()).await?;
     bot.start();
     let bot = Arc::new(bot);
     info!(
@@ -90,7 +90,7 @@ async fn main() -> anyhow::Result<()> {
     // Setup publishers
     debug!("Setting up Publishers...");
     SeriesFeedPublisher::new(
-        feed_subscription_service.clone(),
+        service.clone(),
         event_bus.clone(),
         config.poll_interval,
     )
