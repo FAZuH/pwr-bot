@@ -1,3 +1,10 @@
+## [0.1.20](https://github.com/FAZuH/pwr-bot/compare/v0.1.19...v0.1.20) (2026-01-02)
+
+
+### Performance Improvements
+
+* Improve /subscriptions performance ([b899493](https://github.com/FAZuH/pwr-bot/commit/b899493b9aac8435660c5341d3b1776d45660a6d))
+
 ## [0.1.19](https://github.com/FAZuH/pwr-bot/compare/v0.1.18...v0.1.19) (2026-01-02)
 
 
@@ -62,12 +69,4 @@
 
 * Add MIT license ([3da4457](https://github.com/FAZuH/pwr-bot/commit/3da4457a62e80704b0a6aa3a291cc8605240ff7e))
 * Improve README ([14cf620](https://github.com/FAZuH/pwr-bot/commit/14cf62051aeaa2ec8b25fb7e3d8275ee67e25b7f))
-
-## [0.1.15](https://github.com/FAZuH/pwr-bot/compare/v0.1.14...v0.1.15) (2025-12-30)
-
-
-### Bug Fixes
-
-* Error on empty MangaDex feed description ([d13d839](https://github.com/FAZuH/pwr-bot/commit/d13d8398ac4f434f1666d489d3090cdb256f0014))
-* Error when subscribing to AniList feed that is not yet aired ([55282ad](https://github.com/FAZuH/pwr-bot/commit/55282adb621a8f70779908013c4ee6c480b6907a))
 
