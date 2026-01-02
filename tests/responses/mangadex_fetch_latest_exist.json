@@ -1,0 +1,41 @@
+{
+  "result": "ok",
+  "response": "collection",
+  "data": [
+    {
+      "id": "eb39609e-2e48-4434-af76-aff0b7be91c2",
+      "type": "chapter",
+      "attributes": {
+        "volume": "11",
+        "chapter": "105",
+        "title": "Kuma-san Explores the Tunnel",
+        "translatedLanguage": "en",
+        "externalUrl": null,
+        "isUnavailable": false,
+        "publishAt": "2025-12-23T03:19:29+00:00",
+        "readableAt": "2025-12-23T03:19:29+00:00",
+        "createdAt": "2025-12-23T03:19:28+00:00",
+        "updatedAt": "2025-12-23T03:20:37+00:00",
+        "version": 3,
+        "pages": 17
+      },
+      "relationships": [
+        {
+          "id": "958beca1-f584-4a5a-926c-e7894f31d9b1",
+          "type": "scanlation_group"
+        },
+        {
+          "id": "0e017a08-835a-4cbe-ba63-576d5010a5a0",
+          "type": "manga"
+        },
+        {
+          "id": "037e9232-0abd-4ebf-a3ec-2ecf0eb3264a",
+          "type": "user"
+        }
+      ]
+    }
+  ],
+  "limit": 1,
+  "offset": 0,
+  "total": 134
+}

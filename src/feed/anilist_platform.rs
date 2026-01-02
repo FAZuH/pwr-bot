@@ -221,8 +221,6 @@ impl Platform for AniListPlatform {
         let published = DateTime::from_timestamp(timestamp, 0)
             .ok_or_else(|| FeedError::InvalidTimestamp { timestamp })?;
 
-        info!("Successfully fetched anime for source_id: {source_id}");
-
         Ok(FeedItem {
             id,
             title,

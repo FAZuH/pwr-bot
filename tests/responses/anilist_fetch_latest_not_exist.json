@@ -1,0 +1,17 @@
+{
+  "errors": [
+    {
+      "message": "Not Found.",
+      "status": 404,
+      "locations": [
+        {
+          "line": 2,
+          "column": 5
+        }
+      ]
+    }
+  ],
+  "data": {
+    "AiringSchedule": null
+  }
+}

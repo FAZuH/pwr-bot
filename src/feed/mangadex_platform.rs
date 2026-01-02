@@ -13,7 +13,10 @@ use governor::state::direct::NotKeyed;
 use log::debug;
 use log::info;
 use log::warn;
-use reqwest;
+use reqwest::Client;
+use reqwest::header::HeaderMap;
+use reqwest::header::HeaderValue;
+use reqwest::header::USER_AGENT;
 use serde_json::Map;
 use serde_json::Value;
 
@@ -34,6 +37,15 @@ pub struct MangaDexPlatform {
 
 impl MangaDexPlatform {
     pub fn new() -> Self {
+        // See https://api.mangadex.org/docs/2-limitations/
+        // "The request MUST have a User-Agent header, and it must not be spoofed"
+        let mut headers = HeaderMap::new();
+        headers.insert(USER_AGENT, HeaderValue::from_static("pwr-bot/0.1"));
+        let client = Client::builder()
+            .default_headers(headers)
+            .build()
+            .expect("Failed to create client");
+
         let info = PlatformInfo {
             name: "MangaDex".to_string(),
             feed_item_name: "Chapter".to_string(),
@@ -55,7 +67,7 @@ impl MangaDexPlatform {
 
         Self {
             base: BasePlatform::new(info),
-            client: reqwest::Client::new(),
+            client,
             limiter,
         }
     }
@@ -293,8 +305,6 @@ impl Platform for MangaDexPlatform {
         ));
         let source_url = self.get_source_url_from_id(&source_id);
 
-        info!("Successfully fetched latest manga for source_id: {source_id}");
-
         Ok(FeedSource {
             items_id: source_id.clone(),
             name,
@@ -333,8 +343,6 @@ impl Platform for MangaDexPlatform {
         let id = self.get_chapter_id(chapter)?;
         let title = self.get_chapter_title(attributes)?;
         let published = self.get_chapter_publish_at(attributes)?;
-
-        info!("Successfully fetched latest manga for source_id: {source_id}");
 
         Ok(FeedItem {
             id,

@@ -1,0 +1,1152 @@
+{
+  "firstChap": {
+    "chap": "1",
+    "hid": "1Py2q",
+    "lang": "en",
+    "group_name": [
+      "Official"
+    ],
+    "vol": "1"
+  },
+  "comic": {
+    "id": 19556,
+    "hid": "DqrXZDbr",
+    "title": "Tonikaku Kawaii",
+    "country": "jp",
+    "status": 1,
+    "links": {
+      "al": "101177",
+      "ap": "fly-me-to-the-moon",
+      "bw": "series/161304/list",
+      "kt": "40657",
+      "mu": "h1dfwtz",
+      "amz": "https://www.amazon.co.jp/dp/B07H8RNN24",
+      "ebj": "https://ebookjapan.yahoo.co.jp/books/457626",
+      "mal": "112589",
+      "raw": "https://websunday.net/rensai/tonikaku/",
+      "engtl": "https://www.viz.com/fly-me-to-the-moon"
+    },
+    "last_chapter": 333,
+    "chapter_count": 2360,
+    "demographic": 1,
+    "follow_rank": 919,
+    "user_follow_count": 18153,
+    "desc": "Described as a story full of \"love\" and \"dreams\", Tonikaku Kawaii follows a protagonist whose name is written with the characters for \"Hoshizora\" (\"Starry Sky\" in Japanese), but whose name is pronounced as \"Nasa\". On the day of his high school entrance exams, Nasa encounters a beautiful girl. For Nasa, it feels like destiny is finally calling out to him that he will have a girl friend, but…\n\nNote: Volume 15 and 16's numberings are correct, as this is how they are in the original.",
+    "parsed": "<p>Described as a story full of \"love\" and \"dreams\", Tonikaku Kawaii follows a protagonist whose name is written with the characters for \"Hoshizora\" (\"Starry Sky\" in Japanese), but whose name is pronounced as \"Nasa\". On the day of his high school entrance exams, Nasa encounters a beautiful girl. For Nasa, it feels like destiny is finally calling out to him that he will have a girl friend, but…</p>\n<p>Note: Volume 15 and 16's numberings are correct, as this is how they are in the original.</p>",
+    "slug": "02-tonikaku-kawaii",
+    "mismatch": null,
+    "year": 2018,
+    "bayesian_rating": "8.75",
+    "rating_count": 725,
+    "content_rating": "safe",
+    "statistics": [
+      {
+        "score_count": 725,
+        "weighted_score": "8.75",
+        "score": "8.9",
+        "distribution": {
+          "1": 6,
+          "2": 0,
+          "3": 2,
+          "4": 7,
+          "5": 12,
+          "6": 22,
+          "7": 54,
+          "8": 123,
+          "9": 138,
+          "10": 359
+        }
+      }
+    ],
+    "translation_completed": false,
+    "chapter_numbers_reset_on_new_volume_manual": false,
+    "final_chapter": null,
+    "final_volume": null,
+    "noindex": true,
+    "adsense": true,
+    "comment_count": 2,
+    "login_required": false,
+    "has_anime": true,
+    "anime": {
+      "end": "Vol 13, Chap 121 (Including OVAs)",
+      "start": "Vol 1, Chap 1 (S1)"
+    },
+    "reviews": [],
+    "recommendations": [
+      {
+        "up": 214,
+        "down": -7,
+        "total": 207,
+        "relates": {
+          "title": "Horimiya",
+          "slug": "horimiya",
+          "hid": "5FtO6y6v",
+          "md_covers": [
+            {
+              "vol": "17.6",
+              "w": 1353,
+              "h": 1920,
+              "b2key": "YgE5X4.jpg"
+            }
+          ]
+        }
+      },
+      {
+        "up": 88,
+        "down": -3,
+        "total": 85,
+        "relates": {
+          "title": "Mijuku na Futari de Gozaimasu ga",
+          "slug": "00-we-may-be-an-inexperienced-couple-but",
+          "hid": "l95anfRG",
+          "md_covers": [
+            {
+              "vol": "18",
+              "w": 3023,
+              "h": 4299,
+              "b2key": "NrqMy1.jpg"
+            }
+          ]
+        }
+      },
+      {
+        "up": 81,
+        "down": -2,
+        "total": 79,
+        "relates": {
+          "title": "Futari Ashita mo Sorenari ni",
+          "slug": "futari-ashita-mo-sorenari-ni",
+          "hid": "4YxjbX4N",
+          "md_covers": [
+            {
+              "vol": "5",
+              "w": 1798,
+              "h": 2560,
+              "b2key": "GpJrp.png"
+            }
+          ]
+        }
+      },
+      {
+        "up": 50,
+        "down": -1,
+        "total": 49,
+        "relates": {
+          "title": "Kaguya-sama wa Kokurasetai: Tensai-tachi no Renai Zunousen (Fan Colored)",
+          "slug": "kaguya-sama-wa-kokurasetai-tensai-tachi-no-renai-zunousen-fan-colored",
+          "hid": "_tCqefCz",
+          "md_covers": [
+            {
+              "vol": "28",
+              "w": 844,
+              "h": 1200,
+              "b2key": "oZ8rjZ.jpg"
+            }
+          ]
+        }
+      },
+      {
+        "up": 34,
+        "down": 0,
+        "total": 34,
+        "relates": {
+          "title": "Shikimori's Not Just a Cutie",
+          "slug": "00-shikimori-s-not-just-a-cutie",
+          "hid": "LtPne2v2",
+          "md_covers": [
+            {
+              "vol": "20",
+              "w": 3024,
+              "h": 4299,
+              "b2key": "GpMgzv.jpg"
+            }
+          ]
+        }
+      },
+      {
+        "up": 35,
+        "down": -3,
+        "total": 32,
+        "relates": {
+          "title": "The Duke of Death and His Maid",
+          "slug": "the-duke-of-death-and-his-black-maid",
+          "hid": "bpu9Oo0u",
+          "md_covers": [
+            {
+              "vol": "16",
+              "w": 1445,
+              "h": 2048,
+              "b2key": "pgOa3.jpg"
+            }
+          ]
+        }
+      },
+      {
+        "up": 30,
+        "down": -1,
+        "total": 29,
+        "relates": {
+          "title": "These Two Will Be Married In 100 Days",
+          "slug": "these-two-will-be-married-in-100-days",
+          "hid": "BeS3ZgXS",
+          "md_covers": [
+            {
+              "vol": "1",
+              "w": 1059,
+              "h": 1500,
+              "b2key": "nGNQz.png"
+            }
+          ]
+        }
+      },
+      {
+        "up": 27,
+        "down": -1,
+        "total": 26,
+        "relates": {
+          "title": "Yaiteru Futari",
+          "slug": "a-rare-marriage-how-to-grill-our-love",
+          "hid": "UKFY_l4U",
+          "md_covers": [
+            {
+              "vol": "22",
+              "w": 3023,
+              "h": 4299,
+              "b2key": "Q8z2BY.jpg"
+            }
+          ]
+        }
+      },
+      {
+        "up": 25,
+        "down": 0,
+        "total": 25,
+        "relates": {
+          "title": "Kekkon Suru tte, Hontou desu ka: 365 Days To The Wedding",
+          "slug": "are-you-really-getting-married",
+          "hid": "XNbTPSPb",
+          "md_covers": [
+            {
+              "vol": "11",
+              "w": 873,
+              "h": 1232,
+              "b2key": "r1DgG.jpg"
+            }
+          ]
+        }
+      },
+      {
+        "up": 20,
+        "down": 0,
+        "total": 20,
+        "relates": {
+          "title": "Taishou Otome Otogibanashi",
+          "slug": "taishou-otome-otogibanashi",
+          "hid": "amysdZHr",
+          "md_covers": [
+            {
+              "vol": "5",
+              "w": 764,
+              "h": 1200,
+              "b2key": "Rd0lx.jpg"
+            }
+          ]
+        }
+      },
+      {
+        "up": 15,
+        "down": 0,
+        "total": 15,
+        "relates": {
+          "title": "Maybe Meant to Be",
+          "slug": "00-match-made-in-heaven-by-chance",
+          "hid": "PioVCWo1",
+          "md_covers": [
+            {
+              "vol": "1",
+              "w": 690,
+              "h": 1000,
+              "b2key": "Y7b4r.jpg"
+            }
+          ]
+        }
+      },
+      {
+        "up": 14,
+        "down": 0,
+        "total": 14,
+        "relates": {
+          "title": "Kubo-san wa Mob wo Yurusanai",
+          "slug": "kubo-san-wa-boku-mobu-wo-yurusanai",
+          "hid": "crsW8XMq",
+          "md_covers": [
+            {
+              "vol": "12.5",
+              "w": 1765,
+              "h": 2509,
+              "b2key": "Z8nZaj.jpg"
+            }
+          ]
+        }
+      },
+      {
+        "up": 13,
+        "down": 0,
+        "total": 13,
+        "relates": {
+          "title": "Fechippuru - Bokura no Innocent Love",
+          "slug": "fechippuru-our-innocent-love",
+          "hid": "lksxfMZd",
+          "md_covers": [
+            {
+              "vol": "9",
+              "w": 3024,
+              "h": 4299,
+              "b2key": "la18z.png"
+            }
+          ]
+        }
+      },
+      {
+        "up": 12,
+        "down": 0,
+        "total": 12,
+        "relates": {
+          "title": "Hori-san to Miyamura-kun",
+          "slug": "00-hori-san-to-miyamura-kun",
+          "hid": "4HfTiTGB",
+          "md_covers": [
+            {
+              "vol": "10.1",
+              "w": 902,
+              "h": 1280,
+              "b2key": "7yKm3d.jpg"
+            }
+          ]
+        }
+      },
+      {
+        "up": 10,
+        "down": 0,
+        "total": 10,
+        "relates": {
+          "title": "Boku no Kanojo wa Saikou desu!",
+          "slug": "boku-no-kanojo-wa-saikoudesu",
+          "hid": "DbjEYdQk",
+          "md_covers": [
+            {
+              "vol": "6",
+              "w": 3024,
+              "h": 4299,
+              "b2key": "a5g42.jpg"
+            }
+          ]
+        }
+      },
+      {
+        "up": 10,
+        "down": 0,
+        "total": 10,
+        "relates": {
+          "title": "Hayate no Gotoku!",
+          "slug": "hayate-no-gotoku",
+          "hid": "jToAB3I5",
+          "md_covers": [
+            {
+              "vol": "52",
+              "w": 764,
+              "h": 1200,
+              "b2key": "a84pg.jpg"
+            }
+          ]
+        }
+      },
+      {
+        "up": 9,
+        "down": 0,
+        "total": 9,
+        "relates": {
+          "title": "Sensei wa Koi o Oshierarenai",
+          "slug": "sensei-wa-koi-o-oshierarenai",
+          "hid": "9TGMN2iD",
+          "md_covers": [
+            {
+              "vol": "7",
+              "w": 1445,
+              "h": 2048,
+              "b2key": "oa6m4.jpg"
+            }
+          ]
+        }
+      },
+      {
+        "up": 11,
+        "down": -2,
+        "total": 9,
+        "relates": {
+          "title": "Kakkou no Iinazuke",
+          "slug": "a-couple-of-cuckoos",
+          "hid": "U0gQ3INA",
+          "md_covers": [
+            {
+              "vol": "30",
+              "w": 2717,
+              "h": 4063,
+              "b2key": "w7XMKK.jpg"
+            }
+          ]
+        }
+      },
+      {
+        "up": 8,
+        "down": 0,
+        "total": 8,
+        "relates": {
+          "title": "Kuchi ga Saketemo Kimi Ni Wa",
+          "slug": "kuchi-ga-saketemo-kimi-ni-wa-khmxj5gh",
+          "hid": "1c_6BwKQ",
+          "md_covers": [
+            {
+              "vol": "11",
+              "w": 1440,
+              "h": 2048,
+              "b2key": "6bgQkX.jpg"
+            }
+          ]
+        }
+      },
+      {
+        "up": 8,
+        "down": 0,
+        "total": 8,
+        "relates": {
+          "title": "Koi ga Fuufu ni Naru Mae Ni",
+          "slug": "first-comes-love-then-comes-marriage",
+          "hid": "XX75T2D1",
+          "md_covers": [
+            {
+              "vol": "1",
+              "w": 705,
+              "h": 1000,
+              "b2key": "RE6RZ.jpg"
+            }
+          ]
+        }
+      },
+      {
+        "up": 7,
+        "down": 0,
+        "total": 7,
+        "relates": {
+          "title": "Komi-san wa Komyushou Desu.",
+          "slug": "01-komi-san-wa-komyushou-desu",
+          "hid": "K_Dn8VW7",
+          "md_covers": [
+            {
+              "vol": "37",
+              "w": 1303,
+              "h": 2048,
+              "b2key": "7yOOgk.jpg"
+            }
+          ]
+        }
+      },
+      {
+        "up": 7,
+        "down": 0,
+        "total": 7,
+        "relates": {
+          "title": "Wǒ Jiā Lǎopo Láizì Yīqiān Nián Qián",
+          "slug": "my-wife-is-from-a-thousand-years-ago",
+          "hid": "zdsbT3M6",
+          "md_covers": [
+            {
+              "vol": "2",
+              "w": 720,
+              "h": 960,
+              "b2key": "aa1bM2.png"
+            }
+          ]
+        }
+      },
+      {
+        "up": 7,
+        "down": 0,
+        "total": 7,
+        "relates": {
+          "title": "Watashi no Shiawase na Kekkon",
+          "slug": "my-blissful-marriage",
+          "hid": "1pL7pdTV",
+          "md_covers": [
+            {
+              "vol": "5.1",
+              "w": 1350,
+              "h": 1920,
+              "b2key": "qYr7k1.jpg"
+            }
+          ]
+        }
+      },
+      {
+        "up": 9,
+        "down": -2,
+        "total": 7,
+        "relates": {
+          "title": "Nisekoi",
+          "slug": "00-nisekoi",
+          "hid": "RqYIIJ9N",
+          "md_covers": [
+            {
+              "vol": null,
+              "w": 814,
+              "h": 1280,
+              "b2key": "m3Ede.jpg"
+            }
+          ]
+        }
+      },
+      {
+        "up": 8,
+        "down": -1,
+        "total": 7,
+        "relates": {
+          "title": "Cinderella wa Sagasanai",
+          "slug": "cinderella-wa-sagasanai",
+          "hid": "pIW85k9v",
+          "md_covers": [
+            {
+              "vol": "4",
+              "w": 1055,
+              "h": 1500,
+              "b2key": "zdd4e.jpg"
+            }
+          ]
+        }
+      },
+      {
+        "up": 6,
+        "down": 0,
+        "total": 6,
+        "relates": {
+          "title": "Amagami-san Chi no Enmusubi",
+          "slug": "01-matchmaking-of-the-amagami-household",
+          "hid": "RBDHW6Dw",
+          "md_covers": [
+            {
+              "vol": "22",
+              "w": 2717,
+              "h": 4063,
+              "b2key": "qYZjv8.jpg"
+            }
+          ]
+        }
+      },
+      {
+        "up": 6,
+        "down": 0,
+        "total": 6,
+        "relates": {
+          "title": "Èmó X Tiānshǐ Bù Néng Yǒuhǎo Xiāngchǔ",
+          "slug": "00-demon-x-angel-can-t-get-along",
+          "hid": "Zpmw28Bt",
+          "md_covers": [
+            {
+              "vol": "3",
+              "w": 2480,
+              "h": 3508,
+              "b2key": "D4wWmY.jpg"
+            }
+          ]
+        }
+      },
+      {
+        "up": 5,
+        "down": 0,
+        "total": 5,
+        "relates": {
+          "title": "Mayonaka Heart Tune",
+          "slug": "tune-in-to-the-midnight-heart",
+          "hid": "vhmo0yE4",
+          "md_covers": [
+            {
+              "vol": "11",
+              "w": 2717,
+              "h": 4063,
+              "b2key": "rxvklp.jpg"
+            }
+          ]
+        }
+      },
+      {
+        "up": 5,
+        "down": 0,
+        "total": 5,
+        "relates": {
+          "title": "My New Wife's Fake Smile",
+          "slug": "my-new-wife-is-forcing-herself-to-smile",
+          "hid": "IqTgbAu3",
+          "md_covers": [
+            {
+              "vol": "7",
+              "w": 3024,
+              "h": 4299,
+              "b2key": "2bl4L.jpg"
+            }
+          ]
+        }
+      },
+      {
+        "up": 4,
+        "down": -1,
+        "total": 3,
+        "relates": {
+          "title": "Sweet & Tart Boyfriend",
+          "slug": "tsun-ama-na-kareshi",
+          "hid": "6qTDTRX5",
+          "md_covers": [
+            {
+              "vol": "4",
+              "w": 1000,
+              "h": 1421,
+              "b2key": "7DdEB.jpg"
+            }
+          ]
+        }
+      }
+    ],
+    "relate_from": [
+      {
+        "relate_to": {
+          "slug": "hayate-no-gotoku",
+          "title": "Hayate no Gotoku!"
+        },
+        "md_relates": {
+          "name": "Shared universe"
+        }
+      },
+      {
+        "relate_to": {
+          "slug": "these-two-will-be-married-in-100-days",
+          "title": "These Two Will Be Married In 100 Days"
+        },
+        "md_relates": {
+          "name": "Shared universe"
+        }
+      }
+    ],
+    "md_titles": [
+      {
+        "title": "Унеси меня на Луну",
+        "lang": "ru"
+      },
+      {
+        "title": "トニカクカワイイ",
+        "lang": "ja"
+      },
+      {
+        "title": "总之就是非常可爱",
+        "lang": "zh"
+      },
+      {
+        "title": "어쩄든 귀여워",
+        "lang": "ko"
+      },
+      {
+        "title": "Tonikaku Cawaii",
+        "lang": "ja-ro"
+      },
+      {
+        "title": "TONIKAWA: Over The Moon For You",
+        "lang": "en"
+      },
+      {
+        "title": "Cute Anyways",
+        "lang": "en"
+      },
+      {
+        "title": "Віднеси мене на місяць",
+        "lang": "uk"
+      },
+      {
+        "title": "Fly Me to The Moon",
+        "lang": "en"
+      }
+    ],
+    "is_english_title": null,
+    "md_comic_md_genres": [
+      {
+        "md_genres": {
+          "name": "Comedy",
+          "type": "main",
+          "slug": "comedy",
+          "group": "Genre"
+        }
+      },
+      {
+        "md_genres": {
+          "name": "Romance",
+          "type": "main",
+          "slug": "romance",
+          "group": "Genre"
+        }
+      },
+      {
+        "md_genres": {
+          "name": "Slice of Life",
+          "type": "main",
+          "slug": "slice-of-life",
+          "group": "Genre"
+        }
+      }
+    ],
+    "md_covers": [
+      {
+        "vol": "34",
+        "w": 636,
+        "h": 1000,
+        "b2key": "O8kwQg.jpg"
+      }
+    ],
+    "mu_comics": {
+      "mu_comic_publishers": [
+        {
+          "mu_publishers": {
+            "title": "Shogakukan",
+            "slug": "shogakukan"
+          }
+        }
+      ],
+      "licensed_in_english": true,
+      "mu_comic_categories": [
+        {
+          "mu_categories": {
+            "title": "Married Couple",
+            "slug": "married-couple"
+          },
+          "positive_vote": 20,
+          "negative_vote": 0
+        },
+        {
+          "mu_categories": {
+            "title": "Innocent Love",
+            "slug": "innocent-love"
+          },
+          "positive_vote": 18,
+          "negative_vote": 0
+        },
+        {
+          "mu_categories": {
+            "title": "Newlyweds",
+            "slug": "newlyweds"
+          },
+          "positive_vote": 18,
+          "negative_vote": 0
+        },
+        {
+          "mu_categories": {
+            "title": "Beautiful Female Lead",
+            "slug": "beautiful-female-lead"
+          },
+          "positive_vote": 17,
+          "negative_vote": 0
+        },
+        {
+          "mu_categories": {
+            "title": "Hard-Working Protagonist",
+            "slug": "hard-working-protagonist"
+          },
+          "positive_vote": 17,
+          "negative_vote": 0
+        },
+        {
+          "mu_categories": {
+            "title": "Fast Romance",
+            "slug": "fast-romance"
+          },
+          "positive_vote": 17,
+          "negative_vote": 0
+        },
+        {
+          "mu_categories": {
+            "title": "Love at First Sight",
+            "slug": "love-at-first-sight"
+          },
+          "positive_vote": 17,
+          "negative_vote": 0
+        },
+        {
+          "mu_categories": {
+            "title": "21st Century",
+            "slug": "21st-century"
+          },
+          "positive_vote": 16,
+          "negative_vote": 0
+        },
+        {
+          "mu_categories": {
+            "title": "Smart Male Lead",
+            "slug": "smart-male-lead"
+          },
+          "positive_vote": 15,
+          "negative_vote": 0
+        },
+        {
+          "mu_categories": {
+            "title": "Marriage Proposal",
+            "slug": "marriage-proposal"
+          },
+          "positive_vote": 14,
+          "negative_vote": 0
+        },
+        {
+          "mu_categories": {
+            "title": "Male Lead Falls in Love First",
+            "slug": "male-lead-falls-in-love-first"
+          },
+          "positive_vote": 14,
+          "negative_vote": 0
+        },
+        {
+          "mu_categories": {
+            "title": "Sudden Confession",
+            "slug": "sudden-confession"
+          },
+          "positive_vote": 14,
+          "negative_vote": 0
+        },
+        {
+          "mu_categories": {
+            "title": "Life-Changing Event/s",
+            "slug": "life-changing-event-s"
+          },
+          "positive_vote": 13,
+          "negative_vote": 0
+        },
+        {
+          "mu_categories": {
+            "title": "Housewife",
+            "slug": "housewife"
+          },
+          "positive_vote": 13,
+          "negative_vote": 0
+        },
+        {
+          "mu_categories": {
+            "title": "Loyal Protagonist",
+            "slug": "loyal-protagonist"
+          },
+          "positive_vote": 12,
+          "negative_vote": 0
+        },
+        {
+          "mu_categories": {
+            "title": "Cute Male Lead",
+            "slug": "cute-male-lead"
+          },
+          "positive_vote": 12,
+          "negative_vote": 0
+        },
+        {
+          "mu_categories": {
+            "title": "Rich Family",
+            "slug": "rich-family"
+          },
+          "positive_vote": 12,
+          "negative_vote": 0
+        },
+        {
+          "mu_categories": {
+            "title": "Japan",
+            "slug": "japan"
+          },
+          "positive_vote": 12,
+          "negative_vote": 0
+        },
+        {
+          "mu_categories": {
+            "title": "Savior",
+            "slug": "savior"
+          },
+          "positive_vote": 12,
+          "negative_vote": 0
+        },
+        {
+          "mu_categories": {
+            "title": "Rich Female Lead",
+            "slug": "rich-female-lead"
+          },
+          "positive_vote": 11,
+          "negative_vote": 0
+        },
+        {
+          "mu_categories": {
+            "title": "Mysterious Female Lead",
+            "slug": "mysterious-female-lead"
+          },
+          "positive_vote": 8,
+          "negative_vote": 0
+        },
+        {
+          "mu_categories": {
+            "title": "Adapted to Anime",
+            "slug": "adapted-to-anime"
+          },
+          "positive_vote": 7,
+          "negative_vote": 0
+        },
+        {
+          "mu_categories": {
+            "title": "Time Skip",
+            "slug": "time-skip"
+          },
+          "positive_vote": 10,
+          "negative_vote": 3
+        },
+        {
+          "mu_categories": {
+            "title": "Accident/s",
+            "slug": "accident-s"
+          },
+          "positive_vote": 8,
+          "negative_vote": 1
+        },
+        {
+          "mu_categories": {
+            "title": "Hidden Past",
+            "slug": "hidden-past"
+          },
+          "positive_vote": 7,
+          "negative_vote": 0
+        },
+        {
+          "mu_categories": {
+            "title": "Cute Protagonist",
+            "slug": "cute-protagonist"
+          },
+          "positive_vote": 6,
+          "negative_vote": 0
+        },
+        {
+          "mu_categories": {
+            "title": "Past Promise/s",
+            "slug": "past-promise-s"
+          },
+          "positive_vote": 6,
+          "negative_vote": 0
+        },
+        {
+          "mu_categories": {
+            "title": "Significant Name/s",
+            "slug": "significant-name-s"
+          },
+          "positive_vote": 6,
+          "negative_vote": 0
+        },
+        {
+          "mu_categories": {
+            "title": "Smart Protagonist",
+            "slug": "smart-protagonist"
+          },
+          "positive_vote": 6,
+          "negative_vote": 0
+        },
+        {
+          "mu_categories": {
+            "title": "Mysterious Protagonist",
+            "slug": "mysterious-protagonist"
+          },
+          "positive_vote": 4,
+          "negative_vote": 0
+        },
+        {
+          "mu_categories": {
+            "title": "Japanese Folklore",
+            "slug": "japanese-folklore"
+          },
+          "positive_vote": 4,
+          "negative_vote": 0
+        },
+        {
+          "mu_categories": {
+            "title": "Multiple Couples",
+            "slug": "multiple-couples"
+          },
+          "positive_vote": 5,
+          "negative_vote": 1
+        },
+        {
+          "mu_categories": {
+            "title": "Mysterious Elements",
+            "slug": "mysterious-elements"
+          },
+          "positive_vote": 4,
+          "negative_vote": 0
+        },
+        {
+          "mu_categories": {
+            "title": "Virgin/s",
+            "slug": "virgin-s"
+          },
+          "positive_vote": 3,
+          "negative_vote": 0
+        },
+        {
+          "mu_categories": {
+            "title": "Immortality",
+            "slug": "immortality"
+          },
+          "positive_vote": 2,
+          "negative_vote": 0
+        },
+        {
+          "mu_categories": {
+            "title": "First Time Dating",
+            "slug": "first-time-dating"
+          },
+          "positive_vote": 2,
+          "negative_vote": 0
+        },
+        {
+          "mu_categories": {
+            "title": "Teacher/s",
+            "slug": "teacher-s"
+          },
+          "positive_vote": 1,
+          "negative_vote": 0
+        },
+        {
+          "mu_categories": {
+            "title": "Death of Loved One/s",
+            "slug": "death-of-loved-one-s"
+          },
+          "positive_vote": 1,
+          "negative_vote": 0
+        },
+        {
+          "mu_categories": {
+            "title": "Shota",
+            "slug": "shota"
+          },
+          "positive_vote": 1,
+          "negative_vote": 0
+        },
+        {
+          "mu_categories": {
+            "title": "Moon",
+            "slug": "moon"
+          },
+          "positive_vote": 1,
+          "negative_vote": 0
+        },
+        {
+          "mu_categories": {
+            "title": "Older Female Younger Male",
+            "slug": "older-female-younger-male"
+          },
+          "positive_vote": 1,
+          "negative_vote": 0
+        },
+        {
+          "mu_categories": {
+            "title": "Young Male Lead",
+            "slug": "young-male-lead"
+          },
+          "positive_vote": 1,
+          "negative_vote": 0
+        },
+        {
+          "mu_categories": {
+            "title": "Extended Flashbacks",
+            "slug": "extended-flashbacks"
+          },
+          "positive_vote": 1,
+          "negative_vote": 0
+        },
+        {
+          "mu_categories": {
+            "title": "Cohabitation",
+            "slug": "cohabitation"
+          },
+          "positive_vote": 1,
+          "negative_vote": 0
+        },
+        {
+          "mu_categories": {
+            "title": "Flashbacks",
+            "slug": "flashbacks"
+          },
+          "positive_vote": 1,
+          "negative_vote": 0
+        },
+        {
+          "mu_categories": {
+            "title": "Supportive Female Lead",
+            "slug": "supportive-female-lead"
+          },
+          "positive_vote": 0,
+          "negative_vote": 0
+        },
+        {
+          "mu_categories": {
+            "title": "Modern Era",
+            "slug": "modern-era"
+          },
+          "positive_vote": 0,
+          "negative_vote": 0
+        },
+        {
+          "mu_categories": {
+            "title": "Alien/s",
+            "slug": "alien-s"
+          },
+          "positive_vote": 1,
+          "negative_vote": 1
+        },
+        {
+          "mu_categories": {
+            "title": "Legal Shota/s",
+            "slug": "legal-shota-s"
+          },
+          "positive_vote": 0,
+          "negative_vote": 0
+        }
+      ]
+    },
+    "iso639_1": "ja",
+    "lang_name": "Japanese",
+    "lang_native": "日本語 (にほんご／にっぽんご)"
+  },
+  "artists": [
+    {
+      "name": "Hata Kenjiro",
+      "slug": "hata-kenjiro"
+    }
+  ],
+  "authors": [
+    {
+      "name": "Hata Kenjiro",
+      "slug": "hata-kenjiro"
+    }
+  ],
+  "langList": [
+    "ar",
+    "de",
+    "en",
+    "es",
+    "es-419",
+    "fr",
+    "id",
+    "it",
+    "pl",
+    "pt-br",
+    "ru",
+    "tr",
+    "uk",
+    "vi",
+    "zh-hk"
+  ],
+  "recommendable": true,
+  "demographic": "Shounen",
+  "matureContent": false,
+  "checkVol2Chap1": false
+}
