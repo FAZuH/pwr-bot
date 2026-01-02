@@ -167,7 +167,7 @@ impl FeedSubscriptionService {
     }
 
     /// # Performance
-    /// * DB calls: 1 + 2*N
+    /// * DB calls: 1
     ///
     /// Where N is number of subscriptions found for given page
     pub async fn list_paginated_subscriptions(
@@ -178,35 +178,45 @@ impl FeedSubscriptionService {
     ) -> Result<Vec<SubscriptionInfo>, ServiceError> {
         let page = page.into() - 1;
 
-        let mut ret = vec![];
-        // Existence guaranteed by FOREIGN KEY constraint
         // DB 1
-        let subscriptions = self
+        let rows = self
             .db
             .feed_subscription_table
-            .select_paginated_by_subscriber_id(subscriber.id, page, per_page)
+            .select_paginated_with_latest_by_subscriber_id(subscriber.id, page, per_page)
             .await?;
-        // DB N
-        for sub in subscriptions {
-            // Existence guaranteed by FOREIGN KEY constraint
-            // DB 1
-            let feed = self
-                .db
-                .feed_table
-                .select(&sub.feed_id)
-                .await?
-                .ok_or_else(|| ServiceError::UnexpectedResult {
-                    message: "Feed not found".to_string(),
-                })?;
-            // DB 1
-            let feed_latest = self
-                .db
-                .feed_item_table
-                .select_latest_by_feed_id(feed.id)
-                .await?;
 
-            ret.push(SubscriptionInfo { feed, feed_latest });
-        }
+        let ret = rows
+            .into_iter()
+            .map(|row| {
+                let feed = FeedModel {
+                    id: row.id,
+                    name: row.name,
+                    description: row.description,
+                    platform_id: row.platform_id,
+                    source_id: row.source_id,
+                    items_id: row.items_id,
+                    source_url: row.source_url,
+                    cover_url: row.cover_url,
+                    tags: row.tags,
+                };
+
+                let feed_latest = if let (Some(id), Some(desc), Some(pub_date)) =
+                    (row.item_id, row.item_description, row.item_published)
+                {
+                    Some(FeedItemModel {
+                        id,
+                        feed_id: feed.id,
+                        description: desc,
+                        published: pub_date,
+                    })
+                } else {
+                    None
+                };
+
+                SubscriptionInfo { feed, feed_latest }
+            })
+            .collect();
+
         Ok(ret)
     }
 

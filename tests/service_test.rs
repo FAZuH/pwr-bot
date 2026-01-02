@@ -1,7 +1,10 @@
 use std::sync::Arc;
 
 use chrono::Utc;
+use pwr_bot::database::model::FeedItemModel;
+use pwr_bot::database::model::FeedModel;
 use pwr_bot::database::model::SubscriberType;
+use pwr_bot::database::table::Table;
 use pwr_bot::feed::FeedItem;
 use pwr_bot::feed::FeedSource;
 use pwr_bot::feed::platforms::Platforms;
@@ -163,6 +166,89 @@ async fn test_server_settings_service() {
     assert_eq!(fetched.channel_id, Some("chan_456".to_string()));
     assert_eq!(fetched.subscribe_role_id, Some("role_123".to_string()));
     assert_eq!(fetched.unsubscribe_role_id, Some("role_456".to_string()));
+
+    common::teardown_db(db_path).await;
+}
+
+#[tokio::test]
+async fn test_list_paginated_subscriptions_optimization() {
+    let (db, db_path) = common::setup_db().await;
+    let feeds_platform = Arc::new(Platforms::new());
+
+    let service = Arc::new(FeedSubscriptionService {
+        db: db.clone(),
+        platforms: feeds_platform.clone(),
+    });
+
+    // 1. Create Subscriber
+    let target = SubscriberTarget {
+        subscriber_type: SubscriberType::Dm,
+        target_id: "user_paginated".to_string(),
+    };
+    let subscriber = service.get_or_create_subscriber(&target).await.unwrap();
+
+    // 2. Create Feeds
+    let feed_names = vec!["Zebra Feed", "Apple Feed", "Mango Feed", "Banana Feed"];
+
+    for (i, name) in feed_names.iter().enumerate() {
+        let feed = FeedModel {
+            name: name.to_string(),
+            platform_id: "mock".to_string(),
+            source_id: format!("src_{}", i),
+            items_id: format!("items_{}", i),
+            source_url: format!("http://mock/{}/{}", i, name),
+            ..Default::default()
+        };
+        let feed_id = db.feed_table.insert(&feed).await.unwrap();
+
+        let sub_model = pwr_bot::database::model::FeedSubscriptionModel {
+            feed_id,
+            subscriber_id: subscriber.id,
+            ..Default::default()
+        };
+        db.feed_subscription_table.insert(&sub_model).await.unwrap();
+
+        // Add item for some feeds
+        if i % 2 == 0 {
+            let item = FeedItemModel {
+                feed_id,
+                description: format!("Chapter {}", i),
+                published: Utc::now(),
+                ..Default::default()
+            };
+            db.feed_item_table.insert(&item).await.unwrap();
+        }
+    }
+
+    // 3. Test Pagination & Sorting
+    // Sorted names: Apple Feed, Banana Feed, Mango Feed, Zebra Feed
+    // Page 1, Limit 2. Expected: Apple Feed, Banana Feed
+
+    let result = service
+        .list_paginated_subscriptions(&subscriber, 1u32, 2u32)
+        .await
+        .unwrap();
+
+    assert_eq!(result.len(), 2);
+    assert_eq!(result[0].feed.name, "Apple Feed");
+    assert_eq!(result[1].feed.name, "Banana Feed");
+
+    // Page 2, Limit 2. Expected: Mango Feed, Zebra Feed
+    let result_p2 = service
+        .list_paginated_subscriptions(&subscriber, 2u32, 2u32)
+        .await
+        .unwrap();
+
+    assert_eq!(result_p2.len(), 2);
+    assert_eq!(result_p2[0].feed.name, "Mango Feed");
+    assert_eq!(result_p2[1].feed.name, "Zebra Feed");
+
+    // Check item presence for Mango Feed (index 2) - has item
+    assert!(result_p2[0].feed_latest.is_some());
+    assert_eq!(
+        result_p2[0].feed_latest.as_ref().unwrap().description,
+        "Chapter 2"
+    );
 
     common::teardown_db(db_path).await;
 }
