@@ -94,9 +94,8 @@ async fn test_subscription_and_publishing() {
 
     // Start Publisher
     let publisher = SeriesFeedPublisher::new(
-        db.clone(),
+        service.clone(),
         event_bus.clone(),
-        feeds.clone(),
         Duration::from_millis(100), // Fast poll
     );
     publisher

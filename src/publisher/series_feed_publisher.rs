@@ -23,30 +23,25 @@ use serenity::all::MessageFlags;
 use tokio::time::Sleep;
 use tokio::time::sleep;
 
-use crate::database::Database;
-use crate::database::error::DatabaseError;
 use crate::database::model::FeedItemModel;
 use crate::database::model::FeedModel;
-use crate::database::table::Table;
 use crate::event::event_bus::EventBus;
 use crate::event::feed_update_event::FeedUpdateEvent;
 use crate::feed::PlatformInfo;
-use crate::feed::error::FeedError;
-use crate::feed::platforms::Platforms;
+use crate::service::feed_subscription_service::FeedSubscriptionService;
+use crate::service::feed_subscription_service::FeedUpdateResult;
 
 pub struct SeriesFeedPublisher {
-    db: Arc<Database>,
+    service: Arc<FeedSubscriptionService>,
     event_bus: Arc<EventBus>,
-    feeds: Arc<Platforms>,
     poll_interval: Duration,
     running: AtomicBool,
 }
 
 impl SeriesFeedPublisher {
     pub fn new(
-        db: Arc<Database>,
+        service: Arc<FeedSubscriptionService>,
         event_bus: Arc<EventBus>,
-        feeds: Arc<Platforms>,
         poll_interval: Duration,
     ) -> Arc<Self> {
         info!(
@@ -54,9 +49,8 @@ impl SeriesFeedPublisher {
             poll_interval
         );
         Arc::new(Self {
-            db,
+            service,
             event_bus,
-            feeds,
             poll_interval,
             running: AtomicBool::new(false),
         })
@@ -97,7 +91,7 @@ impl SeriesFeedPublisher {
         debug!("Checking for feed updates.");
 
         // Get all feeds containing tag "series"
-        let feeds = self.db.feed_table.select_all_by_tag("series").await?;
+        let feeds = self.service.get_feeds_by_tag("series").await?;
         let feeds_len = feeds.len();
         info!("Found {} feeds to check.", feeds.len());
 
@@ -115,98 +109,44 @@ impl SeriesFeedPublisher {
     }
 
     async fn check_feed(&self, feed: FeedModel) -> anyhow::Result<()> {
-        // Skip feeds with no subscribers
-        let subs = self
-            .db
-            .feed_subscription_table
-            .exists_by_feed_id(feed.id)
-            .await?;
-
-        if !subs {
-            debug!(
-                "No subscriptions for {}. Skipping.",
-                self.get_feed_desc(&feed)
-            );
-            return Ok(());
-        }
-
-        // Get the latest known version for this feed
-        let old_latest = self
-            .db
-            .feed_item_table
-            .select_latest_by_feed_id(feed.id)
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("Latest feed item not found"))?;
-
-        let platform = self
-            .feeds
-            .get_platform_by_source_url(&feed.source_url)
-            .ok_or_else(|| {
-                DatabaseError::InternalError {
-                    message: format!("Series feed source with url {} not found.", feed.source_url),
-                }
-                // NOTE: This means an invalid URL has been inserted to db due to insufficient
-                // checks
-            })?;
-
-        // Fetch current state from source
-        let new_latest = match platform.fetch_latest(&feed.items_id).await {
-            Ok(series) => series,
-            Err(e) => {
-                if matches!(e, FeedError::SourceFinished { .. }) {
-                    info!(
-                        "Feed {} is finished. Removing from database.",
-                        self.get_feed_desc(&feed)
-                    );
-                    self.db.feed_table.delete(&feed.id).await?;
-                } else {
-                    error!("Error fetching {}: {}", self.get_feed_desc(&feed), e);
-                    return Err(e.into());
-                }
-                return Ok(());
+        match self.service.check_feed_update(&feed).await? {
+            FeedUpdateResult::NoUpdate => {
+                debug!(
+                    "No update or no subscribers for {}.",
+                    self.get_feed_desc(&feed)
+                );
+                Ok(())
             }
-        };
+            FeedUpdateResult::SourceFinished => {
+                info!(
+                    "Feed {} is finished. Removed from database.",
+                    self.get_feed_desc(&feed)
+                );
+                Ok(())
+            }
+            FeedUpdateResult::Updated {
+                feed: _,
+                old_item,
+                new_item,
+                feed_info,
+            } => {
+                info!(
+                    "New version found for {}: {} -> {}",
+                    self.get_feed_desc(&feed),
+                    old_item.description,
+                    new_item.description
+                );
 
-        debug!(
-            "Current version for {}: {}",
-            self.get_feed_desc(&feed),
-            new_latest.title
-        );
+                // Set vars
+                let message = self.create_message(&feed, &feed_info, &old_item, &new_item);
 
-        // Check if version changed
-        if new_latest.title == old_latest.description {
-            debug!("No new version for {}.", self.get_feed_desc(&feed));
-            return Ok(());
+                // Publish update event
+                info!("Publishing update event for {}.", self.get_feed_desc(&feed));
+                let event = FeedUpdateEvent { feed, message };
+                self.event_bus.publish(event);
+                Ok(())
+            }
         }
-        info!(
-            "New version found for {}: {} -> {}",
-            self.get_feed_desc(&feed),
-            old_latest.description,
-            new_latest.title
-        );
-
-        // Insert new version into database
-        let new_feed_item = FeedItemModel {
-            id: 0, // Will be set by database
-            feed_id: feed.id,
-            description: new_latest.title.clone(),
-            published: new_latest.published,
-        };
-        self.db.feed_item_table.replace(&new_feed_item).await?;
-
-        // Set vars
-        let message = self.create_message(
-            &feed,
-            &platform.get_base().info,
-            &old_latest,
-            &new_feed_item,
-        );
-
-        // Publish update event
-        info!("Publishing update event for {}.", self.get_feed_desc(&feed));
-        let event = FeedUpdateEvent { feed, message };
-        self.event_bus.publish(event);
-        Ok(())
     }
 
     fn get_feed_desc(&self, feed: &FeedModel) -> String {
