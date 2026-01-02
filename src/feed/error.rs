@@ -14,7 +14,7 @@ pub enum UrlParseError {
 #[derive(Debug, thiserror::Error)]
 pub enum FeedError {
     #[error("HTTP request failed: {0}")]
-    RequestFailed(#[from] reqwest::Error),
+    RequestFailed(#[source] Box<dyn std::error::Error + Send + Sync>),
 
     #[error("Failed to parse API response: {0}")]
     JsonParseFailed(#[from] serde_json::Error),
@@ -54,4 +54,16 @@ pub enum FeedError {
 
     #[error(transparent)]
     UrlParseFailed(#[from] UrlParseError),
+}
+
+impl From<reqwest::Error> for FeedError {
+    fn from(e: reqwest::Error) -> Self {
+        FeedError::RequestFailed(Box::new(e))
+    }
+}
+
+impl From<wreq::Error> for FeedError {
+    fn from(e: wreq::Error) -> Self {
+        FeedError::RequestFailed(Box::new(e))
+    }
 }

@@ -61,10 +61,8 @@ impl MockFeed {
             logo_url: "".to_string(),
             tags: "series".to_string(),
         };
-        let client = reqwest::Client::new();
-
         Self {
-            base: BasePlatform::new(info, client),
+            base: BasePlatform::new(info),
             state: Arc::new(RwLock::new(MockFeedState::default())),
         }
     }

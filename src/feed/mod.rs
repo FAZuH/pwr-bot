@@ -45,12 +45,11 @@ pub struct PlatformInfo {
 #[derive(Clone, Debug)]
 pub struct BasePlatform {
     pub info: PlatformInfo,
-    pub client: reqwest::Client,
 }
 
 impl BasePlatform {
-    pub fn new(info: PlatformInfo, client: reqwest::Client) -> Self {
-        BasePlatform { info, client }
+    pub fn new(info: PlatformInfo) -> Self {
+        BasePlatform { info }
     }
     pub fn get_nth_path_from_url<'b>(
         &self,
@@ -188,8 +187,7 @@ mod tests {
             api_url: "https://test.com".to_string(),
             ..Default::default()
         };
-        let client = reqwest::Client::new();
-        let base = BasePlatform::new(info, client);
+        let base = BasePlatform::new(info);
 
         let url = "https://test.com/one/two/three";
 

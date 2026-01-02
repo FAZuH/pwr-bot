@@ -23,6 +23,7 @@ use crate::feed::error::FeedError;
 
 pub struct AniListPlatform {
     pub base: BasePlatform,
+    client: reqwest::Client,
     limiter: RateLimiter<NotKeyed, InMemoryState, QuantaClock>,
 }
 
@@ -44,7 +45,8 @@ impl AniListPlatform {
         // the API is fully restored.
         let limiter = RateLimiter::direct(Quota::per_minute(NonZeroU32::new(30).unwrap()));
         Self {
-            base: BasePlatform::new(info, reqwest::Client::new()),
+            base: BasePlatform::new(info),
+            client: reqwest::Client::new(),
             limiter,
         }
     }
@@ -56,7 +58,7 @@ impl AniListPlatform {
             "variables": { "id": source_id_num }
         });
 
-        let request = self.base.client.post(&self.base.info.api_url).json(&json);
+        let request = self.client.get(&self.base.info.api_url).json(&json);
         let response = self.send(request).await?;
         let response_json = response.json::<serde_json::Value>().await?; // Automatically converts to SourceError::JsonParseFailed
 
@@ -177,7 +179,7 @@ impl AniListPlatform {
 
         let req = request.build()?;
         debug!("Making request to: {}", req.url());
-        self.base.client.execute(req).await
+        self.client.execute(req).await
     }
 
     /// Validate source_id format (should be numeric for AniList)

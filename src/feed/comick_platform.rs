@@ -12,13 +12,10 @@ use governor::state::InMemoryState;
 use governor::state::direct::NotKeyed;
 use log::debug;
 use log::info;
-use reqwest;
-use reqwest::Client;
-use reqwest::header::HeaderMap;
-use reqwest::header::HeaderValue;
-use reqwest::header::USER_AGENT;
 use serde_json::Map;
 use serde_json::Value;
+use wreq::Client;
+use wreq_util::Emulation;
 
 use crate::feed::BasePlatform;
 use crate::feed::FeedItem;
@@ -31,18 +28,16 @@ type Json = Map<String, Value>;
 
 pub struct ComickPlatform {
     pub base: BasePlatform,
+    client: Client,
     limiter: RateLimiter<NotKeyed, InMemoryState, QuantaClock>,
 }
 
 impl ComickPlatform {
     pub fn new() -> Self {
-        let mut headers = HeaderMap::new();
-        headers.insert(USER_AGENT, HeaderValue::from_static("pwr-bot/0.1"));
-
         let client = Client::builder()
-            .default_headers(headers)
+            .emulation(Emulation::Chrome137)
             .build()
-            .expect("Failed to create client");
+            .unwrap();
 
         let info = PlatformInfo {
             name: "Comick".to_string(),
@@ -64,7 +59,8 @@ impl ComickPlatform {
         let limiter = RateLimiter::direct(Quota::per_minute(NonZeroU32::new(200).unwrap()));
 
         Self {
-            base: BasePlatform::new(info, client),
+            base: BasePlatform::new(info),
+            client,
             limiter,
         }
     }
@@ -207,10 +203,7 @@ impl ComickPlatform {
             })
     }
 
-    async fn send(
-        &self,
-        request: reqwest::RequestBuilder,
-    ) -> Result<reqwest::Response, reqwest::Error> {
+    async fn send(&self, request: wreq::RequestBuilder) -> Result<wreq::Response, wreq::Error> {
         if self.limiter.check().is_err() {
             info!("Source {} is ratelimited. Waiting...", self.base.info.name);
         }
@@ -218,10 +211,10 @@ impl ComickPlatform {
 
         let req = request.build()?;
         debug!("Making request to: {}", req.url());
-        self.base.client.execute(req).await
+        self.client.execute(req).await
     }
 
-    async fn send_get_json(&self, request: reqwest::RequestBuilder) -> Result<Json, FeedError> {
+    async fn send_get_json(&self, request: wreq::RequestBuilder) -> Result<Json, FeedError> {
         let response = self.send(request).await?;
 
         let body = response.text().await?;
@@ -240,7 +233,6 @@ impl Platform for ComickPlatform {
         );
 
         let request = self
-            .base
             .client
             .get(format!("{}/comic/{slug}", self.base.info.api_url));
 
@@ -272,7 +264,7 @@ impl Platform for ComickPlatform {
             self.base.info.name
         );
 
-        let request = self.base.client.get(format!(
+        let request = self.client.get(format!(
             "{}/comic/{hid}/chapters?lang=en",
             self.base.info.api_url
         ));

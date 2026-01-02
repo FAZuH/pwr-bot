@@ -14,10 +14,6 @@ use log::debug;
 use log::info;
 use log::warn;
 use reqwest;
-use reqwest::Client;
-use reqwest::header::HeaderMap;
-use reqwest::header::HeaderValue;
-use reqwest::header::USER_AGENT;
 use serde_json::Map;
 use serde_json::Value;
 
@@ -32,19 +28,12 @@ type Json<'a> = &'a Map<String, Value>;
 
 pub struct MangaDexPlatform {
     pub base: BasePlatform,
+    client: reqwest::Client,
     limiter: RateLimiter<NotKeyed, InMemoryState, QuantaClock>,
 }
 
 impl MangaDexPlatform {
     pub fn new() -> Self {
-        let mut headers = HeaderMap::new();
-        headers.insert(USER_AGENT, HeaderValue::from_static("pwr-bot/0.1"));
-
-        let client = Client::builder()
-            .default_headers(headers)
-            .build()
-            .expect("Failed to create client");
-
         let info = PlatformInfo {
             name: "MangaDex".to_string(),
             feed_item_name: "Chapter".to_string(),
@@ -65,7 +54,8 @@ impl MangaDexPlatform {
         let limiter = RateLimiter::direct(Quota::per_second(NonZeroU32::new(5).unwrap()));
 
         Self {
-            base: BasePlatform::new(info, client),
+            base: BasePlatform::new(info),
+            client: reqwest::Client::new(),
             limiter,
         }
     }
@@ -260,7 +250,7 @@ impl MangaDexPlatform {
 
         let req = request.build()?;
         debug!("Making request to: {}", req.url());
-        self.base.client.execute(req).await
+        self.client.execute(req).await
     }
 
     async fn send_get_json(
@@ -286,7 +276,7 @@ impl Platform for MangaDexPlatform {
         let source_id = source_id.to_string();
         self.validate_uuid(&source_id.clone())?;
 
-        let request = self.base.client.get(format!(
+        let request = self.client.get(format!(
             "{}/manga/{source_id}?includes[]=cover_art",
             self.base.info.api_url
         ));
@@ -323,7 +313,6 @@ impl Platform for MangaDexPlatform {
         let source_id = items_id.to_string();
 
         let request = self
-            .base
             .client
             .get(format!("{}/manga/{source_id}/feed", self.base.info.api_url))
             .query(&[
