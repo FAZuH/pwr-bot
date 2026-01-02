@@ -188,7 +188,7 @@ async fn test_list_paginated_subscriptions_optimization() {
     let subscriber = service.get_or_create_subscriber(&target).await.unwrap();
 
     // 2. Create Feeds
-    let feed_names = vec!["Zebra Feed", "Apple Feed", "Mango Feed", "Banana Feed"];
+    let feed_names = ["Zebra Feed", "Apple Feed", "Mango Feed", "Banana Feed"];
 
     for (i, name) in feed_names.iter().enumerate() {
         let feed = FeedModel {

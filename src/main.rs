@@ -67,7 +67,13 @@ async fn main() -> anyhow::Result<()> {
 
     // Setup & start bot
     info!("Starting bot...");
-    let mut bot = Bot::new(config.clone(), db.clone(), platforms.clone(), service.clone()).await?;
+    let mut bot = Bot::new(
+        config.clone(),
+        db.clone(),
+        platforms.clone(),
+        service.clone(),
+    )
+    .await?;
     bot.start();
     let bot = Arc::new(bot);
     info!(
@@ -89,12 +95,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Setup publishers
     debug!("Setting up Publishers...");
-    SeriesFeedPublisher::new(
-        service.clone(),
-        event_bus.clone(),
-        config.poll_interval,
-    )
-    .start()?;
+    SeriesFeedPublisher::new(service.clone(), event_bus.clone(), config.poll_interval).start()?;
     info!(
         "Publishers setup complete ({:.2}s).",
         init_start.elapsed().as_secs_f64()

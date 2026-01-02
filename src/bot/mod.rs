@@ -133,7 +133,12 @@ impl Bot {
         ))
     }
 
-    fn create_data(config: Arc<Config>, db: Arc<Database>, platforms: Arc<Platforms>, service: Arc<FeedSubscriptionService>) -> Arc<Data> {
+    fn create_data(
+        config: Arc<Config>,
+        db: Arc<Database>,
+        platforms: Arc<Platforms>,
+        service: Arc<FeedSubscriptionService>,
+    ) -> Arc<Data> {
         Arc::new(Data {
             config,
             db,
