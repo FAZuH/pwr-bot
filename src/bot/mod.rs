@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use anyhow;
 use anyhow::Result;
+use async_trait::async_trait;
 use futures::lock::Mutex;
 use log::error;
 use log::info;
@@ -25,6 +26,7 @@ use serenity::all::CreateComponent;
 use serenity::all::CreateContainer;
 use serenity::all::CreateContainerComponent;
 use serenity::all::CreateTextDisplay;
+use serenity::all::FullEvent;
 use serenity::all::MessageFlags;
 use serenity::all::Token;
 
@@ -35,15 +37,17 @@ use crate::bot::cog::feeds_cog::FeedsCog;
 use crate::bot::error::BotError;
 use crate::config::Config;
 use crate::database::Database;
+use crate::event::VoiceStateEvent;
+use crate::event::event_bus::EventBus;
 use crate::feed::platforms::Platforms;
+use crate::service::Services;
 use crate::service::error::ServiceError;
-use crate::service::feed_subscription_service::FeedSubscriptionService;
 
 pub struct Data {
     pub config: Arc<Config>,
     pub db: Arc<Database>,
     pub platforms: Arc<Platforms>,
-    pub service: Arc<FeedSubscriptionService>,
+    pub service: Arc<Services>,
 }
 
 pub struct Bot {
@@ -57,16 +61,24 @@ impl Bot {
     pub async fn new(
         config: Arc<Config>,
         db: Arc<Database>,
+        event_bus: Arc<EventBus>,
         platforms: Arc<Platforms>,
-        service: Arc<FeedSubscriptionService>,
+        service: Arc<Services>,
     ) -> Result<Self> {
         info!("Initializing bot...");
 
         let framework = Self::create_framework(&config)?;
-        let data = Self::create_data(config.clone(), db, platforms, service);
+        let data = Arc::new(Data {
+            config: config.clone(),
+            db,
+            platforms,
+            service,
+        });
         let (token, intents) = Self::create_client_config(&config)?;
+        let event_handler = Arc::new(BotEventHandler::new(event_bus));
 
         let client_builder = ClientBuilder::new(token.clone(), intents)
+            .event_handler(event_handler)
             .framework(framework)
             .data(data);
 
@@ -131,20 +143,6 @@ impl Bot {
         Ok(Box::new(
             poise::Framework::builder().options(options).build(),
         ))
-    }
-
-    fn create_data(
-        config: Arc<Config>,
-        db: Arc<Database>,
-        platforms: Arc<Platforms>,
-        service: Arc<FeedSubscriptionService>,
-    ) -> Arc<Data> {
-        Arc::new(Data {
-            config,
-            db,
-            platforms,
-            service,
-        })
     }
 
     fn create_client_config(config: &Config) -> Result<(Token, GatewayIntents)> {
@@ -229,5 +227,31 @@ impl Bot {
                 }
             }
         }
+    }
+}
+
+pub struct BotEventHandler {
+    event_bus: Arc<EventBus>,
+}
+
+impl BotEventHandler {
+    pub fn new(event_bus: Arc<EventBus>) -> Self {
+        Self { event_bus }
+    }
+}
+
+#[async_trait]
+impl poise::serenity_prelude::EventHandler for BotEventHandler {
+    async fn dispatch(&self, _context: &poise::serenity_prelude::Context, _event: &FullEvent) {
+        #[allow(clippy::single_match)]
+        match _event {
+            FullEvent::VoiceStateUpdate { old, new, .. } => {
+                self.event_bus.publish(VoiceStateEvent {
+                    old: old.clone(),
+                    new: new.clone(),
+                });
+            }
+            _ => {}
+        };
     }
 }

@@ -1,3 +1,5 @@
+use serenity::all::VoiceState;
+
 pub mod event_bus;
 
 /// Marker trait for events that can be dispatched through the event bus.
@@ -26,6 +28,18 @@ pub struct FeedUpdateEvent {
 }
 
 impl Event for FeedUpdateEvent {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct VoiceStateEvent {
+    pub old: Option<VoiceState>,
+    pub new: VoiceState,
+}
+
+impl Event for VoiceStateEvent {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }

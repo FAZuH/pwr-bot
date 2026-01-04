@@ -25,6 +25,9 @@ pub struct FeedSubscriptionService {
 }
 
 impl FeedSubscriptionService {
+    pub fn new(db: Arc<Database>, platforms: Arc<Platforms>) -> Self {
+        Self { db, platforms }
+    }
     /// Core subscription operations
     ///
     /// # Performance
