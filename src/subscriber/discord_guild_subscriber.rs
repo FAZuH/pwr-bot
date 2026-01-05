@@ -15,7 +15,7 @@ use crate::database::model::SubscriberModel;
 use crate::database::model::SubscriberType;
 use crate::database::table::Table;
 use crate::event::Event;
-use crate::event::feed_update_event::FeedUpdateEvent;
+use crate::event::FeedUpdateEvent;
 use crate::subscriber::Subscriber;
 
 pub struct DiscordGuildSubscriber {

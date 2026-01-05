@@ -139,3 +139,22 @@ pub struct FeedWithLatestItemRow {
     pub item_description: Option<String>,
     pub item_published: Option<DateTime<Utc>>,
 }
+
+#[derive(FromRow, Serialize, Default, Clone)]
+pub struct VoiceSessionsModel {
+    #[serde(default)]
+    pub id: i32,
+    #[serde(default)]
+    #[sqlx(try_from = "i64")]
+    pub user_id: u64,
+    #[serde(default)]
+    #[sqlx(try_from = "i64")]
+    pub guild_id: u64,
+    #[serde(default)]
+    #[sqlx(try_from = "i64")]
+    pub channel_id: u64,
+    #[serde(default)]
+    pub join_time: DateTime<Utc>,
+    #[serde(default)]
+    pub leave_time: DateTime<Utc>,
+}

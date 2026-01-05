@@ -10,6 +10,7 @@ use crate::database::model::FeedWithLatestItemRow;
 use crate::database::model::ServerSettingsModel;
 use crate::database::model::SubscriberModel;
 use crate::database::model::SubscriberType;
+use crate::database::model::VoiceSessionsModel;
 
 pub struct BaseTable {
     pub pool: SqlitePool,
@@ -251,7 +252,7 @@ impl_table!(
         cover_url TEXT DEFAULT NULL,
         tags TEXT DEFAULT NULL,
         UNIQUE(platform_id, source_id),
-        UNIQUE(cover_url)
+        UNIQUE(source_url)
     )"#,
     "name, description, platform_id, source_id, items_id, source_url, cover_url, tags",
     "?, ?, ?, ?, ?, ?, ?, ?",
@@ -636,10 +637,38 @@ impl_table!(
     guild_id,
     u64,
     i64,
-    // Note: Table creation handled by migration
-    "",
+    r#"CREATE TABLE IF NOT EXISTS server_settings (
+        guild_id INTEGER PRIMARY KEY,
+        settings TEXT NOT NULL
+    );"#,
     "guild_id, settings",
     "?, ?",
     "guild_id = ?, settings = ?",
     [guild_id, settings]
+);
+
+// ============================================================================
+// VoiceSessionsTable
+// ============================================================================
+
+impl_table!(
+    VoiceSessionsTable,
+    VoiceSessionsModel,
+    "voice_sessions",
+    id,
+    i32,
+    i32,
+    r#"CREATE TABLE IF NOT EXISTS voice_sessions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        guild_id INTEGER NOT NULL,
+        channel_id INTEGER NOT NULL,
+        join_time TIMESTAMP NOT NULL,
+        leave_time TIMESTAMP NOT NULL,
+        UNIQUE(user_id, channel_id, join_time)
+    );"#,
+    "user_id, guild_id, channel_id, join_time, leave_time",
+    "?, ?, ?, ?, ?",
+    "user_id = ?, guild_id = ?, channel_id = ?, join_time = ?, leave_time = ?",
+    [user_id, guild_id, channel_id, join_time, leave_time]
 );
