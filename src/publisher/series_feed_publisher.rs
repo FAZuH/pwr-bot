@@ -133,12 +133,14 @@ impl SeriesFeedPublisher {
                 info!(
                     "New version found for {}: {} -> {}",
                     self.get_feed_desc(&feed),
-                    old_item.description,
+                    old_item
+                        .as_ref()
+                        .map_or("None".to_string(), |e| e.description.clone()),
                     new_item.description
                 );
 
                 // Set vars
-                let message = self.create_message(&feed, &feed_info, &old_item, &new_item);
+                let message = self.create_message(&feed, &feed_info, old_item.as_ref(), &new_item);
 
                 // Publish update event
                 info!("Publishing update event for {}.", self.get_feed_desc(&feed));
@@ -158,7 +160,7 @@ impl SeriesFeedPublisher {
         &self,
         feed: &FeedModel,
         feed_info: &PlatformInfo,
-        old_feed_item: &FeedItemModel,
+        old_feed_item: Option<&FeedItemModel>,
         new_feed_item: &FeedItemModel,
     ) -> CreateMessage<'static> {
         let feed_desc = feed
@@ -167,23 +169,31 @@ impl SeriesFeedPublisher {
             .trim_end()
             .replace("\n", "\n> ")
             .replace("<br>", "");
+
+        let old_section = old_feed_item.map_or(String::from("**No previous version**"), |old| {
+            format!(
+                "**Old {}**: {}
+    Published on <t:{}>",
+                feed_info.feed_item_name,
+                old.description,
+                old.published.timestamp()
+            )
+        });
+
         let text_main = format!(
             "### {}
 
-> {}
+    > {}
 
-**Old {}**: {}
-Published on <t:{}>
+    {}
 
-**New {}**: {}
-Published on <t:{}>
+    **New {}**: {}
+    Published on <t:{}>
 
-**[Open in browser ↗]({})**",
+    **[Open in browser ↗]({})**",
             feed.name,
             feed_desc,
-            feed_info.feed_item_name,
-            old_feed_item.description,
-            old_feed_item.published.timestamp(),
+            old_section,
             feed_info.feed_item_name,
             new_feed_item.description,
             new_feed_item.published.timestamp(),
