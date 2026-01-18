@@ -10,14 +10,19 @@ use poise::CreateReply;
 use poise::ReplyHandle;
 use poise::serenity_prelude::AutocompleteChoice;
 use poise::serenity_prelude::CreateAutocompleteResponse;
+use serenity::all::ButtonStyle;
 use serenity::all::ChannelId;
 use serenity::all::ChannelType;
+use serenity::all::ComponentInteraction;
 use serenity::all::ComponentInteractionCollector;
 use serenity::all::ComponentInteractionDataKind;
 use serenity::all::CreateActionRow;
+use serenity::all::CreateButton;
 use serenity::all::CreateComponent;
 use serenity::all::CreateContainer;
 use serenity::all::CreateContainerComponent;
+use serenity::all::CreateInteractionResponse;
+use serenity::all::CreateInteractionResponseMessage;
 use serenity::all::CreateSection;
 use serenity::all::CreateSectionAccessory;
 use serenity::all::CreateSectionComponent;
@@ -32,6 +37,7 @@ use serenity::all::GuildId;
 use serenity::all::MessageFlags;
 use serenity::all::RoleId;
 use serenity::all::UserId;
+use serenity::futures::StreamExt;
 
 use crate::bot::checks::check_guild_permissions;
 use crate::bot::cog::Context;
@@ -44,7 +50,17 @@ use crate::database::model::SubscriberModel;
 use crate::database::model::SubscriberType;
 use crate::service::feed_subscription_service::SubscribeResult;
 use crate::service::feed_subscription_service::SubscriberTarget;
+use crate::service::feed_subscription_service::SubscriptionInfo;
 use crate::service::feed_subscription_service::UnsubscribeResult;
+
+const MAX_URLS_PER_REQUEST: usize = 10;
+const ITEMS_PER_PAGE: u32 = 10;
+const UPDATE_INTERVAL_SECS: u64 = 2;
+const INTERACTION_TIMEOUT_SECS: u64 = 120;
+
+// ============================================================================
+// Types and Display Implementations
+// ============================================================================
 
 #[derive(ChoiceParameter)]
 enum SendInto {
@@ -105,204 +121,45 @@ impl Display for UnsubscribeResult {
     }
 }
 
+// ============================================================================
+// Main Cog
+// ============================================================================
+
 pub struct FeedsCog;
 
 impl FeedsCog {
-    /// Configure server feed settings
+    // ------------------------------------------------------------------------
+    // Commands
+    // ------------------------------------------------------------------------
+
     #[poise::command(
         slash_command,
         guild_only,
         default_member_permissions = "ADMINISTRATOR | MANAGE_GUILD"
     )]
     pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
-        use serenity::futures::StreamExt;
         ctx.defer().await?;
         let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?.get();
 
         let mut settings = ctx.data().service.get_server_settings(guild_id).await?;
 
-        let msg_handle = ctx.send(FeedsCog::create_settings_reply(&settings)).await?;
+        let msg_handle = ctx
+            .send(
+                CreateReply::new()
+                    .flags(MessageFlags::IS_COMPONENTS_V2)
+                    .components(ServerSettingsPage::create(&settings)),
+            )
+            .await?;
 
-        let msg = msg_handle.message().await?.into_owned();
-        let author_id = ctx.author().id;
-
-        let mut collector = ComponentInteractionCollector::new(ctx.serenity_context())
-            .message_id(msg.id)
-            .author_id(author_id)
-            .timeout(Duration::from_secs(120))
-            .stream();
-
-        while let Some(interaction) = collector.next().await {
-            let mut should_update = true;
-
-            match &interaction.data.kind {
-                ComponentInteractionDataKind::StringSelect { values }
-                    if interaction.data.custom_id == "server_settings_enabled" =>
-                {
-                    if let Some(value) = values.first() {
-                        settings.enabled = Some(value == "true");
-                    }
-                }
-                ComponentInteractionDataKind::ChannelSelect { values }
-                    if interaction.data.custom_id == "server_settings_channel" =>
-                {
-                    settings.channel_id = values.first().map(|id| id.to_string());
-                }
-                ComponentInteractionDataKind::RoleSelect { values }
-                    if interaction.data.custom_id == "server_settings_sub_role" =>
-                {
-                    settings.subscribe_role_id = if values.is_empty() {
-                        None
-                    } else {
-                        values.first().map(|id| id.to_string())
-                    };
-                }
-                ComponentInteractionDataKind::RoleSelect { values }
-                    if interaction.data.custom_id == "server_settings_unsub_role" =>
-                {
-                    settings.unsubscribe_role_id = if values.is_empty() {
-                        None
-                    } else {
-                        values.first().map(|id| id.to_string())
-                    };
-                }
-                _ => {
-                    should_update = false;
-                }
-            }
-
-            if should_update {
-                ctx.data()
-                    .service
-                    .update_server_settings(guild_id, settings.clone())
-                    .await?;
-            }
-
-            interaction
-                .create_response(
-                    ctx.http(),
-                    poise::serenity_prelude::CreateInteractionResponse::UpdateMessage(
-                        poise::serenity_prelude::CreateInteractionResponseMessage::new()
-                            .components(FeedsCog::create_settings_components(&settings)),
-                    ),
-                )
-                .await?;
-        }
-
+        FeedsCog::handle_settings_interactions(ctx, msg_handle, &mut settings, guild_id).await?;
         Ok(())
     }
 
-    fn create_settings_reply(settings: &ServerSettings) -> CreateReply<'_> {
-        CreateReply::new()
-            .flags(MessageFlags::IS_COMPONENTS_V2)
-            .components(FeedsCog::create_settings_components(settings))
-    }
-
-    fn create_settings_components(settings: &ServerSettings) -> Vec<CreateComponent<'_>> {
-        let parse_role_id = |id: &Option<String>| {
-            id.as_ref()
-                .and_then(|id| RoleId::from_str(id).ok())
-                .into_iter()
-                .collect::<Vec<_>>()
-        };
-        let parse_channel_id = |id: &Option<String>| {
-            id.as_ref()
-                .and_then(|id| ChannelId::from_str(id).ok().map(GenericChannelId::from))
-                .into_iter()
-                .collect::<Vec<_>>()
-        };
-        let is_enabled = settings.enabled.unwrap_or(true);
-
-        // Status section
-        let status_text = format!(
-            "## Server Feed Settings\n\n> 🛈  {}",
-            if is_enabled {
-                format!(
-                    "Feed notifications are currently active. Notifications will be sent to <#{}>",
-                    settings.channel_id.clone().unwrap_or("Unknown".to_string())
-                )
-            } else {
-                "Feed notifications are currently paused. No notifications will be sent until re-enabled.".to_string()
-            }
-        );
-        let enabled_select = CreateSelectMenu::new(
-            "server_settings_enabled",
-            CreateSelectMenuKind::String {
-                options: vec![
-                    CreateSelectMenuOption::new("🟢 Enabled", "true").default_selection(is_enabled),
-                    CreateSelectMenuOption::new("🔴 Disabled", "false")
-                        .default_selection(!is_enabled),
-                ]
-                .into(),
-            },
-        )
-        .placeholder("Toggle feed notifications");
-
-        // Channel section
-        let channel_text =
-            "### Notification Channel\n\n> 🛈  Choose where feed updates will be posted.";
-        let channel_select = CreateSelectMenu::new(
-            "server_settings_channel",
-            CreateSelectMenuKind::Channel {
-                channel_types: Some(vec![ChannelType::Text, ChannelType::News].into()),
-                default_channels: Some(parse_channel_id(&settings.channel_id).into()),
-            },
-        )
-        .placeholder(if settings.channel_id.is_some() {
-            "Change notification channel"
-        } else {
-            "⚠️ Required: Select a notification channel"
-        });
-
-        // Permissions section
-        let sub_role_text = "### Subscribe Permission\n\n> 🛈  Who can add new feeds to this server. Leave empty to allow users with \"Manage Server\" permission.";
-        let sub_role_select = CreateSelectMenu::new(
-            "server_settings_sub_role",
-            CreateSelectMenuKind::Role {
-                default_roles: Some(parse_role_id(&settings.subscribe_role_id).into()),
-            },
-        )
-        .min_values(0)
-        .placeholder(if settings.subscribe_role_id.is_some() {
-            "Change subscribe role"
-        } else {
-            "Optional: Select role for subscribe permission"
-        });
-
-        let unsub_role_text = "### Unsubscribe Permission\n\n> 🛈  Who can remove feeds from this server. Leave empty to allow users with \"Manage Server\" permission.";
-        let unsub_role_select = CreateSelectMenu::new(
-            "server_settings_unsub_role",
-            CreateSelectMenuKind::Role {
-                default_roles: Some(parse_role_id(&settings.unsubscribe_role_id).into()),
-            },
-        )
-        .min_values(0)
-        .placeholder(if settings.unsubscribe_role_id.is_some() {
-            "Change unsubscribe role"
-        } else {
-            "Optional: Select role for unsubscribe permission"
-        });
-
-        let container = CreateComponent::Container(CreateContainer::new(vec![
-            CreateContainerComponent::TextDisplay(CreateTextDisplay::new(status_text)),
-            CreateContainerComponent::ActionRow(CreateActionRow::SelectMenu(enabled_select)),
-            CreateContainerComponent::TextDisplay(CreateTextDisplay::new(channel_text)),
-            CreateContainerComponent::ActionRow(CreateActionRow::SelectMenu(channel_select)),
-            CreateContainerComponent::TextDisplay(CreateTextDisplay::new(sub_role_text)),
-            CreateContainerComponent::ActionRow(CreateActionRow::SelectMenu(sub_role_select)),
-            CreateContainerComponent::TextDisplay(CreateTextDisplay::new(unsub_role_text)),
-            CreateContainerComponent::ActionRow(CreateActionRow::SelectMenu(unsub_role_select)),
-        ]));
-
-        vec![container]
-    }
-
-    /// Subscribe to a feed
     #[poise::command(slash_command)]
     pub async fn subscribe(
         ctx: Context<'_>,
         #[description = "Link(s) of the feeds. Separate links with commas (,)"]
-        #[autocomplete = "Self::autocomplete_supported_feeds"]
+        #[autocomplete = "FeedsCog::autocomplete_supported_feeds"]
         links: String,
         #[description = "Where to send the notifications. Default to your DM"] send_into: Option<
             SendInto,
@@ -311,79 +168,21 @@ impl FeedsCog {
         ctx.defer().await?;
 
         let send_into = send_into.unwrap_or(SendInto::DM);
+        let urls = FeedsCog::parse_and_validate_urls(&links)?;
 
-        if let SendInto::Server = send_into {
-            let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?;
-            let settings = ctx
-                .data()
-                .service
-                .get_server_settings(guild_id.get())
-                .await?;
-            if settings.channel_id.is_none() {
-                return Err(BotError::ConfigurationError(
-                    "Server feed settings are not configured. A server admin must run `/settings` to configure a notification channel first.".to_string(),
-                )
-                .into());
-            }
-            // Check if author is allowed to subscribe according to server settings
-            check_guild_permissions(ctx, &settings.subscribe_role_id).await?;
-        }
+        FeedsCog::verify_server_config(ctx, &send_into, true).await?;
 
-        let urls_split: Vec<&str> = links.split(',').map(|s| s.trim()).collect();
-        FeedsCog::validate_urls(&urls_split)?;
+        let subscriber = FeedsCog::get_subscriber(ctx, &send_into).await?;
+        FeedsCog::process_subscription_batch(ctx, &urls, &subscriber, true).await?;
 
-        let subscriber_type = SubscriberType::from(&send_into);
-        let target_id = FeedsCog::get_target_id(ctx, &send_into)?;
-        let target = SubscriberTarget {
-            subscriber_type,
-            target_id,
-        };
-        let subscriber = ctx.data().service.get_or_create_subscriber(&target).await?;
-
-        let mut states: Vec<String> = vec!["⏳ ﻿ Processing...".to_string(); urls_split.len()];
-
-        let interval = Duration::from_secs(2);
-        let mut last_send = Instant::now();
-
-        let mut reply: Option<ReplyHandle<'_>> = None;
-
-        // NOTE: Can be done concurrently
-        for (i, url) in urls_split.iter().enumerate() {
-            let sub_result = ctx.data().service.subscribe(url, &subscriber).await;
-
-            states[i] = sub_result.map_or_else(|e| format!("❌ {e}"), |res| res.to_string());
-
-            let containers: Vec<CreateContainerComponent> = (0..urls_split.len())
-                .map(|i| {
-                    CreateContainerComponent::TextDisplay(CreateTextDisplay::new(states[i].clone()))
-                })
-                .collect();
-            let components = vec![CreateComponent::Container(CreateContainer::new(containers))];
-            let resp = CreateReply::new()
-                .flags(MessageFlags::IS_COMPONENTS_V2)
-                .components(components);
-
-            if last_send.elapsed() > interval || i + 1 == urls_split.len() {
-                match reply {
-                    None => {
-                        reply = Some(ctx.send(resp).await?);
-                    }
-                    Some(ref reply) => {
-                        reply.edit(ctx, resp).await?;
-                    }
-                }
-                last_send = Instant::now();
-            }
-        }
         Ok(())
     }
 
-    /// Unsubscribe from a feed
     #[poise::command(slash_command)]
     pub async fn unsubscribe(
         ctx: Context<'_>,
         #[description = "Link(s) of the feeds. Separate links with commas (,)"]
-        #[autocomplete = "Self::autocomplete_subscriptions"]
+        #[autocomplete = "FeedsCog::autocomplete_subscriptions"]
         links: String,
         #[description = "Where notifications were being sent. Default to DM"] send_into: Option<
             SendInto,
@@ -392,74 +191,16 @@ impl FeedsCog {
         ctx.defer().await?;
 
         let send_into = send_into.unwrap_or(SendInto::DM);
+        let urls = FeedsCog::parse_and_validate_urls(&links)?;
 
-        if let SendInto::Server = send_into {
-            let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?;
-            let settings = ctx
-                .data()
-                .service
-                .get_server_settings(guild_id.get())
-                .await?;
-            if settings.channel_id.is_none() {
-                return Err(BotError::ConfigurationError(
-                    "Server feed settings are not configured. An administrator must run `/settings` to configure a notification channel first.".to_string(),
-                )
-                .into());
-            }
-            // Check if author is allowed to unsubscribe according to server settings
-            check_guild_permissions(ctx, &settings.unsubscribe_role_id).await?;
-        }
+        FeedsCog::verify_server_config(ctx, &send_into, false).await?;
 
-        let urls_split: Vec<&str> = links.split(',').map(|s| s.trim()).collect();
-        FeedsCog::validate_urls(&urls_split)?;
+        let subscriber = FeedsCog::get_subscriber(ctx, &send_into).await?;
+        FeedsCog::process_subscription_batch(ctx, &urls, &subscriber, false).await?;
 
-        let subscriber_type = SubscriberType::from(&send_into);
-        let target_id = FeedsCog::get_target_id(ctx, &send_into)?;
-        let target = SubscriberTarget {
-            subscriber_type,
-            target_id,
-        };
-        let subscriber = ctx.data().service.get_or_create_subscriber(&target).await?;
-
-        let mut states: Vec<String> = vec!["⏳ ﻿ Processing...".to_string(); urls_split.len()];
-
-        let interval = Duration::from_secs(2);
-        let mut last_send = Instant::now();
-
-        let mut reply: Option<ReplyHandle<'_>> = None;
-
-        // NOTE: Can be done concurrently
-        for (i, url) in urls_split.iter().enumerate() {
-            let unsub_result = ctx.data().service.unsubscribe(url, &subscriber).await;
-
-            states[i] = unsub_result.map_or_else(|e| format!("❌ {e}"), |res| res.to_string());
-
-            let containers: Vec<CreateContainerComponent> = (0..urls_split.len())
-                .map(|i| {
-                    CreateContainerComponent::TextDisplay(CreateTextDisplay::new(states[i].clone()))
-                })
-                .collect();
-            let components = vec![CreateComponent::Container(CreateContainer::new(containers))];
-            let resp = CreateReply::new()
-                .flags(MessageFlags::IS_COMPONENTS_V2)
-                .components(components);
-
-            if last_send.elapsed() > interval || i + 1 == urls_split.len() {
-                match reply {
-                    None => {
-                        reply = Some(ctx.send(resp).await?);
-                    }
-                    Some(ref reply) => {
-                        reply.edit(ctx, resp).await?;
-                    }
-                }
-                last_send = Instant::now();
-            }
-        }
         Ok(())
     }
 
-    /// List all your feed subscriptions
     #[poise::command(slash_command)]
     pub async fn subscriptions(
         ctx: Context<'_>,
@@ -470,34 +211,167 @@ impl FeedsCog {
         ctx.defer().await?;
         let sent_into = sent_into.unwrap_or(SendInto::DM);
 
-        // Get subscriber
-        let target_id = FeedsCog::get_target_id(ctx, &sent_into)?;
-        let subscriber_type = SubscriberType::from(&sent_into);
-        let target = SubscriberTarget {
-            subscriber_type,
-            target_id,
-        };
-        let subscriber = ctx.data().service.get_or_create_subscriber(&target).await?;
-
-        // Get subscriber's subscription count
-        let per_page = 10;
-        let items = ctx
+        let subscriber = FeedsCog::get_subscriber(ctx, &sent_into).await?;
+        let total_items = ctx
             .data()
             .service
             .get_subscription_count(&subscriber)
             .await?;
 
-        // Create navigation component
-        let pages = items.div_ceil(per_page);
-        let mut navigation =
-            PageNavigationComponent::new(&ctx, Pagination::new(pages, per_page, 1));
+        FeedsCog::show_paginated_subscriptions(ctx, &subscriber, total_items).await?;
+        Ok(())
+    }
 
-        // Run feedback loop until timeout
+    // ------------------------------------------------------------------------
+    // Settings UI
+    // ------------------------------------------------------------------------
+
+    async fn handle_settings_interactions(
+        ctx: Context<'_>,
+        msg_handle: ReplyHandle<'_>,
+        settings: &mut ServerSettings,
+        guild_id: u64,
+    ) -> Result<(), Error> {
+        let msg = msg_handle.message().await?.into_owned();
+        let author_id = ctx.author().id;
+
+        let mut collector = ComponentInteractionCollector::new(ctx.serenity_context())
+            .message_id(msg.id)
+            .author_id(author_id)
+            .timeout(Duration::from_secs(INTERACTION_TIMEOUT_SECS))
+            .stream();
+
+        while let Some(interaction) = collector.next().await {
+            if FeedsCog::update_setting_from_interaction(settings, &interaction) {
+                ctx.data()
+                    .service
+                    .update_server_settings(guild_id, settings.clone())
+                    .await?;
+            }
+
+            interaction
+                .create_response(
+                    ctx.http(),
+                    CreateInteractionResponse::UpdateMessage(
+                        CreateInteractionResponseMessage::new()
+                            .components(ServerSettingsPage::create(settings)),
+                    ),
+                )
+                .await?;
+        }
+
+        Ok(())
+    }
+
+    fn update_setting_from_interaction(
+        settings: &mut ServerSettings,
+        interaction: &ComponentInteraction,
+    ) -> bool {
+        match &interaction.data.kind {
+            ComponentInteractionDataKind::StringSelect { values }
+                if interaction.data.custom_id == "server_settings_enabled" =>
+            {
+                if let Some(value) = values.first() {
+                    settings.enabled = Some(value == "true");
+                    return true;
+                }
+            }
+            ComponentInteractionDataKind::ChannelSelect { values }
+                if interaction.data.custom_id == "server_settings_channel" =>
+            {
+                settings.channel_id = values.first().map(|id| id.to_string());
+                return true;
+            }
+            ComponentInteractionDataKind::RoleSelect { values }
+                if interaction.data.custom_id == "server_settings_sub_role" =>
+            {
+                settings.subscribe_role_id = if values.is_empty() {
+                    None
+                } else {
+                    values.first().map(|id| id.to_string())
+                };
+                return true;
+            }
+            ComponentInteractionDataKind::RoleSelect { values }
+                if interaction.data.custom_id == "server_settings_unsub_role" =>
+            {
+                settings.unsubscribe_role_id = if values.is_empty() {
+                    None
+                } else {
+                    values.first().map(|id| id.to_string())
+                };
+                return true;
+            }
+            _ => {}
+        }
+        false
+    }
+
+    // ------------------------------------------------------------------------
+    // Subscription Processing
+    // ------------------------------------------------------------------------
+
+    async fn process_subscription_batch(
+        ctx: Context<'_>,
+        urls: &[&str],
+        subscriber: &SubscriberModel,
+        is_subscribe: bool,
+    ) -> Result<(), Error> {
+        let mut states: Vec<String> = vec!["⏳ Processing...".to_string(); urls.len()];
+        let interval = Duration::from_secs(UPDATE_INTERVAL_SECS);
+        let mut last_send = Instant::now();
+        let mut reply: Option<ReplyHandle<'_>> = None;
+
+        for (i, url) in urls.iter().enumerate() {
+            let result_str = if is_subscribe {
+                ctx.data()
+                    .service
+                    .subscribe(url, subscriber)
+                    .await
+                    .map(|res| res.to_string())
+            } else {
+                ctx.data()
+                    .service
+                    .unsubscribe(url, subscriber)
+                    .await
+                    .map(|res| res.to_string())
+            };
+
+            states[i] = result_str.unwrap_or_else(|e| format!("❌ {e}"));
+
+            let is_final = i + 1 == urls.len();
+            if last_send.elapsed() > interval || is_final {
+                let resp = SubscriptionBatchPage::create(&states, is_final);
+                match reply {
+                    None => reply = Some(ctx.send(resp).await?),
+                    Some(ref r) => r.edit(ctx, resp).await?,
+                }
+                last_send = Instant::now();
+            }
+        }
+        Ok(())
+    }
+
+    // ------------------------------------------------------------------------
+    // Subscriptions List
+    // ------------------------------------------------------------------------
+
+    async fn show_paginated_subscriptions(
+        ctx: Context<'_>,
+        subscriber: &SubscriberModel,
+        total_items: u32,
+    ) -> Result<(), Error> {
+        let pages = total_items.div_ceil(ITEMS_PER_PAGE);
+        let mut navigation =
+            PageNavigationComponent::new(&ctx, Pagination::new(pages, ITEMS_PER_PAGE, 1));
+
         let reply = ctx
             .send(
                 CreateReply::new()
                     .flags(MessageFlags::IS_COMPONENTS_V2)
-                    .components(FeedsCog::create_page(&ctx, &subscriber, &navigation).await?),
+                    .components(
+                        FeedsCog::create_subscription_page(&ctx, subscriber, &navigation).await?,
+                    ),
             )
             .await?;
 
@@ -507,7 +381,10 @@ impl FeedsCog {
                     ctx,
                     CreateReply::new()
                         .flags(MessageFlags::IS_COMPONENTS_V2)
-                        .components(FeedsCog::create_page(&ctx, &subscriber, &navigation).await?),
+                        .components(
+                            FeedsCog::create_subscription_page(&ctx, subscriber, &navigation)
+                                .await?,
+                        ),
                 )
                 .await?;
         }
@@ -515,11 +392,11 @@ impl FeedsCog {
         Ok(())
     }
 
-    async fn create_page<'a>(
+    async fn create_subscription_page<'a>(
         ctx: &Context<'_>,
         subscriber: &SubscriberModel,
         navigation: &'a PageNavigationComponent<'_>,
-    ) -> anyhow::Result<Vec<CreateComponent<'a>>> {
+    ) -> Result<Vec<CreateComponent<'a>>, Error> {
         let subscriptions = ctx
             .data()
             .service
@@ -531,45 +408,49 @@ impl FeedsCog {
             .await?;
 
         if subscriptions.is_empty() {
-            let text = CreateTextDisplay::new("You have no subscriptions.");
-            let empty_container = CreateComponent::Container(CreateContainer::new(vec![
-                CreateContainerComponent::TextDisplay(text),
-            ]));
-            return Ok(vec![empty_container]);
+            return Ok(SubscriptionsListPage::create_empty());
         }
 
-        let mut container_components = vec![];
-        for sub in subscriptions {
-            let text = if let Some(latest) = sub.feed_latest {
-                CreateTextDisplay::new(format!(
-                    "### {}\n\n- **Last version**: {}\n- **Last updated**: <t:{}>\n- **Source**: <{}>",
-                    sub.feed.name,
-                    latest.description,
-                    latest.published.timestamp(),
-                    sub.feed.source_url
-                ))
-            } else {
-                // Note: You need to provide the feed name and URL for this case too
-                CreateTextDisplay::new(format!(
-                    "### {}\n\n> No latest version found.\n- **Source**: <{}>",
-                    sub.feed.name, sub.feed.source_url
-                ))
-            };
-            let thumbnail = CreateThumbnail::new(CreateUnfurledMediaItem::new(sub.feed.cover_url));
+        Ok(SubscriptionsListPage::create(subscriptions, navigation))
+    }
 
-            container_components.push(CreateContainerComponent::Section(CreateSection::new(
-                vec![CreateSectionComponent::TextDisplay(text)],
-                CreateSectionAccessory::Thumbnail(thumbnail),
-            )))
+    // ------------------------------------------------------------------------
+    // Autocomplete
+    // ------------------------------------------------------------------------
+
+    async fn autocomplete_subscriptions<'a>(
+        ctx: Context<'_>,
+        partial: &str,
+    ) -> CreateAutocompleteResponse<'a> {
+        if partial.trim().is_empty() {
+            return CreateAutocompleteResponse::new().set_choices(vec![AutocompleteChoice::from(
+                "Start typing to see suggestions",
+            )]);
         }
 
-        let container = CreateComponent::Container(CreateContainer::new(container_components));
-        if navigation.pagination.pages == 1 {
-            Ok(vec![container])
-        } else {
-            let buttons = navigation.create_buttons();
-            Ok(vec![container, buttons])
+        let (user_subscriber, guild_subscriber) = FeedsCog::get_both_subscribers(ctx).await;
+
+        if user_subscriber.is_none() && guild_subscriber.is_none() {
+            return CreateAutocompleteResponse::new();
         }
+
+        let feeds =
+            FeedsCog::search_and_combine_feeds(ctx, partial, user_subscriber, guild_subscriber)
+                .await;
+
+        if ctx.guild_id().is_none() && feeds.is_empty() {
+            return CreateAutocompleteResponse::new().set_choices(vec![AutocompleteChoice::from(
+                "You have no subscriptions yet. Subscribe first with `/subscribe` command",
+            )]);
+        }
+
+        let mut choices: Vec<AutocompleteChoice> = feeds
+            .into_iter()
+            .map(|feed| AutocompleteChoice::new(feed.name, feed.source_url))
+            .collect();
+
+        choices.truncate(25);
+        CreateAutocompleteResponse::new().set_choices(choices)
     }
 
     async fn autocomplete_supported_feeds<'a>(
@@ -594,94 +475,144 @@ impl FeedsCog {
         CreateAutocompleteResponse::new().set_choices(choices)
     }
 
-    async fn autocomplete_subscriptions<'a>(
-        ctx: Context<'_>,
-        partial: &str,
-    ) -> CreateAutocompleteResponse<'a> {
-        if partial.trim().is_empty() {
-            return CreateAutocompleteResponse::new().set_choices(vec![AutocompleteChoice::from(
-                "Start typing to see suggestions",
-            )]);
-        }
+    // ------------------------------------------------------------------------
+    // Helpers
+    // ------------------------------------------------------------------------
 
-        // Get subscriber
+    async fn get_both_subscribers(
+        ctx: Context<'_>,
+    ) -> (Option<SubscriberModel>, Option<SubscriberModel>) {
         let user_target = SubscriberTarget {
             target_id: ctx.author().id.to_string(),
             subscriber_type: SubscriberType::Dm,
         };
-        let guild_target = ctx.guild_id().map(|res| SubscriberTarget {
-            target_id: res.to_string(),
-            subscriber_type: SubscriberType::Guild,
-        });
+
         let user_subscriber = ctx
             .data()
             .service
             .get_or_create_subscriber(&user_target)
             .await
             .ok();
-        let guild_subscriber = match guild_target {
-            Some(guild_target) => ctx
-                .data()
-                .service
-                .get_or_create_subscriber(&guild_target)
-                .await
-                .ok(),
+
+        let guild_subscriber = match ctx.guild_id() {
+            Some(guild_id) => {
+                let guild_target = SubscriberTarget {
+                    target_id: guild_id.to_string(),
+                    subscriber_type: SubscriberType::Guild,
+                };
+                ctx.data()
+                    .service
+                    .get_or_create_subscriber(&guild_target)
+                    .await
+                    .ok()
+            }
             None => None,
         };
-        if user_subscriber.is_none() && guild_subscriber.is_none() {
-            return CreateAutocompleteResponse::new();
-        }
 
-        // Get subscribed feeds
+        (user_subscriber, guild_subscriber)
+    }
+
+    async fn search_and_combine_feeds(
+        ctx: Context<'_>,
+        partial: &str,
+        user_subscriber: Option<SubscriberModel>,
+        guild_subscriber: Option<SubscriberModel>,
+    ) -> Vec<crate::database::model::FeedModel> {
         let mut user_feeds = match user_subscriber {
-            Some(user_subscriber) => ctx
+            Some(sub) => ctx
                 .data()
                 .service
-                .search_subcriptions(&user_subscriber, partial)
+                .search_subcriptions(&sub, partial)
                 .await
-                .unwrap_or(vec![]),
+                .unwrap_or_default(),
             None => vec![],
         };
-        let mut guild_feeds = match guild_subscriber {
-            Some(guild_subscriber) => ctx
-                .data()
-                .service
-                .search_subcriptions(&guild_subscriber, partial)
-                .await
-                .unwrap_or(vec![]),
-            None => vec![],
-        };
-        if ctx.guild_id().is_none() && user_feeds.is_empty() {
-            return CreateAutocompleteResponse::new().set_choices(vec![AutocompleteChoice::from(
-                "You have no subscriptions yet. Subscribe first with `/subscribe` command",
-            )]);
-        }
 
-        // Combine the feeds
+        let mut guild_feeds = match guild_subscriber {
+            Some(sub) => ctx
+                .data()
+                .service
+                .search_subcriptions(&sub, partial)
+                .await
+                .unwrap_or_default(),
+            None => vec![],
+        };
+
         for f in &mut user_feeds {
             f.name.insert_str(0, "(DM) ");
         }
         for f in &mut guild_feeds {
             f.name.insert_str(0, "(Server) ");
         }
-        // NOTE: search_subcriptions already returns Vec<FeedModel> sorted by FeedModel.name, so we
-        // don't need to sort it here.
+
         user_feeds.append(&mut guild_feeds);
-        let feeds = user_feeds;
+        user_feeds
+    }
 
-        // Map the feeds into AutocompleteChoices
-        let mut choices = feeds
-            .into_iter()
-            .map(|feed| AutocompleteChoice::new(feed.name, feed.source_url))
-            .collect::<Vec<_>>();
+    async fn verify_server_config(
+        ctx: Context<'_>,
+        send_into: &SendInto,
+        is_subscribe: bool,
+    ) -> Result<(), Error> {
+        if let SendInto::Server = send_into {
+            let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?;
+            let settings = ctx
+                .data()
+                .service
+                .get_server_settings(guild_id.get())
+                .await?;
 
-        // Discord autocomplete limit
-        choices.truncate(25);
-        CreateAutocompleteResponse::new().set_choices(choices)
+            if settings.channel_id.is_none() {
+                return Err(BotError::ConfigurationError(
+                    "Server feed settings are not configured. A server admin must run `/settings` to configure a notification channel first.".to_string(),
+                ).into());
+            }
+
+            let role_id = if is_subscribe {
+                &settings.subscribe_role_id
+            } else {
+                &settings.unsubscribe_role_id
+            };
+
+            check_guild_permissions(ctx, role_id).await?;
+        }
+        Ok(())
+    }
+
+    async fn get_subscriber(
+        ctx: Context<'_>,
+        send_into: &SendInto,
+    ) -> Result<SubscriberModel, Error> {
+        let target_id = FeedsCog::get_target_id(ctx, send_into)?;
+        let subscriber_type = SubscriberType::from(send_into);
+        let target = SubscriberTarget {
+            subscriber_type,
+            target_id,
+        };
+        Ok(ctx.data().service.get_or_create_subscriber(&target).await?)
+    }
+
+    fn parse_and_validate_urls(links: &str) -> Result<Vec<&str>, BotError> {
+        let urls: Vec<&str> = links.split(',').map(|s| s.trim()).collect();
+        FeedsCog::validate_urls(&urls)?;
+        Ok(urls)
+    }
+
+    fn validate_urls(urls: &[&str]) -> Result<(), BotError> {
+        if urls.len() > MAX_URLS_PER_REQUEST {
+            return Err(BotError::InvalidCommandArgument {
+                parameter: "links".to_string(),
+                reason: format!(
+                    "Too many links provided. Please provide no more than {} links at a time.",
+                    MAX_URLS_PER_REQUEST
+                ),
+            });
+        }
+        Ok(())
     }
 
     fn get_target_id(ctx: Context<'_>, send_into: &SendInto) -> Result<String, BotError> {
-        Self::get_target_id_inner(ctx.guild_id(), ctx.author().id, send_into)
+        FeedsCog::get_target_id_inner(ctx.guild_id(), ctx.author().id, send_into)
     }
 
     fn get_target_id_inner(
@@ -701,24 +632,201 @@ impl FeedsCog {
             SendInto::DM => Ok(author_id.to_string()),
         }
     }
+}
 
-    fn validate_urls(urls: &[&str]) -> Result<(), BotError> {
-        if urls.len() > 10 {
-            return Err(BotError::InvalidCommandArgument {
-                parameter: "links".to_string(),
-                reason: "Too many links provided. Please provide no more than 10 links at a time."
-                    .to_string(),
-            });
+// ============================================================================
+// Page Components
+// ============================================================================
+
+struct SubscriptionBatchPage;
+
+impl SubscriptionBatchPage {
+    fn create(states: &[String], is_final: bool) -> CreateReply<'_> {
+        let text_components: Vec<CreateContainerComponent> = states
+            .iter()
+            .map(|s| CreateContainerComponent::TextDisplay(CreateTextDisplay::new(s.clone())))
+            .collect();
+
+        let mut components = vec![CreateComponent::Container(CreateContainer::new(
+            text_components,
+        ))];
+
+        if is_final {
+            let nav_button = CreateButton::new("view_subscriptions")
+                .label("View Subscriptions")
+                .style(ButtonStyle::Secondary);
+
+            components.push(CreateComponent::ActionRow(CreateActionRow::Buttons(
+                vec![nav_button].into(),
+            )));
         }
-        Ok(())
+
+        CreateReply::new()
+            .flags(MessageFlags::IS_COMPONENTS_V2)
+            .components(components)
+    }
+}
+
+struct SubscriptionsListPage;
+
+impl SubscriptionsListPage {
+    fn create_empty<'a>() -> Vec<CreateComponent<'a>> {
+        vec![CreateComponent::Container(CreateContainer::new(vec![
+            CreateContainerComponent::TextDisplay(CreateTextDisplay::new(
+                "You have no subscriptions.",
+            )),
+        ]))]
+    }
+
+    fn create<'a>(
+        subscriptions: Vec<SubscriptionInfo>,
+        pagination: &'a PageNavigationComponent,
+    ) -> Vec<CreateComponent<'a>> {
+        let sections: Vec<CreateContainerComponent> = subscriptions
+            .into_iter()
+            .map(Self::create_subscription_section)
+            .collect();
+
+        let container = CreateComponent::Container(CreateContainer::new(sections));
+
+        if pagination.pagination.pages == 1 {
+            vec![container]
+        } else {
+            vec![container, pagination.create_buttons()]
+        }
+    }
+
+    fn create_subscription_section<'a>(sub: SubscriptionInfo) -> CreateContainerComponent<'a> {
+        let text = if let Some(latest) = sub.feed_latest {
+            CreateTextDisplay::new(format!(
+                "### {}\n\n- **Last version**: {}\n- **Last updated**: <t:{}>\n- **Source**: <{}>",
+                sub.feed.name,
+                latest.description,
+                latest.published.timestamp(),
+                sub.feed.source_url
+            ))
+        } else {
+            CreateTextDisplay::new(format!(
+                "### {}\n\n> No latest version found.\n- **Source**: <{}>",
+                sub.feed.name, sub.feed.source_url
+            ))
+        };
+
+        let thumbnail = CreateThumbnail::new(CreateUnfurledMediaItem::new(sub.feed.cover_url));
+
+        CreateContainerComponent::Section(CreateSection::new(
+            vec![CreateSectionComponent::TextDisplay(text)],
+            CreateSectionAccessory::Thumbnail(thumbnail),
+        ))
+    }
+}
+
+struct ServerSettingsPage;
+
+impl ServerSettingsPage {
+    fn create(settings: &ServerSettings) -> Vec<CreateComponent<'_>> {
+        let is_enabled = settings.enabled.unwrap_or(true);
+
+        let status_text = format!(
+            "## Server Feed Settings\n\n> 🛈  {}",
+            if is_enabled {
+                format!(
+                    "Feed notifications are currently active. Notifications will be sent to <#{}>",
+                    settings.channel_id.as_deref().unwrap_or("Unknown")
+                )
+            } else {
+                "Feed notifications are currently paused. No notifications will be sent until re-enabled.".to_string()
+            }
+        );
+
+        let enabled_select = CreateSelectMenu::new(
+            "server_settings_enabled",
+            CreateSelectMenuKind::String {
+                options: vec![
+                    CreateSelectMenuOption::new("🟢 Enabled", "true").default_selection(is_enabled),
+                    CreateSelectMenuOption::new("🔴 Disabled", "false")
+                        .default_selection(!is_enabled),
+                ]
+                .into(),
+            },
+        )
+        .placeholder("Toggle feed notifications");
+
+        let channel_text =
+            "### Notification Channel\n\n> 🛈  Choose where feed updates will be posted.";
+
+        let channel_select = CreateSelectMenu::new(
+            "server_settings_channel",
+            CreateSelectMenuKind::Channel {
+                channel_types: Some(vec![ChannelType::Text, ChannelType::News].into()),
+                default_channels: Some(Self::parse_channel_id(&settings.channel_id).into()),
+            },
+        )
+        .placeholder(if settings.channel_id.is_some() {
+            "Change notification channel"
+        } else {
+            "⚠️ Required: Select a notification channel"
+        });
+
+        let sub_role_text = "### Subscribe Permission\n\n> 🛈  Who can add new feeds to this server. Leave empty to allow users with \"Manage Server\" permission.";
+        let sub_role_select = CreateSelectMenu::new(
+            "server_settings_sub_role",
+            CreateSelectMenuKind::Role {
+                default_roles: Some(Self::parse_role_id(&settings.subscribe_role_id).into()),
+            },
+        )
+        .min_values(0)
+        .placeholder(if settings.subscribe_role_id.is_some() {
+            "Change subscribe role"
+        } else {
+            "Optional: Select role for subscribe permission"
+        });
+
+        let unsub_role_text = "### Unsubscribe Permission\n\n> 🛈  Who can remove feeds from this server. Leave empty to allow users with \"Manage Server\" permission.";
+        let unsub_role_select = CreateSelectMenu::new(
+            "server_settings_unsub_role",
+            CreateSelectMenuKind::Role {
+                default_roles: Some(Self::parse_role_id(&settings.unsubscribe_role_id).into()),
+            },
+        )
+        .min_values(0)
+        .placeholder(if settings.unsubscribe_role_id.is_some() {
+            "Change unsubscribe role"
+        } else {
+            "Optional: Select role for unsubscribe permission"
+        });
+
+        let container = CreateComponent::Container(CreateContainer::new(vec![
+            CreateContainerComponent::TextDisplay(CreateTextDisplay::new(status_text)),
+            CreateContainerComponent::ActionRow(CreateActionRow::SelectMenu(enabled_select)),
+            CreateContainerComponent::TextDisplay(CreateTextDisplay::new(channel_text)),
+            CreateContainerComponent::ActionRow(CreateActionRow::SelectMenu(channel_select)),
+            CreateContainerComponent::TextDisplay(CreateTextDisplay::new(sub_role_text)),
+            CreateContainerComponent::ActionRow(CreateActionRow::SelectMenu(sub_role_select)),
+            CreateContainerComponent::TextDisplay(CreateTextDisplay::new(unsub_role_text)),
+            CreateContainerComponent::ActionRow(CreateActionRow::SelectMenu(unsub_role_select)),
+        ]));
+
+        vec![container]
+    }
+
+    fn parse_role_id(id: &Option<String>) -> Vec<RoleId> {
+        id.as_ref()
+            .and_then(|id| RoleId::from_str(id).ok())
+            .into_iter()
+            .collect()
+    }
+
+    fn parse_channel_id(id: &Option<String>) -> Vec<GenericChannelId> {
+        id.as_ref()
+            .and_then(|id| ChannelId::from_str(id).ok().map(GenericChannelId::from))
+            .into_iter()
+            .collect()
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use serenity::all::GuildId;
-    use serenity::all::UserId;
-
     use super::*;
 
     #[test]
