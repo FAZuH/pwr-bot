@@ -58,7 +58,7 @@ impl AniListPlatform {
             "variables": { "id": source_id_num }
         });
 
-        let request = self.client.get(&self.base.info.api_url).json(&json);
+        let request = self.client.post(&self.base.info.api_url).json(&json);
         let response = self.send(request).await?;
         let response_json = response.json::<serde_json::Value>().await?; // Automatically converts to SourceError::JsonParseFailed
 
