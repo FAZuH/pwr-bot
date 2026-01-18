@@ -170,15 +170,18 @@ impl SeriesFeedPublisher {
             .replace("\n", "\n> ")
             .replace("<br>", "");
 
-        let old_section = old_feed_item.map_or(format!("**No previous {} **", feed_info.feed_item_name), |old| {
-            format!(
-                "**Old {}**: {}
+        let old_section = old_feed_item.map_or(
+            format!("**No previous {} **", feed_info.feed_item_name),
+            |old| {
+                format!(
+                    "**Old {}**: {}
     Published on <t:{}>",
-                feed_info.feed_item_name,
-                old.description,
-                old.published.timestamp()
-            )
-        });
+                    feed_info.feed_item_name,
+                    old.description,
+                    old.published.timestamp()
+                )
+            },
+        );
 
         let text_main = format!(
             "### {}

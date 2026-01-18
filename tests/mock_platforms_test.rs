@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
-use httpmock::Method::{GET, POST};
+use httpmock::Method::GET;
+use httpmock::Method::POST;
 use httpmock::MockServer;
 use pwr_bot::feed::Platform;
 use pwr_bot::feed::anilist_platform::AniListPlatform;
