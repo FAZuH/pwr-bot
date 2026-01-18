@@ -1,3 +1,10 @@
+## [0.1.22](https://github.com/FAZuH/pwr-bot/compare/v0.1.21...v0.1.22) (2026-01-18)
+
+
+### Bug Fixes
+
+* Fix publish error on newly released series ([5d01218](https://github.com/FAZuH/pwr-bot/commit/5d01218c0e83b71cdde59694f871c007b838c55c))
+
 ## [0.1.21](https://github.com/FAZuH/pwr-bot/compare/v0.1.20...v0.1.21) (2026-01-02)
 
 
@@ -36,25 +43,4 @@
 ### Documentation
 
 * Add Comick support to README ([67c8f9d](https://github.com/FAZuH/pwr-bot/commit/67c8f9d89ccc637129a1d101849d47146095a2a7))
-
-## [0.1.17](https://github.com/FAZuH/pwr-bot/compare/v0.1.16...v0.1.17) (2025-12-31)
-
-
-### New Features
-
-* **bot:** Add register and unregister commands ([8f47240](https://github.com/FAZuH/pwr-bot/commit/8f4724099d22e6a8ee44660b8ca357cbd1a3691f))
-* **bot:** Improve bot messages ([cb08adf](https://github.com/FAZuH/pwr-bot/commit/cb08adf5ddafaff0d7e398a95037637a2dce72da))
-
-
-### UI/UX Changes
-
-* **bot:** Improve Discord error messages ([9b284bc](https://github.com/FAZuH/pwr-bot/commit/9b284bcfbbd4576b8dee04e94d466982d69ca732))
-* **bot:** Rename register command to register_owner ([08d4b95](https://github.com/FAZuH/pwr-bot/commit/08d4b95875bd60204d14fec806f7942ee1b5a0a8))
-
-
-### Documentation
-
-* Add "Discord Setup" and "Command Registration" sections to README ([1218dcf](https://github.com/FAZuH/pwr-bot/commit/1218dcfce74616e45d874b571499cb4210edf29e))
-* **bot:** Update command registration guide in README ([09a3029](https://github.com/FAZuH/pwr-bot/commit/09a30292581b223bd8a568b50dc963ac19872768))
-* Modify README for non-Docker installation ([086507f](https://github.com/FAZuH/pwr-bot/commit/086507fb600914a85a71bb6b271a02260ffd00bf))
 
