@@ -1,3 +1,10 @@
+## [0.1.23](https://github.com/FAZuH/pwr-bot/compare/v0.1.22...v0.1.23) (2026-01-18)
+
+
+### Bug Fixes
+
+* Fix API error when subscribing to AniList feeds ([534605e](https://github.com/FAZuH/pwr-bot/commit/534605ec7e4a9531dc7c13152c5b40a3aa7f61ce))
+
 ## [0.1.22](https://github.com/FAZuH/pwr-bot/compare/v0.1.21...v0.1.22) (2026-01-18)
 
 
@@ -25,22 +32,4 @@
 ### Bug Fixes
 
 * Fix Comick getting blocked by Cloudflare ([47e947a](https://github.com/FAZuH/pwr-bot/commit/47e947a2698d15ad3e6f0007c2b7c2f9372f7f22))
-
-## [0.1.18](https://github.com/FAZuH/pwr-bot/compare/v0.1.17...v0.1.18) (2026-01-01)
-
-
-### New Features
-
-* **feed:** Add comick.dev feed source for manga ([7196370](https://github.com/FAZuH/pwr-bot/commit/7196370a0e02626b5043dfdbce26de064bcfcb70))
-
-
-### Bug Fixes
-
-* Fix internal error on command registration ([95829fc](https://github.com/FAZuH/pwr-bot/commit/95829fcefd2b307729a7ac0871f5d2f67579ae14))
-* **publisher:** Fix feed API error in publisher ([d0144be](https://github.com/FAZuH/pwr-bot/commit/d0144be2675b2d28363f2633206b41562a315f02))
-
-
-### Documentation
-
-* Add Comick support to README ([67c8f9d](https://github.com/FAZuH/pwr-bot/commit/67c8f9d89ccc637129a1d101849d47146095a2a7))
 
