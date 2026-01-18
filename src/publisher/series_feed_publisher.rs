@@ -170,7 +170,7 @@ impl SeriesFeedPublisher {
             .replace("\n", "\n> ")
             .replace("<br>", "");
 
-        let old_section = old_feed_item.map_or(String::from("**No previous version**"), |old| {
+        let old_section = old_feed_item.map_or(format!("**No previous {} **", feed_info.feed_item_name), |old| {
             format!(
                 "**Old {}**: {}
     Published on <t:{}>",
@@ -183,14 +183,14 @@ impl SeriesFeedPublisher {
         let text_main = format!(
             "### {}
 
-    > {}
+> {}
 
-    {}
+{}
 
-    **New {}**: {}
-    Published on <t:{}>
+**New {}**: {}
+Published on <t:{}>
 
-    **[Open in browser ↗]({})**",
+**[Open in browser ↗]({})**",
             feed.name,
             feed_desc,
             old_section,
