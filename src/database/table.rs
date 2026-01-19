@@ -10,6 +10,7 @@ use crate::database::model::FeedWithLatestItemRow;
 use crate::database::model::ServerSettingsModel;
 use crate::database::model::SubscriberModel;
 use crate::database::model::SubscriberType;
+use crate::database::model::VoiceLeaderboardEntry;
 use crate::database::model::VoiceSessionsModel;
 
 pub struct BaseTable {
@@ -672,3 +673,29 @@ impl_table!(
     "user_id = ?, guild_id = ?, channel_id = ?, join_time = ?, leave_time = ?",
     [user_id, guild_id, channel_id, join_time, leave_time]
 );
+
+impl VoiceSessionsTable {
+    /// Get top users by voice duration in a guild
+    pub async fn get_leaderboard(
+        &self,
+        guild_id: u64,
+        limit: u32,
+    ) -> Result<Vec<VoiceLeaderboardEntry>, DatabaseError> {
+        Ok(sqlx::query_as::<_, VoiceLeaderboardEntry>(
+            r#"
+            SELECT 
+                user_id, 
+                SUM(strftime('%s', leave_time) - strftime('%s', join_time)) as total_duration
+            FROM voice_sessions
+            WHERE guild_id = ?
+            GROUP BY user_id
+            ORDER BY total_duration DESC
+            LIMIT ?
+            "#,
+        )
+        .bind(guild_id as i64)
+        .bind(limit)
+        .fetch_all(&self.base.pool)
+        .await?)
+    }
+}

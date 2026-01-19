@@ -34,6 +34,7 @@ type Error = Box<dyn std::error::Error + Send + Sync>;
 
 use crate::bot::cog::admin_cog::AdminCog;
 use crate::bot::cog::feeds_cog::FeedsCog;
+use crate::bot::cog::voice_cog::VoiceCog;
 use crate::bot::error::BotError;
 use crate::config::Config;
 use crate::database::Database;
@@ -126,6 +127,7 @@ impl Bot {
                 FeedsCog::subscriptions(),
                 AdminCog::dump_db(),
                 AdminCog::register(),
+                VoiceCog::vc(),
             ],
             on_error: |error| Box::pin(Self::on_error(error)),
             prefix_options: poise::PrefixFrameworkOptions {

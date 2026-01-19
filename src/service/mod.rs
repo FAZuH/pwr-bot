@@ -15,13 +15,13 @@ pub struct Services {
 }
 
 impl Services {
-    pub fn new(db: Arc<Database>, platforms: Arc<Platforms>) -> Self {
-        Self {
+    pub async fn new(db: Arc<Database>, platforms: Arc<Platforms>) -> anyhow::Result<Self> {
+        Ok(Self {
             feed_subscription: Arc::new(FeedSubscriptionService::new(
                 db.clone(),
                 platforms.clone(),
             )),
-            voice_tracking: Arc::new(VoiceTrackingService::new(db.clone())),
-        }
+            voice_tracking: Arc::new(VoiceTrackingService::new(db.clone()).await?),
+        })
     }
 }

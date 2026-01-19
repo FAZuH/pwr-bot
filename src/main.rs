@@ -61,7 +61,7 @@ async fn main() -> anyhow::Result<()> {
     let platforms = Arc::new(Platforms::new());
 
     debug!("Setting up Services...");
-    let services = Arc::new(Services::new(db.clone(), platforms.clone()));
+    let services = Arc::new(Services::new(db.clone(), platforms.clone()).await?);
 
     // Setup & start bot
     info!("Starting bot...");

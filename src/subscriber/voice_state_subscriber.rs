@@ -157,6 +157,21 @@ impl Subscriber<VoiceStateEvent> for VoiceStateSubscriber {
     /// - event.old is Some and event.new.channel_id is Some if and only if user moved between
     /// voice channels
     async fn callback(&self, event: VoiceStateEvent) -> Result<()> {
+        let guild_id = event
+            .new
+            .guild_id
+            .or_else(|| event.old.as_ref().and_then(|v| v.guild_id));
+
+        if let Some(guild_id) = guild_id
+            && !self
+                .services
+                .voice_tracking
+                .is_enabled(guild_id.get())
+                .await
+        {
+            return Ok(());
+        }
+
         let old_channel = event.old.as_ref().and_then(|v| v.channel_id);
         let new_channel = event.new.channel_id;
 
@@ -188,7 +203,7 @@ mod tests {
     use crate::database::Database;
     use crate::feed::platforms::Platforms;
 
-    async fn create_mock_subscriber() -> VoiceStateSubscriber {
+    async fn create_mock_subscriber() -> anyhow::Result<VoiceStateSubscriber> {
         let t = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -198,8 +213,8 @@ mod tests {
 
         let db = Database::new(&db_url, &db_path).await.unwrap();
         db.run_migrations().await.unwrap();
-        let services = Arc::new(Services::new(Arc::new(db), Arc::new(Platforms::new())));
-        VoiceStateSubscriber::new(services)
+        let services = Arc::new(Services::new(Arc::new(db), Arc::new(Platforms::new())).await?);
+        Ok(VoiceStateSubscriber::new(services))
     }
 
     fn create_voice_state(
@@ -225,7 +240,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_join_logic() {
-        let sub = create_mock_subscriber().await;
+        let sub = create_mock_subscriber().await.unwrap();
         let event = VoiceStateEvent {
             old: None,
             new: create_voice_state(123, Some(456), Some(789), "session1"),
@@ -240,7 +255,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_leave_logic() {
-        let sub = create_mock_subscriber().await;
+        let sub = create_mock_subscriber().await.unwrap();
         let join_time = Utc::now();
         sub.session_joins
             .lock()
@@ -262,7 +277,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_move_logic() {
-        let sub = create_mock_subscriber().await;
+        let sub = create_mock_subscriber().await.unwrap();
         let join_time = Utc::now();
         sub.session_joins
             .lock()

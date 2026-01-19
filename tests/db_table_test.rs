@@ -452,6 +452,7 @@ mod server_settings_table_tests {
                 channel_id: Some(chan.to_string()),
                 subscribe_role_id: None,
                 unsubscribe_role_id: None,
+                voice_tracking_enabled: None,
             }),
         }
     }

@@ -119,6 +119,15 @@ pub struct ServerSettings {
     pub subscribe_role_id: Option<String>,
     #[serde(default)]
     pub unsubscribe_role_id: Option<String>,
+    #[serde(default)]
+    pub voice_tracking_enabled: Option<bool>,
+}
+
+#[derive(FromRow, Serialize, Default, Clone, Debug)]
+pub struct VoiceLeaderboardEntry {
+    #[sqlx(try_from = "i64")]
+    pub user_id: u64,
+    pub total_duration: i64, // Duration in seconds
 }
 
 #[derive(FromRow)]
