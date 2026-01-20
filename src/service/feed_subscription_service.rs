@@ -83,10 +83,7 @@ impl FeedSubscriptionService {
             .db
             .feed_item_table
             .select_latest_by_feed_id(feed.id)
-            .await?
-            .ok_or_else(|| ServiceError::UnexpectedResult {
-                message: "Latest feed item not found".to_string(),
-            })?;
+            .await?;
 
         let platform = self
             .platforms
@@ -111,7 +108,10 @@ impl FeedSubscriptionService {
         };
 
         // Check if version changed
-        if new_latest.title == old_latest.description {
+        if old_latest
+            .as_ref()
+            .is_some_and(|e| new_latest.title == e.description)
+        {
             return Ok(FeedUpdateResult::NoUpdate);
         }
 
@@ -443,7 +443,7 @@ pub enum FeedUpdateResult {
     NoUpdate,
     Updated {
         feed: FeedModel,
-        old_item: FeedItemModel,
+        old_item: Option<FeedItemModel>,
         new_item: FeedItemModel,
         feed_info: PlatformInfo,
     },

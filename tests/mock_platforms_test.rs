@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use httpmock::Method::GET;
+use httpmock::Method::POST;
 use httpmock::MockServer;
 use pwr_bot::feed::Platform;
 use pwr_bot::feed::anilist_platform::AniListPlatform;
@@ -24,7 +25,7 @@ async fn test_anilist_fetch_source() {
     let source_id = "101177";
 
     let mock = server.mock(|when, then| {
-        when.method(GET).body_contains(source_id); // GraphQL query contains ID
+        when.method(POST).body_contains(source_id); // GraphQL query contains ID
         then.status(200)
             .header("content-type", "application/json")
             .body(response_body);
@@ -59,7 +60,7 @@ async fn test_anilist_fetch_latest() {
     let items_id = "401043"; // Corresponds to ID in query or response
 
     let mock = server.mock(|when, then| {
-        when.method(GET).body_contains(items_id);
+        when.method(POST).body_contains(items_id);
         then.status(200)
             .header("content-type", "application/json")
             .body(response_body);
