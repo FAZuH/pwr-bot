@@ -39,7 +39,7 @@ use serenity::all::RoleId;
 use serenity::all::UserId;
 use serenity::futures::StreamExt;
 
-use crate::bot::checks::check_guild_permissions;
+use crate::bot::checks::check_author_roles;
 use crate::bot::cog::Context;
 use crate::bot::cog::Error;
 use crate::bot::components::PageNavigationComponent;
@@ -588,7 +588,12 @@ impl FeedsCog {
                 &settings.unsubscribe_role_id
             };
 
-            check_guild_permissions(ctx, role_id).await?;
+            let role_id = match role_id.as_ref() {
+                Some(id) => vec![RoleId::new(id.parse()?)],
+                None => vec![],
+            };
+
+            check_author_roles(ctx, role_id).await?;
         }
         Ok(())
     }
