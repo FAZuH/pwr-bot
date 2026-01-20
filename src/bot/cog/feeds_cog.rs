@@ -250,6 +250,7 @@ impl FeedsCog {
             if FeedsCog::update_setting_from_interaction(settings, &interaction) {
                 ctx.data()
                     .service
+                    .feed_subscription
                     .update_server_settings(guild_id, settings.clone())
                     .await?;
             }
@@ -331,12 +332,14 @@ impl FeedsCog {
             let result_str = if is_subscribe {
                 ctx.data()
                     .service
+                    .feed_subscription
                     .subscribe(url, subscriber)
                     .await
                     .map(|res| res.to_string())
             } else {
                 ctx.data()
                     .service
+                    .feed_subscription
                     .unsubscribe(url, subscriber)
                     .await
                     .map(|res| res.to_string())
@@ -509,6 +512,7 @@ impl FeedsCog {
                 };
                 ctx.data()
                     .service
+                    .feed_subscription
                     .get_or_create_subscriber(&guild_target)
                     .await
                     .ok()
@@ -529,6 +533,7 @@ impl FeedsCog {
             Some(sub) => ctx
                 .data()
                 .service
+                .feed_subscription
                 .search_subcriptions(&sub, partial)
                 .await
                 .unwrap_or_default(),
@@ -539,6 +544,7 @@ impl FeedsCog {
             Some(sub) => ctx
                 .data()
                 .service
+                .feed_subscription
                 .search_subcriptions(&sub, partial)
                 .await
                 .unwrap_or_default(),
@@ -566,6 +572,7 @@ impl FeedsCog {
             let settings = ctx
                 .data()
                 .service
+                .feed_subscription
                 .get_server_settings(guild_id.get())
                 .await?;
 
@@ -596,7 +603,12 @@ impl FeedsCog {
             subscriber_type,
             target_id,
         };
-        Ok(ctx.data().service.get_or_create_subscriber(&target).await?)
+        Ok(ctx
+            .data()
+            .service
+            .feed_subscription
+            .get_or_create_subscriber(&target)
+            .await?)
     }
 
     fn parse_and_validate_urls(links: &str) -> Result<Vec<&str>, BotError> {
