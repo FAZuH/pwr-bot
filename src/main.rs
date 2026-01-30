@@ -33,15 +33,13 @@ async fn main() -> anyhow::Result<()> {
     let init_start = Instant::now();
     dotenv().ok();
 
-    info!("Starting pwr-bot...");
-
-    debug!("Setting up Config...");
     let mut config = Config::new();
     config.load()?;
     let config = Arc::new(config);
 
-    debug!("Setting up Config...");
     setup_logging(&config)?;
+
+    info!("Starting pwr-bot...");
 
     debug!("Setting up EventBus...");
     let event_bus = Arc::new(EventBus::new());
