@@ -3,8 +3,8 @@ use std::borrow::Cow;
 use serenity::all::Permissions;
 use serenity::all::RoleId;
 
-use crate::bot::cog::Context;
-use crate::bot::cog::Error;
+use crate::bot::commands::Context;
+use crate::bot::commands::Error;
 use crate::bot::error::BotError;
 
 pub async fn is_author_guild_admin(ctx: Context<'_>) -> Result<(), Error> {

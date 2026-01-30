@@ -1,10 +1,14 @@
+use poise::Command;
 /// Cog of bot owners-only commands
 use poise::CreateReply;
 use serenity::all::CreateAttachment;
 
-use crate::bot::cog::Context;
-use crate::bot::cog::Error;
+use crate::bot::Data;
+use crate::bot::commands::Cog;
+use crate::bot::commands::Context;
+use crate::bot::commands::Error;
 use crate::database::table::Table;
+
 pub struct OwnerCog;
 
 impl OwnerCog {
@@ -45,5 +49,11 @@ impl OwnerCog {
 
         ctx.send(reply).await?;
         Ok(())
+    }
+}
+
+impl Cog for OwnerCog {
+    fn commands(&self) -> Vec<Command<Data, Error>> {
+        vec![Self::dump_db(), Self::register_owner()]
     }
 }

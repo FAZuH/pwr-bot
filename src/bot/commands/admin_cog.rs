@@ -1,10 +1,13 @@
+use poise::Command;
 /// Cog of server admin only commands
 use poise::CreateReply;
 use poise::samples::create_application_commands;
 
+use crate::bot::Data;
 use crate::bot::checks::is_author_guild_admin;
-use crate::bot::cog::Context;
-use crate::bot::cog::Error;
+use crate::bot::commands::Cog;
+use crate::bot::commands::Context;
+use crate::bot::commands::Error;
 use crate::bot::error::BotError;
 
 pub struct AdminCog;
@@ -59,5 +62,11 @@ impl AdminCog {
             .await?;
 
         Ok(())
+    }
+}
+
+impl Cog for AdminCog {
+    fn commands(&self) -> Vec<Command<Data, Error>> {
+        vec![Self::register(), Self::unregister()]
     }
 }

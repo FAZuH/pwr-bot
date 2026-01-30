@@ -1,6 +1,10 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use chrono::DateTime;
+use chrono::Duration;
+use chrono::Utc;
+use serenity::all::UserId;
 use tokio::sync::RwLock;
 
 use crate::database::Database;
@@ -89,4 +93,21 @@ impl VoiceTrackingService {
             .get_leaderboard(guild_id, limit)
             .await?)
     }
+
+    pub async fn get_voice_user_count(
+        &self,
+        _guild_id: impl Into<u64>,
+        _from: &DateTime<Utc>,
+        _until: &DateTime<Utc>,
+    ) -> anyhow::Result<u32> {
+        todo!()
+    }
+}
+
+pub struct VoiceTotalMemberData {
+    user_id: UserId,
+    name: String,
+    duration: Duration,
+    from: DateTime<Utc>,
+    until: DateTime<Utc>,
 }

@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::time::Duration;
 
 use serenity::all::ButtonStyle;
@@ -7,7 +8,7 @@ use serenity::all::CreateButton;
 use serenity::all::CreateComponent;
 use serenity::all::CreateInteractionResponse;
 
-use crate::bot::cog::Context;
+use crate::bot::commands::Context;
 
 pub struct Pagination {
     /// Current page number. Guaranteed to be >= 1 and <= pages
@@ -48,13 +49,13 @@ impl Pagination {
     }
 }
 
-pub struct PageNavigationComponent<'a> {
+pub struct PageNavigationView<'a> {
     pub pagination: Pagination,
     ctx: &'a Context<'a>,
     button_ids: Vec<String>,
 }
 
-impl<'a> PageNavigationComponent<'a> {
+impl<'a> PageNavigationView<'a> {
     pub fn new(ctx: &'a Context<'a>, pagination: Pagination) -> Self {
         let button_ids = vec![
             "first".to_string(),
@@ -96,7 +97,7 @@ impl<'a> PageNavigationComponent<'a> {
         }
     }
 
-    pub fn create_buttons(&self) -> CreateComponent<'_> {
+    pub fn create_buttons<'b>(&self) -> CreateComponent<'b> {
         let page_label = format!("{}/{}", self.pagination.current_page, self.pagination.pages);
 
         CreateComponent::ActionRow(CreateActionRow::Buttons(
@@ -120,6 +121,19 @@ impl<'a> PageNavigationComponent<'a> {
             ]
             .into(),
         ))
+    }
+
+    pub fn append_buttons_if_multipage<'b>(
+        &self,
+        components: impl Into<Cow<'b, [CreateComponent<'b>]>>,
+    ) -> Vec<CreateComponent<'b>> {
+        let mut components = components.into().into_owned();
+        if self.pagination.pages == 1 {
+            components
+        } else {
+            components.push(self.create_buttons());
+            components
+        }
     }
 }
 

@@ -1,7 +1,8 @@
 pub mod checks;
-pub mod cog;
-pub mod components;
+pub mod commands;
 pub mod error;
+pub mod error_handler;
+pub mod views;
 
 use std::collections::HashSet;
 use std::str::FromStr;
@@ -12,7 +13,6 @@ use anyhow;
 use anyhow::Result;
 use async_trait::async_trait;
 use futures::lock::Mutex;
-use log::error;
 use log::info;
 use poise::Framework;
 use poise::FrameworkOptions;
@@ -22,28 +22,20 @@ use poise::serenity_prelude::ClientBuilder;
 use poise::serenity_prelude::GatewayIntents;
 use poise::serenity_prelude::Http;
 use poise::serenity_prelude::UserId;
-use serenity::all::CreateComponent;
-use serenity::all::CreateContainer;
-use serenity::all::CreateContainerComponent;
-use serenity::all::CreateTextDisplay;
 use serenity::all::FullEvent;
-use serenity::all::MessageFlags;
 use serenity::all::Token;
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
 
-use crate::bot::cog::AdminCog;
-use crate::bot::cog::FeedsCog;
-use crate::bot::cog::OwnerCog;
-use crate::bot::cog::VoiceCog;
-use crate::bot::error::BotError;
+use crate::bot::commands::Cog;
+use crate::bot::commands::Cogs;
+use crate::bot::error_handler::ErrorHandler;
 use crate::config::Config;
 use crate::database::Database;
 use crate::event::VoiceStateEvent;
 use crate::event::event_bus::EventBus;
 use crate::feed::platforms::Platforms;
 use crate::service::Services;
-use crate::service::error::ServiceError;
 
 pub struct Data {
     pub config: Arc<Config>,
@@ -120,18 +112,9 @@ impl Bot {
     }
 
     fn create_framework(config: &Config) -> Result<Box<Framework<Data, Error>>> {
+        let cogs = Cogs;
         let options = FrameworkOptions::<Data, Error> {
-            commands: vec![
-                FeedsCog::settings(),
-                FeedsCog::subscribe(),
-                FeedsCog::unsubscribe(),
-                FeedsCog::subscriptions(),
-                OwnerCog::dump_db(),
-                OwnerCog::register_owner(),
-                AdminCog::register(),
-                AdminCog::unregister(),
-                VoiceCog::vc(),
-            ],
+            commands: cogs.commands(),
             on_error: |error| Box::pin(Self::on_error(error)),
             prefix_options: poise::PrefixFrameworkOptions {
                 prefix: Some("!".into()),
@@ -157,81 +140,7 @@ impl Bot {
     }
 
     async fn on_error(error: poise::FrameworkError<'_, Data, Error>) {
-        match error {
-            poise::FrameworkError::Command { error, ctx, .. } => {
-                let (error_title, error_description) =
-                    if let Some(bot_error) = error.downcast_ref::<BotError>() {
-                        ("❌ Action Failed", bot_error.to_string())
-                    } else if let Some(service_error) = error.downcast_ref::<ServiceError>() {
-                        // ServiceError is mostly transparent, so we can use its message
-                        ("❌ Service Error", service_error.to_string())
-                    } else {
-                        // Generic/Internal error
-                        error!(
-                            "Unexpected error in command `{}`: {:?}",
-                            ctx.command().name,
-                            error
-                        );
-                        (
-                            "❌ Internal Error",
-                            "An unexpected error occurred. Please contact the bot developer."
-                                .to_string(),
-                        )
-                    };
-
-                let error_message = format!(
-                    "## {}
-
-**Command:** `{}`
-**Error:** {}",
-                    error_title,
-                    ctx.command().name,
-                    error_description
-                );
-
-                let components = vec![CreateComponent::Container(CreateContainer::new(vec![
-                    CreateContainerComponent::TextDisplay(CreateTextDisplay::new(error_message)),
-                ]))];
-
-                let _ = ctx
-                    .send(
-                        poise::CreateReply::default()
-                            .flags(MessageFlags::IS_COMPONENTS_V2)
-                            .components(components),
-                    )
-                    .await;
-            }
-            poise::FrameworkError::ArgumentParse { error, ctx, .. } => {
-                let error_message = format!(
-                    "## ⚠️ Invalid Arguments
-
-**Command:** `{}`
-**Issue:** {}
-
-> Use `/help {}` for usage information.",
-                    ctx.command().name,
-                    error,
-                    ctx.command().name
-                );
-
-                let components = vec![CreateComponent::Container(CreateContainer::new(vec![
-                    CreateContainerComponent::TextDisplay(CreateTextDisplay::new(error_message)),
-                ]))];
-
-                let _ = ctx
-                    .send(
-                        poise::CreateReply::default()
-                            .flags(MessageFlags::IS_COMPONENTS_V2)
-                            .components(components),
-                    )
-                    .await;
-            }
-            error => {
-                if let Err(e) = poise::builtins::on_error(error).await {
-                    error!("Error while handling error: {}", e);
-                }
-            }
-        }
+        ErrorHandler::handle(error).await;
     }
 }
 

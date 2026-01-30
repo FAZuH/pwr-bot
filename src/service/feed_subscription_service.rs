@@ -178,7 +178,7 @@ impl FeedSubscriptionService {
         subscriber: &SubscriberModel,
         page: impl Into<u32>,
         per_page: impl Into<u32>,
-    ) -> Result<Vec<SubscriptionInfo>, ServiceError> {
+    ) -> Result<Vec<Subscription>, ServiceError> {
         let page = page.into() - 1;
 
         // DB 1
@@ -216,7 +216,7 @@ impl FeedSubscriptionService {
                     None
                 };
 
-                SubscriptionInfo { feed, feed_latest }
+                Subscription { feed, feed_latest }
             })
             .collect();
 
@@ -433,7 +433,7 @@ pub struct SubscriberTarget {
     pub target_id: String,               // "guild_id:channel_id" or "user_id"
 }
 
-pub struct SubscriptionInfo {
+pub struct Subscription {
     pub feed: FeedModel,
     pub feed_latest: Option<FeedItemModel>,
 }
