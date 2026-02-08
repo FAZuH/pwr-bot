@@ -1,4 +1,7 @@
+use std::path::PathBuf;
 use std::time::Duration;
+
+use log::info;
 
 use crate::error::AppError;
 
@@ -9,7 +12,8 @@ pub struct Config {
     pub db_path: String,
     pub discord_token: String,
     pub admin_id: String,
-    pub logs_path: String,
+    pub data_path: PathBuf,
+    pub logs_path: PathBuf,
 }
 
 impl Config {
@@ -33,7 +37,28 @@ impl Config {
         self.admin_id = std::env::var("ADMIN_ID").map_err(|_| AppError::MissingConfig {
             config: "ADMIN_ID".to_string(),
         })?;
-        self.logs_path = std::env::var("LOGS_PATH").unwrap_or("./logs".to_string());
+        self.data_path = self.get_dirpath_mustexist("DATA_PATH", "./data")?;
+        self.logs_path = self.get_dirpath_mustexist("LOGS_PATH", "./logs")?;
         Ok(())
+    }
+
+    fn get_dirpath_mustexist(
+        &self,
+        var: &'static str,
+        default: &'static str,
+    ) -> Result<PathBuf, AppError> {
+        #[allow(unused_must_use)]
+        let val = std::env::var(var).unwrap_or(default.to_string());
+        let path = PathBuf::from(val);
+        let path_str = path.to_string_lossy();
+        if !path.exists() {
+            info!("Directory {path_str} does not exist. Creating...");
+            let _ = std::fs::create_dir_all(&path);
+        } else if !path.is_dir() {
+            return Err(AppError::ConfigurationError {
+                msg: format!("Path {path_str} exist but is a file when it must be a directory."),
+            });
+        };
+        Ok(path)
     }
 }

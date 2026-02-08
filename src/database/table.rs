@@ -676,6 +676,7 @@ impl_table!(
 
 impl VoiceSessionsTable {
     /// Get top users by voice duration in a guild
+    /// For active sessions (leave_time == join_time), uses current time as leave_time
     pub async fn get_leaderboard(
         &self,
         guild_id: u64,
@@ -685,7 +686,13 @@ impl VoiceSessionsTable {
             r#"
             SELECT 
                 user_id, 
-                SUM(strftime('%s', leave_time) - strftime('%s', join_time)) as total_duration
+                SUM(
+                    CASE 
+                        WHEN leave_time = join_time 
+                        THEN strftime('%s', 'now') - strftime('%s', join_time)
+                        ELSE strftime('%s', leave_time) - strftime('%s', join_time)
+                    END
+                ) as total_duration
             FROM voice_sessions
             WHERE guild_id = ?
             GROUP BY user_id
@@ -700,6 +707,7 @@ impl VoiceSessionsTable {
     }
 
     /// Get paginated leaderboard with offset
+    /// For active sessions (leave_time == join_time), uses current time as leave_time
     pub async fn get_leaderboard_with_offset(
         &self,
         guild_id: u64,
@@ -710,7 +718,13 @@ impl VoiceSessionsTable {
             r#"
             SELECT 
                 user_id, 
-                SUM(strftime('%s', leave_time) - strftime('%s', join_time)) as total_duration
+                SUM(
+                    CASE 
+                        WHEN leave_time = join_time 
+                        THEN strftime('%s', 'now') - strftime('%s', join_time)
+                        ELSE strftime('%s', leave_time) - strftime('%s', join_time)
+                    END
+                ) as total_duration
             FROM voice_sessions
             WHERE guild_id = ?
             GROUP BY user_id
@@ -721,6 +735,42 @@ impl VoiceSessionsTable {
         .bind(guild_id as i64)
         .bind(limit)
         .bind(offset)
+        .fetch_all(&self.base.pool)
+        .await?)
+    }
+
+    /// Update leave_time for a specific session (user, channel, join_time combination)
+    pub async fn update_leave_time(
+        &self,
+        user_id: u64,
+        channel_id: u64,
+        join_time: &chrono::DateTime<chrono::Utc>,
+        leave_time: &chrono::DateTime<chrono::Utc>,
+    ) -> Result<(), DatabaseError> {
+        sqlx::query(
+            r#"
+            UPDATE voice_sessions 
+            SET leave_time = ?
+            WHERE user_id = ? AND channel_id = ? AND join_time = ?
+            "#,
+        )
+        .bind(leave_time)
+        .bind(user_id as i64)
+        .bind(channel_id as i64)
+        .bind(join_time)
+        .execute(&self.base.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Find all active sessions (where leave_time equals join_time)
+    pub async fn find_active_sessions(&self) -> Result<Vec<VoiceSessionsModel>, DatabaseError> {
+        Ok(sqlx::query_as::<_, VoiceSessionsModel>(
+            r#"
+            SELECT * FROM voice_sessions
+            WHERE leave_time = join_time
+            "#,
+        )
         .fetch_all(&self.base.pool)
         .await?)
     }
