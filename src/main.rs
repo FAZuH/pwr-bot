@@ -19,6 +19,8 @@ use log::info;
 use crate::bot::Bot;
 use crate::config::Config;
 use crate::database::Database;
+use crate::event::FeedUpdateEvent;
+use crate::event::VoiceStateEvent;
 use crate::event::event_bus::EventBus;
 use crate::feed::platforms::Platforms;
 use crate::logging::setup_logging;
@@ -54,14 +56,30 @@ async fn main() -> anyhow::Result<()> {
         init_start.elapsed().as_secs_f64()
     );
 
-    // Setup sources
+    // Setup Platforms
     debug!("Setting up Platforms...");
     let platforms = Arc::new(Platforms::new());
 
+    // Setup Services
     debug!("Setting up Services...");
-    let services = Arc::new(Services::new(db.clone(), platforms.clone()).await?);
+    let services = Arc::new(Services::new(db.clone(), platforms.clone(), &config.data_path).await?);
 
-    // Setup & start bot
+    // Perform voice tracking crash recovery before starting the bot
+    if let Some(ref heartbeat) = services.voice_heartbeat {
+        info!("Performing voice tracking crash recovery...");
+        let recovered = heartbeat.recover_from_crash().await?;
+        if recovered > 0 {
+            info!("Recovered {} orphaned voice sessions", recovered);
+        }
+
+        // Start the heartbeat after recovery
+        heartbeat.start().await;
+    }
+
+    // Create voice_subscriber first (needed by BotEventHandler)
+    let voice_subscriber = Arc::new(VoiceStateSubscriber::new(services.clone()));
+
+    // Setup & start bot (needs voice_subscriber for voice channel scanning)
     info!("Starting bot...");
     let mut bot = Bot::new(
         config.clone(),
@@ -69,6 +87,7 @@ async fn main() -> anyhow::Result<()> {
         event_bus.clone(),
         platforms.clone(),
         services.clone(),
+        voice_subscriber.clone(),
     )
     .await?;
     bot.start();
@@ -79,11 +98,14 @@ async fn main() -> anyhow::Result<()> {
     );
 
     // Setup subscribers
+    let discord_dm_subscriber = Arc::new(DiscordDmSubscriber::new(bot.clone(), db.clone()));
+    let discord_channel_subscriber = Arc::new(DiscordGuildSubscriber::new(bot.clone(), db.clone()));
+
     debug!("Setting up Subscribers...");
     event_bus
-        .register_subcriber(DiscordDmSubscriber::new(bot.clone(), db.clone()).into())
-        .register_subcriber(DiscordGuildSubscriber::new(bot.clone(), db.clone()).into())
-        .register_subcriber(VoiceStateSubscriber::new(services.clone()).into());
+        .register_subcriber::<FeedUpdateEvent, _>(discord_dm_subscriber.clone())
+        .register_subcriber::<FeedUpdateEvent, _>(discord_channel_subscriber.clone())
+        .register_subcriber::<VoiceStateEvent, _>(voice_subscriber.clone());
     info!(
         "Subscribers setup complete ({:.2}s).",
         init_start.elapsed().as_secs_f64()

@@ -9,14 +9,6 @@ use crate::config::Config;
 use crate::error::AppError;
 
 pub fn setup_logging(config: &Config) -> Result<(), AppError> {
-    // Create logs directory if it doesn't exist
-    std::fs::create_dir_all(&config.logs_path).map_err(|e| AppError::ConfigurationError {
-        msg: format!(
-            "Failed to create logs directory at '{}': {}",
-            config.logs_path, e
-        ),
-    })?;
-
     let file_appender = RollingFileAppender::builder()
         .rotation(Rotation::DAILY)
         .filename_prefix("pwr-bot")
@@ -26,7 +18,8 @@ pub fn setup_logging(config: &Config) -> Result<(), AppError> {
         .map_err(|e| AppError::ConfigurationError {
             msg: format!(
                 "Failed to initialize rolling file appender at '{}': {}",
-                config.logs_path, e
+                config.logs_path.to_string_lossy(),
+                e
             ),
         })?;
 
