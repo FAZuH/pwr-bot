@@ -1,3 +1,5 @@
+## [0.1.25](https://github.com/FAZuH/pwr-bot/compare/v0.1.24...v0.1.25) (2026-02-08)
+
 ## [0.1.24](https://github.com/FAZuH/pwr-bot/compare/v0.1.23...v0.1.24) (2026-02-08)
 
 
@@ -35,11 +37,4 @@
 ### Bug Fixes
 
 * **feed:** Fix MangaDex API errors ([bb921ff](https://github.com/FAZuH/pwr-bot/commit/bb921ffbbf4fc35c7ca88bdccd39fa7a923c9b39))
-
-## [0.1.20](https://github.com/FAZuH/pwr-bot/compare/v0.1.19...v0.1.20) (2026-01-02)
-
-
-### Performance Improvements
-
-* Improve /subscriptions performance ([b899493](https://github.com/FAZuH/pwr-bot/commit/b899493b9aac8435660c5341d3b1776d45660a6d))
 
