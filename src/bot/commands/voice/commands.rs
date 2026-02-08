@@ -10,6 +10,7 @@ use serenity::futures::StreamExt;
 
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;
+use crate::bot::commands::voice::LeaderboardEntry;
 use crate::bot::commands::voice::image_generator::LeaderboardImageGenerator;
 use crate::bot::commands::voice::views::LeaderboardView;
 use crate::bot::commands::voice::views::SettingsVoiceView;
@@ -121,11 +122,11 @@ pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
 
     let current_page_entries =
         &total_entries[..(total_entries.len().min(LEADERBOARD_PER_PAGE as usize))];
-    let (_, image_bytes) = generate_page(ctx, &image_gen, current_page_entries, 0).await?;
+    let page_result = generate_page(ctx, &image_gen, current_page_entries, 0).await?;
 
     let view = LeaderboardView {};
     let components = view.create_page(user_rank);
-    let attachment = CreateAttachment::bytes(image_bytes, "leaderboard.png");
+    let attachment = CreateAttachment::bytes(page_result.image_bytes, "leaderboard.png");
 
     let reply = CreateReply::new()
         .flags(MessageFlags::IS_COMPONENTS_V2)
@@ -144,10 +145,10 @@ pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
         let end = (offset + LEADERBOARD_PER_PAGE as usize).min(total_entries.len());
 
         let page_entries = &total_entries[offset..end];
-        let (_, image_bytes) = generate_page(ctx, &image_gen, page_entries, offset as u32).await?;
+        let page_result = generate_page(ctx, &image_gen, page_entries, offset as u32).await?;
 
         let components = view.create_page(user_rank);
-        let attachment = CreateAttachment::bytes(image_bytes, "leaderboard.png");
+        let attachment = CreateAttachment::bytes(page_result.image_bytes, "leaderboard.png");
 
         let reply = CreateReply::new()
             .flags(MessageFlags::IS_COMPONENTS_V2)
@@ -165,9 +166,9 @@ async fn generate_page(
     image_gen: &LeaderboardImageGenerator,
     entries: &[VoiceLeaderboardEntry],
     rank_offset: u32,
-) -> Result<(Vec<(VoiceLeaderboardEntry, String)>, Vec<u8>), Error> {
+) -> Result<super::PageGenerationResult, Error> {
     let mut entries_with_names: Vec<(VoiceLeaderboardEntry, String)> = Vec::new();
-    let mut entries_for_image: Vec<(u32, u64, String, Option<String>, i64)> = Vec::new();
+    let mut entries_for_image: Vec<LeaderboardEntry> = Vec::new();
 
     for (idx, entry) in entries.iter().enumerate() {
         let rank = rank_offset + idx as u32 + 1;
@@ -182,13 +183,13 @@ async fn generate_page(
         };
 
         entries_with_names.push((entry.clone(), display_name.clone()));
-        entries_for_image.push((
+        entries_for_image.push(LeaderboardEntry {
             rank,
-            entry.user_id,
+            user_id: entry.user_id,
             display_name,
             avatar_url,
-            entry.total_duration,
-        ));
+            duration_seconds: entry.total_duration,
+        });
     }
 
     let image_bytes = image_gen
@@ -201,5 +202,8 @@ async fn generate_page(
             )))
         })?;
 
-    Ok((entries_with_names, image_bytes))
+    Ok(super::PageGenerationResult {
+        entries_with_names,
+        image_bytes,
+    })
 }

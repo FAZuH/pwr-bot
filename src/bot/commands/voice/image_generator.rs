@@ -11,6 +11,8 @@ use image::RgbaImage;
 use image::imageops::FilterType;
 use image::imageops::overlay;
 
+use crate::bot::commands::voice::LeaderboardEntry;
+
 const BACKGROUND_COLOR: Rgba<u8> = Rgba([26, 26, 46, 255]); // Dark blue-purple #1a1a2e
 const TEXT_COLOR: Rgba<u8> = Rgba([224, 224, 224, 255]); // Light gray #e0e0e0
 const GOLD_COLOR: Rgba<u8> = Rgba([255, 215, 0, 255]); // Gold #ffd700
@@ -42,27 +44,30 @@ impl LeaderboardImageGenerator {
         })
     }
 
-    pub async fn generate_leaderboard(
-        &self,
-        entries: &[(u32, u64, String, Option<String>, i64)], // (rank, user_id, display_name, avatar_url, duration_seconds)
-    ) -> Result<Vec<u8>> {
+    pub async fn generate_leaderboard(&self, entries: &[LeaderboardEntry]) -> Result<Vec<u8>> {
         let total_height = (entries.len() as u32 * IMAGE_HEIGHT_PER_ENTRY) + PADDING * 2;
 
         // Create base image with dark background
         let mut img = RgbaImage::from_pixel(IMAGE_WIDTH, total_height, BACKGROUND_COLOR);
 
         // Draw entries
-        for (idx, (rank, user_id, display_name, avatar_url, duration)) in entries.iter().enumerate()
-        {
+        for (idx, entry) in entries.iter().enumerate() {
             let y = PADDING + (idx as u32 * IMAGE_HEIGHT_PER_ENTRY);
 
             // Download and process avatar
-            let avatar = match avatar_url {
+            let avatar = match &entry.avatar_url {
                 Some(url) => self.download_avatar_from_url(url).await.ok(),
-                None => self.download_default_avatar(*user_id).await.ok(),
+                None => self.download_default_avatar(entry.user_id).await.ok(),
             };
 
-            self.draw_entry(&mut img, y, *rank, avatar.as_ref(), display_name, *duration)?;
+            self.draw_entry(
+                &mut img,
+                y,
+                entry.rank,
+                avatar.as_ref(),
+                &entry.display_name,
+                entry.duration_seconds,
+            )?;
         }
 
         // Encode to PNG
