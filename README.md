@@ -1,24 +1,17 @@
+<div style="text-align: center;">
+● <a href="#features">Features</a> ﻿ ﻿ ﻿ ● <a href="#discord-setup">Discord Setup</a> ﻿ ﻿ ﻿ ● <a href="#installation--usage">Installation & Usage</a><br>
+● <a href="#configuration">Configuration</a> ﻿ ﻿ ﻿ ● <a href="#command-registration">Command Registration</a> ﻿ ﻿ ﻿ ● <a href="#notes-and-tips">Notes and Tips</a><br>
+● <a href="#bug-reports-and-feature-requests">Bug Reports and Feature Requests</a> ﻿ ﻿ ﻿ ● <a href="#license">License</a>
+</div>
+
 # pwr-bot
 
 Discord bot that sends feed update notifications to your DM or server.
 
-## Table of Contents
-
-- [Features](#features)
-- [Discord Setup](#discord-setup)
-- [Installation & Usage](#installation--usage)
-    - [Docker (Recommended)](#docker-recommended)
-    - [Manual (Binary)](#manual-binary)
-- [Command Registration](#command-registration)
-- [Configuration](#configuration)
-- [Notes and Tips](#notes-and-tips)
-- [Bug Reports and Feature Requests](#bug-reports-and-feature-requests)
-- [License](#license)
-
 ## Features
 
-- **Multi-Source Support:** Subscribe to updates from AniList, MangaDex, and Comick.
-- **Flexible Notifications:** Receive updates via Discord Direct Messages (DMs) or server channels.
+- **Anime and Manga Subscription:** Subscribe to updates from AniList, MangaDex, and Comick. Receive updates via Discord Direct Messages (DMs) or server channels.
+- **Voice Channel Activity Tracking:** Track time spent in voice channels and view server-wide leaderboards with user rankings.
 - **Lightning Fast:** *(Metrics based on v0.1.15)*
   - Application initialization: **~0.3s**
   - Bot initialization: **~2s**
@@ -68,7 +61,7 @@ You can run this bot using Docker (recommended) or manually using the pre-compil
     ```
 
 2.  **Configuration**
-    Copy the example environment file and configure it:
+    Copy the example environment file and configure it (see [Configuration](#configuration)):
     ```sh
     cp .env-example .env
     # Edit .env with your text editor
@@ -125,7 +118,7 @@ If you prefer to run the container directly without `docker compose` or cloning 
     Download the latest binary for your platform from the [GitHub Releases](https://github.com/FAZuH/pwr-bot/releases).
 
 2.  **Configuration**
-    Download the [.env-example](.env-example) file, rename it to `.env` in the same directory as the binary, and configure it with your text editor.
+    Download the [.env-example](.env-example) file, rename it to `.env` in the same directory as the binary, and configure it with your text editor (see [Configuration](#configuration)).
 
 3.  **Run**
     ```sh
@@ -133,6 +126,19 @@ If you prefer to run the container directly without `docker compose` or cloning 
     chmod +x pwr-bot
     ./pwr-bot
     ```
+
+## Configuration
+
+See `.env-example` for available configuration options.
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `DISCORD_TOKEN` | Your Discord bot token | **Required** |
+| `ADMIN_ID` | Discord User ID for admin commands | **Required** |
+| `POLL_INTERVAL` | Feed polling interval in seconds | `180` |
+| `DATABASE_PATH` | Path to SQLite DB file | `./data/data.db` |
+| `LOGS_PATH` | Directory for logs | `./logs` |
+| `RUST_LOG` | Log level (e.g., `info`, `debug`. Read [here](https://rust-lang-nursery.github.io/rust-cookbook/development_tools/debugging/config_log.html) for more info) | `pwr_bot=info` |
 
 ## Command Registration
 
@@ -148,19 +154,6 @@ After the bot is running and invited to your server, you need to register the sl
 > Users in other servers with "Administrator" or "Manage Server" permissions can simply run `!register` or `!unregister`.
 
 <img width="617" height="91" alt="image" src="https://github.com/user-attachments/assets/c0f508aa-e373-4df7-a574-01183eee4a98" />
-
-## Configuration
-
-See `.env-example` for available configuration options.
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `DISCORD_TOKEN` | Your Discord bot token | **Required** |
-| `ADMIN_ID` | Discord User ID for admin commands | **Required** |
-| `POLL_INTERVAL` | Feed polling interval in seconds | `180` |
-| `DATABASE_PATH` | Path to SQLite DB file | `./data/data.db` |
-| `LOGS_PATH` | Directory for logs | `./logs` |
-| `RUST_LOG` | Log level (e.g., `info`, `debug`. Read [here](https://rust-lang-nursery.github.io/rust-cookbook/development_tools/debugging/config_log.html) for more info) | `pwr_bot=info` |
 
 ## Notes and Tips
 
