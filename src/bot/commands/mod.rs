@@ -3,7 +3,7 @@ use crate::bot::Data;
 pub mod admin_cog;
 pub mod feeds;
 pub mod owner_cog;
-pub mod voice_cog;
+pub mod voice;
 
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 pub type Context<'a> = poise::Context<'a, Data, Error>;
@@ -12,7 +12,7 @@ pub use admin_cog::AdminCog;
 pub use feeds::FeedsCog;
 pub use owner_cog::OwnerCog;
 use poise::Command;
-pub use voice_cog::VoiceCog;
+pub use voice::VoiceCog;
 
 pub trait Cog {
     fn commands(&self) -> Vec<Command<Data, Error>>;

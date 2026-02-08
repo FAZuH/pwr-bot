@@ -698,4 +698,30 @@ impl VoiceSessionsTable {
         .fetch_all(&self.base.pool)
         .await?)
     }
+
+    /// Get paginated leaderboard with offset
+    pub async fn get_leaderboard_with_offset(
+        &self,
+        guild_id: u64,
+        offset: u32,
+        limit: u32,
+    ) -> Result<Vec<VoiceLeaderboardEntry>, DatabaseError> {
+        Ok(sqlx::query_as::<_, VoiceLeaderboardEntry>(
+            r#"
+            SELECT 
+                user_id, 
+                SUM(strftime('%s', leave_time) - strftime('%s', join_time)) as total_duration
+            FROM voice_sessions
+            WHERE guild_id = ?
+            GROUP BY user_id
+            ORDER BY total_duration DESC
+            LIMIT ? OFFSET ?
+            "#,
+        )
+        .bind(guild_id as i64)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&self.base.pool)
+        .await?)
+    }
 }
