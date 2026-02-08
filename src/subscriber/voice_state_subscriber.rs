@@ -239,6 +239,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial_test::serial]
     async fn test_handle_join_logic() {
         let sub = create_mock_subscriber().await.unwrap();
         let event = VoiceStateEvent {
@@ -254,6 +255,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial_test::serial]
     async fn test_handle_leave_logic() {
         let sub = create_mock_subscriber().await.unwrap();
         let join_time = Utc::now();
@@ -276,6 +278,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial_test::serial]
     async fn test_handle_move_logic() {
         let sub = create_mock_subscriber().await.unwrap();
         let join_time = Utc::now();
