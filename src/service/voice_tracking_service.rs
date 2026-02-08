@@ -2,9 +2,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use chrono::DateTime;
-use chrono::Duration;
 use chrono::Utc;
-use serenity::all::UserId;
 use tokio::sync::RwLock;
 
 use crate::database::Database;
@@ -117,10 +115,10 @@ impl VoiceTrackingService {
     }
 }
 
-pub struct VoiceTotalMemberData {
-    user_id: UserId,
-    name: String,
-    duration: Duration,
-    from: DateTime<Utc>,
-    until: DateTime<Utc>,
-}
+// pub struct VoiceTotalMemberData {
+//     user_id: UserId,
+//     name: String,
+//     duration: Duration,
+//     from: DateTime<Utc>,
+//     until: DateTime<Utc>,
+// }

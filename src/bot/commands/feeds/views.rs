@@ -22,10 +22,13 @@ use serenity::all::GenericChannelId;
 use serenity::all::MessageFlags;
 use serenity::all::RoleId;
 
-use crate::bot::commands::feeds::model::SettingsFeedsButton;
-use crate::bot::views::PageNavigationView;
 use crate::database::model::ServerSettings;
 use crate::service::feed_subscription_service::Subscription;
+
+const ENABLED_CID: &str = "feed_settings_enabled";
+const CHANNEL_CID: &str = "feed_settings_channel";
+const SUB_ROLE_CID: &str = "feed_settings_subrole";
+const UNSUB_ROLE_CID: &str = "feed_settings_unsubrole";
 
 pub struct SettingsFeedsView;
 
@@ -52,7 +55,7 @@ impl SettingsFeedsView {
         );
 
         let enabled_select = CreateSelectMenu::new(
-            SettingsFeedsButton::ENABLED_CID,
+            ENABLED_CID,
             CreateSelectMenuKind::String {
                 options: vec![
                     CreateSelectMenuOption::new("🟢 Enabled", "true").default_selection(is_enabled),
@@ -68,7 +71,7 @@ impl SettingsFeedsView {
             "### Notification Channel\n\n> 🛈  Choose where feed updates will be posted.";
 
         let channel_select = CreateSelectMenu::new(
-            SettingsFeedsButton::CHANNEL_CID,
+            CHANNEL_CID,
             CreateSelectMenuKind::Channel {
                 channel_types: Some(vec![ChannelType::Text, ChannelType::News].into()),
                 default_channels: Some(Self::parse_channel_id(settings.channel_id.as_ref()).into()),
@@ -82,7 +85,7 @@ impl SettingsFeedsView {
 
         let sub_role_text = "### Subscribe Permission\n\n> 🛈  Who can add new feeds to this server. Leave empty to allow users with \"Manage Server\" permission.";
         let sub_role_select = CreateSelectMenu::new(
-            SettingsFeedsButton::SUB_ROLE_CID,
+            SUB_ROLE_CID,
             CreateSelectMenuKind::Role {
                 default_roles: Some(
                     Self::parse_role_id(settings.subscribe_role_id.as_ref()).into(),
@@ -98,7 +101,7 @@ impl SettingsFeedsView {
 
         let unsub_role_text = "### Unsubscribe Permission\n\n> 🛈  Who can remove feeds from this server. Leave empty to allow users with \"Manage Server\" permission.";
         let unsub_role_select = CreateSelectMenu::new(
-            SettingsFeedsButton::UNSUB_ROLE_CID,
+            UNSUB_ROLE_CID,
             CreateSelectMenuKind::Role {
                 default_roles: Some(
                     Self::parse_role_id(settings.unsubscribe_role_id.as_ref()).into(),
@@ -139,19 +142,9 @@ impl SettingsFeedsView {
     }
 }
 
-pub struct SubscriptionsListView<'a> {
-    navigation: PageNavigationView<'a>,
-}
+pub struct SubscriptionsListView;
 
-impl<'a> SubscriptionsListView<'a> {
-    pub fn new(navigation: PageNavigationView<'a>) -> Self {
-        Self { navigation }
-    }
-
-    pub fn navigation(&mut self) -> &mut PageNavigationView<'a> {
-        &mut self.navigation
-    }
-
+impl<'a> SubscriptionsListView {
     pub fn create_reply(&self, subscriptions: Vec<Subscription>) -> CreateReply<'_> {
         CreateReply::new()
             .flags(MessageFlags::IS_COMPONENTS_V2)
@@ -169,7 +162,7 @@ impl<'a> SubscriptionsListView<'a> {
             .collect();
 
         let container = CreateComponent::Container(CreateContainer::new(sections));
-        self.navigation.append_buttons_if_multipage(vec![container])
+        vec![container]
     }
 
     fn create_empty() -> Vec<CreateComponent<'a>> {

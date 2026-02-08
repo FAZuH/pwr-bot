@@ -1,12 +1,10 @@
 use crate::bot::commands::Cog;
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;
-use crate::bot::commands::voice::controller::LeaderboardController;
-use crate::bot::commands::voice::controller::SettingsController;
 
-pub mod controller;
-pub mod view;
+pub mod commands;
 pub mod image_generator;
+pub mod views;
 
 pub struct VoiceCog;
 
@@ -21,12 +19,12 @@ impl VoiceCog {
         default_member_permissions = "ADMINISTRATOR | MANAGE_GUILD"
     )]
     pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
-        SettingsController::execute(ctx).await
+        commands::settings(ctx).await
     }
 
     #[poise::command(slash_command)]
     pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
-        LeaderboardController::execute(ctx).await
+        commands::leaderboard(ctx).await
     }
 }
 
