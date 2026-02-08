@@ -163,20 +163,37 @@ impl SeriesFeedPublisher {
         old_feed_item: Option<&FeedItemModel>,
         new_feed_item: &FeedItemModel,
     ) -> CreateMessage<'static> {
-        let title =
-            CreateComponent::TextDisplay(CreateTextDisplay::new(format!("### {}", feed.name)));
-
-        let feed_desc = feed
-            .description
-            .trim_start()
-            .trim_end()
-            .replace("\n", "\n> ")
-            .replace("<br>", "");
-        let feed_desc: String = html2md::parse_html(&feed_desc)
-            // Prevent panic from splitting in the middle of a multi-byte UTF-8 character
-            .chars()
-            .take(500)
-            .collect();
+        let feed_desc = if feed.description.is_empty() {
+            "> No description.".to_string()
+        } else {
+            let mut desc = html2md::parse_html(&feed.description)
+                .replace(r"\*", "*")
+                .replace(r"\_", "_")
+                .replace(r"\[", "[")
+                .replace(r"\]", "]")
+                .replace(r"\(", "(")
+                .replace(r"\)", ")")
+                .replace("\n\n", "\n")
+                .replace("\n", "\n> \n> ")
+                .trim_start()
+                .trim_end()
+                .trim_end_matches("\n")
+                .to_string();
+            desc.insert_str(0, "> ");
+            
+            if desc.len() > 500 {
+                // Prevent panic from splitting in the middle of a multi-byte UTF-8 character
+                desc = desc.chars()
+                    .take(500)
+                    .collect::<String>()
+                    .trim_end()
+                    .trim_end_matches("\n")
+                    .to_string();
+                desc.push_str("\n> ...");
+            }
+            
+            desc
+        };
 
         let old_section = old_feed_item.map_or(
             format!("**No previous {} **", feed_info.feed_item_name),
@@ -191,7 +208,9 @@ impl SeriesFeedPublisher {
         );
 
         let text_main = format!(
-            "> {}
+            "### {}
+
+{}
 
 {}
 
@@ -199,6 +218,7 @@ impl SeriesFeedPublisher {
 Published on <t:{}>
 
 **[Open in browser ↗]({})**",
+            feed.name,
             feed_desc,
             old_section,
             feed_info.feed_item_name,
@@ -226,7 +246,7 @@ Published on <t:{}>
 
         CreateMessage::new()
             .flags(MessageFlags::IS_COMPONENTS_V2)
-            .components(vec![title, container])
+            .components(vec![container])
     }
 
     fn check_feed_wait(feeds_length: usize, poll_interval: &Duration) -> Sleep {
