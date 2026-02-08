@@ -163,19 +163,26 @@ impl SeriesFeedPublisher {
         old_feed_item: Option<&FeedItemModel>,
         new_feed_item: &FeedItemModel,
     ) -> CreateMessage<'static> {
+        let title =
+            CreateComponent::TextDisplay(CreateTextDisplay::new(format!("### {}", feed.name)));
+
         let feed_desc = feed
             .description
             .trim_start()
             .trim_end()
             .replace("\n", "\n> ")
             .replace("<br>", "");
+        let feed_desc: String = html2md::parse_html(&feed_desc)
+            // Prevent panic from splitting in the middle of a multi-byte UTF-8 character
+            .chars()
+            .take(500)
+            .collect();
 
         let old_section = old_feed_item.map_or(
             format!("**No previous {} **", feed_info.feed_item_name),
             |old| {
                 format!(
-                    "**Old {}**: {}
-    Published on <t:{}>",
+                    "**Old {}**: {}\nPublished on <t:{}>",
                     feed_info.feed_item_name,
                     old.description,
                     old.published.timestamp()
@@ -184,9 +191,7 @@ impl SeriesFeedPublisher {
         );
 
         let text_main = format!(
-            "### {}
-
-> {}
+            "> {}
 
 {}
 
@@ -194,7 +199,6 @@ impl SeriesFeedPublisher {
 Published on <t:{}>
 
 **[Open in browser ↗]({})**",
-            feed.name,
             feed_desc,
             old_section,
             feed_info.feed_item_name,
@@ -204,7 +208,7 @@ Published on <t:{}>
         );
         let text_footer = format!("-# {}", feed_info.copyright_notice);
 
-        let container = CreateContainer::new(vec![
+        let container = CreateComponent::Container(CreateContainer::new(vec![
             CreateContainerComponent::Section(CreateSection::new(
                 vec![CreateSectionComponent::TextDisplay(CreateTextDisplay::new(
                     text_main,
@@ -218,11 +222,11 @@ Published on <t:{}>
                 CreateMediaGalleryItem::new(CreateUnfurledMediaItem::new(feed.cover_url.clone())),
             ])),
             CreateContainerComponent::TextDisplay(CreateTextDisplay::new(text_footer)),
-        ]);
+        ]));
 
         CreateMessage::new()
             .flags(MessageFlags::IS_COMPONENTS_V2)
-            .components(vec![CreateComponent::Container(container)])
+            .components(vec![title, container])
     }
 
     fn check_feed_wait(feeds_length: usize, poll_interval: &Duration) -> Sleep {
