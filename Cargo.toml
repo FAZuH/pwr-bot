@@ -32,7 +32,11 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 wreq = "5.3.0"
 wreq-util = "2.2.6"
+image = "0.25"
+ab_glyph = "0.2"
+html2md = "0.2.15"
 
 [dev-dependencies]
 httpmock = "0.7.0"
 mockall = "0.13.0"
+serial_test = "3.2.0"

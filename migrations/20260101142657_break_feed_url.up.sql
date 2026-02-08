@@ -15,12 +15,12 @@ CREATE TABLE feeds_new (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
     description TEXT DEFAULT NULL,
-    cover_url TEXT DEFAULT NULL,
-    tags TEXT DEFAULT NULL,
     platform_id TEXT NOT NULL,
     source_id TEXT NOT NULL,
     items_id TEXT NOT NULL,
-    source_url TEXT NOT NULL
+    source_url TEXT NOT NULL,
+    cover_url TEXT DEFAULT NULL,
+    tags TEXT DEFAULT NULL
 );
 
 -- Copy and transform data
@@ -50,6 +50,7 @@ DROP TABLE feeds;
 ALTER TABLE feeds_new RENAME TO feeds;
 
 CREATE UNIQUE INDEX idx_feeds_platform_source ON feeds(platform_id, source_id);
+CREATE UNIQUE INDEX idx_feeds_source_url ON feeds(source_url);
 
 -- Recreate dependent tables
 CREATE TABLE feed_items (

@@ -7,6 +7,7 @@ use pwr_bot::database::model::ServerSettings;
 use pwr_bot::database::model::ServerSettingsModel;
 use pwr_bot::database::model::SubscriberModel;
 use pwr_bot::database::model::SubscriberType;
+use pwr_bot::database::model::VoiceSessionsModel;
 use pwr_bot::database::table::Table;
 
 mod common;
@@ -89,6 +90,22 @@ macro_rules! create_item {
             })
             .await
             .expect("Failed to insert item")
+    };
+}
+
+macro_rules! create_voice_session {
+    ($db:expr, $user:expr, $guild:expr, $chan:expr) => {
+        $db.voice_sessions_table
+            .insert(&VoiceSessionsModel {
+                user_id: $user,
+                guild_id: $guild,
+                channel_id: $chan,
+                join_time: Utc::now(),
+                leave_time: Utc::now() + Duration::hours(1),
+                ..Default::default()
+            })
+            .await
+            .expect("Failed to insert voice session")
     };
 }
 
@@ -355,6 +372,22 @@ mod feed_subscription_table_tests {
         assert_eq!(page.len(), 1);
     });
 
+    db_test!(select_paginated_with_latest, |db| {
+        let f_id = create_feed!(db, "Feed");
+        let s_id = create_sub!(db, "u1");
+        create_subscription!(db, f_id, s_id);
+        create_item!(db, f_id, "Latest Item");
+
+        let page = db
+            .feed_subscription_table
+            .select_paginated_with_latest_by_subscriber_id(s_id, 0u32, 10u32)
+            .await
+            .unwrap();
+        assert_eq!(page.len(), 1);
+        assert_eq!(page[0].name, "Feed");
+        assert_eq!(page[0].item_description, Some("Latest Item".to_string()));
+    });
+
     db_test!(delete_subscription, |db| {
         let f_id = create_feed!(db, "Feed");
         let s_id = create_sub!(db, "u1");
@@ -419,6 +452,7 @@ mod server_settings_table_tests {
                 channel_id: Some(chan.to_string()),
                 subscribe_role_id: None,
                 unsubscribe_role_id: None,
+                voice_tracking_enabled: None,
             }),
         }
     }
@@ -472,5 +506,36 @@ mod server_settings_table_tests {
                 .unwrap()
                 .is_none()
         );
+    });
+}
+
+mod voice_sessions_table_tests {
+    use super::*;
+
+    db_test!(insert_and_select, |db| {
+        let id = create_voice_session!(db, 1, 2, 3);
+        assert!(id > 0);
+
+        let fetched = db.voice_sessions_table.select(&id).await.unwrap().unwrap();
+        assert_eq!(fetched.user_id, 1);
+        assert_eq!(fetched.guild_id, 2);
+        assert_eq!(fetched.channel_id, 3);
+    });
+
+    db_test!(update, |db| {
+        let id = create_voice_session!(db, 1, 2, 3);
+        let mut session = db.voice_sessions_table.select(&id).await.unwrap().unwrap();
+
+        session.channel_id = 4;
+        db.voice_sessions_table.update(&session).await.unwrap();
+
+        let fetched = db.voice_sessions_table.select(&id).await.unwrap().unwrap();
+        assert_eq!(fetched.channel_id, 4);
+    });
+
+    db_test!(delete, |db| {
+        let id = create_voice_session!(db, 1, 2, 3);
+        db.voice_sessions_table.delete(&id).await.unwrap();
+        assert!(db.voice_sessions_table.select(&id).await.unwrap().is_none());
     });
 }

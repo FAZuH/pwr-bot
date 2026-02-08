@@ -152,6 +152,7 @@ async fn test_server_settings_service() {
         channel_id: Some("chan_456".to_string()),
         subscribe_role_id: Some("role_123".to_string()),
         unsubscribe_role_id: Some("role_456".to_string()),
+        voice_tracking_enabled: None,
     };
     service
         .update_server_settings(guild_id, new_settings.clone())
