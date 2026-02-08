@@ -384,4 +384,48 @@ mod tests {
         assert_ne!(sessions.get("session1").unwrap().join_time, join_time);
         assert_eq!(sessions.get("session1").unwrap().channel_id, 782);
     }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_track_existing_user() {
+        let sub = create_mock_subscriber().await.unwrap();
+
+        // Track an existing user (simulating startup scan)
+        let result = sub.track_existing_user(123, 456, 789, "session1").await;
+        assert!(result.is_ok());
+
+        // Verify session is tracked in memory
+        let sessions = sub.active_sessions.lock().await;
+        assert!(sessions.contains_key("session1"));
+        assert_eq!(sessions.get("session1").unwrap().user_id, 123);
+        assert_eq!(sessions.get("session1").unwrap().guild_id, 456);
+        assert_eq!(sessions.get("session1").unwrap().channel_id, 789);
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_track_existing_user_already_tracked() {
+        let sub = create_mock_subscriber().await.unwrap();
+
+        // Track user first time
+        sub.track_existing_user(123, 456, 789, "session1")
+            .await
+            .unwrap();
+
+        let first_join_time = {
+            let sessions = sub.active_sessions.lock().await;
+            sessions.get("session1").unwrap().join_time
+        };
+
+        // Try to track same user again (should not create duplicate)
+        sub.track_existing_user(123, 456, 789, "session1")
+            .await
+            .unwrap();
+
+        // Verify still only one session and join_time hasn't changed
+        let sessions = sub.active_sessions.lock().await;
+        assert!(sessions.contains_key("session1"));
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions.get("session1").unwrap().join_time, first_join_time);
+    }
 }
