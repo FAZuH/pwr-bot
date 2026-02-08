@@ -23,24 +23,23 @@ use crate::event::event_bus::EventBus;
 use crate::feed::platforms::Platforms;
 use crate::logging::setup_logging;
 use crate::publisher::series_feed_publisher::SeriesFeedPublisher;
-use crate::service::feed_subscription_service::FeedSubscriptionService;
+use crate::service::Services;
 use crate::subscriber::discord_dm_subscriber::DiscordDmSubscriber;
 use crate::subscriber::discord_guild_subscriber::DiscordGuildSubscriber;
+use crate::subscriber::voice_state_subscriber::VoiceStateSubscriber;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let init_start = Instant::now();
     dotenv().ok();
 
-    info!("Starting pwr-bot...");
-
-    debug!("Setting up Config...");
     let mut config = Config::new();
     config.load()?;
     let config = Arc::new(config);
 
-    debug!("Setting up Config...");
     setup_logging(&config)?;
+
+    info!("Starting pwr-bot...");
 
     debug!("Setting up EventBus...");
     let event_bus = Arc::new(EventBus::new());
@@ -59,19 +58,17 @@ async fn main() -> anyhow::Result<()> {
     debug!("Setting up Platforms...");
     let platforms = Arc::new(Platforms::new());
 
-    debug!("Setting up FeedSubscriptionService...");
-    let service = Arc::new(FeedSubscriptionService {
-        db: db.clone(),
-        platforms: platforms.clone(),
-    });
+    debug!("Setting up Services...");
+    let services = Arc::new(Services::new(db.clone(), platforms.clone()).await?);
 
     // Setup & start bot
     info!("Starting bot...");
     let mut bot = Bot::new(
         config.clone(),
         db.clone(),
+        event_bus.clone(),
         platforms.clone(),
-        service.clone(),
+        services.clone(),
     )
     .await?;
     bot.start();
@@ -83,11 +80,10 @@ async fn main() -> anyhow::Result<()> {
 
     // Setup subscribers
     debug!("Setting up Subscribers...");
-    let dm_subscriber = DiscordDmSubscriber::new(bot.clone(), db.clone());
-    let webhook_subscriber = DiscordGuildSubscriber::new(bot.clone(), db.clone());
     event_bus
-        .register_subcriber(dm_subscriber.into())
-        .register_subcriber(webhook_subscriber.into());
+        .register_subcriber(DiscordDmSubscriber::new(bot.clone(), db.clone()).into())
+        .register_subcriber(DiscordGuildSubscriber::new(bot.clone(), db.clone()).into())
+        .register_subcriber(VoiceStateSubscriber::new(services.clone()).into());
     info!(
         "Subscribers setup complete ({:.2}s).",
         init_start.elapsed().as_secs_f64()
@@ -95,7 +91,12 @@ async fn main() -> anyhow::Result<()> {
 
     // Setup publishers
     debug!("Setting up Publishers...");
-    SeriesFeedPublisher::new(service.clone(), event_bus.clone(), config.poll_interval).start()?;
+    SeriesFeedPublisher::new(
+        services.feed_subscription.clone(),
+        event_bus.clone(),
+        config.poll_interval,
+    )
+    .start()?;
     info!(
         "Publishers setup complete ({:.2}s).",
         init_start.elapsed().as_secs_f64()

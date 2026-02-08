@@ -11,6 +11,7 @@ use crate::database::table::FeedTable;
 use crate::database::table::ServerSettingsTable;
 use crate::database::table::SubscriberTable;
 use crate::database::table::TableBase;
+use crate::database::table::VoiceSessionsTable;
 
 pub mod error;
 pub mod model;
@@ -23,6 +24,7 @@ pub struct Database {
     pub subscriber_table: SubscriberTable,
     pub feed_subscription_table: FeedSubscriptionTable,
     pub server_settings_table: ServerSettingsTable,
+    pub voice_sessions_table: VoiceSessionsTable,
 }
 
 impl Database {
@@ -47,6 +49,7 @@ impl Database {
         let subscriber_table = SubscriberTable::new(pool.clone());
         let feed_subscription_table = FeedSubscriptionTable::new(pool.clone());
         let server_settings_table = ServerSettingsTable::new(pool.clone());
+        let voice_sessions_table = VoiceSessionsTable::new(pool.clone());
 
         Ok(Self {
             pool,
@@ -55,6 +58,7 @@ impl Database {
             subscriber_table,
             feed_subscription_table,
             server_settings_table,
+            voice_sessions_table,
         })
     }
 
@@ -69,6 +73,7 @@ impl Database {
         self.subscriber_table.drop_table().await?;
         self.feed_subscription_table.drop_table().await?;
         self.server_settings_table.drop_table().await?;
+        self.voice_sessions_table.drop_table().await?;
         Ok(())
     }
 
@@ -78,6 +83,7 @@ impl Database {
         self.subscriber_table.delete_all().await?;
         self.feed_subscription_table.delete_all().await?;
         self.server_settings_table.delete_all().await?;
+        self.voice_sessions_table.delete_all().await?;
         Ok(())
     }
 }

@@ -1,7 +1,8 @@
 pub mod checks;
-pub mod cog;
-pub mod components;
+pub mod commands;
 pub mod error;
+pub mod error_handler;
+pub mod ui;
 
 use std::collections::HashSet;
 use std::str::FromStr;
@@ -10,8 +11,8 @@ use std::time::Duration;
 
 use anyhow;
 use anyhow::Result;
+use async_trait::async_trait;
 use futures::lock::Mutex;
-use log::error;
 use log::info;
 use poise::Framework;
 use poise::FrameworkOptions;
@@ -21,29 +22,26 @@ use poise::serenity_prelude::ClientBuilder;
 use poise::serenity_prelude::GatewayIntents;
 use poise::serenity_prelude::Http;
 use poise::serenity_prelude::UserId;
-use serenity::all::CreateComponent;
-use serenity::all::CreateContainer;
-use serenity::all::CreateContainerComponent;
-use serenity::all::CreateTextDisplay;
-use serenity::all::MessageFlags;
+use serenity::all::FullEvent;
 use serenity::all::Token;
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
 
-use crate::bot::cog::admin_cog::AdminCog;
-use crate::bot::cog::feeds_cog::FeedsCog;
-use crate::bot::error::BotError;
+use crate::bot::commands::Cog;
+use crate::bot::commands::Cogs;
+use crate::bot::error_handler::ErrorHandler;
 use crate::config::Config;
 use crate::database::Database;
+use crate::event::VoiceStateEvent;
+use crate::event::event_bus::EventBus;
 use crate::feed::platforms::Platforms;
-use crate::service::error::ServiceError;
-use crate::service::feed_subscription_service::FeedSubscriptionService;
+use crate::service::Services;
 
 pub struct Data {
     pub config: Arc<Config>,
     pub db: Arc<Database>,
     pub platforms: Arc<Platforms>,
-    pub service: Arc<FeedSubscriptionService>,
+    pub service: Arc<Services>,
 }
 
 pub struct Bot {
@@ -57,16 +55,24 @@ impl Bot {
     pub async fn new(
         config: Arc<Config>,
         db: Arc<Database>,
+        event_bus: Arc<EventBus>,
         platforms: Arc<Platforms>,
-        service: Arc<FeedSubscriptionService>,
+        service: Arc<Services>,
     ) -> Result<Self> {
         info!("Initializing bot...");
 
         let framework = Self::create_framework(&config)?;
-        let data = Self::create_data(config.clone(), db, platforms, service);
+        let data = Arc::new(Data {
+            config: config.clone(),
+            db,
+            platforms,
+            service,
+        });
         let (token, intents) = Self::create_client_config(&config)?;
+        let event_handler = Arc::new(BotEventHandler::new(event_bus));
 
         let client_builder = ClientBuilder::new(token.clone(), intents)
+            .event_handler(event_handler)
             .framework(framework)
             .data(data);
 
@@ -106,15 +112,9 @@ impl Bot {
     }
 
     fn create_framework(config: &Config) -> Result<Box<Framework<Data, Error>>> {
+        let cogs = Cogs;
         let options = FrameworkOptions::<Data, Error> {
-            commands: vec![
-                FeedsCog::settings(),
-                FeedsCog::subscribe(),
-                FeedsCog::unsubscribe(),
-                FeedsCog::subscriptions(),
-                AdminCog::dump_db(),
-                AdminCog::register(),
-            ],
+            commands: cogs.commands(),
             on_error: |error| Box::pin(Self::on_error(error)),
             prefix_options: poise::PrefixFrameworkOptions {
                 prefix: Some("!".into()),
@@ -133,20 +133,6 @@ impl Bot {
         ))
     }
 
-    fn create_data(
-        config: Arc<Config>,
-        db: Arc<Database>,
-        platforms: Arc<Platforms>,
-        service: Arc<FeedSubscriptionService>,
-    ) -> Arc<Data> {
-        Arc::new(Data {
-            config,
-            db,
-            platforms,
-            service,
-        })
-    }
-
     fn create_client_config(config: &Config) -> Result<(Token, GatewayIntents)> {
         let token = Token::from_str(&config.discord_token)?;
         let intents = GatewayIntents::non_privileged() | GatewayIntents::MESSAGE_CONTENT;
@@ -154,80 +140,32 @@ impl Bot {
     }
 
     async fn on_error(error: poise::FrameworkError<'_, Data, Error>) {
-        match error {
-            poise::FrameworkError::Command { error, ctx, .. } => {
-                let (error_title, error_description) =
-                    if let Some(bot_error) = error.downcast_ref::<BotError>() {
-                        ("❌ Action Failed", bot_error.to_string())
-                    } else if let Some(service_error) = error.downcast_ref::<ServiceError>() {
-                        // ServiceError is mostly transparent, so we can use its message
-                        ("❌ Service Error", service_error.to_string())
-                    } else {
-                        // Generic/Internal error
-                        error!(
-                            "Unexpected error in command `{}`: {:?}",
-                            ctx.command().name,
-                            error
-                        );
-                        (
-                            "❌ Internal Error",
-                            "An unexpected error occurred. Please contact the bot developer."
-                                .to_string(),
-                        )
-                    };
+        ErrorHandler::handle(error).await;
+    }
+}
 
-                let error_message = format!(
-                    "## {}
+pub struct BotEventHandler {
+    event_bus: Arc<EventBus>,
+}
 
-**Command:** `{}`
-**Error:** {}",
-                    error_title,
-                    ctx.command().name,
-                    error_description
-                );
+impl BotEventHandler {
+    pub fn new(event_bus: Arc<EventBus>) -> Self {
+        Self { event_bus }
+    }
+}
 
-                let components = vec![CreateComponent::Container(CreateContainer::new(vec![
-                    CreateContainerComponent::TextDisplay(CreateTextDisplay::new(error_message)),
-                ]))];
-
-                let _ = ctx
-                    .send(
-                        poise::CreateReply::default()
-                            .flags(MessageFlags::IS_COMPONENTS_V2)
-                            .components(components),
-                    )
-                    .await;
+#[async_trait]
+impl poise::serenity_prelude::EventHandler for BotEventHandler {
+    async fn dispatch(&self, _context: &poise::serenity_prelude::Context, _event: &FullEvent) {
+        #[allow(clippy::single_match)]
+        match _event {
+            FullEvent::VoiceStateUpdate { old, new, .. } => {
+                self.event_bus.publish(VoiceStateEvent {
+                    old: old.clone(),
+                    new: new.clone(),
+                });
             }
-            poise::FrameworkError::ArgumentParse { error, ctx, .. } => {
-                let error_message = format!(
-                    "## ⚠️ Invalid Arguments
-
-**Command:** `{}`
-**Issue:** {}
-
-> Use `/help {}` for usage information.",
-                    ctx.command().name,
-                    error,
-                    ctx.command().name
-                );
-
-                let components = vec![CreateComponent::Container(CreateContainer::new(vec![
-                    CreateContainerComponent::TextDisplay(CreateTextDisplay::new(error_message)),
-                ]))];
-
-                let _ = ctx
-                    .send(
-                        poise::CreateReply::default()
-                            .flags(MessageFlags::IS_COMPONENTS_V2)
-                            .components(components),
-                    )
-                    .await;
-            }
-            error => {
-                if let Err(e) = poise::builtins::on_error(error).await {
-                    error!("Error while handling error: {}", e);
-                }
-            }
-        }
+            _ => {}
+        };
     }
 }
