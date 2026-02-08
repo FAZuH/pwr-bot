@@ -1,3 +1,10 @@
+## [0.1.26](https://github.com/FAZuH/pwr-bot/compare/v0.1.25...v0.1.26) (2026-02-08)
+
+
+### Bug Fixes
+
+* Fix feed notification message formatting ([5fb7c04](https://github.com/FAZuH/pwr-bot/commit/5fb7c044cb1c768986e0fbc794796f35a06af516))
+
 ## [0.1.25](https://github.com/FAZuH/pwr-bot/compare/v0.1.24...v0.1.25) (2026-02-08)
 
 ## [0.1.24](https://github.com/FAZuH/pwr-bot/compare/v0.1.23...v0.1.24) (2026-02-08)
@@ -30,11 +37,4 @@
 ### Bug Fixes
 
 * Fix publish error on newly released series ([5d01218](https://github.com/FAZuH/pwr-bot/commit/5d01218c0e83b71cdde59694f871c007b838c55c))
-
-## [0.1.21](https://github.com/FAZuH/pwr-bot/compare/v0.1.20...v0.1.21) (2026-01-02)
-
-
-### Bug Fixes
-
-* **feed:** Fix MangaDex API errors ([bb921ff](https://github.com/FAZuH/pwr-bot/commit/bb921ffbbf4fc35c7ca88bdccd39fa7a923c9b39))
 
