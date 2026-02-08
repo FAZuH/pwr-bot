@@ -113,6 +113,26 @@ impl VoiceTrackingService {
     ) -> anyhow::Result<u32> {
         todo!()
     }
+
+    /// Update leave_time for a specific session (heartbeat mechanism)
+    pub async fn update_session_leave_time(
+        &self,
+        user_id: u64,
+        channel_id: u64,
+        join_time: &DateTime<Utc>,
+        leave_time: &DateTime<Utc>,
+    ) -> anyhow::Result<()> {
+        self.db
+            .voice_sessions_table
+            .update_leave_time(user_id, channel_id, join_time, leave_time)
+            .await?;
+        Ok(())
+    }
+
+    /// Find all active sessions from database
+    pub async fn find_active_sessions(&self) -> anyhow::Result<Vec<VoiceSessionsModel>> {
+        Ok(self.db.voice_sessions_table.find_active_sessions().await?)
+    }
 }
 
 // pub struct VoiceTotalMemberData {

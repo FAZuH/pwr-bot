@@ -434,3 +434,163 @@ async fn test_disabled_guilds_cache_on_init() {
 
     common::teardown_db(db_path).await;
 }
+
+#[tokio::test]
+async fn test_get_leaderboard_includes_active_sessions() {
+    let (db, db_path) = common::setup_db().await;
+    let service = VoiceTrackingService::new(db.clone())
+        .await
+        .expect("Failed to create service");
+
+    let guild_id: u64 = 999999;
+    let now = Utc::now();
+
+    // Insert a mix of completed and active sessions
+    // Active session: leave_time == join_time
+    let sessions = vec![
+        VoiceSessionsModel {
+            id: 0,
+            user_id: 2001,
+            guild_id,
+            channel_id: 9001,
+            join_time: now - Duration::hours(2),
+            leave_time: now, // Completed: 2 hours (7200 seconds)
+        },
+        VoiceSessionsModel {
+            id: 0,
+            user_id: 2002,
+            guild_id,
+            channel_id: 9001,
+            join_time: now - Duration::hours(1),
+            leave_time: now - Duration::hours(1), // Active: 1 hour so far
+        },
+        VoiceSessionsModel {
+            id: 0,
+            user_id: 2003,
+            guild_id,
+            channel_id: 9001,
+            join_time: now - Duration::minutes(30),
+            leave_time: now - Duration::minutes(30), // Active: 30 minutes so far
+        },
+    ];
+
+    for session in &sessions {
+        service
+            .insert(session)
+            .await
+            .expect("Failed to insert session");
+    }
+
+    // Get leaderboard
+    let leaderboard = service
+        .get_leaderboard(guild_id, 10)
+        .await
+        .expect("Failed to get leaderboard");
+
+    // Should have 3 users
+    assert_eq!(leaderboard.len(), 3, "Should have 3 users in leaderboard");
+
+    // User 2001 should be first with ~7200 seconds (2 hours completed)
+    assert_eq!(leaderboard[0].user_id, 2001);
+    assert!(
+        leaderboard[0].total_duration >= 7200,
+        "User 2001 should have at least 7200 seconds"
+    );
+
+    // User 2002 should be second with ~3600 seconds (1 hour active)
+    assert_eq!(leaderboard[1].user_id, 2002);
+    assert!(
+        leaderboard[1].total_duration >= 3600,
+        "User 2002 should have at least 3600 seconds"
+    );
+
+    // User 2003 should be third with ~1800 seconds (30 minutes active)
+    assert_eq!(leaderboard[2].user_id, 2003);
+    assert!(
+        leaderboard[2].total_duration >= 1800,
+        "User 2003 should have at least 1800 seconds"
+    );
+
+    common::teardown_db(db_path).await;
+}
+
+#[tokio::test]
+async fn test_get_leaderboard_active_and_completed_mixed() {
+    let (db, db_path) = common::setup_db().await;
+    let service = VoiceTrackingService::new(db.clone())
+        .await
+        .expect("Failed to create service");
+
+    let guild_id: u64 = 888888;
+    let now = Utc::now();
+
+    // User with multiple sessions: one completed, one active
+    let sessions = vec![
+        // User 3001: Completed session (1 hour)
+        VoiceSessionsModel {
+            id: 0,
+            user_id: 3001,
+            guild_id,
+            channel_id: 9001,
+            join_time: now - Duration::hours(3),
+            leave_time: now - Duration::hours(2),
+        },
+        // User 3001: Active session (30 minutes so far)
+        VoiceSessionsModel {
+            id: 0,
+            user_id: 3001,
+            guild_id,
+            channel_id: 9001,
+            join_time: now - Duration::minutes(30),
+            leave_time: now - Duration::minutes(30),
+        },
+        // User 3002: Only completed sessions (2 hours total)
+        VoiceSessionsModel {
+            id: 0,
+            user_id: 3002,
+            guild_id,
+            channel_id: 9001,
+            join_time: now - Duration::hours(4),
+            leave_time: now - Duration::hours(3),
+        },
+        VoiceSessionsModel {
+            id: 0,
+            user_id: 3002,
+            guild_id,
+            channel_id: 9001,
+            join_time: now - Duration::hours(2),
+            leave_time: now - Duration::hours(1),
+        },
+    ];
+
+    for session in &sessions {
+        service
+            .insert(session)
+            .await
+            .expect("Failed to insert session");
+    }
+
+    // Get leaderboard
+    let leaderboard = service
+        .get_leaderboard(guild_id, 10)
+        .await
+        .expect("Failed to get leaderboard");
+
+    assert_eq!(leaderboard.len(), 2, "Should have 2 users");
+
+    // User 3002 should be first with exactly 7200 seconds (2 hours completed)
+    assert_eq!(leaderboard[0].user_id, 3002);
+    assert_eq!(
+        leaderboard[0].total_duration, 7200,
+        "User 3002 should have exactly 7200 seconds"
+    );
+
+    // User 3001 should be second with ~5400 seconds (3600 completed + ~1800 active)
+    assert_eq!(leaderboard[1].user_id, 3001);
+    assert!(
+        leaderboard[1].total_duration >= 5400,
+        "User 3001 should have at least 5400 seconds (3600 completed + ~1800 active)"
+    );
+
+    common::teardown_db(db_path).await;
+}
