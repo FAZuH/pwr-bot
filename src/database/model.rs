@@ -57,7 +57,7 @@ pub struct FeedModel {
 /// Tracks the history of updates for a content source. Each new episode,
 /// chapter, or post creates a new version entry. The latest version can be
 /// determined by querying for the most recent `published` timestamp.
-#[derive(FromRow, Serialize, Default, Clone)]
+#[derive(FromRow, Serialize, Default, Clone, Debug)]
 pub struct FeedItemModel {
     #[serde(default)]
     pub id: i32,

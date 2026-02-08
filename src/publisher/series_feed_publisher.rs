@@ -6,28 +6,13 @@ use std::time::Duration;
 use log::debug;
 use log::error;
 use log::info;
-use serenity::all::CreateComponent;
-use serenity::all::CreateContainer;
-use serenity::all::CreateContainerComponent;
-use serenity::all::CreateMediaGallery;
-use serenity::all::CreateMediaGalleryItem;
-use serenity::all::CreateMessage;
-use serenity::all::CreateSection;
-use serenity::all::CreateSectionAccessory;
-use serenity::all::CreateSectionComponent;
-use serenity::all::CreateSeparator;
-use serenity::all::CreateTextDisplay;
-use serenity::all::CreateThumbnail;
-use serenity::all::CreateUnfurledMediaItem;
-use serenity::all::MessageFlags;
 use tokio::time::Sleep;
 use tokio::time::sleep;
 
-use crate::database::model::FeedItemModel;
 use crate::database::model::FeedModel;
+use crate::event::FeedUpdateData;
 use crate::event::FeedUpdateEvent;
 use crate::event::event_bus::EventBus;
-use crate::feed::PlatformInfo;
 use crate::service::feed_subscription_service::FeedSubscriptionService;
 use crate::service::feed_subscription_service::FeedUpdateResult;
 
@@ -139,12 +124,21 @@ impl SeriesFeedPublisher {
                     new_item.description
                 );
 
-                // Set vars
-                let message = self.create_message(&feed, &feed_info, old_item.as_ref(), &new_item);
+                let feed = Arc::new(feed);
+                let feed_info = Arc::new(feed_info);
+                let old_feed_item = old_item.map(Arc::new);
+                let new_feed_item = Arc::new(new_item);
+
+                let data = FeedUpdateData {
+                    feed: feed.clone(),
+                    feed_info: feed_info.clone(),
+                    old_feed_item: old_feed_item.clone(),
+                    new_feed_item: new_feed_item.clone(),
+                };
 
                 // Publish update event
                 info!("Publishing update event for {}.", self.get_feed_desc(&feed));
-                let event = FeedUpdateEvent { feed, message };
+                let event = FeedUpdateEvent::new(data);
                 self.event_bus.publish(event);
                 Ok(())
             }
@@ -153,100 +147,6 @@ impl SeriesFeedPublisher {
 
     fn get_feed_desc(&self, feed: &FeedModel) -> String {
         format!("feed id `{}` ({})", feed.id, feed.name)
-    }
-
-    /// Insipred by freestuffbot.xyz's notifications
-    fn create_message(
-        &self,
-        feed: &FeedModel,
-        feed_info: &PlatformInfo,
-        old_feed_item: Option<&FeedItemModel>,
-        new_feed_item: &FeedItemModel,
-    ) -> CreateMessage<'static> {
-        let feed_desc = if feed.description.is_empty() {
-            "> No description.".to_string()
-        } else {
-            let mut desc = html2md::parse_html(&feed.description)
-                .replace(r"\*", "*")
-                .replace(r"\_", "_")
-                .replace(r"\[", "[")
-                .replace(r"\]", "]")
-                .replace(r"\(", "(")
-                .replace(r"\)", ")")
-                .replace("\n\n", "\n")
-                .replace("\n", "\n> \n> ")
-                .trim_start()
-                .trim_end()
-                .trim_end_matches("\n")
-                .to_string();
-            desc.insert_str(0, "> ");
-            
-            if desc.len() > 500 {
-                // Prevent panic from splitting in the middle of a multi-byte UTF-8 character
-                desc = desc.chars()
-                    .take(500)
-                    .collect::<String>()
-                    .trim_end()
-                    .trim_end_matches("\n")
-                    .to_string();
-                desc.push_str("\n> ...");
-            }
-            
-            desc
-        };
-
-        let old_section = old_feed_item.map_or(
-            format!("**No previous {} **", feed_info.feed_item_name),
-            |old| {
-                format!(
-                    "**Old {}**: {}\nPublished on <t:{}>",
-                    feed_info.feed_item_name,
-                    old.description,
-                    old.published.timestamp()
-                )
-            },
-        );
-
-        let text_main = format!(
-            "### {}
-
-{}
-
-{}
-
-**New {}**: {}
-Published on <t:{}>
-
-**[Open in browser ↗]({})**",
-            feed.name,
-            feed_desc,
-            old_section,
-            feed_info.feed_item_name,
-            new_feed_item.description,
-            new_feed_item.published.timestamp(),
-            feed.source_url
-        );
-        let text_footer = format!("-# {}", feed_info.copyright_notice);
-
-        let container = CreateComponent::Container(CreateContainer::new(vec![
-            CreateContainerComponent::Section(CreateSection::new(
-                vec![CreateSectionComponent::TextDisplay(CreateTextDisplay::new(
-                    text_main,
-                ))],
-                CreateSectionAccessory::Thumbnail(CreateThumbnail::new(
-                    CreateUnfurledMediaItem::new(feed_info.logo_url.clone()),
-                )),
-            )),
-            CreateContainerComponent::Separator(CreateSeparator::new(false)),
-            CreateContainerComponent::MediaGallery(CreateMediaGallery::new(vec![
-                CreateMediaGalleryItem::new(CreateUnfurledMediaItem::new(feed.cover_url.clone())),
-            ])),
-            CreateContainerComponent::TextDisplay(CreateTextDisplay::new(text_footer)),
-        ]));
-
-        CreateMessage::new()
-            .flags(MessageFlags::IS_COMPONENTS_V2)
-            .components(vec![container])
     }
 
     fn check_feed_wait(feeds_length: usize, poll_interval: &Duration) -> Sleep {

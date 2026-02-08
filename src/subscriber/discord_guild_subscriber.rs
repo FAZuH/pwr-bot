@@ -39,7 +39,7 @@ impl DiscordGuildSubscriber {
             .await?;
 
         for sub in subs {
-            if let Err(e) = self.handle_sub(&sub, event.message.clone()).await {
+            if let Err(e) = self.handle_sub(&sub, event.data.create_message()).await {
                 error!(
                     "Error handling subscriber id `{}` target `{}`: {:?}",
                     sub.id, sub.target_id, e
