@@ -4,60 +4,44 @@
 "use strict";
 const config = require("conventional-changelog-conventionalcommits");
 
+// chore!(major) -> major (0)
+// chore!(minor) -> minor (1)
+// otherwise -> patch (2)
 function whatBump(commits) {
-  let releaseType = 2;
-
-  // chore(bump) or chore! -> major (0)
-  // feat! or fix! -> minor (1)
-  // otherwise -> patch (2)
-
-  for (let commit of commits) {
-    if (commit == null || !commit.header) continue;
-
-    // We want to select the highest release type
-    if (
-      commit.header.startsWith("chore(bump)") ||
-      commit.header.startsWith("chore!") ||
-      commit.header.startsWith("feat(major)")
-    ) {
-      releaseType = 0;
-    } else if (
-      (commit.header.startsWith("feat!") || commit.header.startsWith("fix!")) &&
-      releaseType > 1
-    ) {
-      releaseType = 1;
-    }
+  const hasMajor = commits.some(c => c?.header?.startsWith("chore!(major)"));
+  const hasMinor = commits.some(c => c?.header?.startsWith("chore!(minor)"));
+  
+  if (hasMajor) {
+    return {
+      releaseType: "major",
+      reason: "Found a commit with a chore!(major) type."
+    };
   }
-
-  let releaseTypes = ["major", "minor", "patch"];
-
-  let reason = "No special commits found. Defaulting to a patch.";
-
-  switch (releaseTypes[releaseType]) {
-    case "major":
-      reason = "Found a commit with a chore(bump) or feat(major) header.";
-      break;
-    case "minor":
-      reason = "Found a commit with a feat! or fix! header.";
-      break;
+  
+  if (hasMinor) {
+    return {
+      releaseType: "minor",
+      reason: "Found a commit with a chore!(minor) type."
+    };
   }
-
+  
   return {
-    releaseType: releaseTypes[releaseType],
-    reason: reason,
+    releaseType: "patch",
+    reason: "No special commits found. Defaulting to a patch."
   };
 }
 
 async function getOptions() {
   let options = await config({
     types: [
-      { type: "feat", section: "New Features" },
-      { type: "feature", section: "New Features" },
-      { type: "fix", section: "Bug Fixes" },
+      { type: "feat!", section: "New Features" },
+      { type: "fix!", section: "Bug Fixes" },
       { type: "perf", section: "Performance Improvements" },
       { type: "ui", section: "UI/UX Changes" },
       { type: "revert", section: "Reverts" },
       { type: "docs", section: "Documentation" },
+      { type: "feat", section: "New Features (internal)", hidden: true },
+      { type: "fix", section: "Bug Fixes (internal)", hidden: true },
       { type: "style", section: "Styles", hidden: true },
       { type: "chore", section: "Miscellaneous Chores", hidden: true },
       { type: "refactor", section: "Code Refactoring", hidden: true },
