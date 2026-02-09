@@ -1,0 +1,64 @@
+%% UI UML
+classDiagram
+    %% Interfaces
+    class ComponentProvider~T = CreateComponent~ {
+        <<interface>>
+        create() Vec~T~*
+    }
+
+    class ResponseView {
+        <<interface>>
+        create_reply() CreateReply
+        create_message() CreateMessage
+    }
+
+    class ComponentAttachable~T = CreateComponent~ {
+        <<interface>>
+        attach(&mut Vec~T~)
+    }
+
+    class InteractableComponent {
+        <<interface>>
+        listen() ComponentInteractionCollector*
+    }
+
+    %% Interface Relationships
+    ResponseView --|> ComponentProvider
+    ComponentAttachable --|> ComponentProvider
+    InteractableComponent --|> ComponentAttachable
+
+    %% Classes
+    class AboutView
+
+    class SettingsMainView
+    class SettingsFeedView
+    class SettingsVoiceView
+    class SettingsNavigationView
+
+    class FeedSubscribeView
+    class FeedUnsubscribeView
+    class FeedSubscriptionBatchView
+    class FeedSubscriptionListView
+    class FeedNavigationView
+
+    class VoiceLeaderboardView
+    
+    class PaginationView
+
+    %% Class Relationships
+    AboutView ..|> ResponseView
+
+    SettingsMainView ..|> ResponseView
+    SettingsFeedView ..|> ResponseView
+    SettingsVoiceView ..|> ResponseView
+
+    FeedSubscribeView ..|> ResponseView
+    FeedUnsubscribeView ..|> ResponseView
+    FeedSubscriptionBatchView ..|> ResponseView
+    FeedSubscriptionListView ..|> ResponseView
+
+    VoiceLeaderboardView ..|> ResponseView
+
+    PaginationView ..|> InteractableComponent
+    FeedNavigationView ..|> InteractableComponent
+    SettingsNavigationView ..|> InteractableComponent
