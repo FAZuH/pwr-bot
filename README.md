@@ -1,7 +1,7 @@
 <div align="center">
-● <a href="#features">Features</a> ﻿ ﻿ ﻿ ● <a href="#discord-setup">Discord Setup</a> ﻿ ﻿ ﻿ ● <a href="#installation--usage">Installation & Usage</a><br>
-● <a href="#configuration">Configuration</a> ﻿ ﻿ ﻿ ● <a href="#command-registration">Command Registration</a> ﻿ ﻿ ﻿ ● <a href="#notes-and-tips">Notes and Tips</a><br>
-● <a href="#bug-reports-and-feature-requests">Bug Reports and Feature Requests</a> ﻿ ﻿ ﻿ ● <a href="#license">License</a>
+● <a href="#features">Features</a> ﻿ ● <a href="#discord-setup">Discord Setup</a> ﻿ ● <a href="#installation--usage">Installation & Usage</a><br>
+● <a href="#configuration">Configuration</a> ﻿ ● <a href="#command-registration">Command Registration</a> ﻿ ● <a href="#notes-and-tips">Notes and Tips</a><br>
+● <a href="#bug-reports-and-feature-requests">Bug Reports and Feature Requests</a> ﻿ ● <a href="#license">License</a>
 </div>
 
 # pwr-bot
