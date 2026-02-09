@@ -15,8 +15,8 @@ use crate::bot::commands::voice::image_generator::LeaderboardImageGenerator;
 use crate::bot::commands::voice::views::LeaderboardView;
 use crate::bot::commands::voice::views::SettingsVoiceView;
 use crate::bot::error::BotError;
-use crate::bot::ui::pagination::PaginationHandler;
-use crate::bot::ui::pagination::PaginationState;
+use crate::bot::views::pagination::PaginationHandler;
+use crate::bot::views::pagination::PaginationState;
 use crate::database::model::VoiceLeaderboardEntry;
 
 const INTERACTION_TIMEOUT_SECS: u64 = 120;
