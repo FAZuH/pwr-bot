@@ -34,19 +34,19 @@ function whatBump(commits) {
 async function getOptions() {
   let options = await config({
     types: [
-      { type: "feat!", section: "New Features" },
-      { type: "fix!", section: "Bug Fixes" },
-      { type: "perf!", section: "Performance Improvements" },
-      { type: "ui!", section: "UI/UX Changes" },
-      { type: "docs!", section: "Documentation" },
-      { type: "revert!", section: "Reverts" },
+      { type: "feat", section: "New Features" },
+      { type: "fix", section: "Bug Fixes" },
+      { type: "perf", section: "Performance Improvements" },
+      { type: "ui", section: "UI/UX Changes" },
+      { type: "docs", section: "Documentation" },
+      { type: "revert", section: "Reverts" },
 
-      { type: "feat", section: "New Features (internal)", hidden: true },
-      { type: "fix", section: "Bug Fixes (internal)", hidden: true },
-      { type: "perf", section: "Performance Improvements (internal)", hidden: true },
-      { type: "ui", section: "UI/UX Changes (internal)", hidden: true },
-      { type: "docs", section: "Documentation (internal)", hidden: true },
-      { type: "revert", section: "Reverts (internal)", hidden: true },
+      { type: "ifeat", section: "New Features (internal)", hidden: true },
+      { type: "ifix", section: "Bug Fixes (internal)", hidden: true },
+      { type: "iperf", section: "Performance Improvements (internal)", hidden: true },
+      { type: "iui", section: "UI/UX Changes (internal)", hidden: true },
+      { type: "idocs", section: "Documentation (internal)", hidden: true },
+      { type: "irevert", section: "Reverts (internal)", hidden: true },
 
       { type: "style", section: "Styles", hidden: true },
       { type: "chore", section: "Miscellaneous Chores", hidden: true },
