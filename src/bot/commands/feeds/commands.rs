@@ -18,7 +18,7 @@ use crate::bot::commands::feeds::views::SubscriptionsListView;
 use crate::bot::error::BotError;
 use crate::bot::ui::pagination::PaginationHandler;
 use crate::bot::ui::pagination::PaginationState;
-use crate::bot::ui::validators::parse_and_validate_urls;
+use crate::bot::utils::parse_and_validate_urls;
 use crate::database::model::FeedModel;
 use crate::database::model::ServerSettings;
 use crate::database::model::SubscriberModel;
