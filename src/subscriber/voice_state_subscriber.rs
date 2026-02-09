@@ -280,8 +280,7 @@ mod tests {
 
         let db = Database::new(&db_url, &db_path).await.unwrap();
         db.run_migrations().await.unwrap();
-        let services =
-            Arc::new(Services::new(Arc::new(db), Arc::new(Platforms::new()), "/tmp").await?);
+        let services = Arc::new(Services::new(Arc::new(db), Arc::new(Platforms::new())).await?);
         Ok(VoiceStateSubscriber::new(services))
     }
 

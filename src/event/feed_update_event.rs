@@ -57,6 +57,8 @@ impl FeedUpdateData {
             "> No description.".to_string()
         } else {
             let mut desc = html2md::parse_html(&feed.description)
+                .trim_start()
+                .trim_end()
                 .replace(r"\*", "*")
                 .replace(r"\_", "_")
                 .replace(r"\[", "[")
@@ -65,8 +67,6 @@ impl FeedUpdateData {
                 .replace(r"\)", ")")
                 .replace("\n\n", "\n")
                 .replace("\n", "\n> \n> ")
-                .trim_start()
-                .trim_end()
                 .trim_end_matches("\n")
                 .to_string();
             desc.insert_str(0, "> ");
@@ -77,7 +77,6 @@ impl FeedUpdateData {
                     .chars()
                     .take(500)
                     .collect::<String>()
-                    .trim_end()
                     .trim_end_matches("\n")
                     .to_string();
                 desc.push_str("\n> ...");

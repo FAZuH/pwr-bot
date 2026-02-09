@@ -5,9 +5,9 @@ pub mod error;
 pub mod event;
 pub mod feed;
 pub mod logging;
-pub mod publisher;
 pub mod service;
 pub mod subscriber;
+pub mod task;
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -24,11 +24,12 @@ use crate::event::VoiceStateEvent;
 use crate::event::event_bus::EventBus;
 use crate::feed::platforms::Platforms;
 use crate::logging::setup_logging;
-use crate::publisher::series_feed_publisher::SeriesFeedPublisher;
 use crate::service::Services;
 use crate::subscriber::discord_dm_subscriber::DiscordDmSubscriber;
 use crate::subscriber::discord_guild_subscriber::DiscordGuildSubscriber;
 use crate::subscriber::voice_state_subscriber::VoiceStateSubscriber;
+use crate::task::series_feed_publisher::SeriesFeedPublisher;
+use crate::task::voice_heartbeat::VoiceHeartbeatManager;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -62,19 +63,17 @@ async fn main() -> anyhow::Result<()> {
 
     // Setup Services
     debug!("Setting up Services...");
-    let services = Arc::new(Services::new(db.clone(), platforms.clone(), &config.data_path).await?);
+    let services = Arc::new(Services::new(db.clone(), platforms.clone()).await?);
 
     // Perform voice tracking crash recovery before starting the bot
-    if let Some(ref heartbeat) = services.voice_heartbeat {
-        info!("Performing voice tracking crash recovery...");
-        let recovered = heartbeat.recover_from_crash().await?;
-        if recovered > 0 {
-            info!("Recovered {} orphaned voice sessions", recovered);
-        }
-
-        // Start the heartbeat after recovery
-        heartbeat.start().await;
+    let voice_heartbeat =
+        VoiceHeartbeatManager::new(&config.data_path, services.voice_tracking.clone());
+    info!("Performing voice tracking crash recovery...");
+    let recovered = voice_heartbeat.recover_from_crash().await?;
+    if recovered > 0 {
+        info!("Recovered {} orphaned voice sessions", recovered);
     }
+    voice_heartbeat.start().await;
 
     // Create voice_subscriber first (needed by BotEventHandler)
     let voice_subscriber = Arc::new(VoiceStateSubscriber::new(services.clone()));

@@ -1,7 +1,7 @@
-<div style="text-align: center;">
-● <a href="#features">Features</a> ﻿ ﻿ ﻿ ● <a href="#discord-setup">Discord Setup</a> ﻿ ﻿ ﻿ ● <a href="#installation--usage">Installation & Usage</a><br>
-● <a href="#configuration">Configuration</a> ﻿ ﻿ ﻿ ● <a href="#command-registration">Command Registration</a> ﻿ ﻿ ﻿ ● <a href="#notes-and-tips">Notes and Tips</a><br>
-● <a href="#bug-reports-and-feature-requests">Bug Reports and Feature Requests</a> ﻿ ﻿ ﻿ ● <a href="#license">License</a>
+<div align="center">
+● <a href="#features">Features</a> ﻿ ● <a href="#discord-setup">Discord Setup</a> ﻿ ● <a href="#installation--usage">Installation & Usage</a><br>
+● <a href="#configuration">Configuration</a> ﻿ ● <a href="#command-registration">Command Registration</a> ﻿ ● <a href="#notes-and-tips">Notes and Tips</a><br>
+● <a href="#bug-reports-and-feature-requests">Bug Reports and Feature Requests</a> ﻿ ● <a href="#license">License</a>
 </div>
 
 # pwr-bot
@@ -138,6 +138,7 @@ See `.env-example` for available configuration options.
 | `POLL_INTERVAL` | Feed polling interval in seconds | `180` |
 | `DATABASE_PATH` | Path to SQLite DB file | `./data/data.db` |
 | `LOGS_PATH` | Directory for logs | `./logs` |
+| `DATA_PATH` | Directory for logs | `./data` |
 | `RUST_LOG` | Log level (e.g., `info`, `debug`. Read [here](https://rust-lang-nursery.github.io/rust-cookbook/development_tools/debugging/config_log.html) for more info) | `pwr_bot=info` |
 
 ## Command Registration
