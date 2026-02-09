@@ -538,4 +538,131 @@ mod voice_sessions_table_tests {
         db.voice_sessions_table.delete(&id).await.unwrap();
         assert!(db.voice_sessions_table.select(&id).await.unwrap().is_none());
     });
+
+    db_test!(update_leave_time, |db| {
+        let join_time = Utc::now();
+        let session = VoiceSessionsModel {
+            id: 0,
+            user_id: 100,
+            guild_id: 200,
+            channel_id: 300,
+            join_time,
+            leave_time: join_time, // Active session
+        };
+        db.voice_sessions_table
+            .insert(&session)
+            .await
+            .expect("Failed to insert session");
+
+        // Update leave_time
+        let new_leave_time = join_time + Duration::hours(1);
+        db.voice_sessions_table
+            .update_leave_time(100, 300, &join_time, &new_leave_time)
+            .await
+            .expect("Failed to update leave time");
+
+        // Verify the update
+        let sessions: Vec<VoiceSessionsModel> = db
+            .voice_sessions_table
+            .select_all()
+            .await
+            .expect("Failed to select sessions");
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].leave_time, new_leave_time);
+        assert_ne!(sessions[0].leave_time, sessions[0].join_time);
+    });
+
+    db_test!(find_active_sessions, |db| {
+        let now = Utc::now();
+
+        // Insert mix of active and completed sessions
+        let active_session = VoiceSessionsModel {
+            id: 0,
+            user_id: 100,
+            guild_id: 200,
+            channel_id: 300,
+            join_time: now - Duration::hours(1),
+            leave_time: now - Duration::hours(1), // Active
+        };
+        db.voice_sessions_table
+            .insert(&active_session)
+            .await
+            .expect("Failed to insert active session");
+
+        let completed_session = VoiceSessionsModel {
+            id: 0,
+            user_id: 101,
+            guild_id: 200,
+            channel_id: 301,
+            join_time: now - Duration::hours(2),
+            leave_time: now - Duration::hours(1), // Completed
+        };
+        db.voice_sessions_table
+            .insert(&completed_session)
+            .await
+            .expect("Failed to insert completed session");
+
+        let another_active = VoiceSessionsModel {
+            id: 0,
+            user_id: 102,
+            guild_id: 200,
+            channel_id: 302,
+            join_time: now - Duration::minutes(30),
+            leave_time: now - Duration::minutes(30), // Active
+        };
+        db.voice_sessions_table
+            .insert(&another_active)
+            .await
+            .expect("Failed to insert another active session");
+
+        // Find active sessions
+        let active = db
+            .voice_sessions_table
+            .find_active_sessions()
+            .await
+            .expect("Failed to find active sessions");
+
+        // Should find exactly 2 active sessions
+        assert_eq!(active.len(), 2);
+
+        // Verify correct users are found
+        let user_ids: Vec<u64> = active.iter().map(|s| s.user_id).collect();
+        assert!(user_ids.contains(&100), "User 100 should be active");
+        assert!(user_ids.contains(&102), "User 102 should be active");
+        assert!(!user_ids.contains(&101), "User 101 should not be active");
+    });
+
+    db_test!(find_active_sessions_empty, |db| {
+        // No sessions inserted
+        let active = db
+            .voice_sessions_table
+            .find_active_sessions()
+            .await
+            .expect("Failed to find active sessions");
+
+        // Should return empty vector
+        assert!(active.is_empty());
+    });
+
+    db_test!(update_leave_time_no_match, |db| {
+        let join_time = Utc::now();
+
+        // Try to update a session that doesn't exist
+        let new_leave_time = join_time + Duration::hours(1);
+        let result = db
+            .voice_sessions_table
+            .update_leave_time(999, 999, &join_time, &new_leave_time)
+            .await;
+
+        // Should not error, just not update anything
+        assert!(result.is_ok());
+
+        // Verify no sessions exist
+        let sessions: Vec<VoiceSessionsModel> = db
+            .voice_sessions_table
+            .select_all()
+            .await
+            .expect("Failed to select sessions");
+        assert!(sessions.is_empty());
+    });
 }
