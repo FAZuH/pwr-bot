@@ -287,14 +287,15 @@ async fn process_subscription_batch(
     if let Some(mut view) = view {
         let timeout = Duration::from_secs(INTERACTION_TIMEOUT_SECS);
         if let Some((action, _)) = view.listen_once(&ctx, timeout).await
-            && action == SubscriptionBatchAction::ViewSubscriptions {
-                // Convert subscriber type back to SendInto
-                let send_into = match subscriber.r#type {
-                    SubscriberType::Guild => SendInto::Server,
-                    SubscriberType::Dm => SendInto::DM,
-                };
-                subscriptions(ctx, Some(send_into)).await?;
-            }
+            && action == SubscriptionBatchAction::ViewSubscriptions
+        {
+            // Convert subscriber type back to SendInto
+            let send_into = match subscriber.r#type {
+                SubscriberType::Guild => SendInto::Server,
+                SubscriberType::Dm => SendInto::DM,
+            };
+            subscriptions(ctx, Some(send_into)).await?;
+        }
     }
 
     Ok(())
