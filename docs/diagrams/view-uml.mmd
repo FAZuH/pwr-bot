@@ -17,9 +17,17 @@ classDiagram
         attach(&mut Vec~T~)
     }
 
-    class InteractableComponentView {
+    class InteractableComponentView~T = Action~ {
         <<interface>>
-        listen() ComponentInteractionCollector*
+        listen_once(ctx, timeout) Option~T, ComponentInteraction~
+        stream(ctx, timeout) impl Stream~T, ComponentInteraction~
+        handle(interaction) Option~T~
+    }
+
+    class Action {
+        <<interface>>
+        ALL &'static [&'static str]
+        as_str() &'static str
     }
 
     %% Interface Relationships

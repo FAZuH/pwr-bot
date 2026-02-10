@@ -4,6 +4,8 @@ use poise::CreateReply;
 use serenity::all::ButtonStyle;
 use serenity::all::ChannelId;
 use serenity::all::ChannelType;
+use serenity::all::ComponentInteraction;
+use serenity::all::ComponentInteractionDataKind;
 use serenity::all::CreateActionRow;
 use serenity::all::CreateButton;
 use serenity::all::CreateComponent;
@@ -22,24 +24,50 @@ use serenity::all::GenericChannelId;
 use serenity::all::MessageFlags;
 use serenity::all::RoleId;
 
+use crate::bot::views::Action;
+use crate::bot::views::InteractableComponentView;
+use crate::bot::views::ResponseComponentView;
+use crate::bot::views::ViewProvider;
+use crate::custom_id_enum;
 use crate::database::model::ServerSettings;
 use crate::service::feed_subscription_service::Subscription;
 
-const ENABLED_CID: &str = "feed_settings_enabled";
-const CHANNEL_CID: &str = "feed_settings_channel";
-const SUB_ROLE_CID: &str = "feed_settings_subrole";
-const UNSUB_ROLE_CID: &str = "feed_settings_unsubrole";
+custom_id_enum!(SettingsFeedsAction {
+    Enabled,
+    Channel,
+    SubRole,
+    UnsubRole
+});
 
-pub struct SettingsFeedsView;
+pub struct SettingsFeedsView<'a> {
+    pub settings: &'a mut ServerSettings,
+}
 
-impl SettingsFeedsView {
-    pub fn create_reply(settings: &ServerSettings) -> CreateReply<'_> {
-        CreateReply::new()
-            .flags(MessageFlags::IS_COMPONENTS_V2)
-            .components(Self::create_components(settings))
+impl<'a> SettingsFeedsView<'a> {
+    pub fn new(settings: &'a mut ServerSettings) -> Self {
+        Self { settings }
     }
 
-    pub fn create_components(settings: &ServerSettings) -> Vec<CreateComponent<'_>> {
+    pub fn set_settings(&mut self, settings: &'a mut ServerSettings) {
+        self.settings = settings;
+    }
+
+    fn parse_role_id(id: Option<&String>) -> Vec<RoleId> {
+        id.and_then(|id| RoleId::from_str(id).ok())
+            .into_iter()
+            .collect()
+    }
+
+    fn parse_channel_id(id: Option<&String>) -> Vec<GenericChannelId> {
+        id.and_then(|id| ChannelId::from_str(id).ok().map(GenericChannelId::from))
+            .into_iter()
+            .collect()
+    }
+}
+
+impl<'a> ViewProvider<'a> for SettingsFeedsView<'_> {
+    fn create(&self) -> Vec<CreateComponent<'a>> {
+        let settings = &self.settings;
         let is_enabled = settings.enabled.unwrap_or(true);
 
         let status_text = format!(
@@ -55,7 +83,7 @@ impl SettingsFeedsView {
         );
 
         let enabled_select = CreateSelectMenu::new(
-            ENABLED_CID,
+            SettingsFeedsAction::Enabled.as_str(),
             CreateSelectMenuKind::String {
                 options: vec![
                     CreateSelectMenuOption::new("🟢 Enabled", "true").default_selection(is_enabled),
@@ -71,7 +99,7 @@ impl SettingsFeedsView {
             "### Notification Channel\n\n> 🛈  Choose where feed updates will be posted.";
 
         let channel_select = CreateSelectMenu::new(
-            CHANNEL_CID,
+            SettingsFeedsAction::Channel.as_str(),
             CreateSelectMenuKind::Channel {
                 channel_types: Some(vec![ChannelType::Text, ChannelType::News].into()),
                 default_channels: Some(Self::parse_channel_id(settings.channel_id.as_ref()).into()),
@@ -85,7 +113,7 @@ impl SettingsFeedsView {
 
         let sub_role_text = "### Subscribe Permission\n\n> 🛈  Who can add new feeds to this server. Leave empty to allow users with \"Manage Server\" permission.";
         let sub_role_select = CreateSelectMenu::new(
-            SUB_ROLE_CID,
+            SettingsFeedsAction::SubRole.as_str(),
             CreateSelectMenuKind::Role {
                 default_roles: Some(
                     Self::parse_role_id(settings.subscribe_role_id.as_ref()).into(),
@@ -101,7 +129,7 @@ impl SettingsFeedsView {
 
         let unsub_role_text = "### Unsubscribe Permission\n\n> 🛈  Who can remove feeds from this server. Leave empty to allow users with \"Manage Server\" permission.";
         let unsub_role_select = CreateSelectMenu::new(
-            UNSUB_ROLE_CID,
+            SettingsFeedsAction::UnsubRole.as_str(),
             CreateSelectMenuKind::Role {
                 default_roles: Some(
                     Self::parse_role_id(settings.unsubscribe_role_id.as_ref()).into(),
@@ -128,17 +156,44 @@ impl SettingsFeedsView {
 
         vec![container]
     }
+}
 
-    fn parse_role_id(id: Option<&String>) -> Vec<RoleId> {
-        id.and_then(|id| RoleId::from_str(id).ok())
-            .into_iter()
-            .collect()
-    }
+impl ResponseComponentView for SettingsFeedsView<'_> {}
 
-    fn parse_channel_id(id: Option<&String>) -> Vec<GenericChannelId> {
-        id.and_then(|id| ChannelId::from_str(id).ok().map(GenericChannelId::from))
-            .into_iter()
-            .collect()
+#[async_trait::async_trait]
+impl InteractableComponentView<SettingsFeedsAction> for SettingsFeedsView<'_> {
+    async fn handle(&mut self, interaction: &ComponentInteraction) -> Option<SettingsFeedsAction> {
+        let action = SettingsFeedsAction::from_str(&interaction.data.custom_id).ok()?;
+        let data = &interaction.data;
+
+        match (&data.kind, action) {
+            (
+                ComponentInteractionDataKind::StringSelect { values },
+                SettingsFeedsAction::Enabled,
+            ) => {
+                self.settings.enabled = values.first().map(|v| v == "true");
+                Some(action)
+            }
+            (
+                ComponentInteractionDataKind::ChannelSelect { values },
+                SettingsFeedsAction::Channel,
+            ) => {
+                self.settings.channel_id = values.first().map(|id| id.to_string());
+                Some(action)
+            }
+            (ComponentInteractionDataKind::RoleSelect { values }, SettingsFeedsAction::SubRole) => {
+                self.settings.subscribe_role_id = values.first().map(|v| v.to_string());
+                Some(action)
+            }
+            (
+                ComponentInteractionDataKind::RoleSelect { values },
+                SettingsFeedsAction::UnsubRole,
+            ) => {
+                self.settings.unsubscribe_role_id = values.first().map(|v| v.to_string());
+                Some(action)
+            }
+            _ => None,
+        }
     }
 }
 

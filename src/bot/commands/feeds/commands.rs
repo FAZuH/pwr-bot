@@ -1,13 +1,12 @@
 use std::time::Duration;
 
 use poise::ChoiceParameter;
-use serenity::all::ComponentInteractionCollector;
 use serenity::all::CreateInteractionResponse;
 use serenity::all::CreateInteractionResponseMessage;
 use serenity::all::GuildId;
+use serenity::all::MessageFlags;
 use serenity::all::RoleId;
 use serenity::all::UserId;
-use serenity::futures::StreamExt;
 
 use crate::bot::checks::check_author_roles;
 use crate::bot::commands::Context;
@@ -18,9 +17,10 @@ use crate::bot::commands::feeds::views::SubscriptionsListView;
 use crate::bot::error::BotError;
 use crate::bot::utils::parse_and_validate_urls;
 use crate::bot::views::InteractableComponentView;
+use crate::bot::views::ResponseComponentView;
+use crate::bot::views::ViewProvider;
 use crate::bot::views::pagination::PaginationView;
 use crate::database::model::FeedModel;
-use crate::database::model::ServerSettings;
 use crate::database::model::SubscriberModel;
 use crate::database::model::SubscriberType;
 use crate::service::feed_subscription_service::SubscribeResult;
@@ -115,85 +115,29 @@ pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
         .get_server_settings(guild_id)
         .await?;
 
-    let msg_handle = ctx.send(SettingsFeedsView::create_reply(&settings)).await?;
+    let mut view = SettingsFeedsView::new(&mut settings);
+    let _ = ctx.send(view.create_reply()).await?;
 
-    let msg_id = msg_handle.message().await?.into_owned().id;
-    let author_id = ctx.author().id;
-
-    let mut collector = ComponentInteractionCollector::new(ctx.serenity_context())
-        .message_id(msg_id)
-        .author_id(author_id)
-        .timeout(Duration::from_secs(INTERACTION_TIMEOUT_SECS))
-        .stream();
-
-    while let Some(interaction) = collector.next().await {
-        let should_update = apply_settings_interaction(&mut settings, &interaction);
-
-        if should_update {
-            ctx.data()
-                .service
-                .feed_subscription
-                .update_server_settings(guild_id, settings.clone())
-                .await?;
-        }
-
-        interaction
-            .create_response(
-                ctx.http(),
-                CreateInteractionResponse::UpdateMessage(
-                    CreateInteractionResponseMessage::new()
-                        .components(SettingsFeedsView::create_components(&settings)),
-                ),
-            )
+    while let Some((_, interaction)) = view
+        .listen_once(&ctx, Duration::from_secs(INTERACTION_TIMEOUT_SECS))
+        .await
+    {
+        ctx.data()
+            .service
+            .feed_subscription
+            .update_server_settings(guild_id, view.settings.clone())
             .await?;
+
+        let reply = CreateInteractionResponse::UpdateMessage(
+            CreateInteractionResponseMessage::new()
+                .flags(MessageFlags::IS_COMPONENTS_V2)
+                .components(view.create()),
+        );
+
+        interaction.create_response(ctx.http(), reply).await?;
     }
 
     Ok(())
-}
-
-fn apply_settings_interaction(
-    settings: &mut ServerSettings,
-    interaction: &serenity::all::ComponentInteraction,
-) -> bool {
-    let custom_id = &interaction.data.custom_id;
-    match &interaction.data.kind {
-        serenity::all::ComponentInteractionDataKind::StringSelect { values }
-            if custom_id == "server_settings_enabled" =>
-        {
-            if let Some(value) = values.first() {
-                settings.enabled = Some(value == "true");
-                return true;
-            }
-        }
-        serenity::all::ComponentInteractionDataKind::ChannelSelect { values }
-            if custom_id == "server_settings_channel" =>
-        {
-            settings.channel_id = values.first().map(|id| id.to_string());
-            return true;
-        }
-        serenity::all::ComponentInteractionDataKind::RoleSelect { values }
-            if custom_id == "server_settings_sub_role" =>
-        {
-            settings.subscribe_role_id = if values.is_empty() {
-                None
-            } else {
-                values.first().map(|id| id.to_string())
-            };
-            return true;
-        }
-        serenity::all::ComponentInteractionDataKind::RoleSelect { values }
-            if custom_id == "server_settings_unsub_role" =>
-        {
-            settings.unsubscribe_role_id = if values.is_empty() {
-                None
-            } else {
-                values.first().map(|id| id.to_string())
-            };
-            return true;
-        }
-        _ => {}
-    }
-    false
 }
 
 pub async fn subscribe(
@@ -245,7 +189,7 @@ pub async fn subscriptions(ctx: Context<'_>, sent_into: Option<SendInto>) -> Res
         .get_subscription_count(&subscriber)
         .await?;
 
-    let mut pagination = PaginationView::new(&ctx, total_items, 10_u32);
+    let mut pagination = PaginationView::new(total_items, 10_u32);
     let view = SubscriptionsListView;
 
     let subscriptions = ctx
@@ -264,7 +208,7 @@ pub async fn subscriptions(ctx: Context<'_>, sent_into: Option<SendInto>) -> Res
 
     let msg_handle = ctx.send(reply).await?;
 
-    while pagination.listen(Duration::from_secs(60)).await.is_some() {
+    while (pagination.listen_once(&ctx, Duration::from_secs(60)).await).is_some() {
         let subscriptions = ctx
             .data()
             .service

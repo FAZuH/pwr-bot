@@ -104,7 +104,7 @@ pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
     }
 
     let total_items = total_entries.len() as u32;
-    let mut pagination = PaginationView::new(&ctx, total_items, LEADERBOARD_PER_PAGE);
+    let mut pagination = PaginationView::new(total_items, LEADERBOARD_PER_PAGE);
 
     let user_rank = total_entries
         .iter()
@@ -135,7 +135,7 @@ pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
     let msg_handle = ctx.send(reply).await?;
 
     while pagination
-        .listen(Duration::from_secs(INTERACTION_TIMEOUT_SECS))
+        .listen_once(&ctx, Duration::from_secs(INTERACTION_TIMEOUT_SECS))
         .await
         .is_some()
     {

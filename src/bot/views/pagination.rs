@@ -1,15 +1,12 @@
 use std::str::FromStr;
-use std::time::Duration;
 
-use async_trait::async_trait;
 use serenity::all::ButtonStyle;
-use serenity::all::ComponentInteractionCollector;
+use serenity::all::ComponentInteraction;
 use serenity::all::CreateActionRow;
 use serenity::all::CreateButton;
 use serenity::all::CreateComponent;
-use serenity::all::CreateInteractionResponse;
 
-use crate::bot::commands::Context;
+use crate::bot::views::Action;
 use crate::bot::views::AttachableView;
 use crate::bot::views::InteractableComponentView;
 use crate::bot::views::ViewProvider;
@@ -88,25 +85,20 @@ custom_id_enum!(PaginationAction {
     Last,
 });
 
-pub struct PaginationView<'a> {
-    ctx: &'a Context<'a>,
+pub struct PaginationView {
     pub state: PaginationModel,
 }
 
-impl<'a> PaginationView<'a> {
-    pub fn new(
-        ctx: &'a Context<'a>,
-        total_items: impl Into<u32>,
-        per_page: impl Into<u32>,
-    ) -> Self {
+impl PaginationView {
+    pub fn new(total_items: impl Into<u32>, per_page: impl Into<u32>) -> Self {
         let per_page = per_page.into();
         let pages = total_items.into().div_ceil(per_page);
         let model = PaginationModel::new(pages, per_page, 1);
-        Self { ctx, state: model }
+        Self { state: model }
     }
 
-    pub fn from_model(ctx: &'a Context<'a>, model: PaginationModel) -> Self {
-        Self { ctx, state: model }
+    pub fn from_model(model: PaginationModel) -> Self {
+        Self { state: model }
     }
 
     pub fn attach_if_multipage<'b>(&self, components: &mut impl Extend<CreateComponent<'b>>) {
@@ -116,7 +108,7 @@ impl<'a> PaginationView<'a> {
     }
 }
 
-impl<'a> ViewProvider<'a> for PaginationView<'_> {
+impl<'a> ViewProvider<'a> for PaginationView {
     fn create(&self) -> Vec<CreateComponent<'a>> {
         let page_label = format!("{}/{}", self.state.current_page, self.state.pages);
 
@@ -144,38 +136,20 @@ impl<'a> ViewProvider<'a> for PaginationView<'_> {
     }
 }
 
-#[async_trait]
-impl InteractableComponentView<Option<PaginationAction>> for PaginationView<'_> {
-    async fn listen(&mut self, timeout: Duration) -> Option<PaginationAction> {
-        let collector = ComponentInteractionCollector::new(self.ctx.serenity_context())
-            .author_id(self.ctx.author().id)
-            .filter(move |i| PaginationAction::ALL.contains(&i.data.custom_id.as_str()))
-            .timeout(timeout);
+#[async_trait::async_trait]
+impl InteractableComponentView<PaginationAction> for PaginationView {
+    async fn handle(&mut self, interaction: &ComponentInteraction) -> Option<PaginationAction> {
+        let action = PaginationAction::from_str(&interaction.data.custom_id).ok()?;
 
-        match collector.next().await {
-            None => None,
-            Some(interaction) => {
-                interaction
-                    .create_response(self.ctx.http(), CreateInteractionResponse::Acknowledge)
-                    .await
-                    .ok();
-
-                // NOTE: `PaginationAction::from_str` never returns `Err`.
-                // This is guaranteed by the filter closure in `collector`
-                let action =
-                    PaginationAction::from_str(interaction.data.custom_id.as_str()).unwrap();
-
-                match action {
-                    PaginationAction::First => self.state.first_page(),
-                    PaginationAction::Prev => self.state.prev_page(),
-                    PaginationAction::Next => self.state.next_page(),
-                    PaginationAction::Last => self.state.last_page(),
-                    _ => {}
-                }
-
-                Some(action)
-            }
+        match action {
+            PaginationAction::First => self.state.first_page(),
+            PaginationAction::Prev => self.state.prev_page(),
+            PaginationAction::Next => self.state.next_page(),
+            PaginationAction::Last => self.state.last_page(),
+            _ => return None,
         }
+
+        Some(action)
     }
 }
 
