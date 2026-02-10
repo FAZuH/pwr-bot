@@ -17,8 +17,8 @@ use crate::bot::commands::feeds::views::SubscriptionBatchView;
 use crate::bot::commands::feeds::views::SubscriptionsListView;
 use crate::bot::error::BotError;
 use crate::bot::utils::parse_and_validate_urls;
-use crate::bot::views::pagination::PaginationHandler;
-use crate::bot::views::pagination::PaginationState;
+use crate::bot::views::InteractableComponentView;
+use crate::bot::views::pagination::PaginationView;
 use crate::database::model::FeedModel;
 use crate::database::model::ServerSettings;
 use crate::database::model::SubscriberModel;
@@ -245,9 +245,7 @@ pub async fn subscriptions(ctx: Context<'_>, sent_into: Option<SendInto>) -> Res
         .get_subscription_count(&subscriber)
         .await?;
 
-    let pages = total_items.div_ceil(10);
-    let state = PaginationState::new(pages, 10, 1);
-    let mut pagination = PaginationHandler::new(&ctx, state);
+    let mut pagination = PaginationView::new(&ctx, total_items, 10_u32);
     let view = SubscriptionsListView;
 
     let subscriptions = ctx
@@ -257,20 +255,26 @@ pub async fn subscriptions(ctx: Context<'_>, sent_into: Option<SendInto>) -> Res
         .list_paginated_subscriptions(&subscriber, 1u32, 10u32)
         .await?;
 
-    let reply = view.create_reply(subscriptions);
+    let mut components = view.create_page(subscriptions);
+    pagination.attach_if_multipage(&mut components);
+
+    let reply = poise::CreateReply::new()
+        .flags(serenity::all::MessageFlags::IS_COMPONENTS_V2)
+        .components(components);
+
     let msg_handle = ctx.send(reply).await?;
 
     while pagination.listen(Duration::from_secs(60)).await.is_some() {
-        let current_page = pagination.state().current_page;
-
         let subscriptions = ctx
             .data()
             .service
             .feed_subscription
-            .list_paginated_subscriptions(&subscriber, current_page, 10u32)
+            .list_paginated_subscriptions(&subscriber, pagination.state.current_page, 10u32)
             .await?;
 
-        let components = view.create_page(subscriptions);
+        components = view.create_page(subscriptions);
+        pagination.attach_if_multipage(&mut components);
+
         let reply = poise::CreateReply::new()
             .flags(serenity::all::MessageFlags::IS_COMPONENTS_V2)
             .components(components);

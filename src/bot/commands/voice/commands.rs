@@ -15,8 +15,8 @@ use crate::bot::commands::voice::image_generator::LeaderboardImageGenerator;
 use crate::bot::commands::voice::views::LeaderboardView;
 use crate::bot::commands::voice::views::SettingsVoiceView;
 use crate::bot::error::BotError;
-use crate::bot::views::pagination::PaginationHandler;
-use crate::bot::views::pagination::PaginationState;
+use crate::bot::views::InteractableComponentView;
+use crate::bot::views::pagination::PaginationView;
 use crate::database::model::VoiceLeaderboardEntry;
 
 const INTERACTION_TIMEOUT_SECS: u64 = 120;
@@ -104,9 +104,7 @@ pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
     }
 
     let total_items = total_entries.len() as u32;
-    let pages = total_items.div_ceil(LEADERBOARD_PER_PAGE);
-    let state = PaginationState::new(pages, LEADERBOARD_PER_PAGE, 1);
-    let mut pagination = PaginationHandler::new(&ctx, state);
+    let mut pagination = PaginationView::new(&ctx, total_items, LEADERBOARD_PER_PAGE);
 
     let user_rank = total_entries
         .iter()
@@ -125,7 +123,8 @@ pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
     let page_result = generate_page(ctx, &image_gen, current_page_entries, 0).await?;
 
     let view = LeaderboardView {};
-    let components = view.create_page(user_rank);
+    let mut components = view.create_page(user_rank);
+    pagination.attach_if_multipage(&mut components);
     let attachment = CreateAttachment::bytes(page_result.image_bytes, "leaderboard.png");
 
     let reply = CreateReply::new()
@@ -140,14 +139,16 @@ pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
         .await
         .is_some()
     {
-        let current_page = pagination.state().current_page;
+        let current_page = pagination.state.current_page;
         let offset = ((current_page - 1) * LEADERBOARD_PER_PAGE) as usize;
         let end = (offset + LEADERBOARD_PER_PAGE as usize).min(total_entries.len());
 
         let page_entries = &total_entries[offset..end];
         let page_result = generate_page(ctx, &image_gen, page_entries, offset as u32).await?;
 
-        let components = view.create_page(user_rank);
+        components = view.create_page(user_rank);
+        pagination.attach_if_multipage(&mut components);
+
         let attachment = CreateAttachment::bytes(page_result.image_bytes, "leaderboard.png");
 
         let reply = CreateReply::new()
