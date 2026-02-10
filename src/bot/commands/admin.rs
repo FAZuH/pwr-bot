@@ -13,6 +13,10 @@ use crate::bot::error::BotError;
 pub struct AdminCog;
 
 impl AdminCog {
+    /// Register guild slash commands.
+    ///
+    /// Registers all bot slash commands for the current server.
+    /// Requires server administrator permissions.
     #[poise::command(prefix_command, hide_in_help)]
     pub async fn register(ctx: Context<'_>) -> Result<(), Error> {
         is_author_guild_admin(ctx).await?;
@@ -42,6 +46,10 @@ impl AdminCog {
         Ok(())
     }
 
+    /// Unregister guild slash commands.
+    ///
+    /// Removes all bot slash commands from the current server.
+    /// Requires server administrator permissions.
     #[poise::command(prefix_command, hide_in_help)]
     pub async fn unregister(ctx: Context<'_>) -> Result<(), Error> {
         is_author_guild_admin(ctx).await?;

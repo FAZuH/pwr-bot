@@ -23,11 +23,19 @@ pub struct PageGenerationResult {
 pub struct VoiceCog;
 
 impl VoiceCog {
+    /// Voice channel tracking and leaderboard commands.
+    ///
+    /// Track voice channel activity and view leaderboards.
+    /// Use subcommands to configure settings or view the leaderboard.
     #[poise::command(slash_command, subcommands("Self::settings", "Self::leaderboard"))]
     pub async fn vc(_ctx: Context<'_>) -> Result<(), Error> {
         Ok(())
     }
 
+    /// Configure voice tracking settings for this server.
+    ///
+    /// Enable or disable voice channel activity tracking.
+    /// Only server administrators can use this command.
     #[poise::command(
         slash_command,
         default_member_permissions = "ADMINISTRATOR | MANAGE_GUILD"
@@ -36,6 +44,10 @@ impl VoiceCog {
         commands::settings(ctx).await
     }
 
+    /// Display the voice activity leaderboard.
+    ///
+    /// Shows a ranked list of users by total time spent in voice channels.
+    /// Includes your current rank position.
     #[poise::command(slash_command)]
     pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
         commands::leaderboard(ctx).await
