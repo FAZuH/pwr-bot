@@ -37,6 +37,8 @@ custom_id_enum!(SettingsFeedsAction {
     UnsubRole
 });
 
+custom_id_enum!(SubscriptionBatchAction { ViewSubscriptions });
+
 pub struct SettingsFeedsView<'a> {
     pub settings: &'a mut ServerSettings,
 }
@@ -284,7 +286,7 @@ impl<'a> ViewProvider<'a> for SubscriptionBatchView {
         ))];
 
         if self.is_final {
-            let nav_button = CreateButton::new("view_subscriptions")
+            let nav_button = CreateButton::new(SubscriptionBatchAction::ViewSubscriptions.as_str())
                 .label("View Subscriptions")
                 .style(ButtonStyle::Secondary);
 
@@ -298,3 +300,13 @@ impl<'a> ViewProvider<'a> for SubscriptionBatchView {
 }
 
 impl ResponseComponentView for SubscriptionBatchView {}
+
+#[async_trait::async_trait]
+impl InteractableComponentView<SubscriptionBatchAction> for SubscriptionBatchView {
+    async fn handle(
+        &mut self,
+        interaction: &ComponentInteraction,
+    ) -> Option<SubscriptionBatchAction> {
+        SubscriptionBatchAction::from_str(&interaction.data.custom_id).ok()
+    }
+}

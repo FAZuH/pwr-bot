@@ -16,6 +16,7 @@ use crate::bot::checks::check_author_roles;
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;
 use crate::bot::commands::feeds::views::SettingsFeedsView;
+use crate::bot::commands::feeds::views::SubscriptionBatchAction;
 use crate::bot::commands::feeds::views::SubscriptionBatchView;
 use crate::bot::commands::feeds::views::SubscriptionsListView;
 use crate::bot::error::BotError;
@@ -246,6 +247,7 @@ async fn process_subscription_batch(
     let mut states: Vec<String> = vec!["⏳ Processing...".to_string(); urls.len()];
     let mut last_send = Instant::now();
     let mut msg_handle: Option<ReplyHandle<'_>> = None;
+    let mut view: Option<SubscriptionBatchView> = None;
 
     for (i, url) in urls.iter().enumerate() {
         let result_str = if is_subscribe {
@@ -268,15 +270,33 @@ async fn process_subscription_batch(
 
         let is_final = i + 1 == urls.len();
         if last_send.elapsed().as_secs() > UPDATE_INTERVAL_SECS || is_final {
-            let view = SubscriptionBatchView::new(states.clone(), is_final);
-            let resp = view.create_reply();
+            let batch_view = SubscriptionBatchView::new(states.clone(), is_final);
+            let resp = batch_view.create_reply();
             match msg_handle {
                 None => msg_handle = Some(ctx.send(resp).await?),
                 Some(ref handle) => handle.edit(ctx, resp).await?,
             }
+            if is_final {
+                view = Some(batch_view);
+            }
             last_send = Instant::now();
         }
     }
+
+    // Listen for "View Subscriptions" button click after final message
+    if let Some(mut view) = view {
+        let timeout = Duration::from_secs(INTERACTION_TIMEOUT_SECS);
+        if let Some((action, _)) = view.listen_once(&ctx, timeout).await
+            && action == SubscriptionBatchAction::ViewSubscriptions {
+                // Convert subscriber type back to SendInto
+                let send_into = match subscriber.r#type {
+                    SubscriberType::Guild => SendInto::Server,
+                    SubscriberType::Dm => SendInto::DM,
+                };
+                subscriptions(ctx, Some(send_into)).await?;
+            }
+    }
+
     Ok(())
 }
 
