@@ -1,12 +1,8 @@
 use std::time::Duration;
 
 use poise::CreateReply;
-use serenity::all::ComponentInteractionCollector;
 use serenity::all::CreateAttachment;
-use serenity::all::CreateInteractionResponse;
-use serenity::all::CreateInteractionResponseMessage;
 use serenity::all::MessageFlags;
-use serenity::futures::StreamExt;
 
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;
@@ -16,6 +12,8 @@ use crate::bot::commands::voice::views::LeaderboardView;
 use crate::bot::commands::voice::views::SettingsVoiceView;
 use crate::bot::error::BotError;
 use crate::bot::views::InteractableComponentView;
+use crate::bot::views::ResponseComponentView;
+use crate::bot::views::ViewProvider;
 use crate::bot::views::pagination::PaginationView;
 use crate::database::model::VoiceLeaderboardEntry;
 
@@ -26,7 +24,7 @@ pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
     ctx.defer().await?;
     let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?.get();
 
-    let mut settings = ctx
+    let settings = ctx
         .data()
         .service
         .voice_tracking
@@ -34,51 +32,25 @@ pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
         .await
         .map_err(Error::from)?;
 
-    let msg_handle = ctx.send(SettingsVoiceView::create_reply(&settings)).await?;
+    let mut view = SettingsVoiceView::new(settings);
+    let msg_handle = ctx.send(view.create_reply()).await?;
 
-    let msg = msg_handle.message().await?.into_owned();
-    let author_id = ctx.author().id;
+    while let Some((_action, _interaction)) = view
+        .listen_once(&ctx, Duration::from_secs(INTERACTION_TIMEOUT_SECS))
+        .await
+    {
+        // Update the settings in the database
+        ctx.data()
+            .service
+            .voice_tracking
+            .update_server_settings(guild_id, view.settings.clone())
+            .await
+            .map_err(Error::from)?;
 
-    let mut collector = ComponentInteractionCollector::new(ctx.serenity_context())
-        .message_id(msg.id)
-        .author_id(author_id)
-        .timeout(Duration::from_secs(INTERACTION_TIMEOUT_SECS))
-        .stream();
-
-    while let Some(interaction) = collector.next().await {
-        let mut should_update = true;
-
-        match &interaction.data.kind {
-            serenity::all::ComponentInteractionDataKind::StringSelect { values }
-                if interaction.data.custom_id == "voice_settings_enabled" =>
-            {
-                if let Some(value) = values.first() {
-                    settings.voice_tracking_enabled = Some(value == "true");
-                }
-            }
-            _ => {
-                should_update = false;
-            }
-        }
-
-        if should_update {
-            ctx.data()
-                .service
-                .voice_tracking
-                .update_server_settings(guild_id, settings.clone())
-                .await
-                .map_err(Error::from)?;
-        }
-
-        interaction
-            .create_response(
-                ctx.http(),
-                CreateInteractionResponse::UpdateMessage(
-                    CreateInteractionResponseMessage::new()
-                        .components(SettingsVoiceView::create_components(&settings)),
-                ),
-            )
-            .await?;
+        let reply = CreateReply::new()
+            .flags(MessageFlags::IS_COMPONENTS_V2)
+            .components(view.create());
+        msg_handle.edit(ctx, reply).await?;
     }
 
     Ok(())
@@ -122,8 +94,8 @@ pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
         &total_entries[..(total_entries.len().min(LEADERBOARD_PER_PAGE as usize))];
     let page_result = generate_page(ctx, &image_gen, current_page_entries, 0).await?;
 
-    let view = LeaderboardView {};
-    let mut components = view.create_page(user_rank);
+    let view = LeaderboardView::new(user_rank);
+    let mut components = view.create();
     pagination.attach_if_multipage(&mut components);
     let attachment = CreateAttachment::bytes(page_result.image_bytes, "leaderboard.png");
 
@@ -146,7 +118,7 @@ pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
         let page_entries = &total_entries[offset..end];
         let page_result = generate_page(ctx, &image_gen, page_entries, offset as u32).await?;
 
-        components = view.create_page(user_rank);
+        components = view.create();
         pagination.attach_if_multipage(&mut components);
 
         let attachment = CreateAttachment::bytes(page_result.image_bytes, "leaderboard.png");

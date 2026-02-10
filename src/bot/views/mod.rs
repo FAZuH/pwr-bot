@@ -21,13 +21,13 @@ pub trait ViewProvider<'a, T = CreateComponent<'a>> {
 }
 
 pub trait ResponseComponentView: for<'a> ViewProvider<'a> {
-    fn create_reply(&self) -> CreateReply<'static> {
+    fn create_reply<'a>(&self) -> CreateReply<'a> {
         CreateReply::new()
             .flags(MessageFlags::IS_COMPONENTS_V2)
             .components(self.create())
     }
 
-    fn create_message(&self) -> CreateMessage<'static> {
+    fn create_message<'a>(&self) -> CreateMessage<'a> {
         CreateMessage::new()
             .flags(MessageFlags::IS_COMPONENTS_V2)
             .components(self.create())
