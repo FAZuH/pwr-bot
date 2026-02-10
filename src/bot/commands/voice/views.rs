@@ -1,4 +1,7 @@
+use std::str::FromStr;
+
 use poise::CreateReply;
+use serenity::all::ComponentInteraction;
 use serenity::all::CreateActionRow;
 use serenity::all::CreateAttachment;
 use serenity::all::CreateComponent;
@@ -13,19 +16,28 @@ use serenity::all::CreateTextDisplay;
 use serenity::all::CreateUnfurledMediaItem;
 use serenity::all::MessageFlags;
 
+use crate::bot::views::Action;
+use crate::bot::views::InteractableComponentView;
+use crate::bot::views::ResponseComponentView;
+use crate::bot::views::ViewProvider;
+use crate::custom_id_enum;
 use crate::database::model::ServerSettings;
 
-pub struct SettingsVoiceView;
+custom_id_enum!(SettingsAction { EnabledSelect });
+
+pub struct SettingsVoiceView {
+    pub settings: ServerSettings,
+}
 
 impl SettingsVoiceView {
-    pub fn create_reply(settings: &ServerSettings) -> CreateReply<'_> {
-        CreateReply::new()
-            .flags(MessageFlags::IS_COMPONENTS_V2)
-            .components(Self::create_components(settings))
+    pub fn new(settings: ServerSettings) -> Self {
+        Self { settings }
     }
+}
 
-    pub fn create_components(settings: &ServerSettings) -> Vec<CreateComponent<'_>> {
-        let is_enabled = settings.voice_tracking_enabled.unwrap_or(true);
+impl<'a> ViewProvider<'a> for SettingsVoiceView {
+    fn create(&self) -> Vec<CreateComponent<'a>> {
+        let is_enabled = self.settings.voice_tracking_enabled.unwrap_or(true);
 
         let status_text = format!(
             "## Voice Tracking Settings\n\n> 🛈  {}",
@@ -37,7 +49,7 @@ impl SettingsVoiceView {
         );
 
         let enabled_select = CreateSelectMenu::new(
-            "voice_settings_enabled",
+            SettingsAction::EnabledSelect.as_str(),
             CreateSelectMenuKind::String {
                 options: vec![
                     CreateSelectMenuOption::new("🟢 Enabled", "true").default_selection(is_enabled),
@@ -58,13 +70,37 @@ impl SettingsVoiceView {
     }
 }
 
-pub struct LeaderboardView;
+impl ResponseComponentView for SettingsVoiceView {}
 
-impl<'a> LeaderboardView {
-    pub fn create_reply(&self, user_rank: Option<u32>) -> CreateReply<'_> {
-        CreateReply::new()
-            .flags(MessageFlags::IS_COMPONENTS_V2)
-            .components(self.create_page(user_rank))
+#[async_trait::async_trait]
+impl InteractableComponentView<SettingsAction> for SettingsVoiceView {
+    async fn handle(&mut self, interaction: &ComponentInteraction) -> Option<SettingsAction> {
+        use serenity::all::ComponentInteractionDataKind;
+
+        let action = SettingsAction::from_str(&interaction.data.custom_id).ok()?;
+
+        match (&action, &interaction.data.kind) {
+            (
+                SettingsAction::EnabledSelect,
+                ComponentInteractionDataKind::StringSelect { values },
+            ) => {
+                if let Some(value) = values.first() {
+                    self.settings.voice_tracking_enabled = Some(value == "true");
+                }
+                Some(action)
+            }
+            _ => None,
+        }
+    }
+}
+
+pub struct LeaderboardView {
+    pub user_rank: Option<u32>,
+}
+
+impl LeaderboardView {
+    pub fn new(user_rank: Option<u32>) -> Self {
+        Self { user_rank }
     }
 
     pub fn create_empty_reply() -> CreateReply<'static> {
@@ -79,10 +115,20 @@ impl<'a> LeaderboardView {
             ))])
     }
 
-    pub fn create_page(&self, user_rank: Option<u32>) -> Vec<CreateComponent<'a>> {
+    pub fn create_page_with_attachment<'a>(
+        &'a self,
+    ) -> (Vec<CreateComponent<'a>>, CreateAttachment<'a>) {
+        let components = self.create();
+        let attachment = CreateAttachment::bytes(vec![], "leaderboard.png");
+        (components, attachment)
+    }
+}
+
+impl<'a> ViewProvider<'a> for LeaderboardView {
+    fn create(&self) -> Vec<CreateComponent<'a>> {
         let mut container_components: Vec<CreateContainerComponent> = Vec::new();
 
-        let title = if let Some(rank) = user_rank {
+        let title = if let Some(rank) = self.user_rank {
             format!(
                 "## Voice Leaderboard\n\nYou are rank **#{}** on this server",
                 rank
@@ -105,14 +151,5 @@ impl<'a> LeaderboardView {
 
         let container = CreateComponent::Container(CreateContainer::new(container_components));
         vec![container]
-    }
-
-    pub fn create_page_with_attachment(
-        &self,
-        user_rank: Option<u32>,
-    ) -> (Vec<CreateComponent<'a>>, CreateAttachment<'a>) {
-        let components = self.create_page(user_rank);
-        let attachment = CreateAttachment::bytes(vec![], "leaderboard.png");
-        (components, attachment)
     }
 }

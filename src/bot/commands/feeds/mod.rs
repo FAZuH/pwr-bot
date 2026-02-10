@@ -9,6 +9,13 @@ pub mod views;
 pub struct FeedsCog;
 
 impl FeedsCog {
+    /// Manage feed subscriptions and settings.
+    ///
+    /// Base command for feed management. Use subcommands to:
+    /// - Subscribe to feeds
+    /// - Unsubscribe from feeds
+    /// - View your subscriptions
+    /// - Configure server feed settings (admin only)
     #[poise::command(
         slash_command,
         subcommands(
@@ -22,6 +29,10 @@ impl FeedsCog {
         Ok(())
     }
 
+    /// Configure feed settings for this server.
+    ///
+    /// Set up notification channels and required roles for feed subscriptions.
+    /// Only server administrators can use this command.
     #[poise::command(
         slash_command,
         default_member_permissions = "ADMINISTRATOR | MANAGE_GUILD"
@@ -30,6 +41,10 @@ impl FeedsCog {
         commands::settings(ctx).await
     }
 
+    /// Subscribe to one or more feeds.
+    ///
+    /// Add feeds to receive notifications. You can subscribe in your DM or
+    /// in the server (if server feed settings are configured).
     #[poise::command(slash_command)]
     pub async fn subscribe(
         ctx: Context<'_>,
@@ -43,6 +58,10 @@ impl FeedsCog {
         commands::subscribe(ctx, links, send_into).await
     }
 
+    /// Unsubscribe from one or more feeds.
+    ///
+    /// Remove feeds from your subscriptions. Use autocomplete to find
+    /// feeds you are currently subscribed to.
     #[poise::command(slash_command)]
     pub async fn unsubscribe(
         ctx: Context<'_>,
@@ -56,6 +75,9 @@ impl FeedsCog {
         commands::unsubscribe(ctx, links, send_into).await
     }
 
+    /// List your current feed subscriptions.
+    ///
+    /// View all feeds you are subscribed to, with pagination support.
     #[poise::command(slash_command)]
     pub async fn subscriptions(
         ctx: Context<'_>,

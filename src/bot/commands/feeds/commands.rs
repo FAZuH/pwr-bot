@@ -1,26 +1,31 @@
 use std::time::Duration;
 
 use poise::ChoiceParameter;
-use serenity::all::ComponentInteractionCollector;
+use poise::CreateReply;
+use poise::ReplyHandle;
+use serenity::all::AutocompleteChoice;
+use serenity::all::CreateAutocompleteResponse;
 use serenity::all::CreateInteractionResponse;
 use serenity::all::CreateInteractionResponseMessage;
 use serenity::all::GuildId;
+use serenity::all::MessageFlags;
 use serenity::all::RoleId;
 use serenity::all::UserId;
-use serenity::futures::StreamExt;
 
 use crate::bot::checks::check_author_roles;
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;
 use crate::bot::commands::feeds::views::SettingsFeedsView;
+use crate::bot::commands::feeds::views::SubscriptionBatchAction;
 use crate::bot::commands::feeds::views::SubscriptionBatchView;
 use crate::bot::commands::feeds::views::SubscriptionsListView;
 use crate::bot::error::BotError;
-use crate::bot::ui::pagination::PaginationHandler;
-use crate::bot::ui::pagination::PaginationState;
-use crate::bot::ui::validators::parse_and_validate_urls;
+use crate::bot::utils::parse_and_validate_urls;
+use crate::bot::views::InteractableComponentView;
+use crate::bot::views::ResponseComponentView;
+use crate::bot::views::ViewProvider;
+use crate::bot::views::pagination::PaginationView;
 use crate::database::model::FeedModel;
-use crate::database::model::ServerSettings;
 use crate::database::model::SubscriberModel;
 use crate::database::model::SubscriberType;
 use crate::service::feed_subscription_service::SubscribeResult;
@@ -115,85 +120,29 @@ pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
         .get_server_settings(guild_id)
         .await?;
 
-    let msg_handle = ctx.send(SettingsFeedsView::create_reply(&settings)).await?;
+    let mut view = SettingsFeedsView::new(&mut settings);
+    let _ = ctx.send(view.create_reply()).await?;
 
-    let msg_id = msg_handle.message().await?.into_owned().id;
-    let author_id = ctx.author().id;
-
-    let mut collector = ComponentInteractionCollector::new(ctx.serenity_context())
-        .message_id(msg_id)
-        .author_id(author_id)
-        .timeout(Duration::from_secs(INTERACTION_TIMEOUT_SECS))
-        .stream();
-
-    while let Some(interaction) = collector.next().await {
-        let should_update = apply_settings_interaction(&mut settings, &interaction);
-
-        if should_update {
-            ctx.data()
-                .service
-                .feed_subscription
-                .update_server_settings(guild_id, settings.clone())
-                .await?;
-        }
-
-        interaction
-            .create_response(
-                ctx.http(),
-                CreateInteractionResponse::UpdateMessage(
-                    CreateInteractionResponseMessage::new()
-                        .components(SettingsFeedsView::create_components(&settings)),
-                ),
-            )
+    while let Some((_, interaction)) = view
+        .listen_once(&ctx, Duration::from_secs(INTERACTION_TIMEOUT_SECS))
+        .await
+    {
+        ctx.data()
+            .service
+            .feed_subscription
+            .update_server_settings(guild_id, view.settings.clone())
             .await?;
+
+        let reply = CreateInteractionResponse::UpdateMessage(
+            CreateInteractionResponseMessage::new()
+                .flags(MessageFlags::IS_COMPONENTS_V2)
+                .components(view.create()),
+        );
+
+        interaction.create_response(ctx.http(), reply).await?;
     }
 
     Ok(())
-}
-
-fn apply_settings_interaction(
-    settings: &mut ServerSettings,
-    interaction: &serenity::all::ComponentInteraction,
-) -> bool {
-    let custom_id = &interaction.data.custom_id;
-    match &interaction.data.kind {
-        serenity::all::ComponentInteractionDataKind::StringSelect { values }
-            if custom_id == "server_settings_enabled" =>
-        {
-            if let Some(value) = values.first() {
-                settings.enabled = Some(value == "true");
-                return true;
-            }
-        }
-        serenity::all::ComponentInteractionDataKind::ChannelSelect { values }
-            if custom_id == "server_settings_channel" =>
-        {
-            settings.channel_id = values.first().map(|id| id.to_string());
-            return true;
-        }
-        serenity::all::ComponentInteractionDataKind::RoleSelect { values }
-            if custom_id == "server_settings_sub_role" =>
-        {
-            settings.subscribe_role_id = if values.is_empty() {
-                None
-            } else {
-                values.first().map(|id| id.to_string())
-            };
-            return true;
-        }
-        serenity::all::ComponentInteractionDataKind::RoleSelect { values }
-            if custom_id == "server_settings_unsub_role" =>
-        {
-            settings.unsubscribe_role_id = if values.is_empty() {
-                None
-            } else {
-                values.first().map(|id| id.to_string())
-            };
-            return true;
-        }
-        _ => {}
-    }
-    false
 }
 
 pub async fn subscribe(
@@ -245,11 +194,6 @@ pub async fn subscriptions(ctx: Context<'_>, sent_into: Option<SendInto>) -> Res
         .get_subscription_count(&subscriber)
         .await?;
 
-    let pages = total_items.div_ceil(10);
-    let state = PaginationState::new(pages, 10, 1);
-    let mut pagination = PaginationHandler::new(&ctx, state);
-    let view = SubscriptionsListView;
-
     let subscriptions = ctx
         .data()
         .service
@@ -257,25 +201,36 @@ pub async fn subscriptions(ctx: Context<'_>, sent_into: Option<SendInto>) -> Res
         .list_paginated_subscriptions(&subscriber, 1u32, 10u32)
         .await?;
 
-    let reply = view.create_reply(subscriptions);
-    let msg_handle = ctx.send(reply).await?;
+    let mut view = SubscriptionsListView::new(subscriptions);
+    let mut pagination = PaginationView::new(total_items, 10_u32);
 
-    while pagination.listen(Duration::from_secs(60)).await.is_some() {
-        let current_page = pagination.state().current_page;
+    let mut components = view.create();
+    pagination.attach_if_multipage(&mut components);
 
+    let msg = CreateReply::new()
+        .flags(MessageFlags::IS_COMPONENTS_V2)
+        .components(components);
+
+    let msg_handle = ctx.send(msg).await?;
+
+    while (pagination.listen_once(&ctx, Duration::from_secs(60)).await).is_some() {
         let subscriptions = ctx
             .data()
             .service
             .feed_subscription
-            .list_paginated_subscriptions(&subscriber, current_page, 10u32)
+            .list_paginated_subscriptions(&subscriber, pagination.state.current_page, 10u32)
             .await?;
 
-        let components = view.create_page(subscriptions);
-        let reply = poise::CreateReply::new()
-            .flags(serenity::all::MessageFlags::IS_COMPONENTS_V2)
+        view.set_subscriptions(subscriptions);
+
+        let mut components = view.create();
+        pagination.attach_if_multipage(&mut components);
+
+        let msg = CreateReply::new()
+            .flags(MessageFlags::IS_COMPONENTS_V2)
             .components(components);
 
-        msg_handle.edit(ctx, reply).await?;
+        msg_handle.edit(ctx, msg).await?;
     }
 
     Ok(())
@@ -291,7 +246,8 @@ async fn process_subscription_batch(
 
     let mut states: Vec<String> = vec!["⏳ Processing...".to_string(); urls.len()];
     let mut last_send = Instant::now();
-    let mut msg_handle: Option<poise::ReplyHandle<'_>> = None;
+    let mut msg_handle: Option<ReplyHandle<'_>> = None;
+    let mut view: Option<SubscriptionBatchView> = None;
 
     for (i, url) in urls.iter().enumerate() {
         let result_str = if is_subscribe {
@@ -314,14 +270,34 @@ async fn process_subscription_batch(
 
         let is_final = i + 1 == urls.len();
         if last_send.elapsed().as_secs() > UPDATE_INTERVAL_SECS || is_final {
-            let resp = SubscriptionBatchView::create(&states, is_final);
+            let batch_view = SubscriptionBatchView::new(states.clone(), is_final);
+            let resp = batch_view.create_reply();
             match msg_handle {
                 None => msg_handle = Some(ctx.send(resp).await?),
                 Some(ref handle) => handle.edit(ctx, resp).await?,
             }
+            if is_final {
+                view = Some(batch_view);
+            }
             last_send = Instant::now();
         }
     }
+
+    // Listen for "View Subscriptions" button click after final message
+    if let Some(mut view) = view {
+        let timeout = Duration::from_secs(INTERACTION_TIMEOUT_SECS);
+        if let Some((action, _)) = view.listen_once(&ctx, timeout).await
+            && action == SubscriptionBatchAction::ViewSubscriptions
+        {
+            // Convert subscriber type back to SendInto
+            let send_into = match subscriber.r#type {
+                SubscriberType::Guild => SendInto::Server,
+                SubscriberType::Dm => SendInto::DM,
+            };
+            subscriptions(ctx, Some(send_into)).await?;
+        }
+    }
+
     Ok(())
 }
 
@@ -435,11 +411,8 @@ async fn get_both_subscribers(
 pub async fn autocomplete_supported_feeds<'a>(
     ctx: Context<'_>,
     partial: &str,
-) -> poise::serenity_prelude::CreateAutocompleteResponse<'a> {
-    let mut choices = vec![poise::serenity_prelude::AutocompleteChoice::new(
-        "Supported feeds are:",
-        "foo",
-    )];
+) -> CreateAutocompleteResponse<'a> {
+    let mut choices = vec![AutocompleteChoice::new("Supported feeds are:", "foo")];
     let feeds = ctx.data().platforms.get_all_platforms();
 
     for feed in feeds {
@@ -449,50 +422,45 @@ pub async fn autocomplete_supported_feeds<'a>(
             || name.to_lowercase().contains(&partial.to_lowercase())
             || info.api_domain.contains(&partial.to_lowercase())
         {
-            choices.push(poise::serenity_prelude::AutocompleteChoice::new(
-                name,
-                info.api_domain.clone(),
-            ));
+            choices.push(AutocompleteChoice::new(name, info.api_domain.clone()));
         }
     }
 
     choices.truncate(25);
-    poise::serenity_prelude::CreateAutocompleteResponse::new().set_choices(choices)
+    CreateAutocompleteResponse::new().set_choices(choices)
 }
 
 pub async fn autocomplete_subscriptions<'a>(
     ctx: Context<'_>,
     partial: &str,
-) -> poise::serenity_prelude::CreateAutocompleteResponse<'a> {
+) -> CreateAutocompleteResponse<'a> {
     if partial.trim().is_empty() {
-        return poise::serenity_prelude::CreateAutocompleteResponse::new().set_choices(vec![
-            poise::serenity_prelude::AutocompleteChoice::from("Start typing to see suggestions"),
-        ]);
+        return CreateAutocompleteResponse::new().set_choices(vec![AutocompleteChoice::from(
+            "Start typing to see suggestions",
+        )]);
     }
 
     let (user_sub, guild_sub) = get_both_subscribers(ctx).await;
 
     if user_sub.is_none() && guild_sub.is_none() {
-        return poise::serenity_prelude::CreateAutocompleteResponse::new();
+        return CreateAutocompleteResponse::new();
     }
 
     let feeds = search_and_combine_feeds(ctx, partial, user_sub, guild_sub).await;
 
     if ctx.guild_id().is_none() && feeds.is_empty() {
-        return poise::serenity_prelude::CreateAutocompleteResponse::new().set_choices(vec![
-            poise::serenity_prelude::AutocompleteChoice::from(
-                "You have no subscriptions yet. Subscribe first with `/subscribe` command",
-            ),
-        ]);
+        return CreateAutocompleteResponse::new().set_choices(vec![AutocompleteChoice::from(
+            "You have no subscriptions yet. Subscribe first with `/subscribe` command",
+        )]);
     }
 
-    let mut choices: Vec<poise::serenity_prelude::AutocompleteChoice> = feeds
+    let mut choices: Vec<AutocompleteChoice> = feeds
         .into_iter()
-        .map(|feed| poise::serenity_prelude::AutocompleteChoice::new(feed.name, feed.source_url))
+        .map(|feed| AutocompleteChoice::new(feed.name, feed.source_url))
         .collect();
 
     choices.truncate(25);
-    poise::serenity_prelude::CreateAutocompleteResponse::new().set_choices(choices)
+    CreateAutocompleteResponse::new().set_choices(choices)
 }
 
 async fn search_and_combine_feeds(
@@ -500,7 +468,7 @@ async fn search_and_combine_feeds(
     partial: &str,
     user_subscriber: Option<SubscriberModel>,
     guild_subscriber: Option<SubscriberModel>,
-) -> Vec<crate::database::model::FeedModel> {
+) -> Vec<FeedModel> {
     let mut user_feeds = match user_subscriber {
         Some(sub) => ctx
             .data()
