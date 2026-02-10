@@ -34,12 +34,12 @@ function whatBump(commits) {
 async function getOptions() {
   let options = await config({
     types: [
-      { type: "feat!", section: "New Features" },
-      { type: "fix!", section: "Bug Fixes" },
-      { type: "perf!", section: "Performance Improvements" },
-      { type: "ui!", section: "UI/UX Changes" },
-      { type: "docs!", section: "Documentation" },
-      { type: "revert!", section: "Reverts" },
+      { type: "ufeat", section: "New Features" },
+      { type: "ufix", section: "Bug Fixes" },
+      { type: "uperf", section: "Performance Improvements" },
+      { type: "uui", section: "UI/UX Changes" },
+      { type: "udocs", section: "Documentation" },
+      { type: "urevert", section: "Reverts" },
 
       { type: "feat", section: "New Features (internal)", hidden: true },
       { type: "fix", section: "Bug Fixes (internal)", hidden: true },

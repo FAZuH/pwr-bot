@@ -1,16 +1,16 @@
 use crate::bot::Data;
 
-pub mod admin_cog;
+pub mod admin;
 pub mod feeds;
-pub mod owner_cog;
+pub mod owner;
 pub mod voice;
 
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 pub type Context<'a> = poise::Context<'a, Data, Error>;
 
-pub use admin_cog::AdminCog;
+pub use admin::AdminCog;
 pub use feeds::FeedsCog;
-pub use owner_cog::OwnerCog;
+pub use owner::OwnerCog;
 use poise::Command;
 pub use voice::VoiceCog;
 

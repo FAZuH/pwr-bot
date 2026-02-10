@@ -2,7 +2,8 @@ pub mod checks;
 pub mod commands;
 pub mod error;
 pub mod error_handler;
-pub mod ui;
+pub mod utils;
+pub mod views;
 
 use std::collections::HashSet;
 use std::str::FromStr;

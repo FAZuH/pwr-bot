@@ -433,6 +433,7 @@ pub struct SubscriberTarget {
     pub target_id: String,               // "guild_id:channel_id" or "user_id"
 }
 
+#[derive(Clone)]
 pub struct Subscription {
     pub feed: FeedModel,
     pub feed_latest: Option<FeedItemModel>,
