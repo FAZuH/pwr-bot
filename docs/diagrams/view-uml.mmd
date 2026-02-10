@@ -1,31 +1,31 @@
 %% UI UML
 classDiagram
     %% Interfaces
-    class ComponentProvider~T = CreateComponent~ {
+    class ViewProvider~T = CreateComponent~ {
         <<interface>>
         create() Vec~T~*
     }
 
-    class ResponseView {
+    class ResponseComponentView {
         <<interface>>
         create_reply() CreateReply
         create_message() CreateMessage
     }
 
-    class ComponentAttachable~T = CreateComponent~ {
+    class AttachableView~T = CreateComponent~ {
         <<interface>>
         attach(&mut Vec~T~)
     }
 
-    class InteractableComponent {
+    class InteractableComponentView {
         <<interface>>
         listen() ComponentInteractionCollector*
     }
 
     %% Interface Relationships
-    ResponseView --|> ComponentProvider
-    ComponentAttachable --|> ComponentProvider
-    InteractableComponent --|> ComponentAttachable
+    ResponseComponentView --|> ViewProvider
+    AttachableView --|> ViewProvider
+    InteractableComponentView --|> AttachableView
 
     %% Classes
     class AboutView
@@ -46,19 +46,19 @@ classDiagram
     class PaginationView
 
     %% Class Relationships
-    AboutView ..|> ResponseView
+    AboutView ..|> ResponseComponentView
 
-    SettingsMainView ..|> ResponseView
-    SettingsFeedView ..|> ResponseView
-    SettingsVoiceView ..|> ResponseView
+    SettingsMainView ..|> ResponseComponentView
+    SettingsFeedView ..|> ResponseComponentView
+    SettingsVoiceView ..|> ResponseComponentView
 
-    FeedSubscribeView ..|> ResponseView
-    FeedUnsubscribeView ..|> ResponseView
-    FeedSubscriptionBatchView ..|> ResponseView
-    FeedSubscriptionListView ..|> ResponseView
+    FeedSubscribeView ..|> ResponseComponentView
+    FeedUnsubscribeView ..|> ResponseComponentView
+    FeedSubscriptionBatchView ..|> ResponseComponentView
+    FeedSubscriptionListView ..|> ResponseComponentView
 
-    VoiceLeaderboardView ..|> ResponseView
+    VoiceLeaderboardView ..|> ResponseComponentView
 
-    PaginationView ..|> InteractableComponent
-    FeedNavigationView ..|> InteractableComponent
-    SettingsNavigationView ..|> InteractableComponent
+    PaginationView ..|> InteractableComponentView
+    FeedNavigationView ..|> InteractableComponentView
+    SettingsNavigationView ..|> InteractableComponentView
