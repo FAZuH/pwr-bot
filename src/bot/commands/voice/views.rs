@@ -52,7 +52,7 @@ impl ResponseComponentView for SettingsVoiceView {
         );
 
         let enabled_select = CreateSelectMenu::new(
-            SettingsVoiceAction::EnabledSelect.as_str(),
+            SettingsVoiceAction::EnabledSelect.custom_id(),
             CreateSelectMenuKind::String {
                 options: vec![
                     CreateSelectMenuOption::new("🟢 Enabled", "true").default_selection(is_enabled),

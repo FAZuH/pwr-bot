@@ -126,20 +126,20 @@ impl ResponseComponentView for PaginationView {
 
         vec![CreateComponent::ActionRow(CreateActionRow::Buttons(
             vec![
-                CreateButton::new(PaginationAction::First.as_str())
+                CreateButton::new(PaginationAction::First.custom_id())
                     .label("⏮")
                     .disabled(self.state.current_page == 1),
-                CreateButton::new(PaginationAction::Prev.as_str())
+                CreateButton::new(PaginationAction::Prev.custom_id())
                     .label("◀")
                     .disabled(self.state.current_page == 1),
-                CreateButton::new(PaginationAction::Page.as_str())
+                CreateButton::new(PaginationAction::Page.custom_id())
                     .label(page_label)
                     .disabled(true)
                     .style(ButtonStyle::Secondary),
-                CreateButton::new(PaginationAction::Next.as_str())
+                CreateButton::new(PaginationAction::Next.custom_id())
                     .label("▶")
                     .disabled(self.state.current_page == self.state.pages),
-                CreateButton::new(PaginationAction::Last.as_str())
+                CreateButton::new(PaginationAction::Last.custom_id())
                     .label("⏭")
                     .disabled(self.state.current_page == self.state.pages),
             ]

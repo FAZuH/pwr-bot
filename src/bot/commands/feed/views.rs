@@ -89,7 +89,7 @@ impl ResponseComponentView for SettingsFeedView<'_> {
         );
 
         let enabled_select = CreateSelectMenu::new(
-            SettingsFeedAction::Enabled.as_str(),
+            SettingsFeedAction::Enabled.custom_id(),
             CreateSelectMenuKind::String {
                 options: vec![
                     CreateSelectMenuOption::new("🟢 Enabled", "true").default_selection(is_enabled),
@@ -105,7 +105,7 @@ impl ResponseComponentView for SettingsFeedView<'_> {
             "### Notification Channel\n\n> 🛈  Choose where feed updates will be posted.";
 
         let channel_select = CreateSelectMenu::new(
-            SettingsFeedAction::Channel.as_str(),
+            SettingsFeedAction::Channel.custom_id(),
             CreateSelectMenuKind::Channel {
                 channel_types: Some(vec![ChannelType::Text, ChannelType::News].into()),
                 default_channels: Some(Self::parse_channel_id(settings.channel_id.as_ref()).into()),
@@ -119,7 +119,7 @@ impl ResponseComponentView for SettingsFeedView<'_> {
 
         let sub_role_text = "### Subscribe Permission\n\n> 🛈  Who can add new feeds to this server. Leave empty to allow users with \"Manage Server\" permission.";
         let sub_role_select = CreateSelectMenu::new(
-            SettingsFeedAction::SubRole.as_str(),
+            SettingsFeedAction::SubRole.custom_id(),
             CreateSelectMenuKind::Role {
                 default_roles: Some(
                     Self::parse_role_id(settings.subscribe_role_id.as_ref()).into(),
@@ -135,7 +135,7 @@ impl ResponseComponentView for SettingsFeedView<'_> {
 
         let unsub_role_text = "### Unsubscribe Permission\n\n> 🛈  Who can remove feeds from this server. Leave empty to allow users with \"Manage Server\" permission.";
         let unsub_role_select = CreateSelectMenu::new(
-            SettingsFeedAction::UnsubRole.as_str(),
+            SettingsFeedAction::UnsubRole.custom_id(),
             CreateSelectMenuKind::Role {
                 default_roles: Some(
                     Self::parse_role_id(settings.unsubscribe_role_id.as_ref()).into(),
@@ -299,7 +299,7 @@ impl ResponseComponentView for FeedSubscriptionBatchView {
 
         if self.is_final {
             let nav_button =
-                CreateButton::new(FeedSubscriptionBatchAction::ViewSubscriptions.as_str())
+                CreateButton::new(FeedSubscriptionBatchAction::ViewSubscriptions.custom_id())
                     .label("View Subscriptions")
                     .style(ButtonStyle::Secondary);
 

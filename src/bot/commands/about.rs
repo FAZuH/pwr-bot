@@ -30,16 +30,20 @@ impl AboutCog {
     /// Show information about the bot
     #[poise::command(slash_command)]
     pub async fn about(ctx: Context<'_>) -> Result<(), Error> {
-        ctx.defer().await?;
-
-        let stats = gather_stats(&ctx).await?;
-        let avatar_url = ctx.cache().current_user().face();
-        let view = AboutView::new(stats, avatar_url);
-
-        ctx.send(view.create_reply()).await?;
-
-        Ok(())
+        about(ctx).await
     }
+}
+
+pub async fn about(ctx: Context<'_>) -> Result<(), Error> {
+    ctx.defer().await?;
+
+    let stats = gather_stats(&ctx).await?;
+    let avatar_url = ctx.cache().current_user().face();
+    let view = AboutView::new(stats, avatar_url);
+
+    ctx.send(view.create_reply()).await?;
+
+    Ok(())
 }
 
 impl Cog for AboutCog {

@@ -45,9 +45,6 @@ classDiagram
     class SettingsVoiceView
     class VoiceLeaderboardView
 
-    class SettingsVoiceAction
-    class SettingsFeedAction
-
     %% Class Relationships
     InteractableComponentView <|.. FeedSubscriptionBatchView : T=FeedSubscriptionBatchAction
     InteractableComponentView <|.. PaginationView : T=PaginationAction
@@ -63,10 +60,11 @@ classDiagram
     ResponseComponentView <|.. VoiceLeaderboardView
 
     %% Unimplemented (but planned) stuff
-    InteractableComponentView <|.. SettingsNavigationView : T=SettingsNavigationAction
+    InteractableComponentView <|.. FeedNavigationView : T=FeedNavigationAction
     InteractableComponentView <|.. FeedSubscribeView : T=FeedSubscribeAction
     InteractableComponentView <|.. FeedUnsubscribeView : T=FeedUnsubscribeAction
     InteractableComponentView <|.. SettingsMainView : T=SettingsMainAction
+    InteractableComponentView <|.. SettingsNavigationView : T=SettingsNavigationAction
 
     ResponseComponentView <|.. FeedSubscribeView
     ResponseComponentView <|.. FeedUnsubscribeView

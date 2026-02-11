@@ -130,26 +130,91 @@ pub trait Action: FromStr + Send {
     /// All possible action strings.
     const ALL: &'static [&'static str];
 
-    /// Returns the string representation of this action.
-    fn as_str(&self) -> &'static str;
+    /// Returns the custom_id for this action.
+    fn custom_id(&self) -> &'static str;
+
+    /// Returns a human-readable label for this action.
+    fn label(&self) -> &'static str;
 }
 
+/// Generates an enum that implements the `Action` trait for use in interactive Discord views.
+///
+/// # Syntax
+///
+/// ```rust
+/// custom_id_enum! {
+///     EnumName {
+///         Variant1,
+///         Variant2 = "Custom Label",
+///         Variant3,
+///     }
+/// }
+/// ```
+///
+/// # Generated Code
+///
+/// - Derives: `Debug`, `Clone`, `Copy`, `PartialEq`, `Eq`
+/// - Implements `Action` trait with:
+///   - `custom_id()`: Returns `"EnumName_Variant"`
+///   - `label()`: Returns custom label or stringified variant name
+/// - Implements `FromStr` for parsing custom IDs back to enum variants
+///
+/// # Example
+///
+/// ```rust
+/// custom_id_enum! {
+///     SettingsAction {
+///         Enable = "Enable Feature",
+///         Disable = "Disable Feature",
+///         Configure,  // Label will be "Configure"
+///     }
+/// }
+///
+/// let action = SettingsAction::Enable;
+/// assert_eq!(action.custom_id(), "SettingsAction_Enable");
+/// assert_eq!(action.label(), "Enable Feature");
+/// ```
 #[macro_export]
 macro_rules! custom_id_enum {
-    ($name:ident { $($variant:ident),* $(,)? }) => {
+    (
+        $(#[$meta:meta])*
+        $name:ident {
+            $(
+                $(#[$variant_meta:meta])*
+                $variant:ident $(= $label:literal)?
+            ),* $(,)?
+        }
+    ) => {
+        $(#[$meta])*
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         pub enum $name {
-            $($variant,)*
+            $(
+                $(#[$variant_meta])*
+                $variant,
+            )*
         }
 
         impl $crate::bot::views::Action for $name {
+            #[doc = "All possible custom_id strings for this action enum."]
             const ALL: &'static [&'static str] = &[
-                $(stringify!($variant),)*
+                $(concat!(stringify!($name), "_", stringify!($variant)),)*
             ];
 
-            fn as_str(&self) -> &'static str {
+            #[doc = "Returns the Discord custom_id for this action."]
+            #[doc = ""]
+            #[doc = "Format: `EnumName_Variant`"]
+            fn custom_id(&self) -> &'static str {
                 match self {
-                    $(Self::$variant => stringify!($variant),)*
+                    $(Self::$variant => concat!(stringify!($name), "_", stringify!($variant)),)*
+                }
+            }
+
+            #[doc = "Returns the human-readable label for this action."]
+            #[doc = ""]
+            #[doc = "Uses custom label if provided, otherwise uses the variant name."]
+            fn label(&self) -> &'static str {
+                match self {
+                    $(Self::$variant => custom_id_enum!(@label $variant $(, $label)?),)*
                 }
             }
         }
@@ -157,12 +222,18 @@ macro_rules! custom_id_enum {
         impl std::str::FromStr for $name {
             type Err = ();
 
+            #[doc = "Parses a custom_id string into an action variant."]
+            #[doc = ""]
+            #[doc = "Returns `Err(())` if the string doesn't match any variant."]
             fn from_str(s: &str) -> Result<Self, Self::Err> {
                 match s {
-                    $(stringify!($variant) => Ok(Self::$variant),)*
+                    $(concat!(stringify!($name), "_", stringify!($variant)) => Ok(Self::$variant),)*
                     _ => Err(()),
                 }
             }
         }
     };
+
+    (@label $variant:ident, $label:literal) => { $label };
+    (@label $variant:ident) => { stringify!($variant) };
 }
