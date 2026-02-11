@@ -10,7 +10,7 @@ use crate::bot::commands::Context;
 use crate::bot::commands::Error;
 use crate::bot::commands::voice::LeaderboardEntry;
 use crate::bot::commands::voice::image_generator::LeaderboardImageGenerator;
-use crate::bot::commands::voice::views::LeaderboardView;
+use crate::bot::commands::voice::views::VoiceLeaderboardView;
 use crate::bot::commands::voice::views::SettingsVoiceView;
 use crate::bot::error::BotError;
 use crate::bot::views::InteractableComponentView;
@@ -77,7 +77,7 @@ pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
         .map_err(Error::from)?;
 
     if total_entries.is_empty() {
-        let reply = LeaderboardView::create_empty_reply();
+        let reply = VoiceLeaderboardView::create_empty_reply();
         ctx.send(reply).await?;
         return Ok(());
     }
@@ -101,7 +101,7 @@ pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
         &total_entries[..(total_entries.len().min(LEADERBOARD_PER_PAGE as usize))];
     let page_result = generate_page(ctx, &image_gen, current_page_entries, 0).await?;
 
-    let view = LeaderboardView::new(user_rank);
+    let view = VoiceLeaderboardView::new(user_rank);
     let mut components = view.create();
     pagination.attach_if_multipage(&mut components);
     let attachment = CreateAttachment::bytes(page_result.image_bytes, "leaderboard.png");

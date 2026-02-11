@@ -17,10 +17,10 @@ use serenity::all::UserId;
 use crate::bot::checks::check_author_roles;
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;
-use crate::bot::commands::feeds::views::SettingsFeedsView;
-use crate::bot::commands::feeds::views::SubscriptionBatchAction;
-use crate::bot::commands::feeds::views::SubscriptionBatchView;
-use crate::bot::commands::feeds::views::SubscriptionsListView;
+use crate::bot::commands::feed::views::SettingsFeedView;
+use crate::bot::commands::feed::views::FeedSubscriptionBatchAction;
+use crate::bot::commands::feed::views::FeedSubscriptionBatchView;
+use crate::bot::commands::feed::views::FeedSubscriptionsListView;
 use crate::bot::error::BotError;
 use crate::bot::utils::parse_and_validate_urls;
 use crate::bot::views::InteractableComponentView;
@@ -128,7 +128,7 @@ pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
         .get_server_settings(guild_id)
         .await?;
 
-    let mut view = SettingsFeedsView::new(&mut settings);
+    let mut view = SettingsFeedView::new(&mut settings);
     let _ = ctx.send(view.create_reply()).await?;
 
     while let Some((_, interaction)) = view
@@ -212,7 +212,7 @@ pub async fn subscriptions(ctx: Context<'_>, sent_into: Option<SendInto>) -> Res
         .list_paginated_subscriptions(&subscriber, 1u32, 10u32)
         .await?;
 
-    let mut view = SubscriptionsListView::new(subscriptions);
+    let mut view = FeedSubscriptionsListView::new(subscriptions);
     let mut pagination = PaginationView::new(total_items, 10_u32);
 
     let mut components = view.create();
@@ -259,7 +259,7 @@ async fn process_subscription_batch(
     let mut states: Vec<String> = vec!["⏳ Processing...".to_string(); urls.len()];
     let mut last_send = Instant::now();
     let mut msg_handle: Option<ReplyHandle<'_>> = None;
-    let mut view: Option<SubscriptionBatchView> = None;
+    let mut view: Option<FeedSubscriptionBatchView> = None;
 
     for (i, url) in urls.iter().enumerate() {
         let result_str = if is_subscribe {
@@ -282,7 +282,7 @@ async fn process_subscription_batch(
 
         let is_final = i + 1 == urls.len();
         if last_send.elapsed().as_secs() > UPDATE_INTERVAL_SECS || is_final {
-            let batch_view = SubscriptionBatchView::new(states.clone(), is_final);
+            let batch_view = FeedSubscriptionBatchView::new(states.clone(), is_final);
             let resp = batch_view.create_reply();
             match msg_handle {
                 None => msg_handle = Some(ctx.send(resp).await?),
@@ -299,7 +299,7 @@ async fn process_subscription_batch(
     if let Some(mut view) = view {
         let timeout = Duration::from_secs(INTERACTION_TIMEOUT_SECS);
         if let Some((action, _)) = view.listen_once(&ctx, timeout).await
-            && action == SubscriptionBatchAction::ViewSubscriptions
+            && action == FeedSubscriptionBatchAction::ViewSubscriptions
         {
             // Convert subscriber type back to SendInto
             let send_into = match subscriber.r#type {

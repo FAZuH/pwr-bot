@@ -3,15 +3,15 @@
 use crate::bot::commands::Cog;
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;
-use crate::bot::commands::feeds::commands::SendInto;
+use crate::bot::commands::feed::commands::SendInto;
 
 pub mod commands;
 pub mod views;
 
 /// Cog for feed subscription commands.
-pub struct FeedsCog;
+pub struct FeedCog;
 
-impl FeedsCog {
+impl FeedCog {
     /// Manage feed subscriptions and settings.
     ///
     /// Base command for feed management. Use subcommands to:
@@ -106,7 +106,7 @@ impl FeedsCog {
     }
 }
 
-impl Cog for FeedsCog {
+impl Cog for FeedCog {
     fn commands(&self) -> Vec<poise::Command<crate::bot::Data, super::Error>> {
         vec![Self::feed()]
     }

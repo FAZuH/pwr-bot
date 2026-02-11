@@ -25,7 +25,7 @@ use crate::bot::views::ViewProvider;
 use crate::custom_id_enum;
 use crate::database::model::ServerSettings;
 
-custom_id_enum!(SettingsAction { EnabledSelect });
+custom_id_enum!(SettingsVoiceAction { EnabledSelect });
 
 /// View for voice tracking settings.
 pub struct SettingsVoiceView {
@@ -53,7 +53,7 @@ impl<'a> ViewProvider<'a> for SettingsVoiceView {
         );
 
         let enabled_select = CreateSelectMenu::new(
-            SettingsAction::EnabledSelect.as_str(),
+            SettingsVoiceAction::EnabledSelect.as_str(),
             CreateSelectMenuKind::String {
                 options: vec![
                     CreateSelectMenuOption::new("🟢 Enabled", "true").default_selection(is_enabled),
@@ -77,15 +77,15 @@ impl<'a> ViewProvider<'a> for SettingsVoiceView {
 impl ResponseComponentView for SettingsVoiceView {}
 
 #[async_trait::async_trait]
-impl InteractableComponentView<SettingsAction> for SettingsVoiceView {
-    async fn handle(&mut self, interaction: &ComponentInteraction) -> Option<SettingsAction> {
+impl InteractableComponentView<SettingsVoiceAction> for SettingsVoiceView {
+    async fn handle(&mut self, interaction: &ComponentInteraction) -> Option<SettingsVoiceAction> {
         use serenity::all::ComponentInteractionDataKind;
 
-        let action = SettingsAction::from_str(&interaction.data.custom_id).ok()?;
+        let action = SettingsVoiceAction::from_str(&interaction.data.custom_id).ok()?;
 
         match (&action, &interaction.data.kind) {
             (
-                SettingsAction::EnabledSelect,
+                SettingsVoiceAction::EnabledSelect,
                 ComponentInteractionDataKind::StringSelect { values },
             ) => {
                 if let Some(value) = values.first() {
@@ -99,11 +99,11 @@ impl InteractableComponentView<SettingsAction> for SettingsVoiceView {
 }
 
 /// View that displays the voice leaderboard.
-pub struct LeaderboardView {
+pub struct VoiceLeaderboardView {
     pub user_rank: Option<u32>,
 }
 
-impl LeaderboardView {
+impl VoiceLeaderboardView {
     /// Creates a new leaderboard view with optional user rank.
     pub fn new(user_rank: Option<u32>) -> Self {
         Self { user_rank }
@@ -132,7 +132,7 @@ impl LeaderboardView {
     }
 }
 
-impl<'a> ViewProvider<'a> for LeaderboardView {
+impl<'a> ViewProvider<'a> for VoiceLeaderboardView {
     fn create(&self) -> Vec<CreateComponent<'a>> {
         let mut container_components: Vec<CreateContainerComponent> = Vec::new();
 
