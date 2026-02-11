@@ -6,13 +6,22 @@ RUN apt-get update && \
     apt-get install -y pkg-config libssl-dev build-essential cmake libclang-dev git && \
     rm -rf /var/lib/apt/lists/*
 
-COPY Cargo.toml Cargo.lock /app/
-COPY ./assets /app/assets
-COPY ./src /app/src
-COPY ./migrations /app/migrations
-
 WORKDIR /app
-RUN --mount=type=cache,target=/usr/local/cargo/registry cargo build --release
+
+# Cache build dependencies
+COPY Cargo.toml Cargo.lock ./
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    mkdir src && \
+    echo "fn main() {}" > src/main.rs && \
+    cargo build --release && \
+    rm -rf src
+
+# Build app
+COPY ./assets ./assets
+COPY ./src ./src
+COPY ./migrations ./migrations
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    cargo build --release
 
 # Includes glibc, libssl.so.3 and libcrypto.so.3, required by app
 FROM gcr.io/distroless/cc-debian12:latest AS app
