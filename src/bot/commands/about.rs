@@ -1,6 +1,8 @@
 use std::borrow::Cow;
 use std::time::Duration;
 
+use chrono::Datelike;
+use chrono::Utc;
 use poise::Command;
 use poise::serenity_prelude::CreateActionRow;
 use poise::serenity_prelude::CreateButton;
@@ -13,7 +15,6 @@ use poise::serenity_prelude::CreateSectionComponent;
 use poise::serenity_prelude::CreateTextDisplay;
 use poise::serenity_prelude::CreateThumbnail;
 use poise::serenity_prelude::CreateUnfurledMediaItem;
-use sysinfo::System;
 
 use crate::bot::commands::Cog;
 use crate::bot::commands::Context;
@@ -53,6 +54,7 @@ struct AboutStats {
     latency_ms: u64,
     command_count: usize,
     memory_mb: f64,
+    current_year: i32,
 }
 
 struct AboutView {
@@ -92,39 +94,52 @@ impl AboutView {
 
 impl<'a> ViewProvider<'a> for AboutView {
     fn create(&self) -> Vec<CreateComponent<'a>> {
-        let title_text = format!("## pwr-bot\n\n**Version:** {}", self.stats.version);
-
-        let stats_text = format!(
-            "### Stats\n\nUptime: {}\nServers: {}\nUsers: {}\nLatency: {}ms\nCommands: {}\nMemory: {:.1} MB",
+        let content_text = format!(
+            "## pwr-bot
+### Stats
+- **Uptime**: {}
+- **Servers**: {}
+- **Users**: {}
+- **Commands**: {}
+- **Latency**: {}ms
+- **Memory**: {:.1} MB
+### Info
+- **Author**: [FAZuH](https://github.com/FAZuH)
+- **Source**: [GitHub](https://github.com/FAZuH/pwr-bot)
+- **License**: [MIT](https://github.com/FAZuH/pwr-bot/blob/main/LICENSE)
+-# Copyright © 2025-{} FAZuH.  —  v{}",
             Self::format_uptime(self.stats.uptime),
             Self::format_number(self.stats.guild_count),
             Self::format_number(self.stats.user_count),
             self.stats.latency_ms,
             self.stats.command_count,
-            self.stats.memory_mb
+            self.stats.memory_mb,
+            self.stats.current_year,
+            self.stats.version,
         );
-
-        let info_text = "### Info\n\nAuthor: [FAZuH](https://github.com/FAZuH)\nSource: [GitHub](https://github.com/FAZuH/pwr-bot)\nLicense: MIT";
 
         let avatar_url: String = self.avatar_url.clone();
         let avatar = CreateThumbnail::new(CreateUnfurledMediaItem::new(avatar_url));
 
-        let title_section = CreateSection::new(
+        let content_section = CreateSection::new(
             vec![CreateSectionComponent::TextDisplay(CreateTextDisplay::new(
-                title_text,
+                content_text,
             ))],
             CreateSectionAccessory::Thumbnail(avatar),
         );
 
         let github_button =
-            CreateButton::new_link("https://github.com/FAZuH/pwr-bot").label("GitHub");
+            CreateButton::new_link("https://github.com/FAZuH/pwr-bot").label("Source Code");
+
+        let license_button =
+            CreateButton::new_link("https://github.com/FAZuH/pwr-bot/blob/main/LICENSE")
+                .label("License");
 
         let container = CreateComponent::Container(CreateContainer::new(vec![
-            CreateContainerComponent::Section(title_section),
-            CreateContainerComponent::TextDisplay(CreateTextDisplay::new(stats_text)),
-            CreateContainerComponent::TextDisplay(CreateTextDisplay::new(info_text)),
+            CreateContainerComponent::Section(content_section),
             CreateContainerComponent::ActionRow(CreateActionRow::Buttons(Cow::Owned(vec![
                 github_button,
+                license_button,
             ]))),
         ]));
 
@@ -148,15 +163,16 @@ async fn gather_stats(ctx: &Context<'_>) -> Result<AboutStats, Error> {
         .map(|guild| guild.member_count as usize)
         .sum();
 
+    // Make a request to Discord server to get latency
     let latency_start = std::time::Instant::now();
     let _ = ctx.http().get_current_user().await?;
     let latency_ms = latency_start.elapsed().as_millis() as u64;
 
     let command_count = ctx.framework().options().commands.len();
 
-    let mut system = System::new();
-    system.refresh_memory();
-    let memory_mb = system.used_memory() as f64 / 1024.0;
+    let memory_mb = get_process_memory_mb();
+
+    let current_year = Utc::now().year();
 
     Ok(AboutStats {
         version: env!("CARGO_PKG_VERSION").to_string(),
@@ -166,5 +182,22 @@ async fn gather_stats(ctx: &Context<'_>) -> Result<AboutStats, Error> {
         latency_ms,
         command_count,
         memory_mb,
+        current_year,
     })
+}
+
+fn get_process_memory_mb() -> f64 {
+    use sysinfo::System;
+    use sysinfo::get_current_pid;
+
+    let mut s = System::new_all();
+    s.refresh_all();
+
+    if let Ok(pid) = get_current_pid()
+        && let Some(process) = s.process(pid)
+    {
+        return process.memory() as f64 / (1024.0 * 1024.0);
+    }
+
+    0.0
 }
