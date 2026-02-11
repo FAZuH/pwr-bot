@@ -411,3 +411,70 @@ impl MyCommandCog {
 - Uses nightly rustfmt for unstable features
 - Uses stable clippy for linting
 - All checks must pass before merging
+
+## Design Patterns
+
+### Controller Pattern
+
+Use the Controller pattern for interactive command flows:
+
+1. **Controller trait**: All interactive flows implement `Controller<O>`
+2. **Coordinator**: Use `Coordinator::run()` to chain controllers without recursion
+3. **Output enums**: Controllers return enums indicating navigation intent
+
+```rust
+// Controller implementation
+pub struct SettingsController<'a> { ctx: &'a Context<'a> }
+
+impl<'a> Controller<SettingsResult> for SettingsController<'a> {
+    async fn run(&mut self) -> Result<SettingsResult, Error> {
+        // Interactive flow logic
+        Ok(SettingsResult::Exit)
+    }
+}
+
+// Chaining with Coordinator
+Coordinator::run(
+    SettingsMainController::new(&ctx),
+    |result| match result {
+        MainResult::NavigateToFeeds => Some(SettingsFeedController::new(&ctx)),
+        MainResult::Exit => None,
+    }
+).await?;
+```
+
+### Type Design
+
+- **Prefer generic types** over associated types when both are possible
+  - Generics offer more flexibility and composability
+  - Associated types should only be used when the type is truly inherent to the trait
+  - Example: Use `Controller<O>` instead of `trait Controller { type Output; }`
+
+### UI Guidelines
+
+- **Do not use emoji** in Discord UI components
+  - Discord emoji render inconsistently across platforms
+  - Use Unicode glyphs or plain text labels instead
+  - Example: Use "< Back" instead of emoji arrows
+  - For icons, use a consistent set of Unicode characters (e.g., mathematical symbols)
+
+### Navigation Patterns
+
+- **Flat navigation**: Use a Coordinator to manage controller flow
+- **Back navigation**: Controllers return a result indicating where to go next
+- **State persistence**: Pass shared state through controller constructors
+- **No recursion**: Always use the Coordinator pattern to prevent stack overflow
+
+## Documentation
+
+### Architecture Diagrams
+
+Update diagrams in `docs/diagrams/` when making architectural changes:
+
+- `architecture-view-uml.mmd` - Class diagrams
+- `architecture-view-flow.mmd` - Flow diagrams
+
+**Guidelines:**
+- Keep source in Mermaid format (`.mmd`)
+- Export PNG for viewing
+- Mark unimplemented features in dedicated section

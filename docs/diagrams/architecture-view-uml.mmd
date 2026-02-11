@@ -35,6 +35,17 @@ classDiagram
         label() &str
     }
 
+    %% Controller Pattern
+    class Controller~O~ {
+        <<interface>>
+        run() Result~O~
+    }
+
+    class Coordinator {
+        <<struct>>
+        run(initial, next) Result~O~
+    }
+
     %% Interface Relationships
     ViewProvider <-- ResponseComponentView : blanket impl
     ResponseComponentView <|-- StatefulView
@@ -47,6 +58,7 @@ classDiagram
     class PaginationView
     class SettingsFeedView
     class SettingsMainView
+    class SettingsNavigationView
     class SettingsVoiceView
     class VoiceLeaderboardView
 
@@ -65,4 +77,22 @@ classDiagram
 
     ResponseComponentView <|.. AboutView
     ResponseComponentView <|.. FeedSubscriptionsListView
+    ResponseComponentView <|.. SettingsNavigationView
     ResponseComponentView <|.. VoiceLeaderboardView
+
+    %% Controller Pattern Relationships
+    Controller <|.. SettingsMainController
+    Controller <|.. SettingsFeedController
+    Controller <|.. SettingsVoiceController
+    Coordinator ..> Controller : manages
+
+    %% Unimplemented (but planned) stuff
+    InteractableComponentView <|.. FeedNavigationView : T=FeedNavigationAction
+    InteractableComponentView <|.. SettingsNavigationView : T=SettingsNavigationAction
+
+    InteractableComponentView <|.. FeedSubscribeView : T=FeedSubscribeAction
+    InteractableComponentView <|.. FeedUnsubscribeView : T=FeedUnsubscribeAction
+
+    ResponseComponentView <|.. FeedSubscribeView
+    ResponseComponentView <|.. FeedUnsubscribeView
+    ResponseComponentView <|.. SettingsMainView
