@@ -123,7 +123,7 @@ where
 pub trait Action: FromStr + Send {
     /// All possible action strings.
     const ALL: &'static [&'static str];
-    
+
     /// Returns the string representation of this action.
     fn as_str(&self) -> &'static str;
 }
