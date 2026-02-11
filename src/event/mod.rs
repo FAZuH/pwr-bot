@@ -1,3 +1,5 @@
+//! Event system for pub/sub communication between components.
+
 pub mod event_bus;
 pub mod feed_update_event;
 
@@ -23,6 +25,7 @@ pub trait Event: std::any::Any + Send + Sync + 'static {
     }
 }
 
+/// Event fired when a user's voice state changes.
 #[derive(Clone, Debug)]
 pub struct VoiceStateEvent {
     pub old: Option<VoiceState>,

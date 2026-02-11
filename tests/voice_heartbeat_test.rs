@@ -1,3 +1,5 @@
+//! Integration tests for voice tracking heartbeat mechanism.
+
 use std::sync::Arc;
 
 use chrono::Duration;

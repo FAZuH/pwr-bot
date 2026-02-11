@@ -1,3 +1,5 @@
+//! Image generation for voice leaderboard.
+
 use std::io::Cursor;
 
 use ab_glyph::Font;
@@ -13,26 +15,50 @@ use image::imageops::overlay;
 
 use crate::bot::commands::voice::LeaderboardEntry;
 
-const BACKGROUND_COLOR: Rgba<u8> = Rgba([26, 26, 46, 255]); // Dark blue-purple #1a1a2e
-const TEXT_COLOR: Rgba<u8> = Rgba([224, 224, 224, 255]); // Light gray #e0e0e0
-const GOLD_COLOR: Rgba<u8> = Rgba([255, 215, 0, 255]); // Gold #ffd700
-const SILVER_COLOR: Rgba<u8> = Rgba([192, 192, 192, 255]); // Silver #c0c0c0
-const BRONZE_COLOR: Rgba<u8> = Rgba([205, 127, 50, 255]); // Bronze #cd7f32
-const PLACEHOLDER_COLOR: Rgba<u8> = Rgba([100, 100, 100, 255]); // Gray placeholder
+/// Dark blue-purple background color.
+const BACKGROUND_COLOR: Rgba<u8> = Rgba([26, 26, 46, 255]);
 
-const IMAGE_WIDTH: u32 = 400; // Half width as requested
+/// Light gray text color.
+const TEXT_COLOR: Rgba<u8> = Rgba([224, 224, 224, 255]);
+
+/// Gold color for rank 1.
+const GOLD_COLOR: Rgba<u8> = Rgba([255, 215, 0, 255]);
+
+/// Silver color for rank 2.
+const SILVER_COLOR: Rgba<u8> = Rgba([192, 192, 192, 255]);
+
+/// Bronze color for rank 3.
+const BRONZE_COLOR: Rgba<u8> = Rgba([205, 127, 50, 255]);
+
+/// Gray placeholder color.
+const PLACEHOLDER_COLOR: Rgba<u8> = Rgba([100, 100, 100, 255]);
+
+/// Width of the generated image in pixels.
+const IMAGE_WIDTH: u32 = 400;
+
+/// Height per leaderboard entry.
 const IMAGE_HEIGHT_PER_ENTRY: u32 = 50;
-const PADDING: u32 = 15;
-const AVATAR_SIZE: u32 = 32; // Smaller avatar to match font height
-const FONT_SIZE: f32 = 20.0;
-const TEXT_VERTICAL_OFFSET: f32 = 6.0; // Adjust text baseline
 
+/// Padding around the image content.
+const PADDING: u32 = 15;
+
+/// Size of user avatars in pixels.
+const AVATAR_SIZE: u32 = 32;
+
+/// Font size for text rendering.
+const FONT_SIZE: f32 = 20.0;
+
+/// Vertical offset for text alignment.
+const TEXT_VERTICAL_OFFSET: f32 = 6.0;
+
+/// Generates leaderboard images with user rankings.
 pub struct LeaderboardImageGenerator {
     font: FontArc,
     http_client: reqwest::Client,
 }
 
 impl LeaderboardImageGenerator {
+    /// Creates a new image generator with embedded Roboto font.
     pub fn new() -> Result<Self> {
         // Load the Roboto font from embedded bytes
         let font_data = include_bytes!("../../../../assets/fonts/Roboto-Regular.ttf");
@@ -44,6 +70,7 @@ impl LeaderboardImageGenerator {
         })
     }
 
+    /// Generates a leaderboard image with the given entries.
     pub async fn generate_leaderboard(&self, entries: &[LeaderboardEntry]) -> Result<Vec<u8>> {
         let total_height = (entries.len() as u32 * IMAGE_HEIGHT_PER_ENTRY) + PADDING * 2;
 
@@ -78,6 +105,7 @@ impl LeaderboardImageGenerator {
         Ok(bytes)
     }
 
+    /// Draws a single leaderboard entry at the given vertical position.
     fn draw_entry(
         &self,
         img: &mut RgbaImage,
@@ -155,6 +183,7 @@ impl LeaderboardImageGenerator {
         Ok(())
     }
 
+    /// Calculates the width of text at the given scale.
     fn calculate_text_width(&self, text: &str, scale: PxScale) -> f32 {
         let mut width = 0.0;
         for c in text.chars() {
@@ -166,6 +195,7 @@ impl LeaderboardImageGenerator {
         width
     }
 
+    /// Crops an image to a circular shape.
     fn make_circular(&self, img: &DynamicImage, size: u32) -> RgbaImage {
         // Resize image to desired size
         let resized = img.resize_exact(size, size, FilterType::Lanczos3);
@@ -190,6 +220,7 @@ impl LeaderboardImageGenerator {
         circular
     }
 
+    /// Draws a circular placeholder avatar.
     fn draw_circle_placeholder(&self, img: &mut RgbaImage, cx: u32, cy: u32, radius: u32) {
         for y in (cy.saturating_sub(radius))..=(cy + radius).min(img.height() - 1) {
             for x in (cx.saturating_sub(radius))..=(cx + radius).min(img.width() - 1) {
@@ -204,6 +235,7 @@ impl LeaderboardImageGenerator {
         }
     }
 
+    /// Downloads an avatar image from a URL.
     async fn download_avatar_from_url(&self, url: &str) -> Result<DynamicImage> {
         // Download avatar from the provided URL (could be WEBP or GIF)
         let response = self.http_client.get(url).send().await?;
@@ -220,6 +252,7 @@ impl LeaderboardImageGenerator {
         Ok(img)
     }
 
+    /// Downloads a Discord default avatar based on user ID.
     async fn download_default_avatar(&self, user_id: u64) -> Result<DynamicImage> {
         // Discord uses a discriminator-based default avatar if no custom avatar is set
         let discriminator = user_id % 5;
@@ -242,6 +275,7 @@ impl LeaderboardImageGenerator {
         Ok(img)
     }
 
+    /// Draws text onto the image at the given position.
     fn draw_text(
         &self,
         img: &mut RgbaImage,
@@ -288,6 +322,7 @@ impl LeaderboardImageGenerator {
     }
 }
 
+/// Formats a duration in seconds into a human-readable string.
 fn format_duration(seconds: i64) -> String {
     if seconds < 60 {
         format!("{}s", seconds)

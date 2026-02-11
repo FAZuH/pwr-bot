@@ -1,3 +1,5 @@
+//! Integration tests for database table operations.
+
 use chrono::Duration;
 use chrono::Utc;
 use pwr_bot::database::model::FeedItemModel;

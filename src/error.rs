@@ -1,6 +1,9 @@
+//! Top-level application errors.
+
 use crate::database::error::DatabaseError;
 use crate::feed::error::FeedError;
 
+/// Application-level errors.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum AppError {
@@ -14,6 +17,7 @@ pub enum AppError {
     ConfigurationError { msg: String },
 }
 
+/// Union of all possible error types in the application.
 pub enum AppErrorKind {
     AppError(AppError),
     DatabaseError(DatabaseError),

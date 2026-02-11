@@ -1,3 +1,5 @@
+//! Integration tests for voice tracking service.
+
 use chrono::Duration;
 use chrono::Utc;
 use pwr_bot::database::model::ServerSettings;

@@ -1,3 +1,5 @@
+//! About command showing bot statistics and information.
+
 use std::borrow::Cow;
 use std::time::Duration;
 
@@ -22,6 +24,7 @@ use crate::bot::commands::Error;
 use crate::bot::views::ResponseComponentView;
 use crate::bot::views::ViewProvider;
 
+/// Cog for the about command.
 pub struct AboutCog;
 
 impl AboutCog {
@@ -46,6 +49,7 @@ impl Cog for AboutCog {
     }
 }
 
+/// Statistics displayed in the about command.
 struct AboutStats {
     version: String,
     uptime: Duration,
@@ -57,16 +61,19 @@ struct AboutStats {
     current_year: i32,
 }
 
+/// View that renders the about information.
 struct AboutView {
     stats: AboutStats,
     avatar_url: String,
 }
 
 impl AboutView {
+    /// Creates a new about view with the given stats and avatar.
     fn new(stats: AboutStats, avatar_url: String) -> Self {
         Self { stats, avatar_url }
     }
 
+    /// Formats a duration into a human-readable uptime string.
     fn format_uptime(duration: Duration) -> String {
         let days = duration.as_secs() / 86400;
         let hours = (duration.as_secs() % 86400) / 3600;
@@ -81,6 +88,7 @@ impl AboutView {
         }
     }
 
+    /// Formats a number with k/M suffixes for readability.
     fn format_number(num: usize) -> String {
         if num >= 1_000_000 {
             format!("{:.1}M", num as f64 / 1_000_000.0)
@@ -149,6 +157,7 @@ impl<'a> ViewProvider<'a> for AboutView {
 
 impl ResponseComponentView for AboutView {}
 
+/// Gathers bot statistics for the about command.
 async fn gather_stats(ctx: &Context<'_>) -> Result<AboutStats, Error> {
     let start_time = ctx.data().start_time;
     let uptime = start_time.elapsed();
@@ -186,6 +195,7 @@ async fn gather_stats(ctx: &Context<'_>) -> Result<AboutStats, Error> {
     })
 }
 
+/// Gets the current process memory usage in megabytes.
 fn get_process_memory_mb() -> f64 {
     use sysinfo::System;
     use sysinfo::get_current_pid;

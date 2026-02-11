@@ -1,3 +1,5 @@
+//! Feed update event and notification message creation.
+
 use std::sync::Arc;
 
 use serenity::all::CreateComponent;
@@ -28,6 +30,7 @@ pub struct FeedUpdateEvent {
 }
 
 impl FeedUpdateEvent {
+    /// Creates a new feed update event from the given data.
     pub fn new(data: FeedUpdateData) -> Self {
         let data = Arc::new(data);
         Self {
@@ -46,6 +49,7 @@ pub struct FeedUpdateData {
 }
 
 impl FeedUpdateData {
+    /// Creates a Discord message for this feed update.
     pub fn create_message(&self) -> CreateMessage<'static> {
         let FeedUpdateData {
             feed,

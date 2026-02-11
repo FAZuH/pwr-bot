@@ -1,3 +1,5 @@
+//! Integration tests for feed subscription service.
+
 use std::sync::Arc;
 
 use chrono::Utc;

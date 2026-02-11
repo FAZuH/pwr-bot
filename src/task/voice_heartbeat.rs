@@ -1,3 +1,5 @@
+/// Heartbeat task for voice tracking crash recovery.
+
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -14,13 +16,13 @@ use tokio::time::interval;
 
 use crate::service::voice_tracking_service::VoiceTrackingService;
 
-/// File to store the last heartbeat timestamp
+/// File to store the last heartbeat timestamp.
 const HEARTBEAT_FILE: &str = "voice_heartbeat.json";
 
-/// Interval between heartbeats (5 minutes)
+/// Interval between heartbeats (5 minutes).
 const HEARTBEAT_INTERVAL_SECS: u64 = 300;
 
-/// Data stored in the heartbeat file
+/// Data stored in the heartbeat file.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct HeartbeatData {
     timestamp: DateTime<Utc>,
@@ -36,13 +38,14 @@ impl Default for HeartbeatData {
     }
 }
 
-/// Manages heartbeat for voice tracking to prevent data loss on crashes
+/// Manages heartbeat for voice tracking to prevent data loss on crashes.
 pub struct VoiceHeartbeatManager {
     data_dir: PathBuf,
     service: Arc<VoiceTrackingService>,
 }
 
 impl VoiceHeartbeatManager {
+    /// Creates a new heartbeat manager with the given data directory.
     pub fn new(data_dir: impl Into<PathBuf>, service: Arc<VoiceTrackingService>) -> Self {
         Self {
             data_dir: data_dir.into(),
@@ -50,12 +53,12 @@ impl VoiceHeartbeatManager {
         }
     }
 
-    /// Get the path to the heartbeat file
+    /// Gets the path to the heartbeat file.
     fn heartbeat_file_path(&self) -> PathBuf {
         self.data_dir.join(HEARTBEAT_FILE)
     }
 
-    /// Read the last heartbeat timestamp from file
+    /// Reads the last heartbeat timestamp from file.
     pub async fn read_last_heartbeat(&self) -> Result<Option<DateTime<Utc>>> {
         let path = self.heartbeat_file_path();
 
@@ -69,7 +72,7 @@ impl VoiceHeartbeatManager {
         Ok(Some(data.timestamp))
     }
 
-    /// Start the heartbeat task
+    /// Starts the heartbeat task.
     pub async fn start(&self) {
         let service = self.service.clone();
         let data_dir = self.data_dir.clone();
@@ -135,7 +138,7 @@ impl VoiceHeartbeatManager {
         );
     }
 
-    /// Handle recovery from a crash - close orphaned sessions using the last known heartbeat
+    /// Handles recovery from a crash by closing orphaned sessions.
     pub async fn recover_from_crash(&self) -> Result<u32> {
         let last_heartbeat = match self.read_last_heartbeat().await? {
             Some(ts) => ts,

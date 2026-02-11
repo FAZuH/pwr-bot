@@ -1,3 +1,5 @@
+//! Voice channel tracking and leaderboard commands.
+
 use crate::bot::commands::Cog;
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;
@@ -7,6 +9,7 @@ pub mod commands;
 pub mod image_generator;
 pub mod views;
 
+/// A single entry in the voice leaderboard.
 pub struct LeaderboardEntry {
     pub rank: u32,
     pub user_id: u64,
@@ -15,11 +18,13 @@ pub struct LeaderboardEntry {
     pub duration_seconds: i64,
 }
 
+/// Result of generating a leaderboard page.
 pub struct PageGenerationResult {
     pub entries_with_names: Vec<(VoiceLeaderboardEntry, String)>,
     pub image_bytes: Vec<u8>,
 }
 
+/// Cog for voice tracking commands.
 pub struct VoiceCog;
 
 impl VoiceCog {

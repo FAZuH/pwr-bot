@@ -1,3 +1,5 @@
+//! Subscriber that sends feed updates to Discord guild channels.
+
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -18,17 +20,20 @@ use crate::event::Event;
 use crate::event::FeedUpdateEvent;
 use crate::subscriber::Subscriber;
 
+/// Subscriber that sends feed updates to guild channels.
 pub struct DiscordGuildSubscriber {
     bot: Arc<Bot>,
     db: Arc<Database>,
 }
 
 impl DiscordGuildSubscriber {
+    /// Creates a new guild subscriber.
     pub fn new(bot: Arc<Bot>, db: Arc<Database>) -> Self {
         debug!("Initializing DiscordGuildSubscriber.");
         Self { bot, db }
     }
 
+    /// Handles a feed update event by sending messages to guild channels.
     pub async fn feed_event_callback(&self, event: FeedUpdateEvent) -> Result<()> {
         debug!("Received event `{}`", event.event_name());
 
@@ -50,6 +55,7 @@ impl DiscordGuildSubscriber {
         Ok(())
     }
 
+    /// Sends a message to a guild channel for a subscriber.
     pub async fn handle_sub(
         &self,
         sub: &SubscriberModel,

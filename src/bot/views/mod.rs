@@ -1,3 +1,7 @@
+//! Discord Components V2 view system.
+//!
+//! Provides traits and utilities for building interactive UI components.
+
 use std::str::FromStr;
 use std::time::Duration;
 
@@ -16,10 +20,13 @@ use crate::bot::commands::Context;
 
 pub mod pagination;
 
+/// Trait for types that can create Discord UI components.
 pub trait ViewProvider<'a, T = CreateComponent<'a>> {
+    /// Creates the components for this view.
     fn create(&self) -> Vec<T>;
 }
 
+/// Trait for views that can be sent as a response to a command.
 pub trait ResponseComponentView: for<'a> ViewProvider<'a> {
     fn create_reply<'a>(&self) -> CreateReply<'a> {
         CreateReply::new()
@@ -34,7 +41,9 @@ pub trait ResponseComponentView: for<'a> ViewProvider<'a> {
     }
 }
 
+/// Trait for views that can be attached to existing component collections.
 pub trait AttachableView<'a, T = CreateComponent<'a>>: ViewProvider<'a, T> {
+    /// Attaches this view's components to the given collection.
     fn attach(&self, components: &mut impl Extend<T>) {
         components.extend(self.create());
     }
@@ -42,11 +51,13 @@ pub trait AttachableView<'a, T = CreateComponent<'a>>: ViewProvider<'a, T> {
 
 impl<'a, T> AttachableView<'a> for T where T: ViewProvider<'a> {}
 
+/// Trait for views that handle component interactions.
 #[async_trait::async_trait]
 pub trait InteractableComponentView<T>: for<'a> AttachableView<'a>
 where
     T: Action,
 {
+    /// Waits for a single interaction and handles it.
     async fn listen_once<'a>(
         &mut self,
         ctx: &'a Context<'a>,
@@ -69,7 +80,7 @@ where
             .map(|action| (action, interaction))
     }
 
-    /// Returns a stream that processes each interaction through `handle` before yielding
+    /// Returns a stream that processes each interaction through `handle` before yielding.
     fn stream<'a>(
         &'a mut self,
         ctx: &'a Context<'a>,
@@ -104,11 +115,16 @@ where
         )
     }
 
+    /// Handles an interaction and returns the action if recognized.
     async fn handle(&mut self, interaction: &ComponentInteraction) -> Option<T>;
 }
 
+/// Trait for action enums used in interactive views.
 pub trait Action: FromStr + Send {
+    /// All possible action strings.
     const ALL: &'static [&'static str];
+    
+    /// Returns the string representation of this action.
     fn as_str(&self) -> &'static str;
 }
 

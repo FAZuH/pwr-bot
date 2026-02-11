@@ -1,3 +1,5 @@
+//! Views for voice tracking commands.
+
 use std::str::FromStr;
 
 use poise::CreateReply;
@@ -25,11 +27,13 @@ use crate::database::model::ServerSettings;
 
 custom_id_enum!(SettingsAction { EnabledSelect });
 
+/// View for voice tracking settings.
 pub struct SettingsVoiceView {
     pub settings: ServerSettings,
 }
 
 impl SettingsVoiceView {
+    /// Creates a new voice settings view.
     pub fn new(settings: ServerSettings) -> Self {
         Self { settings }
     }
@@ -94,15 +98,18 @@ impl InteractableComponentView<SettingsAction> for SettingsVoiceView {
     }
 }
 
+/// View that displays the voice leaderboard.
 pub struct LeaderboardView {
     pub user_rank: Option<u32>,
 }
 
 impl LeaderboardView {
+    /// Creates a new leaderboard view with optional user rank.
     pub fn new(user_rank: Option<u32>) -> Self {
         Self { user_rank }
     }
 
+    /// Creates an empty leaderboard reply.
     pub fn create_empty_reply() -> CreateReply<'static> {
         CreateReply::new()
             .flags(MessageFlags::IS_COMPONENTS_V2)
@@ -115,6 +122,7 @@ impl LeaderboardView {
             ))])
     }
 
+    /// Creates a leaderboard page with an image attachment.
     pub fn create_page_with_attachment<'a>(
         &'a self,
     ) -> (Vec<CreateComponent<'a>>, CreateAttachment<'a>) {

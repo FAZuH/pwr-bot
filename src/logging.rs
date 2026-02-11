@@ -1,13 +1,16 @@
+//! Logging setup and configuration.
+
 use tracing_appender::rolling::RollingFileAppender;
 use tracing_appender::rolling::Rotation;
-use tracing_subscriber::EnvFilter;
 use tracing_subscriber::fmt;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::EnvFilter;
 
 use crate::config::Config;
 use crate::error::AppError;
 
+/// Sets up logging with both console and file output.
 pub fn setup_logging(config: &Config) -> Result<(), AppError> {
     let file_appender = RollingFileAppender::builder()
         .rotation(Rotation::DAILY)

@@ -1,5 +1,6 @@
+//! Admin commands for server management.
+
 use poise::Command;
-/// Cog of server admin only commands
 use poise::CreateReply;
 use poise::samples::create_application_commands;
 
@@ -10,6 +11,7 @@ use crate::bot::commands::Context;
 use crate::bot::commands::Error;
 use crate::bot::error::BotError;
 
+/// Cog of server admin only commands.
 pub struct AdminCog;
 
 impl AdminCog {

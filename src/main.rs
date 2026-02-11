@@ -1,3 +1,7 @@
+//! Application entry point for pwr-bot.
+//!
+//! Initializes all components and starts the Discord bot.
+
 pub mod bot;
 pub mod config;
 pub mod database;

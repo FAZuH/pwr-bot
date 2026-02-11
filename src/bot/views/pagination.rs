@@ -1,3 +1,5 @@
+//! Pagination component for Discord views.
+
 use std::str::FromStr;
 
 use serenity::all::ButtonStyle;
@@ -12,6 +14,7 @@ use crate::bot::views::InteractableComponentView;
 use crate::bot::views::ViewProvider;
 use crate::custom_id_enum;
 
+/// Model for tracking pagination state.
 pub struct PaginationModel {
     pub current_page: u32,
     pub pages: u32,
@@ -19,6 +22,7 @@ pub struct PaginationModel {
 }
 
 impl PaginationModel {
+    /// Creates a new pagination model with the given parameters.
     pub fn new(pages: u32, per_page: u32, current_page: u32) -> Self {
         let pages = pages.max(1);
         let per_page = per_page.max(1);
@@ -30,26 +34,31 @@ impl PaginationModel {
         }
     }
 
+    /// Navigates to the first page.
     pub fn first_page(&mut self) {
         self.current_page = 1;
     }
 
+    /// Navigates to the previous page if not on the first page.
     pub fn prev_page(&mut self) {
         if self.current_page > 1 {
             self.current_page -= 1;
         }
     }
 
+    /// Navigates to the next page if not on the last page.
     pub fn next_page(&mut self) {
         if self.current_page < self.pages {
             self.current_page += 1;
         }
     }
 
+    /// Navigates to the last page.
     pub fn last_page(&mut self) {
         self.current_page = self.pages;
     }
 
+    /// Creates the pagination control buttons.
     pub fn create_buttons(&self) -> CreateComponent<'static> {
         let page_label = format!("{}/{}", self.current_page, self.pages);
 
@@ -85,11 +94,13 @@ custom_id_enum!(PaginationAction {
     Last,
 });
 
+/// View that provides pagination controls for multi-page content.
 pub struct PaginationView {
     pub state: PaginationModel,
 }
 
 impl PaginationView {
+    /// Creates a new pagination view with the given item count and page size.
     pub fn new(total_items: impl Into<u32>, per_page: impl Into<u32>) -> Self {
         let per_page = per_page.into();
         let pages = total_items.into().div_ceil(per_page);
@@ -97,10 +108,12 @@ impl PaginationView {
         Self { state: model }
     }
 
+    /// Creates a pagination view from an existing model.
     pub fn from_model(model: PaginationModel) -> Self {
         Self { state: model }
     }
 
+    /// Attaches pagination controls only if there are multiple pages.
     pub fn attach_if_multipage<'b>(&self, components: &mut impl Extend<CreateComponent<'b>>) {
         if self.state.pages > 1 {
             self.attach(components);

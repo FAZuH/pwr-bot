@@ -1,3 +1,5 @@
+//! Command implementations for feed management.
+
 use std::time::Duration;
 
 use poise::ChoiceParameter;
@@ -32,9 +34,13 @@ use crate::service::feed_subscription_service::SubscribeResult;
 use crate::service::feed_subscription_service::SubscriberTarget;
 use crate::service::feed_subscription_service::UnsubscribeResult;
 
+/// Timeout for interactive components in seconds.
 const INTERACTION_TIMEOUT_SECS: u64 = 120;
+
+/// Update interval for batch processing in seconds.
 const UPDATE_INTERVAL_SECS: u64 = 2;
 
+/// Where to send feed notifications.
 #[derive(ChoiceParameter)]
 pub enum SendInto {
     Server,
@@ -60,6 +66,7 @@ impl std::fmt::Display for SendInto {
 }
 
 impl SendInto {
+    /// Returns the display name for this send target.
     pub fn name(&self) -> &'static str {
         match self {
             Self::DM => "DM",
@@ -109,6 +116,7 @@ impl From<UnsubscribeResult> for String {
     }
 }
 
+/// Handles the feed settings command.
 pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
     ctx.defer().await?;
     let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?.get();
@@ -145,6 +153,7 @@ pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
+/// Handles the subscribe command.
 pub async fn subscribe(
     ctx: Context<'_>,
     links: String,
@@ -163,6 +172,7 @@ pub async fn subscribe(
     Ok(())
 }
 
+/// Handles the unsubscribe command.
 pub async fn unsubscribe(
     ctx: Context<'_>,
     links: String,
@@ -181,6 +191,7 @@ pub async fn unsubscribe(
     Ok(())
 }
 
+/// Handles the subscriptions list command.
 pub async fn subscriptions(ctx: Context<'_>, sent_into: Option<SendInto>) -> Result<(), Error> {
     ctx.defer().await?;
     let sent_into = sent_into.unwrap_or(SendInto::DM);
@@ -236,6 +247,7 @@ pub async fn subscriptions(ctx: Context<'_>, sent_into: Option<SendInto>) -> Res
     Ok(())
 }
 
+/// Processes a batch of subscription/unsubscription operations.
 async fn process_subscription_batch(
     ctx: Context<'_>,
     urls: &[&str],
@@ -301,6 +313,7 @@ async fn process_subscription_batch(
     Ok(())
 }
 
+/// Verifies server configuration is valid for the operation.
 async fn verify_server_config(
     ctx: Context<'_>,
     send_into: &SendInto,
@@ -337,6 +350,7 @@ async fn verify_server_config(
     Ok(())
 }
 
+/// Gets the target ID based on send target type.
 fn get_target_id(
     guild_id: Option<GuildId>,
     author_id: UserId,
@@ -355,6 +369,7 @@ fn get_target_id(
     }
 }
 
+/// Gets or creates a subscriber for the current context.
 async fn get_or_create_subscriber(
     ctx: Context<'_>,
     send_into: &SendInto,
@@ -373,6 +388,7 @@ async fn get_or_create_subscriber(
         .await?)
 }
 
+/// Gets both DM and guild subscribers for the current user.
 async fn get_both_subscribers(
     ctx: Context<'_>,
 ) -> (Option<SubscriberModel>, Option<SubscriberModel>) {
@@ -430,6 +446,7 @@ pub async fn autocomplete_supported_feeds<'a>(
     CreateAutocompleteResponse::new().set_choices(choices)
 }
 
+/// Autocompletes subscriptions for the current user.
 pub async fn autocomplete_subscriptions<'a>(
     ctx: Context<'_>,
     partial: &str,
@@ -463,6 +480,7 @@ pub async fn autocomplete_subscriptions<'a>(
     CreateAutocompleteResponse::new().set_choices(choices)
 }
 
+/// Searches and combines feeds from both user and guild subscriptions.
 async fn search_and_combine_feeds(
     ctx: Context<'_>,
     partial: &str,
@@ -502,6 +520,7 @@ async fn search_and_combine_feeds(
     user_feeds
 }
 
+/// Adds a prefix to feed name indicating subscription type.
 fn format_subscription_with_prefix(feed: &mut FeedModel, is_dm: bool) {
     let prefix = if is_dm { "(DM) " } else { "(Server) " };
     feed.name.insert_str(0, prefix);

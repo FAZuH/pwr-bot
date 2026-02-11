@@ -1,5 +1,6 @@
+//! Owner-only commands for bot administration.
+
 use poise::Command;
-/// Cog of bot owners-only commands
 use poise::CreateReply;
 use serenity::all::CreateAttachment;
 
@@ -9,6 +10,7 @@ use crate::bot::commands::Context;
 use crate::bot::commands::Error;
 use crate::database::table::Table;
 
+/// Cog of bot owners-only commands.
 pub struct OwnerCog;
 
 impl OwnerCog {

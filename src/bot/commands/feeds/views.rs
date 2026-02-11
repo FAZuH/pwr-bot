@@ -1,3 +1,5 @@
+//! Views for feed-related commands.
+
 use std::str::FromStr;
 
 use serenity::all::ButtonStyle;
@@ -39,25 +41,30 @@ custom_id_enum!(SettingsFeedsAction {
 
 custom_id_enum!(SubscriptionBatchAction { ViewSubscriptions });
 
+/// View for configuring server feed settings.
 pub struct SettingsFeedsView<'a> {
     pub settings: &'a mut ServerSettings,
 }
 
 impl<'a> SettingsFeedsView<'a> {
+    /// Creates a new settings view with the given settings reference.
     pub fn new(settings: &'a mut ServerSettings) -> Self {
         Self { settings }
     }
 
+    /// Updates the settings reference.
     pub fn set_settings(&mut self, settings: &'a mut ServerSettings) {
         self.settings = settings;
     }
 
+    /// Parses a role ID string into a RoleId vector.
     fn parse_role_id(id: Option<&String>) -> Vec<RoleId> {
         id.and_then(|id| RoleId::from_str(id).ok())
             .into_iter()
             .collect()
     }
 
+    /// Parses a channel ID string into a GenericChannelId vector.
     fn parse_channel_id(id: Option<&String>) -> Vec<GenericChannelId> {
         id.and_then(|id| ChannelId::from_str(id).ok().map(GenericChannelId::from))
             .into_iter()
@@ -197,20 +204,24 @@ impl InteractableComponentView<SettingsFeedsAction> for SettingsFeedsView<'_> {
     }
 }
 
+/// View that displays a list of feed subscriptions.
 pub struct SubscriptionsListView {
     subscriptions: Vec<Subscription>,
 }
 
 impl SubscriptionsListView {
+    /// Creates a new subscriptions list view.
     pub fn new(subscriptions: Vec<Subscription>) -> Self {
         Self { subscriptions }
     }
 
+    /// Updates the subscriptions list.
     pub fn set_subscriptions(&mut self, subscriptions: Vec<Subscription>) -> &mut Self {
         self.subscriptions = subscriptions;
         self
     }
 
+    /// Creates an empty state view.
     fn create_empty<'a>() -> Vec<CreateComponent<'a>> {
         vec![CreateComponent::Container(CreateContainer::new(vec![
             CreateContainerComponent::TextDisplay(CreateTextDisplay::new(
@@ -219,6 +230,7 @@ impl SubscriptionsListView {
         ]))]
     }
 
+    /// Creates a section component for a single subscription.
     fn create_subscription_section<'a>(sub: Subscription) -> CreateContainerComponent<'a> {
         let text = if let Some(latest) = sub.feed_latest {
             CreateTextDisplay::new(format!(
@@ -262,12 +274,14 @@ impl<'a> ViewProvider<'a> for SubscriptionsListView {
     }
 }
 
+/// View that shows the progress of a subscription batch operation.
 pub struct SubscriptionBatchView {
     states: Vec<String>,
     is_final: bool,
 }
 
 impl SubscriptionBatchView {
+    /// Creates a new batch view with the given states.
     pub fn new(states: Vec<String>, is_final: bool) -> Self {
         Self { states, is_final }
     }

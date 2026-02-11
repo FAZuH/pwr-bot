@@ -1,3 +1,5 @@
+//! Feed subscription management commands.
+
 use crate::bot::commands::Cog;
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;
@@ -6,6 +8,7 @@ use crate::bot::commands::feeds::commands::SendInto;
 pub mod commands;
 pub mod views;
 
+/// Cog for feed subscription commands.
 pub struct FeedsCog;
 
 impl FeedsCog {

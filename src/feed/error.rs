@@ -1,3 +1,5 @@
+//! Feed platform error types.
+
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum UrlParseError {
@@ -11,6 +13,7 @@ pub enum UrlParseError {
     MissingId { url: String },
 }
 
+/// Errors that can occur when interacting with feed platforms.
 #[derive(Debug, thiserror::Error)]
 pub enum FeedError {
     #[error("HTTP request failed: {0}")]

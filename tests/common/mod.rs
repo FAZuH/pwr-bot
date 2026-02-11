@@ -1,3 +1,5 @@
+//! Common test utilities and mock implementations.
+
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::RwLock;
@@ -12,6 +14,7 @@ use pwr_bot::feed::PlatformInfo;
 use pwr_bot::feed::error::FeedError;
 use uuid::Uuid;
 
+/// Sets up a temporary test database.
 pub async fn setup_db() -> (Arc<Database>, PathBuf) {
     let uuid = Uuid::new_v4();
     let db_path = std::env::temp_dir().join(format!("pwr-bot-test-{}.db", uuid));
@@ -26,6 +29,7 @@ pub async fn setup_db() -> (Arc<Database>, PathBuf) {
     (Arc::new(db), db_path)
 }
 
+/// Cleans up the test database file.
 pub async fn teardown_db(db_path: PathBuf) {
     if db_path.exists() {
         let _ = std::fs::remove_file(db_path);
@@ -34,6 +38,7 @@ pub async fn teardown_db(db_path: PathBuf) {
 
 // MOCK FEED
 
+/// Mock feed platform for testing.
 #[derive(Clone)]
 #[allow(dead_code)]
 pub struct MockFeed {
@@ -41,6 +46,7 @@ pub struct MockFeed {
     pub state: Arc<RwLock<MockFeedState>>,
 }
 
+/// State for the mock feed.
 #[derive(Default, Clone)]
 #[allow(dead_code)]
 pub struct MockFeedState {
@@ -50,6 +56,7 @@ pub struct MockFeedState {
 
 #[allow(dead_code)]
 impl MockFeed {
+    /// Creates a new mock feed with the given domain.
     pub fn new(domain: &str) -> Self {
         let info = PlatformInfo {
             name: "MockFeed".to_string(),
@@ -67,10 +74,12 @@ impl MockFeed {
         }
     }
 
+    /// Sets the latest feed item.
     pub fn set_latest(&self, latest: Option<FeedItem>) {
         self.state.write().unwrap().feed_item = latest;
     }
 
+    /// Sets the feed source information.
     pub fn set_info(&self, item: FeedSource) {
         self.state.write().unwrap().feed_source = item;
     }

@@ -1,3 +1,7 @@
+//! Configuration management for the bot.
+//!
+//! Handles loading configuration from environment variables.
+
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -5,6 +9,7 @@ use log::info;
 
 use crate::error::AppError;
 
+/// Bot configuration loaded from environment variables.
 #[derive(Clone, Default)]
 pub struct Config {
     pub poll_interval: Duration,
@@ -17,12 +22,14 @@ pub struct Config {
 }
 
 impl Config {
+    /// Creates a new empty configuration.
     pub fn new() -> Self {
         Self {
             ..Default::default()
         }
     }
 
+    /// Loads configuration from environment variables.
     pub fn load(&mut self) -> Result<(), AppError> {
         self.poll_interval = std::env::var("POLL_INTERVAL")
             .unwrap_or("60".to_string())
@@ -42,6 +49,7 @@ impl Config {
         Ok(())
     }
 
+    /// Gets a directory path from environment variable, creating it if needed.
     fn get_dirpath_mustexist(
         &self,
         var: &'static str,

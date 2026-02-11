@@ -1,3 +1,5 @@
+//! Subscriber that sends feed updates via Discord DM.
+
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -16,17 +18,20 @@ use crate::event::Event;
 use crate::event::FeedUpdateEvent;
 use crate::subscriber::Subscriber;
 
+/// Subscriber that sends feed updates to users via DM.
 pub struct DiscordDmSubscriber {
     bot: Arc<Bot>,
     db: Arc<Database>,
 }
 
 impl DiscordDmSubscriber {
+    /// Creates a new DM subscriber.
     pub fn new(bot: Arc<Bot>, db: Arc<Database>) -> Self {
         debug!("Initializing DiscordDmSubscriber.");
         Self { bot, db }
     }
 
+    /// Handles a feed update event by sending DMs to subscribers.
     pub async fn feed_event_callback(&self, event: FeedUpdateEvent) -> Result<()> {
         debug!("Received event `{}`", event.event_name());
 
@@ -49,6 +54,7 @@ impl DiscordDmSubscriber {
         Ok(())
     }
 
+    /// Sends a message to a subscriber via DM.
     pub async fn handle_sub(
         &self,
         sub: &SubscriberModel,

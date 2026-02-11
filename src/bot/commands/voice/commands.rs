@@ -1,3 +1,5 @@
+//! Voice command implementations.
+
 use std::time::Duration;
 
 use poise::CreateReply;
@@ -17,9 +19,13 @@ use crate::bot::views::ViewProvider;
 use crate::bot::views::pagination::PaginationView;
 use crate::database::model::VoiceLeaderboardEntry;
 
+/// Timeout for interactive components in seconds.
 const INTERACTION_TIMEOUT_SECS: u64 = 120;
+
+/// Number of leaderboard entries per page.
 const LEADERBOARD_PER_PAGE: u32 = 10;
 
+/// Handles the voice settings command.
 pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
     ctx.defer().await?;
     let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?.get();
@@ -56,6 +62,7 @@ pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
+/// Handles the voice leaderboard command.
 pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
     ctx.defer().await?;
     let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?.get();
@@ -134,6 +141,7 @@ pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
+/// Generates a single page of the leaderboard.
 async fn generate_page(
     ctx: Context<'_>,
     image_gen: &LeaderboardImageGenerator,
