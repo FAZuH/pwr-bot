@@ -1,0 +1,73 @@
+%% UI UML
+classDiagram
+    %% Interfaces
+    class ResponseComponentView {
+        <<interface>>
+        create_components() Vec~CreateComponent~
+        create_reply() CreateReply
+        create_message() CreateMessage
+        attach(&mut Vec~CreateComponent~)
+    }
+
+    class ViewProvider~T = CreateComponent~ {
+        <<interface>>
+        create() Vec~T~
+    }
+
+    class InteractableComponentView~T = Action~ {
+        <<interface>>
+        listen_once(ctx, timeout) Option~T, ComponentInteraction~
+        stream(ctx, timeout) impl Stream~T, ComponentInteraction~
+        handle(interaction) Option~T~
+    }
+
+    class Action {
+        <<interface>>
+        ALL &'static [&'static str]
+        as_str() &'static str
+    }
+
+    %% Interface Relationships
+    ViewProvider <-- ResponseComponentView : blanket impl
+    InteractableComponentView --|> ResponseComponentView
+
+    %% Classes
+    class AboutView
+    class FeedNavigationView
+    class FeedSubscribeView
+    class FeedSubscriptionBatchView
+    class FeedSubscriptionListView
+    class FeedUnsubscribeView
+    class PaginationView
+    class SettingsFeedView
+    class SettingsMainView
+    class SettingsNavigationView
+    class SettingsVoiceView
+    class VoiceLeaderboardView
+
+    class SettingsVoiceAction
+    class SettingsFeedAction
+
+    %% Class Relationships
+    InteractableComponentView <|.. FeedSubscriptionBatchView : T=FeedSubscriptionBatchAction
+    InteractableComponentView <|.. PaginationView : T=PaginationAction
+    InteractableComponentView <|.. SettingsFeedView : T=SettingsFeedAction
+    InteractableComponentView <|.. SettingsVoiceView : T=SettingsVoiceActon
+
+    ResponseComponentView <|.. AboutView
+    ResponseComponentView <|.. FeedSubscriptionBatchView
+    ResponseComponentView <|.. FeedSubscriptionListView
+    ResponseComponentView <|.. PaginationView
+    ResponseComponentView <|.. SettingsFeedView
+    ResponseComponentView <|.. SettingsVoiceView
+    ResponseComponentView <|.. VoiceLeaderboardView
+
+    %% Unimplemented (but planned) stuff
+    InteractableComponentView <|.. SettingsNavigationView : T=SettingsNavigationAction
+    InteractableComponentView <|.. FeedSubscribeView : T=FeedSubscribeAction
+    InteractableComponentView <|.. FeedUnsubscribeView : T=FeedUnsubscribeAction
+    InteractableComponentView <|.. SettingsMainView : T=SettingsMainAction
+
+    ResponseComponentView <|.. FeedSubscribeView
+    ResponseComponentView <|.. FeedUnsubscribeView
+    ResponseComponentView <|.. SettingsMainView
