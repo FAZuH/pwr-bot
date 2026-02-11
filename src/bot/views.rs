@@ -142,6 +142,7 @@ pub trait Action: FromStr + Send {
 /// # Syntax
 ///
 /// ```rust
+/// # use pwr_bot::custom_id_enum;
 /// custom_id_enum! {
 ///     EnumName {
 ///         Variant1,
@@ -162,6 +163,9 @@ pub trait Action: FromStr + Send {
 /// # Example
 ///
 /// ```rust
+/// use pwr_bot::custom_id_enum;
+/// use pwr_bot::bot::views::Action;
+///
 /// custom_id_enum! {
 ///     SettingsAction {
 ///         Enable = "Enable Feature",
