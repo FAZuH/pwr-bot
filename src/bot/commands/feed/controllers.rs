@@ -327,16 +327,16 @@ async fn verify_server_config(
             .get_server_settings(guild_id.get())
             .await?;
 
-        if settings.channel_id.is_none() {
+        if settings.feeds.channel_id.is_none() {
             return Err(BotError::ConfigurationError(
                 "Server feed settings are not configured. A server admin must run `/settings` to configure a notification channel first.".to_string(),
             ).into());
         }
 
         let role_id = if is_subscribe {
-            &settings.subscribe_role_id
+            &settings.feeds.subscribe_role_id
         } else {
-            &settings.unsubscribe_role_id
+            &settings.feeds.unsubscribe_role_id
         };
 
         let role_id = match role_id.as_ref() {

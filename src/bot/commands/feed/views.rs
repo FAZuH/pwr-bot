@@ -73,7 +73,7 @@ impl<'a> SettingsFeedView<'a> {
 
 impl ResponseComponentView for SettingsFeedView<'_> {
     fn create_components<'a>(&self) -> Vec<CreateComponent<'a>> {
-        let settings = &self.settings;
+        let settings = &self.settings.feeds;
         let is_enabled = settings.enabled.unwrap_or(true);
 
         let status_text = format!(
@@ -170,30 +170,31 @@ impl InteractableComponentView<SettingsFeedAction> for SettingsFeedView<'_> {
         let action = SettingsFeedAction::from_str(&interaction.data.custom_id).ok()?;
         let data = &interaction.data;
 
+        let settings = &mut self.settings.feeds;
         match (&data.kind, action) {
             (
                 ComponentInteractionDataKind::StringSelect { values },
                 SettingsFeedAction::Enabled,
             ) => {
-                self.settings.enabled = values.first().map(|v| v == "true");
+                settings.enabled = values.first().map(|v| v == "true");
                 Some(action)
             }
             (
                 ComponentInteractionDataKind::ChannelSelect { values },
                 SettingsFeedAction::Channel,
             ) => {
-                self.settings.channel_id = values.first().map(|id| id.to_string());
+                settings.channel_id = values.first().map(|id| id.to_string());
                 Some(action)
             }
             (ComponentInteractionDataKind::RoleSelect { values }, SettingsFeedAction::SubRole) => {
-                self.settings.subscribe_role_id = values.first().map(|v| v.to_string());
+                settings.subscribe_role_id = values.first().map(|v| v.to_string());
                 Some(action)
             }
             (
                 ComponentInteractionDataKind::RoleSelect { values },
                 SettingsFeedAction::UnsubRole,
             ) => {
-                self.settings.unsubscribe_role_id = values.first().map(|v| v.to_string());
+                settings.unsubscribe_role_id = values.first().map(|v| v.to_string());
                 Some(action)
             }
             _ => None,

@@ -40,7 +40,7 @@ impl SettingsVoiceView {
 
 impl ResponseComponentView for SettingsVoiceView {
     fn create_components<'a>(&self) -> Vec<CreateComponent<'a>> {
-        let is_enabled = self.settings.voice_tracking_enabled.unwrap_or(true);
+        let is_enabled = self.settings.voice.enabled.unwrap_or(true);
 
         let status_text = format!(
             "## Voice Tracking Settings\n\n> 🛈  {}",
@@ -86,7 +86,7 @@ impl InteractableComponentView<SettingsVoiceAction> for SettingsVoiceView {
                 ComponentInteractionDataKind::StringSelect { values },
             ) => {
                 if let Some(value) = values.first() {
-                    self.settings.voice_tracking_enabled = Some(value == "true");
+                    self.settings.voice.enabled = Some(value == "true");
                 }
                 Some(action)
             }
