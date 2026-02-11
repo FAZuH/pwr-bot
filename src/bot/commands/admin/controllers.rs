@@ -18,9 +18,16 @@ pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
     is_author_guild_admin(ctx).await?;
     let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?;
 
-    let settings = ctx.data().db.server_settings_table.select(&guild_id.into()).await?.unwrap_or(
-        ServerSettingsModel { guild_id: guild_id.into(), ..Default::default() }
-    );
+    let settings = ctx
+        .data()
+        .db
+        .server_settings_table
+        .select(&guild_id.into())
+        .await?
+        .unwrap_or(ServerSettingsModel {
+            guild_id: guild_id.into(),
+            ..Default::default()
+        });
 
     let mut view = SettingsMainView::new(&ctx, settings);
     let msg_handle = ctx.send(view.create_reply()).await?;
@@ -28,7 +35,11 @@ pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
     while let Some((action, _)) = view.listen_once(&ctx, Duration::from_secs(120)).await {
         msg_handle.edit(ctx, view.create_reply()).await?;
         if !matches!(action, SettingsMainAction::About) {
-            ctx.data().db.server_settings_table.replace(&view.settings).await?;
+            ctx.data()
+                .db
+                .server_settings_table
+                .replace(&view.settings)
+                .await?;
         }
     }
 

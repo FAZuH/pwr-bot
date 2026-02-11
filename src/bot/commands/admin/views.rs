@@ -117,12 +117,15 @@ impl ResponseComponentView for SettingsMainView<'_> {
 
         // Add button row - show disabled placeholder if empty
         let button_active_features = if active_features.is_empty() {
-            CreateActionRow::Buttons(vec![
-                CreateButton::new("placeholder_no_features")
-                    .label("No features enabled")
-                    .style(ButtonStyle::Secondary)
-                    .disabled(true)
-            ].into())
+            CreateActionRow::Buttons(
+                vec![
+                    CreateButton::new("placeholder_no_features")
+                        .label("No features enabled")
+                        .style(ButtonStyle::Secondary)
+                        .disabled(true),
+                ]
+                .into(),
+            )
         } else {
             CreateActionRow::Buttons(
                 active_features
@@ -152,12 +155,14 @@ impl ResponseComponentView for SettingsMainView<'_> {
                 CreateSelectMenu::new(
                     "placeholder_no_inactive_features",
                     CreateSelectMenuKind::String {
-                        options: vec![
-                            CreateSelectMenuOption::new("All features enabled", "placeholder")
-                        ].into(),
+                        options: vec![CreateSelectMenuOption::new(
+                            "All features enabled",
+                            "placeholder",
+                        )]
+                        .into(),
                     },
                 )
-                .disabled(true)
+                .disabled(true),
             )
         } else {
             CreateActionRow::SelectMenu(CreateSelectMenu::new(
