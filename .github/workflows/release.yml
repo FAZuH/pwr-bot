@@ -9,7 +9,7 @@ on:
 
 permissions:
   contents: write
-  id-token: write
+  packages: write
 
 jobs:
   changelog:
@@ -18,7 +18,6 @@ jobs:
     outputs:
       tag: ${{ steps.changelog.outputs.tag }}
       skipped: ${{ steps.changelog.outputs.skipped }}
-      clean_changelog: ${{ steps.changelog.outputs.clean_changelog }}
       changelog: ${{ steps.changelog.outputs.changelog }}
     steps:
       - name: Checkout
@@ -26,18 +25,8 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set Up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Install Changelog Tools
-        run: |
-          npm install conventional-changelog-conventionalcommits@7.0.2
-          npm install conventional-recommended-bump@9.0.0
-
       - name: Set Up version.json
-        run: echo "{"version":$(git describe --tags --abbrev=0)}" > version.json
+        run: echo "{\"version\":\"$(git describe --tags --abbrev=0 2>/dev/null || echo '0.0.0')\"}" > version.json
 
       - name: Create Changelog
         id: changelog
@@ -52,17 +41,10 @@ jobs:
           skip-version-file: true
           skip-git-pull: true
           skip-on-empty: false
-          pre-release: false
           release-count: 5
 
-      - name: Upload Version Information
-        uses: actions/upload-artifact@v4
-        with:
-          name: version
-          path: version.json
-
   build:
-    name: Build
+    name: Build Binary
     needs: changelog
     if: ${{ needs.changelog.outputs.skipped != 'true' }}
     runs-on: ubuntu-latest
@@ -72,15 +54,13 @@ jobs:
         with:
           ref: ${{ needs.changelog.outputs.tag }}
 
-      - name: Update rustup
-        run: rustup update
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache Rust dependencies
+      - name: Rust Cache
         uses: Swatinem/rust-cache@v2
-        with:
-          key: release-build
 
-      - name: Build package
+      - name: Build Package
         run: cargo build --release
 
       - name: Upload Artifacts
@@ -90,17 +70,15 @@ jobs:
           path: target/release/pwr-bot
 
   push-image:
-    name: Build and Push Docker Image
-    needs: changelog # Build needs the new version number
+    name: Docker Build & Push
+    needs: changelog
+    if: ${{ needs.changelog.outputs.skipped != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Set Up QEMU
-        uses: docker/setup-qemu-action@v1
         with:
-          platforms: all
+          ref: ${{ needs.changelog.outputs.tag }}
 
       - name: Set Up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -109,31 +87,21 @@ jobs:
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
-          username: FAZuH
-          password: ${{ secrets.PRIVATE_TOKEN }}
-
-      - name: Set Up Build Date
-        run: echo "date=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_ENV
-
-      - name: Download Version Information
-        uses: actions/download-artifact@v4 # Download version information from changelog
-        with:
-          name: version
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and Push
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: Dockerfile
           platforms: linux/amd64
           push: true
           tags: |
-            ghcr.io/fazuh/pwr-bot:latest
-            ghcr.io/fazuh/pwr-bot:${{ needs.changelog.outputs.tag }}
+            ghcr.io/${{ github.repository_owner }}/pwr-bot:latest
+            ghcr.io/${{ github.repository_owner }}/pwr-bot:${{ needs.changelog.outputs.tag }}
           labels: |
             version=${{ needs.changelog.outputs.tag }}
             commit=${{ github.sha }}
-            build_date=${{ env.date }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -143,41 +111,26 @@ jobs:
     if: ${{ needs.changelog.outputs.skipped != 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - name: Download Version Information
-        uses: actions/download-artifact@v4
-        with:
-          name: version
-
       - name: Download Artifacts
         uses: actions/download-artifact@v4
         with:
           name: pwr-bot
           path: target/release
 
-      - name: Create Release and Upload Files
-        if: ${{ needs.changelog.outputs.skipped != 'true' }}
+      - name: Create Release
         id: release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.changelog.outputs.tag }}
           body: ${{ needs.changelog.outputs.changelog }}
-          draft: false
-          prerelease: false
-          files: |
-            target/release/pwr-bot
-
-      - name: Set Current Date
-        id: date
-        run: |
-          echo "short=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
-          echo "long=$(date +'%Y-%m-%d %H:%M')" >> $GITHUB_OUTPUT
+          files: target/release/pwr-bot
 
       - name: Post Release on Discord
         uses: tsickert/discord-webhook@v6.0.0
         with:
           webhook-url: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
           embed-color: "9498256"
-          embed-title: ${{format('pwr-bot {0}', needs.changelog.outputs.tag)}}
+          embed-title: "pwr-bot ${{ needs.changelog.outputs.tag }}"
           embed-description: ${{ needs.changelog.outputs.changelog }}
           embed-url: ${{ steps.release.outputs.url }}
-          embed-timestamp: ${{ steps.date.outputs.long }}
+          embed-timestamp: ${{ github.event.head_commit.timestamp }}

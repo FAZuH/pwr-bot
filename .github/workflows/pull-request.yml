@@ -7,13 +7,16 @@ on:
   merge_group:
     branches: [main, development]
 
+env:
+  SQLX_OFFLINE: true
+  CARGO_TERM_COLOR: always
+
 jobs:
   format-and-test:
     name: Run Rust Tests
     if: "! github.event.pull_request.draft"
     runs-on: ubuntu-latest
-    env:
-      SQLX_OFFLINE: true
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -23,21 +26,26 @@ jobs:
         with:
           components: rustfmt
 
-      - name: Set up Rust
+      - name: Set up Stable Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt, clippy
+          components: clippy
 
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "ci"
 
       - name: Check Format
         run: cargo +nightly fmt --all -- --check
 
+      - name: Build All Targets
+        run: cargo build --all-features --all-targets
+
       - name: Lint with Clippy
-        run: cargo clippy --all-features -- -D warnings
+        run: cargo clippy --all-features --all-targets --no-deps -- -D warnings
 
       - name: Run Tests
         run: |
           cp .env-example .env
-          cargo test --all-features
+          cargo test --all-features --no-fail-fast

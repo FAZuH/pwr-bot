@@ -70,7 +70,7 @@ cmd_format() {
 
 cmd_lint() {
     print_info "Linting code..."
-    cargo clippy --all-targets --all-features --fix --allow-dirty
+    cargo clippy --all-targets --all-features --no-deps --fix --allow-dirty
     print_success "Linting completed"
 }
 
