@@ -1,7 +1,5 @@
 //! Command implementations for feed management.
 
-use std::time::Duration;
-
 use poise::ChoiceParameter;
 use poise::CreateReply;
 use poise::ReplyHandle;
@@ -32,9 +30,6 @@ use crate::database::model::SubscriberType;
 use crate::service::feed_subscription_service::SubscribeResult;
 use crate::service::feed_subscription_service::SubscriberTarget;
 use crate::service::feed_subscription_service::UnsubscribeResult;
-
-/// Timeout for interactive components in seconds.
-const INTERACTION_TIMEOUT_SECS: u64 = 120;
 
 /// Update interval for batch processing in seconds.
 const UPDATE_INTERVAL_SECS: u64 = 2;
@@ -127,13 +122,10 @@ pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
         .get_server_settings(guild_id)
         .await?;
 
-    let mut view = SettingsFeedView::new(&mut settings);
+    let mut view = SettingsFeedView::new(&ctx, &mut settings);
     let _ = ctx.send(view.create_reply()).await?;
 
-    while let Some((_, interaction)) = view
-        .listen_once(&ctx, Duration::from_secs(INTERACTION_TIMEOUT_SECS))
-        .await
-    {
+    while let Some((_, interaction)) = view.listen_once().await {
         ctx.data()
             .service
             .feed_subscription
@@ -212,7 +204,7 @@ pub async fn subscriptions(ctx: Context<'_>, sent_into: Option<SendInto>) -> Res
         .await?;
 
     let mut view = FeedSubscriptionsListView::new(subscriptions);
-    let mut pagination = PaginationView::new(total_items, 10_u32);
+    let mut pagination = PaginationView::new(&ctx, total_items, 10_u32);
 
     let mut components = view.create_components();
     pagination.attach_if_multipage(&mut components);
@@ -223,7 +215,7 @@ pub async fn subscriptions(ctx: Context<'_>, sent_into: Option<SendInto>) -> Res
 
     let msg_handle = ctx.send(msg).await?;
 
-    while (pagination.listen_once(&ctx, Duration::from_secs(60)).await).is_some() {
+    while (pagination.listen_once().await).is_some() {
         let subscriptions = ctx
             .data()
             .service
@@ -281,7 +273,7 @@ async fn process_subscription_batch(
 
         let is_final = i + 1 == urls.len();
         if last_send.elapsed().as_secs() > UPDATE_INTERVAL_SECS || is_final {
-            let batch_view = FeedSubscriptionBatchView::new(states.clone(), is_final);
+            let batch_view = FeedSubscriptionBatchView::new(&ctx, states.clone(), is_final);
             let resp = batch_view.create_reply();
             match msg_handle {
                 None => msg_handle = Some(ctx.send(resp).await?),
@@ -295,18 +287,16 @@ async fn process_subscription_batch(
     }
 
     // Listen for "View Subscriptions" button click after final message
-    if let Some(mut view) = view {
-        let timeout = Duration::from_secs(INTERACTION_TIMEOUT_SECS);
-        if let Some((action, _)) = view.listen_once(&ctx, timeout).await
-            && action == FeedSubscriptionBatchAction::ViewSubscriptions
-        {
-            // Convert subscriber type back to SendInto
-            let send_into = match subscriber.r#type {
-                SubscriberType::Guild => SendInto::Server,
-                SubscriberType::Dm => SendInto::DM,
-            };
-            subscriptions(ctx, Some(send_into)).await?;
-        }
+    if let Some(mut view) = view
+        && let Some((action, _)) = view.listen_once().await
+        && action == FeedSubscriptionBatchAction::ViewSubscriptions
+    {
+        // Convert subscriber type back to SendInto
+        let send_into = match subscriber.r#type {
+            SubscriberType::Guild => SendInto::Server,
+            SubscriberType::Dm => SendInto::DM,
+        };
+        subscriptions(ctx, Some(send_into)).await?;
     }
 
     Ok(())

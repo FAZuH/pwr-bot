@@ -257,13 +257,19 @@ impl Cog for Cogs {
 
 ## Creating UI Views (Components V2)
 
-Views use Discord's **Components V2** system for rich UI. Implement these traits:
+Views use Discord's **Components V2** system for rich UI. The trait hierarchy is:
+
+1. **ViewProvider** - Creates UI components
+2. **ResponseComponentView** - Sends views as replies/messages (blanket impl of ViewProvider)
+3. **StatefulView** - Manages view context with send/edit capability
+4. **InteractableComponentView** - Handles component interactions (extends StatefulView)
 
 ### Basic Static View
 
+For simple views that don't need interaction or state management:
+
 ```rust
 use crate::bot::views::ResponseComponentView;
-use crate::bot::views::ViewProvider;
 
 pub struct MyView {
     data: String,
@@ -275,8 +281,8 @@ impl MyView {
     }
 }
 
-impl<'a> ViewProvider<'a> for MyView {
-    fn create(&self) -> Vec<CreateComponent<'a>> {
+impl ResponseComponentView for MyView {
+    fn create_components<'a>(&self) -> Vec<CreateComponent<'a>> {
         let container = CreateComponent::Container(CreateContainer::new(vec![
             CreateContainerComponent::TextDisplay(CreateTextDisplay::new(
                 format!("## {}", self.data)
@@ -286,15 +292,15 @@ impl<'a> ViewProvider<'a> for MyView {
         vec![container]
     }
 }
-
-impl ResponseComponentView for MyView {}
 ```
 
-### Interactive View (with buttons/selects)
+### Interactive View (with state and interactions)
 
-For views with interactions, implement `InteractableComponentView`:
+For views that handle interactions and manage state, use the `stateful_view!` macro to automatically implement `StatefulView`:
 
 ```rust
+use std::time::Duration;
+use crate::stateful_view;
 use crate::bot::views::Action;
 use crate::bot::views::InteractableComponentView;
 use crate::custom_id_enum;
@@ -305,12 +311,23 @@ custom_id_enum!(MyAction {
     Cancel,
 });
 
-pub struct InteractiveView {
-    confirmed: bool,
+// Define the view with automatic StatefulView implementation
+stateful_view! {
+    timeout = Duration::from_secs(120),
+    pub struct InteractiveView<'a> {
+        confirmed: bool,
+    }
+}
+
+impl ResponseComponentView for InteractiveView<'_> {
+    fn create_components<'a>(&self) -> Vec<CreateComponent<'a>> {
+        // Create components based on state
+        vec![/* ... */]
+    }
 }
 
 #[async_trait::async_trait]
-impl InteractableComponentView<MyAction> for InteractiveView {
+impl<'a> InteractableComponentView<'a, MyAction> for InteractiveView<'a> {
     async fn handle(&mut self, interaction: &ComponentInteraction) -> Option<MyAction> {
         let action = MyAction::from_str(&interaction.data.custom_id).ok()?;
         
@@ -321,6 +338,45 @@ impl InteractableComponentView<MyAction> for InteractiveView {
             }
             MyAction::Cancel => Some(action),
         }
+    }
+}
+```
+
+The macro generates:
+- A struct with an added `ctx: ViewContext<'a, ()>` field
+- A `new(ctx: &Context<'a>, ...)` constructor that initializes the context with the specified timeout
+- Implementation of `StatefulView<'a, ()>` with `view_context()` and `view_context_mut()` methods
+
+#### Manual StatefulView Implementation
+
+If you need custom behavior or a different data type, implement `StatefulView` manually:
+
+```rust
+use crate::bot::views::StatefulView;
+use crate::bot::views::ViewContext;
+
+pub struct InteractiveView<'a> {
+    confirmed: bool,
+    ctx: ViewContext<'a, ()>,
+}
+
+impl<'a> InteractiveView<'a> {
+    pub fn new(ctx: &'a Context<'a>) -> Self {
+        Self {
+            confirmed: false,
+            ctx: ViewContext::new(ctx, Duration::from_secs(120)),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl<'a> StatefulView<'a> for InteractiveView<'a> {
+    fn view_context(&self) -> &ViewContext<'a> {
+        &self.ctx
+    }
+
+    fn view_context_mut(&mut self) -> &mut ViewContext<'a> {
+        &mut self.ctx
     }
 }
 ```

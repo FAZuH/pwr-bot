@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 use std::slice::from_ref;
 use std::str::FromStr;
+use std::time::Duration;
 
 use serenity::all::ButtonStyle;
 use serenity::all::ComponentInteraction;
@@ -23,6 +24,7 @@ use crate::bot::views::ResponseComponentView;
 use crate::custom_id_enum;
 use crate::database::model::ServerSettings;
 use crate::database::model::ServerSettingsModel;
+use crate::stateful_view;
 
 pub enum SettingsMainState {
     FeatureSettings,
@@ -38,17 +40,19 @@ impl SettingsMainState {
     }
 }
 
-pub struct SettingsMainView<'a> {
-    pub state: SettingsMainState,
-    ctx: &'a Context<'a>,
-    pub settings: ServerSettingsModel,
+stateful_view! {
+    timeout = Duration::from_secs(120),
+    pub struct SettingsMainView<'a> {
+        pub state: SettingsMainState,
+        pub settings: ServerSettingsModel,
+    }
 }
 
 impl<'a> SettingsMainView<'a> {
     pub fn new(ctx: &'a Context<'a>, settings: ServerSettingsModel) -> Self {
         Self {
             state: SettingsMainState::FeatureSettings,
-            ctx,
+            ctx: Self::create_context(ctx),
             settings,
         }
     }
@@ -210,7 +214,7 @@ custom_id_enum!(SettingsMainAction {
 });
 
 #[async_trait::async_trait]
-impl InteractableComponentView<SettingsMainAction> for SettingsMainView<'_> {
+impl<'a> InteractableComponentView<'a, SettingsMainAction> for SettingsMainView<'a> {
     async fn handle(&mut self, interaction: &ComponentInteraction) -> Option<SettingsMainAction> {
         let action = SettingsMainAction::from_str(&interaction.data.custom_id).ok()?;
 
@@ -241,7 +245,7 @@ impl InteractableComponentView<SettingsMainAction> for SettingsMainView<'_> {
                 Some(action)
             }
             (SettingsMainAction::About, ComponentInteractionDataKind::Button) => {
-                let _ = about(*self.ctx).await;
+                let _ = about(*self.ctx.poise_ctx).await;
                 Some(action)
             }
             _ => None,

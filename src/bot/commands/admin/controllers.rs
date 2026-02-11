@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use poise::CreateReply;
 use poise::samples::create_application_commands;
 
@@ -32,7 +30,7 @@ pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
     let mut view = SettingsMainView::new(&ctx, settings);
     let msg_handle = ctx.send(view.create_reply()).await?;
 
-    while let Some((action, _)) = view.listen_once(&ctx, Duration::from_secs(120)).await {
+    while let Some((action, _)) = view.listen_once().await {
         msg_handle.edit(ctx, view.create_reply()).await?;
         if !matches!(action, SettingsMainAction::About) {
             ctx.data()

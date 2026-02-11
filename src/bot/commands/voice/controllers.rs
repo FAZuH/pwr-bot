@@ -1,7 +1,5 @@
 //! Voice command implementations.
 
-use std::time::Duration;
-
 use poise::CreateReply;
 use serenity::all::CreateAttachment;
 use serenity::all::MessageFlags;
@@ -17,9 +15,6 @@ use crate::bot::views::InteractableComponentView;
 use crate::bot::views::ResponseComponentView;
 use crate::bot::views::pagination::PaginationView;
 use crate::database::model::VoiceLeaderboardEntry;
-
-/// Timeout for interactive components in seconds.
-const INTERACTION_TIMEOUT_SECS: u64 = 120;
 
 /// Number of leaderboard entries per page.
 const LEADERBOARD_PER_PAGE: u32 = 10;
@@ -37,13 +32,10 @@ pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
         .await
         .map_err(Error::from)?;
 
-    let mut view = SettingsVoiceView::new(settings);
+    let mut view = SettingsVoiceView::new(&ctx, settings);
     let msg_handle = ctx.send(view.create_reply()).await?;
 
-    while let Some((_action, _interaction)) = view
-        .listen_once(&ctx, Duration::from_secs(INTERACTION_TIMEOUT_SECS))
-        .await
-    {
+    while let Some((_action, _interaction)) = view.listen_once().await {
         // Update the settings in the database
         ctx.data()
             .service
@@ -82,7 +74,7 @@ pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
     }
 
     let total_items = total_entries.len() as u32;
-    let mut pagination = PaginationView::new(total_items, LEADERBOARD_PER_PAGE);
+    let mut pagination = PaginationView::new(&ctx, total_items, LEADERBOARD_PER_PAGE);
 
     let user_rank = total_entries
         .iter()
@@ -112,11 +104,7 @@ pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
 
     let msg_handle = ctx.send(reply).await?;
 
-    while pagination
-        .listen_once(&ctx, Duration::from_secs(INTERACTION_TIMEOUT_SECS))
-        .await
-        .is_some()
-    {
+    while pagination.listen_once().await.is_some() {
         let current_page = pagination.state.current_page;
         let offset = ((current_page - 1) * LEADERBOARD_PER_PAGE) as usize;
         let end = (offset + LEADERBOARD_PER_PAGE as usize).min(total_entries.len());

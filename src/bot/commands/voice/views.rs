@@ -1,6 +1,7 @@
 //! Views for voice tracking commands.
 
 use std::str::FromStr;
+use std::time::Duration;
 
 use poise::CreateReply;
 use serenity::all::ComponentInteraction;
@@ -18,28 +19,36 @@ use serenity::all::CreateTextDisplay;
 use serenity::all::CreateUnfurledMediaItem;
 use serenity::all::MessageFlags;
 
+use crate::bot::commands::Context;
 use crate::bot::views::Action;
 use crate::bot::views::InteractableComponentView;
 use crate::bot::views::ResponseComponentView;
 use crate::custom_id_enum;
 use crate::database::model::ServerSettings;
+use crate::stateful_view;
 
 custom_id_enum!(SettingsVoiceAction { EnabledSelect });
 
-/// View for voice tracking settings.
-pub struct SettingsVoiceView {
-    pub settings: ServerSettings,
-}
-
-impl SettingsVoiceView {
-    /// Creates a new voice settings view.
-    pub fn new(settings: ServerSettings) -> Self {
-        Self { settings }
+stateful_view! {
+    timeout = Duration::from_secs(120),
+    /// View for voice tracking settings.
+    pub struct SettingsVoiceView<'a> {
+        pub settings: ServerSettings,
     }
 }
 
-impl ResponseComponentView for SettingsVoiceView {
-    fn create_components<'a>(&self) -> Vec<CreateComponent<'a>> {
+impl<'a> SettingsVoiceView<'a> {
+    /// Creates a new voice settings view.
+    pub fn new(ctx: &'a Context<'a>, settings: ServerSettings) -> Self {
+        Self {
+            settings,
+            ctx: Self::create_context(ctx),
+        }
+    }
+}
+
+impl<'a> ResponseComponentView for SettingsVoiceView<'a> {
+    fn create_components<'b>(&self) -> Vec<CreateComponent<'b>> {
         let is_enabled = self.settings.voice.enabled.unwrap_or(true);
 
         let status_text = format!(
@@ -74,7 +83,7 @@ impl ResponseComponentView for SettingsVoiceView {
 }
 
 #[async_trait::async_trait]
-impl InteractableComponentView<SettingsVoiceAction> for SettingsVoiceView {
+impl<'a> InteractableComponentView<'a, SettingsVoiceAction> for SettingsVoiceView<'a> {
     async fn handle(&mut self, interaction: &ComponentInteraction) -> Option<SettingsVoiceAction> {
         use serenity::all::ComponentInteractionDataKind;
 
@@ -109,52 +118,56 @@ impl VoiceLeaderboardView {
     /// Creates an empty leaderboard reply.
     pub fn create_empty_reply() -> CreateReply<'static> {
         CreateReply::new()
-            .flags(MessageFlags::IS_COMPONENTS_V2)
-            .components(vec![CreateComponent::Container(CreateContainer::new(
-                vec![CreateContainerComponent::TextDisplay(
-                    CreateTextDisplay::new(
-                        "## Voice Leaderboard\n\nNo voice activity recorded yet.",
-                    ),
-                )],
-            ))])
-    }
-
-    /// Creates a leaderboard page with an image attachment.
-    pub fn create_page_with_attachment<'a>(
-        &'a self,
-    ) -> (Vec<CreateComponent<'a>>, CreateAttachment<'a>) {
-        let components = self.create_components();
-        let attachment = CreateAttachment::bytes(vec![], "leaderboard.png");
-        (components, attachment)
+            .content("No voice activity recorded yet. Join a voice channel to start tracking!")
+            .flags(MessageFlags::EPHEMERAL)
     }
 }
 
 impl ResponseComponentView for VoiceLeaderboardView {
     fn create_components<'a>(&self) -> Vec<CreateComponent<'a>> {
-        let mut container_components: Vec<CreateContainerComponent> = Vec::new();
+        let mut text_components = vec![CreateContainerComponent::TextDisplay(
+            CreateTextDisplay::new("## 🎙️ Voice Leaderboard"),
+        )];
 
-        let title = if let Some(rank) = self.user_rank {
-            format!(
-                "## Voice Leaderboard\n\nYou are rank **#{}** on this server",
-                rank
-            )
-        } else {
-            "## Voice Leaderboard".to_string()
-        };
-        container_components.push(CreateContainerComponent::TextDisplay(
-            CreateTextDisplay::new(title),
+        if let Some(rank) = self.user_rank {
+            text_components.push(CreateContainerComponent::TextDisplay(
+                CreateTextDisplay::new(format!("\n> Your current rank: **#{}**", rank)),
+            ));
+        }
+
+        text_components.push(CreateContainerComponent::TextDisplay(
+            CreateTextDisplay::new(
+                "\nVoice activity is being tracked. Use `/voice stats` to see detailed statistics.",
+            ),
         ));
 
-        container_components.push(CreateContainerComponent::Separator(
-            serenity::all::CreateSeparator::new(true),
-        ));
-
-        let media_gallery = CreateMediaGallery::new(vec![CreateMediaGalleryItem::new(
-            CreateUnfurledMediaItem::new("attachment://leaderboard.png"),
+        let gallery = CreateMediaGallery::new(vec![CreateMediaGalleryItem::new(
+            CreateUnfurledMediaItem::new("attachment://voice_leaderboard.png"),
         )]);
-        container_components.push(CreateContainerComponent::MediaGallery(media_gallery));
 
-        let container = CreateComponent::Container(CreateContainer::new(container_components));
-        vec![container]
+        vec![
+            CreateComponent::Container(CreateContainer::new(text_components)),
+            CreateComponent::MediaGallery(gallery),
+        ]
+    }
+}
+
+/// Extension trait for creating leaderboard replies with attachments.
+pub trait VoiceLeaderboardReply {
+    /// Creates a reply with the leaderboard image attachment.
+    fn create_leaderboard_reply(
+        &self,
+        image_data: Vec<u8>,
+    ) -> impl std::future::Future<Output = CreateReply<'static>> + Send;
+}
+
+impl VoiceLeaderboardReply for VoiceLeaderboardView {
+    async fn create_leaderboard_reply(&self, image_data: Vec<u8>) -> CreateReply<'static> {
+        let attachment = CreateAttachment::bytes(image_data, "voice_leaderboard.png");
+
+        CreateReply::new()
+            .attachment(attachment)
+            .flags(MessageFlags::IS_COMPONENTS_V2)
+            .components(self.create_components())
     }
 }

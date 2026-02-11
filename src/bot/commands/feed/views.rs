@@ -1,6 +1,7 @@
 //! Views for feed-related commands.
 
 use std::str::FromStr;
+use std::time::Duration;
 
 use serenity::all::ButtonStyle;
 use serenity::all::ChannelId;
@@ -24,12 +25,14 @@ use serenity::all::CreateUnfurledMediaItem;
 use serenity::all::GenericChannelId;
 use serenity::all::RoleId;
 
+use crate::bot::commands::Context;
 use crate::bot::views::Action;
 use crate::bot::views::InteractableComponentView;
 use crate::bot::views::ResponseComponentView;
 use crate::custom_id_enum;
 use crate::database::model::ServerSettings;
 use crate::service::feed_subscription_service::Subscription;
+use crate::stateful_view;
 
 custom_id_enum!(SettingsFeedAction {
     Enabled,
@@ -40,15 +43,21 @@ custom_id_enum!(SettingsFeedAction {
 
 custom_id_enum!(FeedSubscriptionBatchAction { ViewSubscriptions });
 
-/// View for configuring server feed settings.
-pub struct SettingsFeedView<'a> {
-    pub settings: &'a mut ServerSettings,
+stateful_view! {
+    timeout = Duration::from_secs(120),
+    /// View for configuring server feed settings.
+    pub struct SettingsFeedView<'a> {
+        pub settings: &'a mut ServerSettings,
+    }
 }
 
 impl<'a> SettingsFeedView<'a> {
     /// Creates a new settings view with the given settings reference.
-    pub fn new(settings: &'a mut ServerSettings) -> Self {
-        Self { settings }
+    pub fn new(ctx: &'a Context<'a>, settings: &'a mut ServerSettings) -> Self {
+        Self {
+            settings,
+            ctx: Self::create_context(ctx),
+        }
     }
 
     /// Updates the settings reference.
@@ -165,7 +174,7 @@ impl ResponseComponentView for SettingsFeedView<'_> {
 }
 
 #[async_trait::async_trait]
-impl InteractableComponentView<SettingsFeedAction> for SettingsFeedView<'_> {
+impl<'a> InteractableComponentView<'a, SettingsFeedAction> for SettingsFeedView<'a> {
     async fn handle(&mut self, interaction: &ComponentInteraction) -> Option<SettingsFeedAction> {
         let action = SettingsFeedAction::from_str(&interaction.data.custom_id).ok()?;
         let data = &interaction.data;
@@ -272,21 +281,28 @@ impl ResponseComponentView for FeedSubscriptionsListView {
     }
 }
 
-/// View that shows the progress of a subscription batch operation.
-pub struct FeedSubscriptionBatchView {
-    states: Vec<String>,
-    is_final: bool,
-}
-
-impl FeedSubscriptionBatchView {
-    /// Creates a new batch view with the given states.
-    pub fn new(states: Vec<String>, is_final: bool) -> Self {
-        Self { states, is_final }
+stateful_view! {
+    timeout = Duration::from_secs(120),
+    /// View that shows the progress of a subscription batch operation.
+    pub struct FeedSubscriptionBatchView<'a> {
+        states: Vec<String>,
+        is_final: bool,
     }
 }
 
-impl ResponseComponentView for FeedSubscriptionBatchView {
-    fn create_components<'a>(&self) -> Vec<CreateComponent<'a>> {
+impl<'a> FeedSubscriptionBatchView<'a> {
+    /// Creates a new batch view with the given states.
+    pub fn new(ctx: &'a Context<'a>, states: Vec<String>, is_final: bool) -> Self {
+        Self {
+            states,
+            is_final,
+            ctx: Self::create_context(ctx),
+        }
+    }
+}
+
+impl<'a> ResponseComponentView for FeedSubscriptionBatchView<'a> {
+    fn create_components<'b>(&self) -> Vec<CreateComponent<'b>> {
         let text_components: Vec<CreateContainerComponent> = self
             .states
             .iter()
@@ -313,7 +329,9 @@ impl ResponseComponentView for FeedSubscriptionBatchView {
 }
 
 #[async_trait::async_trait]
-impl InteractableComponentView<FeedSubscriptionBatchAction> for FeedSubscriptionBatchView {
+impl<'a> InteractableComponentView<'a, FeedSubscriptionBatchAction>
+    for FeedSubscriptionBatchView<'a>
+{
     async fn handle(
         &mut self,
         interaction: &ComponentInteraction,
