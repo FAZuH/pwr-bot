@@ -27,33 +27,39 @@ pub trait ViewProvider<'a, T = CreateComponent<'a>> {
 }
 
 /// Trait for views that can be sent as a response to a command.
-pub trait ResponseComponentView: for<'a> ViewProvider<'a> {
+pub trait ResponseComponentView {
+    /// Creates the components for this view.
+    fn create_components<'a>(&self) -> Vec<CreateComponent<'a>>;
+
+    /// Creates a reply with this view's components.
     fn create_reply<'a>(&self) -> CreateReply<'a> {
         CreateReply::new()
             .flags(MessageFlags::IS_COMPONENTS_V2)
-            .components(self.create())
+            .components(self.create_components())
     }
 
+    /// Creates a message with this view's components.
     fn create_message<'a>(&self) -> CreateMessage<'a> {
         CreateMessage::new()
             .flags(MessageFlags::IS_COMPONENTS_V2)
-            .components(self.create())
+            .components(self.create_components())
     }
-}
 
-/// Trait for views that can be attached to existing component collections.
-pub trait AttachableView<'a, T = CreateComponent<'a>>: ViewProvider<'a, T> {
     /// Attaches this view's components to the given collection.
-    fn attach(&self, components: &mut impl Extend<T>) {
-        components.extend(self.create());
+    fn attach<'a>(&self, components: &mut impl Extend<CreateComponent<'a>>) {
+        components.extend(self.create_components());
     }
 }
 
-impl<'a, T> AttachableView<'a> for T where T: ViewProvider<'a> {}
+impl<'a, T: ResponseComponentView> ViewProvider<'a> for T {
+    fn create(&self) -> Vec<CreateComponent<'a>> {
+        self.create_components()
+    }
+}
 
 /// Trait for views that handle component interactions.
 #[async_trait::async_trait]
-pub trait InteractableComponentView<T>: for<'a> AttachableView<'a>
+pub trait InteractableComponentView<T>: ResponseComponentView
 where
     T: Action,
 {
@@ -123,7 +129,7 @@ where
 pub trait Action: FromStr + Send {
     /// All possible action strings.
     const ALL: &'static [&'static str];
-    
+
     /// Returns the string representation of this action.
     fn as_str(&self) -> &'static str;
 }

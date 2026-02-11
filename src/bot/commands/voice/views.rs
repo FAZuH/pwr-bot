@@ -21,7 +21,6 @@ use serenity::all::MessageFlags;
 use crate::bot::views::Action;
 use crate::bot::views::InteractableComponentView;
 use crate::bot::views::ResponseComponentView;
-use crate::bot::views::ViewProvider;
 use crate::custom_id_enum;
 use crate::database::model::ServerSettings;
 
@@ -39,8 +38,8 @@ impl SettingsVoiceView {
     }
 }
 
-impl<'a> ViewProvider<'a> for SettingsVoiceView {
-    fn create(&self) -> Vec<CreateComponent<'a>> {
+impl ResponseComponentView for SettingsVoiceView {
+    fn create_components<'a>(&self) -> Vec<CreateComponent<'a>> {
         let is_enabled = self.settings.voice_tracking_enabled.unwrap_or(true);
 
         let status_text = format!(
@@ -73,8 +72,6 @@ impl<'a> ViewProvider<'a> for SettingsVoiceView {
         vec![container]
     }
 }
-
-impl ResponseComponentView for SettingsVoiceView {}
 
 #[async_trait::async_trait]
 impl InteractableComponentView<SettingsVoiceAction> for SettingsVoiceView {
@@ -126,14 +123,14 @@ impl VoiceLeaderboardView {
     pub fn create_page_with_attachment<'a>(
         &'a self,
     ) -> (Vec<CreateComponent<'a>>, CreateAttachment<'a>) {
-        let components = self.create();
+        let components = self.create_components();
         let attachment = CreateAttachment::bytes(vec![], "leaderboard.png");
         (components, attachment)
     }
 }
 
-impl<'a> ViewProvider<'a> for VoiceLeaderboardView {
-    fn create(&self) -> Vec<CreateComponent<'a>> {
+impl ResponseComponentView for VoiceLeaderboardView {
+    fn create_components<'a>(&self) -> Vec<CreateComponent<'a>> {
         let mut container_components: Vec<CreateContainerComponent> = Vec::new();
 
         let title = if let Some(rank) = self.user_rank {

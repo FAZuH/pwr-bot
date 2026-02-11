@@ -22,7 +22,6 @@ use crate::bot::commands::Cog;
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;
 use crate::bot::views::ResponseComponentView;
-use crate::bot::views::ViewProvider;
 
 /// Cog for the about command.
 pub struct AboutCog;
@@ -100,8 +99,8 @@ impl AboutView {
     }
 }
 
-impl<'a> ViewProvider<'a> for AboutView {
-    fn create(&self) -> Vec<CreateComponent<'a>> {
+impl ResponseComponentView for AboutView {
+    fn create_components<'a>(&self) -> Vec<CreateComponent<'a>> {
         let content_text = format!(
             "## pwr-bot
 ### Stats
@@ -154,8 +153,6 @@ impl<'a> ViewProvider<'a> for AboutView {
         vec![container]
     }
 }
-
-impl ResponseComponentView for AboutView {}
 
 /// Gathers bot statistics for the about command.
 async fn gather_stats(ctx: &Context<'_>) -> Result<AboutStats, Error> {

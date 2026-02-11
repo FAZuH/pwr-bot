@@ -9,9 +9,8 @@ use serenity::all::CreateButton;
 use serenity::all::CreateComponent;
 
 use crate::bot::views::Action;
-use crate::bot::views::AttachableView;
 use crate::bot::views::InteractableComponentView;
-use crate::bot::views::ViewProvider;
+use crate::bot::views::ResponseComponentView;
 use crate::custom_id_enum;
 
 /// Model for tracking pagination state.
@@ -116,13 +115,13 @@ impl PaginationView {
     /// Attaches pagination controls only if there are multiple pages.
     pub fn attach_if_multipage<'b>(&self, components: &mut impl Extend<CreateComponent<'b>>) {
         if self.state.pages > 1 {
-            self.attach(components);
+            ResponseComponentView::attach(self, components);
         }
     }
 }
 
-impl<'a> ViewProvider<'a> for PaginationView {
-    fn create(&self) -> Vec<CreateComponent<'a>> {
+impl ResponseComponentView for PaginationView {
+    fn create_components<'a>(&self) -> Vec<CreateComponent<'a>> {
         let page_label = format!("{}/{}", self.state.current_page, self.state.pages);
 
         vec![CreateComponent::ActionRow(CreateActionRow::Buttons(

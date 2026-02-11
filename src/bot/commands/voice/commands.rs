@@ -10,12 +10,11 @@ use crate::bot::commands::Context;
 use crate::bot::commands::Error;
 use crate::bot::commands::voice::LeaderboardEntry;
 use crate::bot::commands::voice::image_generator::LeaderboardImageGenerator;
-use crate::bot::commands::voice::views::VoiceLeaderboardView;
 use crate::bot::commands::voice::views::SettingsVoiceView;
+use crate::bot::commands::voice::views::VoiceLeaderboardView;
 use crate::bot::error::BotError;
 use crate::bot::views::InteractableComponentView;
 use crate::bot::views::ResponseComponentView;
-use crate::bot::views::ViewProvider;
 use crate::bot::views::pagination::PaginationView;
 use crate::database::model::VoiceLeaderboardEntry;
 
@@ -55,7 +54,7 @@ pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
 
         let reply = CreateReply::new()
             .flags(MessageFlags::IS_COMPONENTS_V2)
-            .components(view.create());
+            .components(view.create_components());
         msg_handle.edit(ctx, reply).await?;
     }
 
@@ -102,7 +101,7 @@ pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
     let page_result = generate_page(ctx, &image_gen, current_page_entries, 0).await?;
 
     let view = VoiceLeaderboardView::new(user_rank);
-    let mut components = view.create();
+    let mut components = view.create_components();
     pagination.attach_if_multipage(&mut components);
     let attachment = CreateAttachment::bytes(page_result.image_bytes, "leaderboard.png");
 
@@ -125,7 +124,7 @@ pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
         let page_entries = &total_entries[offset..end];
         let page_result = generate_page(ctx, &image_gen, page_entries, offset as u32).await?;
 
-        components = view.create();
+        components = view.create_components();
         pagination.attach_if_multipage(&mut components);
 
         let attachment = CreateAttachment::bytes(page_result.image_bytes, "leaderboard.png");

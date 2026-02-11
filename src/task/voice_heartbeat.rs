@@ -1,5 +1,4 @@
 /// Heartbeat task for voice tracking crash recovery.
-
 use std::path::PathBuf;
 use std::sync::Arc;
 

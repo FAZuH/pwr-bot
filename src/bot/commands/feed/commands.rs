@@ -17,15 +17,14 @@ use serenity::all::UserId;
 use crate::bot::checks::check_author_roles;
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;
-use crate::bot::commands::feed::views::SettingsFeedView;
 use crate::bot::commands::feed::views::FeedSubscriptionBatchAction;
 use crate::bot::commands::feed::views::FeedSubscriptionBatchView;
 use crate::bot::commands::feed::views::FeedSubscriptionsListView;
+use crate::bot::commands::feed::views::SettingsFeedView;
 use crate::bot::error::BotError;
 use crate::bot::utils::parse_and_validate_urls;
 use crate::bot::views::InteractableComponentView;
 use crate::bot::views::ResponseComponentView;
-use crate::bot::views::ViewProvider;
 use crate::bot::views::pagination::PaginationView;
 use crate::database::model::FeedModel;
 use crate::database::model::SubscriberModel;
@@ -144,7 +143,7 @@ pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
         let reply = CreateInteractionResponse::UpdateMessage(
             CreateInteractionResponseMessage::new()
                 .flags(MessageFlags::IS_COMPONENTS_V2)
-                .components(view.create()),
+                .components(view.create_components()),
         );
 
         interaction.create_response(ctx.http(), reply).await?;
@@ -215,7 +214,7 @@ pub async fn subscriptions(ctx: Context<'_>, sent_into: Option<SendInto>) -> Res
     let mut view = FeedSubscriptionsListView::new(subscriptions);
     let mut pagination = PaginationView::new(total_items, 10_u32);
 
-    let mut components = view.create();
+    let mut components = view.create_components();
     pagination.attach_if_multipage(&mut components);
 
     let msg = CreateReply::new()
@@ -234,7 +233,7 @@ pub async fn subscriptions(ctx: Context<'_>, sent_into: Option<SendInto>) -> Res
 
         view.set_subscriptions(subscriptions);
 
-        let mut components = view.create();
+        let mut components = view.create_components();
         pagination.attach_if_multipage(&mut components);
 
         let msg = CreateReply::new()

@@ -27,7 +27,6 @@ use serenity::all::RoleId;
 use crate::bot::views::Action;
 use crate::bot::views::InteractableComponentView;
 use crate::bot::views::ResponseComponentView;
-use crate::bot::views::ViewProvider;
 use crate::custom_id_enum;
 use crate::database::model::ServerSettings;
 use crate::service::feed_subscription_service::Subscription;
@@ -72,8 +71,8 @@ impl<'a> SettingsFeedView<'a> {
     }
 }
 
-impl<'a> ViewProvider<'a> for SettingsFeedView<'_> {
-    fn create(&self) -> Vec<CreateComponent<'a>> {
+impl ResponseComponentView for SettingsFeedView<'_> {
+    fn create_components<'a>(&self) -> Vec<CreateComponent<'a>> {
         let settings = &self.settings;
         let is_enabled = settings.enabled.unwrap_or(true);
 
@@ -165,8 +164,6 @@ impl<'a> ViewProvider<'a> for SettingsFeedView<'_> {
     }
 }
 
-impl ResponseComponentView for SettingsFeedView<'_> {}
-
 #[async_trait::async_trait]
 impl InteractableComponentView<SettingsFeedAction> for SettingsFeedView<'_> {
     async fn handle(&mut self, interaction: &ComponentInteraction) -> Option<SettingsFeedAction> {
@@ -256,8 +253,8 @@ impl FeedSubscriptionsListView {
     }
 }
 
-impl<'a> ViewProvider<'a> for FeedSubscriptionsListView {
-    fn create(&self) -> Vec<CreateComponent<'a>> {
+impl ResponseComponentView for FeedSubscriptionsListView {
+    fn create_components<'a>(&self) -> Vec<CreateComponent<'a>> {
         if self.subscriptions.is_empty() {
             return Self::create_empty();
         }
@@ -287,8 +284,8 @@ impl FeedSubscriptionBatchView {
     }
 }
 
-impl<'a> ViewProvider<'a> for FeedSubscriptionBatchView {
-    fn create(&self) -> Vec<CreateComponent<'a>> {
+impl ResponseComponentView for FeedSubscriptionBatchView {
+    fn create_components<'a>(&self) -> Vec<CreateComponent<'a>> {
         let text_components: Vec<CreateContainerComponent> = self
             .states
             .iter()
@@ -300,9 +297,10 @@ impl<'a> ViewProvider<'a> for FeedSubscriptionBatchView {
         ))];
 
         if self.is_final {
-            let nav_button = CreateButton::new(FeedSubscriptionBatchAction::ViewSubscriptions.as_str())
-                .label("View Subscriptions")
-                .style(ButtonStyle::Secondary);
+            let nav_button =
+                CreateButton::new(FeedSubscriptionBatchAction::ViewSubscriptions.as_str())
+                    .label("View Subscriptions")
+                    .style(ButtonStyle::Secondary);
 
             components.push(CreateComponent::ActionRow(CreateActionRow::Buttons(
                 vec![nav_button].into(),
@@ -312,8 +310,6 @@ impl<'a> ViewProvider<'a> for FeedSubscriptionBatchView {
         components
     }
 }
-
-impl ResponseComponentView for FeedSubscriptionBatchView {}
 
 #[async_trait::async_trait]
 impl InteractableComponentView<FeedSubscriptionBatchAction> for FeedSubscriptionBatchView {
