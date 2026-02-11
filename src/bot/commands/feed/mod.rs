@@ -3,9 +3,9 @@
 use crate::bot::commands::Cog;
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;
-use crate::bot::commands::feed::commands::SendInto;
+use crate::bot::commands::feed::controllers::SendInto;
 
-pub mod commands;
+pub mod controllers;
 pub mod views;
 
 /// Cog for feed subscription commands.
@@ -41,7 +41,7 @@ impl FeedCog {
         default_member_permissions = "ADMINISTRATOR | MANAGE_GUILD"
     )]
     pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
-        commands::settings(ctx).await
+        controllers::settings(ctx).await
     }
 
     /// Subscribe to one or more feeds.
@@ -58,7 +58,7 @@ impl FeedCog {
             SendInto,
         >,
     ) -> Result<(), Error> {
-        commands::subscribe(ctx, links, send_into).await
+        controllers::subscribe(ctx, links, send_into).await
     }
 
     /// Unsubscribe from one or more feeds.
@@ -75,7 +75,7 @@ impl FeedCog {
             SendInto,
         >,
     ) -> Result<(), Error> {
-        commands::unsubscribe(ctx, links, send_into).await
+        controllers::unsubscribe(ctx, links, send_into).await
     }
 
     /// List your current feed subscriptions.
@@ -88,21 +88,21 @@ impl FeedCog {
             SendInto,
         >,
     ) -> Result<(), Error> {
-        commands::subscriptions(ctx, sent_into).await
+        controllers::subscriptions(ctx, sent_into).await
     }
 
     async fn autocomplete_subscriptions<'a>(
         ctx: Context<'_>,
         partial: &str,
     ) -> poise::serenity_prelude::CreateAutocompleteResponse<'a> {
-        commands::autocomplete_subscriptions(ctx, partial).await
+        controllers::autocomplete_subscriptions(ctx, partial).await
     }
 
     async fn autocomplete_supported_feeds<'a>(
         ctx: Context<'_>,
         partial: &str,
     ) -> poise::serenity_prelude::CreateAutocompleteResponse<'a> {
-        commands::autocomplete_supported_feeds(ctx, partial).await
+        controllers::autocomplete_supported_feeds(ctx, partial).await
     }
 }
 

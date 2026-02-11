@@ -5,7 +5,7 @@ use crate::bot::commands::Context;
 use crate::bot::commands::Error;
 use crate::database::model::VoiceLeaderboardEntry;
 
-pub mod commands;
+pub mod controllers;
 pub mod image_generator;
 pub mod views;
 
@@ -46,7 +46,7 @@ impl VoiceCog {
         default_member_permissions = "ADMINISTRATOR | MANAGE_GUILD"
     )]
     pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
-        commands::settings(ctx).await
+        controllers::settings(ctx).await
     }
 
     /// Display the voice activity leaderboard.
@@ -55,7 +55,7 @@ impl VoiceCog {
     /// Includes your current rank position.
     #[poise::command(slash_command)]
     pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
-        commands::leaderboard(ctx).await
+        controllers::leaderboard(ctx).await
     }
 }
 
