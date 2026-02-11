@@ -43,7 +43,7 @@ jobs:
         run: cargo build --all-features --all-targets
 
       - name: Lint with Clippy
-        run: cargo clippy --all-features --all-targets -- -D warnings
+        run: cargo clippy --all-features --all-targets --no-deps -- -D warnings
 
       - name: Run Tests
         run: |
