@@ -9,6 +9,7 @@ use std::collections::HashSet;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
+use std::time::Instant;
 
 use anyhow;
 use anyhow::Result;
@@ -45,6 +46,7 @@ pub struct Data {
     pub db: Arc<Database>,
     pub platforms: Arc<Platforms>,
     pub service: Arc<Services>,
+    pub start_time: Instant,
 }
 
 pub struct Bot {
@@ -71,6 +73,7 @@ impl Bot {
             db,
             platforms,
             service,
+            start_time: Instant::now(),
         });
         let (token, intents) = Self::create_client_config(&config)?;
         let event_handler = Arc::new(BotEventHandler::new(event_bus, voice_subscriber));
