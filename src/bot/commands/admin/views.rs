@@ -24,6 +24,7 @@ use crate::bot::views::ResponseComponentView;
 use crate::custom_id_enum;
 use crate::database::model::ServerSettings;
 use crate::database::model::ServerSettingsModel;
+use crate::error::AppError;
 use crate::stateful_view;
 
 pub enum SettingsMainState {
@@ -45,6 +46,7 @@ stateful_view! {
     pub struct SettingsMainView<'a> {
         pub state: SettingsMainState,
         pub settings: ServerSettingsModel,
+        pub is_settings_modified: bool,
     }
 }
 
@@ -54,6 +56,7 @@ impl<'a> SettingsMainView<'a> {
             state: SettingsMainState::FeatureSettings,
             ctx: Self::create_context(ctx),
             settings,
+            is_settings_modified: false,
         }
     }
 
@@ -65,6 +68,17 @@ impl<'a> SettingsMainView<'a> {
         &self.settings.settings.0
     }
 
+    pub fn done_update_settings(&mut self) -> Result<(), AppError> {
+        if !self.is_settings_modified {
+            return Err(AppError::internal_ref(
+                "done_update_settings called but settings not modified",
+            ));
+        }
+        self.is_settings_modified = false;
+
+        Ok(())
+    }
+
     pub fn toggle_features<'b>(&mut self, features: impl Into<Cow<'b, [SettingsMainAction]>>) {
         let features = features.into();
         for feat in features.iter() {
@@ -72,10 +86,12 @@ impl<'a> SettingsMainView<'a> {
                 SettingsMainAction::Feeds => {
                     self.settings_mut().feeds.enabled =
                         Some(!self.settings_mut().feeds.enabled.unwrap_or(false));
+                    self.is_settings_modified = true;
                 }
                 SettingsMainAction::Voice => {
                     self.settings_mut().voice.enabled =
                         Some(!self.settings_mut().voice.enabled.unwrap_or(false));
+                    self.is_settings_modified = true;
                 }
                 _ => {}
             }
@@ -107,12 +123,20 @@ impl<'a> SettingsMainView<'a> {
 
 impl ResponseComponentView for SettingsMainView<'_> {
     fn create_components<'a>(&self) -> Vec<CreateComponent<'a>> {
-        let text_active_features = CreateTextDisplay::new(
+        let text_active_features_description = match &self.state {
+            SettingsMainState::FeatureSettings => {
+                "You can **configure** a feature by clicking the buttons below"
+            }
+            SettingsMainState::DeactivateFeatures => {
+                "You can **disable** a feature by clicking the buttons below"
+            }
+        };
+        let text_active_features = CreateTextDisplay::new(format!(
             "-# **Settings**
-    ### Active Features
-    > 🛈  List of features currently active for this server.
-    > You can disable a feature by clicking the buttons below.",
-        );
+### Active Features
+> 🛈  List of features currently active for this server.
+> {text_active_features_description}."
+        ));
 
         let active_features = self.get_active_features();
         let inactive_features = self.get_inactive_features();
@@ -147,9 +171,25 @@ impl ResponseComponentView for SettingsMainView<'_> {
         };
         components.push(CreateContainerComponent::ActionRow(button_active_features));
 
+        let button_toggle_state = CreateActionRow::Buttons(
+            vec![
+                CreateButton::new(SettingsMainAction::ToggleState.custom_id())
+                    .label(match &self.state {
+                        SettingsMainState::FeatureSettings => "Deactivate Features",
+                        SettingsMainState::DeactivateFeatures => "Feature Settings",
+                    })
+                    .style(match &self.state {
+                        SettingsMainState::FeatureSettings => ButtonStyle::Danger,
+                        SettingsMainState::DeactivateFeatures => ButtonStyle::Primary,
+                    }),
+            ]
+            .into(),
+        );
+        components.push(CreateContainerComponent::ActionRow(button_toggle_state));
+
         let text_add_features = CreateTextDisplay::new(
             "### Add Features
-    > 🛈  List of inactive features that are available for this server.",
+> 🛈  List of inactive features that are available for this server.",
         );
         components.push(CreateContainerComponent::TextDisplay(text_add_features));
 
@@ -185,15 +225,6 @@ impl ResponseComponentView for SettingsMainView<'_> {
 
         let bottom_buttons = CreateComponent::ActionRow(CreateActionRow::Buttons(
             vec![
-                CreateButton::new(SettingsMainAction::ToggleState.custom_id())
-                    .label(match &self.state {
-                        SettingsMainState::FeatureSettings => "Deactivate Features",
-                        SettingsMainState::DeactivateFeatures => "Feature Settings",
-                    })
-                    .style(match &self.state {
-                        SettingsMainState::FeatureSettings => ButtonStyle::Danger,
-                        SettingsMainState::DeactivateFeatures => ButtonStyle::Primary,
-                    }),
                 CreateButton::new(SettingsMainAction::About.custom_id())
                     .label(SettingsMainAction::About.label())
                     .style(ButtonStyle::Secondary),
@@ -219,14 +250,28 @@ impl<'a> InteractableComponentView<'a, SettingsMainAction> for SettingsMainView<
         let action = SettingsMainAction::from_str(&interaction.data.custom_id).ok()?;
 
         match (&action, &interaction.data.kind) {
-            (SettingsMainAction::Feeds, ComponentInteractionDataKind::Button) => {
-                self.toggle_features(from_ref(&action));
-                Some(action)
-            }
-            (SettingsMainAction::Voice, ComponentInteractionDataKind::Button) => {
-                self.toggle_features(from_ref(&action));
-                Some(action)
-            }
+            (SettingsMainAction::Feeds, _) => match self.state {
+                SettingsMainState::FeatureSettings => {
+                    let _ = crate::bot::commands::feed::controllers::settings(*self.ctx.poise_ctx)
+                        .await;
+                    None
+                }
+                SettingsMainState::DeactivateFeatures => {
+                    self.toggle_features(from_ref(&action));
+                    Some(action)
+                }
+            },
+            (SettingsMainAction::Voice, _) => match self.state {
+                SettingsMainState::FeatureSettings => {
+                    let _ = crate::bot::commands::voice::controllers::settings(*self.ctx.poise_ctx)
+                        .await;
+                    None
+                }
+                SettingsMainState::DeactivateFeatures => {
+                    self.toggle_features(from_ref(&action));
+                    Some(action)
+                }
+            },
             (
                 SettingsMainAction::AddFeatures,
                 ComponentInteractionDataKind::StringSelect { values },
@@ -240,11 +285,11 @@ impl<'a> InteractableComponentView<'a, SettingsMainAction> for SettingsMainView<
                 self.toggle_features(features);
                 Some(action)
             }
-            (SettingsMainAction::ToggleState, ComponentInteractionDataKind::Button) => {
+            (SettingsMainAction::ToggleState, _) => {
                 self.state.toggle();
                 Some(action)
             }
-            (SettingsMainAction::About, ComponentInteractionDataKind::Button) => {
+            (SettingsMainAction::About, _) => {
                 let _ = about(*self.ctx.poise_ctx).await;
                 Some(action)
             }

@@ -4,7 +4,6 @@ use poise::samples::create_application_commands;
 use crate::bot::checks::is_author_guild_admin;
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;
-use crate::bot::commands::admin::views::SettingsMainAction;
 use crate::bot::commands::admin::views::SettingsMainView;
 use crate::bot::error::BotError;
 use crate::bot::views::InteractableComponentView;
@@ -30,14 +29,15 @@ pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
     let mut view = SettingsMainView::new(&ctx, settings);
     let msg_handle = ctx.send(view.create_reply()).await?;
 
-    while let Some((action, _)) = view.listen_once().await {
+    while let Some((_, _)) = view.listen_once().await {
         msg_handle.edit(ctx, view.create_reply()).await?;
-        if !matches!(action, SettingsMainAction::About) {
+        if view.is_settings_modified {
             ctx.data()
                 .db
                 .server_settings_table
                 .replace(&view.settings)
                 .await?;
+            view.done_update_settings()?;
         }
     }
 
