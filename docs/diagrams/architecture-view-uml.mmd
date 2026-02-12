@@ -1,4 +1,17 @@
-%% UI UML
+%%{init: {
+  'theme': 'dark',
+  'themeVariables': {
+    'primaryColor': '#1e1e1e',
+    'primaryTextColor': '#ffffff',
+    'primaryBorderColor': '#ffffff',
+    'lineColor': '#ffffff',
+    'secondaryColor': '#2d2d2d',
+    'tertiaryColor': '#1e1e1e',
+    'noteBkgColor': '#2d2d2d',
+    'noteTextColor': '#ffffff',
+    'noteBorderColor': '#ffffff'
+  }
+}}%%
 classDiagram
     %% Interfaces
     class ViewProvider~T = CreateComponent~ {
@@ -41,8 +54,7 @@ classDiagram
         run(coordinator: &mut Coordinator~S~) Result~NavigationResult~
     }
 
-    class Coordinator~S~ {
-        <<struct>>
+    class Coordinator~S = ()~ {
         ctx: Context
         state: S
         send(reply) Result~()~
@@ -81,13 +93,6 @@ classDiagram
     class VoiceLeaderboardView
 
     %% Class Relationships
-    StatefulView <|.. FeedSubscriptionBatchView
-    StatefulView <|.. PaginationView
-    StatefulView <|.. SettingsFeedView
-    StatefulView <|.. SettingsMainView
-    StatefulView <|.. SettingsVoiceView
-    StatefulView <|.. AboutView
-
     InteractableComponentView <|.. FeedSubscriptionBatchView : T=FeedSubscriptionBatchAction
     InteractableComponentView <|.. PaginationView : T=PaginationAction
     InteractableComponentView <|.. SettingsFeedView : T=SettingsFeedAction
