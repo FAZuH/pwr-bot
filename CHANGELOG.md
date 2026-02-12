@@ -1,3 +1,15 @@
+## [0.2.1](https://github.com/FAZuH/pwr-bot/compare/v0.2.0...v0.2.1) (2026-02-12)
+
+
+### New Features
+
+* **bot:** Add time_range option to /vc leaderboard ([7ea27e4](https://github.com/FAZuH/pwr-bot/commit/7ea27e4cf4b80cc63b62ada98f17838069c3d24b)), closes [#35](https://github.com/FAZuH/pwr-bot/issues/35)
+
+
+### Performance Improvements
+
+* **bot:** Improve /vc leaderboard performance ([c913708](https://github.com/FAZuH/pwr-bot/commit/c9137084524e6475526232ca76e3c6d2ef0d4849))
+
 ## [0.2.0](https://github.com/FAZuH/pwr-bot/compare/v0.1.31...v0.2.0) (2026-02-12)
 
 
@@ -18,15 +30,4 @@
 ## [0.1.30](https://github.com/FAZuH/pwr-bot/compare/v0.1.29...v0.1.30) (2026-02-11)
 
 ## [0.1.29](https://github.com/FAZuH/pwr-bot/compare/v0.1.28...v0.1.29) (2026-02-10)
-
-## [0.1.28](https://github.com/FAZuH/pwr-bot/compare/v0.1.27...v0.1.28) (2026-02-09)
-
-
-### ⚠ BREAKING CHANGES
-
-* Broken feed description when the description has a newline at the end
-
-### Bug Fixes (internal)
-
-* Broken feed description when the description has a newline at the end ([254e5cb](https://github.com/FAZuH/pwr-bot/commit/254e5cbd70644ae642d52d4e6adf4c764c3b8c8a))
 
