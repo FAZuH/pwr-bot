@@ -143,20 +143,19 @@ impl ResponseComponentView for VoiceLeaderboardView {
             ));
         }
 
-        container.push(CreateContainerComponent::TextDisplay(
-            CreateTextDisplay::new(
-                "\nVoice activity is being tracked. Use `/voice stats` to see detailed statistics.",
-            ),
+        // container.push(CreateContainerComponent::TextDisplay(
+        //     CreateTextDisplay::new(
+        //         "\nVoice activity is being tracked. Use `/voice stats` to see detailed statistics.",
+        //     ),
+        // ));
+
+        container.push(CreateContainerComponent::MediaGallery(
+            CreateMediaGallery::new(vec![CreateMediaGalleryItem::new(
+                CreateUnfurledMediaItem::new("attachment://voice_leaderboard.png"),
+            )]),
         ));
 
-        let gallery = CreateMediaGallery::new(vec![CreateMediaGalleryItem::new(
-            CreateUnfurledMediaItem::new("attachment://voice_leaderboard.png"),
-        )]);
-
-        vec![
-            CreateComponent::Container(CreateContainer::new(container)),
-            CreateComponent::MediaGallery(gallery),
-        ]
+        vec![CreateComponent::Container(CreateContainer::new(container))]
     }
 }
 

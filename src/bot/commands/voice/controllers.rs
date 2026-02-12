@@ -22,6 +22,7 @@ use crate::bot::views::ResponseComponentView;
 use crate::bot::views::pagination::PaginationView;
 use crate::controller;
 use crate::database::model::VoiceLeaderboardEntry;
+use crate::error::AppError;
 
 /// Number of leaderboard entries per page.
 const LEADERBOARD_PER_PAGE: u32 = 10;
@@ -109,10 +110,7 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceLeaderboardController<
             .map(|pos| pos as u32 + 1);
 
         let image_gen = LeaderboardImageGenerator::new().map_err(|e| {
-            Error::from(std::io::Error::other(format!(
-                "Failed to initialize image generator: {}",
-                e
-            )))
+            AppError::internal_ref(format!("Failed to initialize image generator: {}", e))
         })?;
 
         let current_page_entries =
@@ -122,7 +120,7 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceLeaderboardController<
         let view = VoiceLeaderboardView::new(user_rank);
         let mut components = view.create_components();
         pagination.attach_if_multipage(&mut components);
-        let attachment = CreateAttachment::bytes(page_result.image_bytes, "leaderboard.png");
+        let attachment = CreateAttachment::bytes(page_result.image_bytes, "voice_leaderboard.png");
 
         let reply = CreateReply::new()
             .flags(MessageFlags::IS_COMPONENTS_V2)
@@ -205,10 +203,7 @@ async fn generate_page(
         .generate_leaderboard(&entries_for_image)
         .await
         .map_err(|e| {
-            Error::from(std::io::Error::other(format!(
-                "Failed to generate leaderboard image: {}",
-                e
-            )))
+            AppError::internal_ref(format!("Failed to initialize image generator: {}", e))
         })?;
 
     Ok(super::PageGenerationResult {
