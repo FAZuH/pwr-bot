@@ -27,7 +27,7 @@ pub enum AppError {
 
 impl AppError {
     /// Log details internally, return generic error to user
-    pub fn internal_ref(msg: impl Display) -> Self {
+    pub fn internal_with_ref(msg: impl Display) -> Self {
         let ref_id = Uuid::new_v4();
         error!("Internal error ({ref_id}): {msg}");
         Self::InternalWithRef { ref_id }

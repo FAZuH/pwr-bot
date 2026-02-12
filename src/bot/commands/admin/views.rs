@@ -69,7 +69,7 @@ impl<'a> SettingsMainView<'a> {
 
     pub fn done_update_settings(&mut self) -> Result<(), AppError> {
         if !self.is_settings_modified {
-            return Err(AppError::internal_ref(
+            return Err(AppError::internal_with_ref(
                 "done_update_settings called but settings not modified",
             ));
         }

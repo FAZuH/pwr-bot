@@ -110,7 +110,7 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceLeaderboardController<
             .map(|pos| pos as u32 + 1);
 
         let image_gen = LeaderboardImageGenerator::new().map_err(|e| {
-            AppError::internal_ref(format!("Failed to initialize image generator: {}", e))
+            AppError::internal_with_ref(format!("Failed to initialize image generator: {}", e))
         })?;
 
         let current_page_entries =
@@ -203,7 +203,7 @@ async fn generate_page(
         .generate_leaderboard(&entries_for_image)
         .await
         .map_err(|e| {
-            AppError::internal_ref(format!("Failed to initialize image generator: {}", e))
+            AppError::internal_with_ref(format!("Failed to initialize image generator: {}", e))
         })?;
 
     Ok(super::PageGenerationResult {
