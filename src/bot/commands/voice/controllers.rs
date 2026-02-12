@@ -55,7 +55,7 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceSettingsController<'a>
                 SettingsVoiceAction::About => {
                     return Ok(NavigationResult::SettingsAbout);
                 }
-                SettingsVoiceAction::EnabledSelect => {
+                SettingsVoiceAction::ToggleEnabled => {
                     // Update the settings in the database
                     ctx.data()
                         .service

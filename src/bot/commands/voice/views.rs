@@ -15,9 +15,6 @@ use serenity::all::CreateContainer;
 use serenity::all::CreateContainerComponent;
 use serenity::all::CreateMediaGallery;
 use serenity::all::CreateMediaGalleryItem;
-use serenity::all::CreateSelectMenu;
-use serenity::all::CreateSelectMenuKind;
-use serenity::all::CreateSelectMenuOption;
 use serenity::all::CreateTextDisplay;
 use serenity::all::CreateUnfurledMediaItem;
 use serenity::all::MessageFlags;
@@ -31,7 +28,7 @@ use crate::database::model::ServerSettings;
 use crate::stateful_view;
 
 custom_id_enum!(SettingsVoiceAction {
-    EnabledSelect,
+    ToggleEnabled,
     Back = "❮ Back",
     About = "🛈 About",
 });
@@ -67,21 +64,19 @@ impl<'a> ResponseComponentView for SettingsVoiceView<'a> {
             }
         );
 
-        let enabled_select = CreateSelectMenu::new(
-            SettingsVoiceAction::EnabledSelect.custom_id(),
-            CreateSelectMenuKind::String {
-                options: vec![
-                    CreateSelectMenuOption::new("Enabled", "true").default_selection(is_enabled),
-                    CreateSelectMenuOption::new("Disabled", "false").default_selection(!is_enabled),
-                ]
-                .into(),
-            },
-        )
-        .placeholder("Toggle voice tracking");
+        let enabled_button = CreateButton::new(SettingsVoiceAction::ToggleEnabled.custom_id())
+            .label(if is_enabled { "Disable" } else { "Enable" })
+            .style(if is_enabled {
+                ButtonStyle::Danger
+            } else {
+                ButtonStyle::Success
+            });
 
         let container = CreateComponent::Container(CreateContainer::new(vec![
             CreateContainerComponent::TextDisplay(CreateTextDisplay::new(status_text)),
-            CreateContainerComponent::ActionRow(CreateActionRow::SelectMenu(enabled_select)),
+            CreateContainerComponent::ActionRow(CreateActionRow::Buttons(
+                vec![enabled_button].into(),
+            )),
         ]));
 
         let nav_buttons = CreateComponent::ActionRow(CreateActionRow::Buttons(
@@ -106,13 +101,9 @@ impl<'a> InteractableComponentView<'a, SettingsVoiceAction> for SettingsVoiceVie
         let action = SettingsVoiceAction::from_str(&interaction.data.custom_id).ok()?;
 
         match (&action, &interaction.data.kind) {
-            (
-                SettingsVoiceAction::EnabledSelect,
-                ComponentInteractionDataKind::StringSelect { values },
-            ) => {
-                if let Some(value) = values.first() {
-                    self.settings.voice.enabled = Some(value == "true");
-                }
+            (SettingsVoiceAction::ToggleEnabled, ComponentInteractionDataKind::Button) => {
+                let current = self.settings.voice.enabled.unwrap_or(true);
+                self.settings.voice.enabled = Some(!current);
                 Some(action)
             }
             (SettingsVoiceAction::Back, _) | (SettingsVoiceAction::About, _) => Some(action),

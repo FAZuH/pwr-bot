@@ -18,7 +18,6 @@ use serenity::all::CreateSectionAccessory;
 use serenity::all::CreateSectionComponent;
 use serenity::all::CreateSelectMenu;
 use serenity::all::CreateSelectMenuKind;
-use serenity::all::CreateSelectMenuOption;
 use serenity::all::CreateTextDisplay;
 use serenity::all::CreateThumbnail;
 use serenity::all::CreateUnfurledMediaItem;
@@ -99,18 +98,13 @@ impl ResponseComponentView for SettingsFeedView<'_> {
             }
         );
 
-        let enabled_select = CreateSelectMenu::new(
-            SettingsFeedAction::Enabled.custom_id(),
-            CreateSelectMenuKind::String {
-                options: vec![
-                    CreateSelectMenuOption::new("🟢 Enabled", "true").default_selection(is_enabled),
-                    CreateSelectMenuOption::new("🔴 Disabled", "false")
-                        .default_selection(!is_enabled),
-                ]
-                .into(),
-            },
-        )
-        .placeholder("Toggle feed notifications");
+        let enabled_button = CreateButton::new(SettingsFeedAction::Enabled.custom_id())
+            .label(if is_enabled { "Disable" } else { "Enable" })
+            .style(if is_enabled {
+                ButtonStyle::Danger
+            } else {
+                ButtonStyle::Success
+            });
 
         let channel_text =
             "### Notification Channel\n\n> 🛈  Choose where feed updates will be posted.";
@@ -162,7 +156,9 @@ impl ResponseComponentView for SettingsFeedView<'_> {
 
         let container = CreateComponent::Container(CreateContainer::new(vec![
             CreateContainerComponent::TextDisplay(CreateTextDisplay::new(status_text)),
-            CreateContainerComponent::ActionRow(CreateActionRow::SelectMenu(enabled_select)),
+            CreateContainerComponent::ActionRow(CreateActionRow::Buttons(
+                vec![enabled_button].into(),
+            )),
             CreateContainerComponent::TextDisplay(CreateTextDisplay::new(channel_text)),
             CreateContainerComponent::ActionRow(CreateActionRow::SelectMenu(channel_select)),
             CreateContainerComponent::TextDisplay(CreateTextDisplay::new(sub_role_text)),
@@ -195,11 +191,9 @@ impl<'a> InteractableComponentView<'a, SettingsFeedAction> for SettingsFeedView<
 
         let settings = &mut self.settings.feeds;
         match (&data.kind, action) {
-            (
-                ComponentInteractionDataKind::StringSelect { values },
-                SettingsFeedAction::Enabled,
-            ) => {
-                settings.enabled = values.first().map(|v| v == "true");
+            (ComponentInteractionDataKind::Button, SettingsFeedAction::Enabled) => {
+                let current = settings.enabled.unwrap_or(true);
+                settings.enabled = Some(!current);
                 Some(action)
             }
             (
