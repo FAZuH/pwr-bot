@@ -112,6 +112,14 @@ pub struct ServerSettingsModel {
 #[derive(Serialize, Deserialize, Default, Clone, Debug)]
 pub struct ServerSettings {
     #[serde(default)]
+    pub feeds: FeedsSettings,
+    #[serde(default)]
+    pub voice: VoiceSettings,
+}
+
+#[derive(Serialize, Deserialize, Default, Clone, Debug)]
+pub struct FeedsSettings {
+    #[serde(default)]
     pub enabled: Option<bool>,
     #[serde(default)]
     pub channel_id: Option<String>,
@@ -119,8 +127,11 @@ pub struct ServerSettings {
     pub subscribe_role_id: Option<String>,
     #[serde(default)]
     pub unsubscribe_role_id: Option<String>,
-    #[serde(default)]
-    pub voice_tracking_enabled: Option<bool>,
+}
+
+#[derive(Serialize, Deserialize, Default, Clone, Debug)]
+pub struct VoiceSettings {
+    pub enabled: Option<bool>,
 }
 
 #[derive(FromRow, Serialize, Default, Clone, Debug)]

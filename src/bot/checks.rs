@@ -1,3 +1,5 @@
+//! Permission checks for bot commands.
+
 use std::borrow::Cow;
 
 use serenity::all::Permissions;
@@ -7,6 +9,7 @@ use crate::bot::commands::Context;
 use crate::bot::commands::Error;
 use crate::bot::error::BotError;
 
+/// Checks if the command author has guild administrator permissions.
 pub async fn is_author_guild_admin(ctx: Context<'_>) -> Result<(), Error> {
     let member = ctx
         .author_member()
@@ -28,6 +31,7 @@ pub async fn is_author_guild_admin(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
+/// Checks if the command author has any of the required roles.
 pub async fn check_author_roles<'a>(
     ctx: Context<'_>,
     required_role_ids: impl Into<Cow<'a, [RoleId]>>,
@@ -43,6 +47,7 @@ pub async fn check_author_roles<'a>(
     )?)
 }
 
+/// Checks author roles without revealing which specific role is required.
 pub async fn check_author_roles_silent<'a>(
     ctx: Context<'_>,
     required_role_ids: impl Into<Cow<'a, [RoleId]>>,
@@ -58,6 +63,7 @@ pub async fn check_author_roles_silent<'a>(
     )?)
 }
 
+/// Internal function to check if user has required permissions.
 fn check_permissions_inner(
     user_roles: &[RoleId],
     required_role_ids: &[RoleId],

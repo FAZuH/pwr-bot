@@ -1,3 +1,5 @@
+//! Background task for polling feed updates.
+
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
@@ -16,6 +18,7 @@ use crate::event::event_bus::EventBus;
 use crate::service::feed_subscription_service::FeedSubscriptionService;
 use crate::service::feed_subscription_service::FeedUpdateResult;
 
+/// Task that periodically checks feeds for updates.
 pub struct SeriesFeedPublisher {
     service: Arc<FeedSubscriptionService>,
     event_bus: Arc<EventBus>,
@@ -24,6 +27,7 @@ pub struct SeriesFeedPublisher {
 }
 
 impl SeriesFeedPublisher {
+    /// Creates a new feed publisher with the given configuration.
     pub fn new(
         service: Arc<FeedSubscriptionService>,
         event_bus: Arc<EventBus>,
@@ -41,6 +45,7 @@ impl SeriesFeedPublisher {
         })
     }
 
+    /// Starts the feed polling loop.
     pub fn start(self: Arc<Self>) -> anyhow::Result<()> {
         if !self.running.load(Ordering::SeqCst) {
             self.running.store(true, Ordering::SeqCst);
@@ -50,6 +55,7 @@ impl SeriesFeedPublisher {
         Ok(())
     }
 
+    /// Stops the feed polling loop.
     pub fn stop(self: Arc<Self>) -> anyhow::Result<()> {
         info!("Stopping FeedPublisher check loop.");
         self.running.store(false, Ordering::SeqCst);

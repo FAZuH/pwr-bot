@@ -1,9 +1,12 @@
-use std::borrow::Cow;
+//! About command showing bot statistics and information.
+
+use std::str::FromStr;
 use std::time::Duration;
 
 use chrono::Datelike;
 use chrono::Utc;
 use poise::Command;
+use poise::serenity_prelude::ButtonStyle;
 use poise::serenity_prelude::CreateActionRow;
 use poise::serenity_prelude::CreateButton;
 use poise::serenity_prelude::CreateComponent;
@@ -19,24 +22,26 @@ use poise::serenity_prelude::CreateUnfurledMediaItem;
 use crate::bot::commands::Cog;
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;
+use crate::bot::commands::settings::SettingsPage;
+use crate::bot::commands::settings::run_settings;
+use crate::bot::controller::Controller;
+use crate::bot::controller::Coordinator;
+use crate::bot::navigation::NavigationResult;
+use crate::bot::views::Action;
+use crate::bot::views::InteractableComponentView;
 use crate::bot::views::ResponseComponentView;
-use crate::bot::views::ViewProvider;
+use crate::controller;
+use crate::custom_id_enum;
+use crate::stateful_view;
 
+/// Cog for the about command.
 pub struct AboutCog;
 
 impl AboutCog {
     /// Show information about the bot
     #[poise::command(slash_command)]
     pub async fn about(ctx: Context<'_>) -> Result<(), Error> {
-        ctx.defer().await?;
-
-        let stats = gather_stats(&ctx).await?;
-        let avatar_url = ctx.cache().current_user().face();
-        let view = AboutView::new(stats, avatar_url);
-
-        ctx.send(view.create_reply()).await?;
-
-        Ok(())
+        run_settings(ctx, Some(SettingsPage::About)).await
     }
 }
 
@@ -46,27 +51,65 @@ impl Cog for AboutCog {
     }
 }
 
-struct AboutStats {
-    version: String,
-    uptime: Duration,
-    guild_count: usize,
-    user_count: usize,
-    latency_ms: u64,
-    command_count: usize,
-    memory_mb: f64,
-    current_year: i32,
-}
-
-struct AboutView {
-    stats: AboutStats,
-    avatar_url: String,
-}
-
-impl AboutView {
-    fn new(stats: AboutStats, avatar_url: String) -> Self {
-        Self { stats, avatar_url }
+custom_id_enum! {
+    AboutAction {
+        /// Navigate back
+        Back = "< Back",
     }
+}
 
+controller! { pub struct AboutController<'a> {} }
+
+#[async_trait::async_trait]
+impl<S: Send + Sync + 'static> Controller<S> for AboutController<'_> {
+    async fn run(
+        &mut self,
+        coordinator: &mut Coordinator<'_, S>,
+    ) -> Result<NavigationResult, Error> {
+        let ctx = *coordinator.context();
+        ctx.defer().await?;
+
+        let stats = gather_stats(&ctx).await?;
+        let avatar_url = ctx.cache().current_user().face();
+        let mut view = AboutView::new(&ctx, stats, avatar_url);
+
+        coordinator.send(view.create_reply()).await?;
+
+        // Wait for user interaction (Back button)
+        if let Some((action, _)) = view.listen_once().await {
+            match action {
+                AboutAction::Back => {
+                    return Ok(NavigationResult::Back);
+                }
+            }
+        }
+
+        // If interaction times out, just exit
+        Ok(NavigationResult::Exit)
+    }
+}
+
+stateful_view! {
+    timeout = Duration::from_secs(120),
+    struct AboutView<'a> {
+        stats: AboutStats,
+        avatar_url: String,
+    }
+}
+
+impl<'a> AboutView<'a> {
+    /// Creates a new about view with the given context, stats, and avatar URL.
+    pub fn new(ctx: &'a Context<'a>, stats: AboutStats, avatar_url: String) -> Self {
+        Self {
+            ctx: Self::create_context(ctx),
+            stats,
+            avatar_url,
+        }
+    }
+}
+
+impl AboutView<'_> {
+    /// Formats a duration into a human-readable uptime string.
     fn format_uptime(duration: Duration) -> String {
         let days = duration.as_secs() / 86400;
         let hours = (duration.as_secs() % 86400) / 3600;
@@ -81,6 +124,7 @@ impl AboutView {
         }
     }
 
+    /// Formats a number with k/M suffixes for readability.
     fn format_number(num: usize) -> String {
         if num >= 1_000_000 {
             format!("{:.1}M", num as f64 / 1_000_000.0)
@@ -92,10 +136,11 @@ impl AboutView {
     }
 }
 
-impl<'a> ViewProvider<'a> for AboutView {
-    fn create(&self) -> Vec<CreateComponent<'a>> {
+impl ResponseComponentView for AboutView<'_> {
+    fn create_components<'b>(&self) -> Vec<CreateComponent<'b>> {
         let content_text = format!(
-            "## pwr-bot
+            "-# **Settings > About**
+## pwr-bot
 ### Stats
 - **Uptime**: {}
 - **Servers**: {}
@@ -107,7 +152,7 @@ impl<'a> ViewProvider<'a> for AboutView {
 - **Author**: [FAZuH](https://github.com/FAZuH)
 - **Source**: [GitHub](https://github.com/FAZuH/pwr-bot)
 - **License**: [MIT](https://github.com/FAZuH/pwr-bot/blob/main/LICENSE)
--# Copyright © 2025-{} FAZuH.  —  v{}",
+Copyright © 2025-{} FAZuH  —  v{}",
             Self::format_uptime(self.stats.uptime),
             Self::format_number(self.stats.guild_count),
             Self::format_number(self.stats.user_count),
@@ -135,20 +180,49 @@ impl<'a> ViewProvider<'a> for AboutView {
             CreateButton::new_link("https://github.com/FAZuH/pwr-bot/blob/main/LICENSE")
                 .label("License");
 
+        let back_button = CreateComponent::ActionRow(CreateActionRow::Buttons(
+            vec![
+                CreateButton::new(AboutAction::Back.custom_id())
+                    .label(AboutAction::Back.label())
+                    .style(ButtonStyle::Secondary),
+            ]
+            .into(),
+        ));
+
         let container = CreateComponent::Container(CreateContainer::new(vec![
             CreateContainerComponent::Section(content_section),
-            CreateContainerComponent::ActionRow(CreateActionRow::Buttons(Cow::Owned(vec![
-                github_button,
-                license_button,
-            ]))),
+            CreateContainerComponent::ActionRow(CreateActionRow::Buttons(
+                vec![github_button, license_button].into(),
+            )),
         ]));
 
-        vec![container]
+        vec![container, back_button]
     }
 }
 
-impl ResponseComponentView for AboutView {}
+#[async_trait::async_trait]
+impl<'a> InteractableComponentView<'a, AboutAction> for AboutView<'a> {
+    async fn handle(
+        &mut self,
+        interaction: &serenity::all::ComponentInteraction,
+    ) -> Option<AboutAction> {
+        AboutAction::from_str(&interaction.data.custom_id).ok()
+    }
+}
 
+/// Statistics displayed in the about command.
+struct AboutStats {
+    version: String,
+    uptime: Duration,
+    guild_count: usize,
+    user_count: usize,
+    latency_ms: u64,
+    command_count: usize,
+    memory_mb: f64,
+    current_year: i32,
+}
+
+/// Gathers bot statistics for the about command.
 async fn gather_stats(ctx: &Context<'_>) -> Result<AboutStats, Error> {
     let start_time = ctx.data().start_time;
     let uptime = start_time.elapsed();
@@ -186,6 +260,7 @@ async fn gather_stats(ctx: &Context<'_>) -> Result<AboutStats, Error> {
     })
 }
 
+/// Gets the current process memory usage in megabytes.
 fn get_process_memory_mb() -> f64 {
     use sysinfo::System;
     use sysinfo::get_current_pid;

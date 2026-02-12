@@ -1,15 +1,18 @@
+//! Feed subscription management commands.
+
 use crate::bot::commands::Cog;
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;
-use crate::bot::commands::feeds::commands::SendInto;
+pub use crate::bot::commands::feed::controllers::SendInto;
 
-pub mod commands;
+pub mod controllers;
 pub mod views;
 
-pub struct FeedsCog;
+/// Cog for feed subscription commands.
+pub struct FeedCog;
 
-impl FeedsCog {
-    /// Manage feed subscriptions and settings.
+impl FeedCog {
+    /// Manage feed subscriptions and settings
     ///
     /// Base command for feed management. Use subcommands to:
     /// - Subscribe to feeds
@@ -29,7 +32,7 @@ impl FeedsCog {
         Ok(())
     }
 
-    /// Configure feed settings for this server.
+    /// Configure feed settings for this server
     ///
     /// Set up notification channels and required roles for feed subscriptions.
     /// Only server administrators can use this command.
@@ -38,10 +41,10 @@ impl FeedsCog {
         default_member_permissions = "ADMINISTRATOR | MANAGE_GUILD"
     )]
     pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
-        commands::settings(ctx).await
+        controllers::settings(ctx).await
     }
 
-    /// Subscribe to one or more feeds.
+    /// Subscribe to one or more feeds
     ///
     /// Add feeds to receive notifications. You can subscribe in your DM or
     /// in the server (if server feed settings are configured).
@@ -55,10 +58,10 @@ impl FeedsCog {
             SendInto,
         >,
     ) -> Result<(), Error> {
-        commands::subscribe(ctx, links, send_into).await
+        controllers::subscribe(ctx, links, send_into).await
     }
 
-    /// Unsubscribe from one or more feeds.
+    /// Unsubscribe from one or more feeds
     ///
     /// Remove feeds from your subscriptions. Use autocomplete to find
     /// feeds you are currently subscribed to.
@@ -72,10 +75,10 @@ impl FeedsCog {
             SendInto,
         >,
     ) -> Result<(), Error> {
-        commands::unsubscribe(ctx, links, send_into).await
+        controllers::unsubscribe(ctx, links, send_into).await
     }
 
-    /// List your current feed subscriptions.
+    /// List your current feed subscriptions
     ///
     /// View all feeds you are subscribed to, with pagination support.
     #[poise::command(slash_command)]
@@ -85,25 +88,25 @@ impl FeedsCog {
             SendInto,
         >,
     ) -> Result<(), Error> {
-        commands::subscriptions(ctx, sent_into).await
+        controllers::subscriptions(ctx, sent_into).await
     }
 
     async fn autocomplete_subscriptions<'a>(
         ctx: Context<'_>,
         partial: &str,
     ) -> poise::serenity_prelude::CreateAutocompleteResponse<'a> {
-        commands::autocomplete_subscriptions(ctx, partial).await
+        controllers::autocomplete_subscriptions(ctx, partial).await
     }
 
     async fn autocomplete_supported_feeds<'a>(
         ctx: Context<'_>,
         partial: &str,
     ) -> poise::serenity_prelude::CreateAutocompleteResponse<'a> {
-        commands::autocomplete_supported_feeds(ctx, partial).await
+        controllers::autocomplete_supported_feeds(ctx, partial).await
     }
 }
 
-impl Cog for FeedsCog {
+impl Cog for FeedCog {
     fn commands(&self) -> Vec<poise::Command<crate::bot::Data, super::Error>> {
         vec![Self::feed()]
     }

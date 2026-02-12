@@ -1,3 +1,5 @@
+//! Bot-specific error types.
+
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum BotError {

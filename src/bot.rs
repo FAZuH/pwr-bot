@@ -1,7 +1,11 @@
+//! Discord bot implementation and command handling.
+
 pub mod checks;
 pub mod commands;
+pub mod controller;
 pub mod error;
 pub mod error_handler;
+pub mod navigation;
 pub mod utils;
 pub mod views;
 
@@ -41,6 +45,7 @@ use crate::feed::platforms::Platforms;
 use crate::service::Services;
 use crate::subscriber::voice_state_subscriber::VoiceStateSubscriber;
 
+/// Data shared across bot commands and contexts.
 pub struct Data {
     pub config: Arc<Config>,
     pub db: Arc<Database>,
@@ -49,6 +54,7 @@ pub struct Data {
     pub start_time: Instant,
 }
 
+/// Discord bot client and framework.
 pub struct Bot {
     pub cache: Arc<Cache>,
     pub http: Arc<Http>,
@@ -57,6 +63,7 @@ pub struct Bot {
 }
 
 impl Bot {
+    /// Creates a new bot instance with all required components.
     pub async fn new(
         config: Arc<Config>,
         db: Arc<Database>,
@@ -91,6 +98,7 @@ impl Bot {
         })
     }
 
+    /// Starts the bot client in a background task.
     pub fn start(&mut self) {
         info!("Starting bot client...");
         let client_builder = self.client_builder.take().expect("start() called twice");
@@ -118,6 +126,7 @@ impl Bot {
         info!("Bot client start initiated.");
     }
 
+    /// Creates the Poise framework with commands and configuration.
     fn create_framework(config: &Config) -> Result<Box<Framework<Data, Error>>> {
         let cogs = Cogs;
         let options = FrameworkOptions::<Data, Error> {
@@ -140,23 +149,27 @@ impl Bot {
         ))
     }
 
+    /// Creates Discord client configuration (token and intents).
     fn create_client_config(config: &Config) -> Result<(Token, GatewayIntents)> {
         let token = Token::from_str(&config.discord_token)?;
         let intents = GatewayIntents::non_privileged() | GatewayIntents::MESSAGE_CONTENT;
         Ok((token, intents))
     }
 
+    /// Handles framework errors by delegating to the error handler.
     async fn on_error(error: poise::FrameworkError<'_, Data, Error>) {
         ErrorHandler::handle(error).await;
     }
 }
 
+/// Event handler for Discord gateway events.
 pub struct BotEventHandler {
     event_bus: Arc<EventBus>,
     voice_subscriber: Arc<VoiceStateSubscriber>,
 }
 
 impl BotEventHandler {
+    /// Creates a new event handler with the event bus and voice subscriber.
     pub fn new(event_bus: Arc<EventBus>, voice_subscriber: Arc<VoiceStateSubscriber>) -> Self {
         Self {
             event_bus,

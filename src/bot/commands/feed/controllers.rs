@@ -1,4 +1,6 @@
-use std::time::Duration;
+//! Command implementations for feed management.
+
+use std::time::Instant;
 
 use poise::ChoiceParameter;
 use poise::CreateReply;
@@ -15,16 +17,22 @@ use serenity::all::UserId;
 use crate::bot::checks::check_author_roles;
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;
-use crate::bot::commands::feeds::views::SettingsFeedsView;
-use crate::bot::commands::feeds::views::SubscriptionBatchAction;
-use crate::bot::commands::feeds::views::SubscriptionBatchView;
-use crate::bot::commands::feeds::views::SubscriptionsListView;
+use crate::bot::commands::feed::views::FeedSubscriptionBatchAction;
+use crate::bot::commands::feed::views::FeedSubscriptionBatchView;
+use crate::bot::commands::feed::views::FeedSubscriptionsListView;
+use crate::bot::commands::feed::views::SettingsFeedAction;
+use crate::bot::commands::feed::views::SettingsFeedView;
+use crate::bot::commands::settings::SettingsPage;
+use crate::bot::commands::settings::run_settings;
+use crate::bot::controller::Controller;
+use crate::bot::controller::Coordinator;
 use crate::bot::error::BotError;
+use crate::bot::navigation::NavigationResult;
 use crate::bot::utils::parse_and_validate_urls;
 use crate::bot::views::InteractableComponentView;
 use crate::bot::views::ResponseComponentView;
-use crate::bot::views::ViewProvider;
 use crate::bot::views::pagination::PaginationView;
+use crate::controller;
 use crate::database::model::FeedModel;
 use crate::database::model::SubscriberModel;
 use crate::database::model::SubscriberType;
@@ -32,10 +40,14 @@ use crate::service::feed_subscription_service::SubscribeResult;
 use crate::service::feed_subscription_service::SubscriberTarget;
 use crate::service::feed_subscription_service::UnsubscribeResult;
 
-const INTERACTION_TIMEOUT_SECS: u64 = 120;
+/// Update interval for batch processing in seconds.
 const UPDATE_INTERVAL_SECS: u64 = 2;
 
-#[derive(ChoiceParameter)]
+/// Number of items per page for subscriptions list.
+const SUBSCRIPTIONS_PER_PAGE: u32 = 10;
+
+/// Where to send feed notifications.
+#[derive(ChoiceParameter, Clone, Copy, Debug)]
 pub enum SendInto {
     Server,
     DM,
@@ -60,6 +72,7 @@ impl std::fmt::Display for SendInto {
 }
 
 impl SendInto {
+    /// Returns the display name for this send target.
     pub fn name(&self) -> &'static str {
         match self {
             Self::DM => "DM",
@@ -109,145 +122,224 @@ impl From<UnsubscribeResult> for String {
     }
 }
 
-pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
-    ctx.defer().await?;
-    let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?.get();
+controller! { pub struct FeedSettingsController<'a> {} }
 
-    let mut settings = ctx
-        .data()
-        .service
-        .feed_subscription
-        .get_server_settings(guild_id)
-        .await?;
+#[async_trait::async_trait]
+impl<'a, S: Send + Sync + 'static> Controller<S> for FeedSettingsController<'a> {
+    async fn run(
+        &mut self,
+        coordinator: &mut Coordinator<'_, S>,
+    ) -> Result<NavigationResult, Error> {
+        let ctx = *coordinator.context();
+        ctx.defer().await?;
+        let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?.get();
 
-    let mut view = SettingsFeedsView::new(&mut settings);
-    let _ = ctx.send(view.create_reply()).await?;
-
-    while let Some((_, interaction)) = view
-        .listen_once(&ctx, Duration::from_secs(INTERACTION_TIMEOUT_SECS))
-        .await
-    {
-        ctx.data()
+        let mut settings = ctx
+            .data()
             .service
             .feed_subscription
-            .update_server_settings(guild_id, view.settings.clone())
+            .get_server_settings(guild_id)
             .await?;
 
-        let reply = CreateInteractionResponse::UpdateMessage(
-            CreateInteractionResponseMessage::new()
-                .flags(MessageFlags::IS_COMPONENTS_V2)
-                .components(view.create()),
-        );
+        let mut view = SettingsFeedView::new(&ctx, &mut settings);
+        coordinator.send(view.create_reply()).await?;
 
-        interaction.create_response(ctx.http(), reply).await?;
+        while let Some((action, interaction)) = view.listen_once().await {
+            if action == SettingsFeedAction::Back {
+                return Ok(NavigationResult::Back);
+            } else if action == SettingsFeedAction::About {
+                return Ok(NavigationResult::SettingsAbout);
+            }
+
+            ctx.data()
+                .service
+                .feed_subscription
+                .update_server_settings(guild_id, view.settings.clone())
+                .await?;
+
+            let reply = CreateInteractionResponse::UpdateMessage(
+                CreateInteractionResponseMessage::new()
+                    .flags(MessageFlags::IS_COMPONENTS_V2)
+                    .components(view.create_components()),
+            );
+
+            interaction.create_response(ctx.http(), reply).await?;
+        }
+
+        Ok(NavigationResult::Exit)
     }
-
-    Ok(())
 }
 
-pub async fn subscribe(
-    ctx: Context<'_>,
-    links: String,
-    send_into: Option<SendInto>,
-) -> Result<(), Error> {
-    ctx.defer().await?;
+controller! { pub struct FeedSubscriptionsController<'a> {
+    send_into: SendInto
+} }
 
-    let send_into = send_into.unwrap_or(SendInto::DM);
-    let urls = parse_and_validate_urls(&links)?;
+#[async_trait::async_trait]
+impl<'a, S: Send + Sync + 'static> Controller<S> for FeedSubscriptionsController<'a> {
+    async fn run(
+        &mut self,
+        coordinator: &mut Coordinator<'_, S>,
+    ) -> Result<NavigationResult, Error> {
+        let ctx = *coordinator.context();
+        ctx.defer().await?;
 
-    verify_server_config(ctx, &send_into, true).await?;
+        let subscriber = get_or_create_subscriber(ctx, &self.send_into).await?;
 
-    let subscriber = get_or_create_subscriber(ctx, &send_into).await?;
-    process_subscription_batch(ctx, &urls, &subscriber, true).await?;
+        let total_items = ctx
+            .data()
+            .service
+            .feed_subscription
+            .get_subscription_count(&subscriber)
+            .await?;
 
-    Ok(())
-}
-
-pub async fn unsubscribe(
-    ctx: Context<'_>,
-    links: String,
-    send_into: Option<SendInto>,
-) -> Result<(), Error> {
-    ctx.defer().await?;
-
-    let send_into = send_into.unwrap_or(SendInto::DM);
-    let urls = parse_and_validate_urls(&links)?;
-
-    verify_server_config(ctx, &send_into, false).await?;
-
-    let subscriber = get_or_create_subscriber(ctx, &send_into).await?;
-    process_subscription_batch(ctx, &urls, &subscriber, false).await?;
-
-    Ok(())
-}
-
-pub async fn subscriptions(ctx: Context<'_>, sent_into: Option<SendInto>) -> Result<(), Error> {
-    ctx.defer().await?;
-    let sent_into = sent_into.unwrap_or(SendInto::DM);
-
-    let subscriber = get_or_create_subscriber(ctx, &sent_into).await?;
-
-    let total_items = ctx
-        .data()
-        .service
-        .feed_subscription
-        .get_subscription_count(&subscriber)
-        .await?;
-
-    let subscriptions = ctx
-        .data()
-        .service
-        .feed_subscription
-        .list_paginated_subscriptions(&subscriber, 1u32, 10u32)
-        .await?;
-
-    let mut view = SubscriptionsListView::new(subscriptions);
-    let mut pagination = PaginationView::new(total_items, 10_u32);
-
-    let mut components = view.create();
-    pagination.attach_if_multipage(&mut components);
-
-    let msg = CreateReply::new()
-        .flags(MessageFlags::IS_COMPONENTS_V2)
-        .components(components);
-
-    let msg_handle = ctx.send(msg).await?;
-
-    while (pagination.listen_once(&ctx, Duration::from_secs(60)).await).is_some() {
         let subscriptions = ctx
             .data()
             .service
             .feed_subscription
-            .list_paginated_subscriptions(&subscriber, pagination.state.current_page, 10u32)
+            .list_paginated_subscriptions(&subscriber, 1u32, SUBSCRIPTIONS_PER_PAGE)
             .await?;
 
-        view.set_subscriptions(subscriptions);
+        let mut view = FeedSubscriptionsListView::new(subscriptions);
+        let mut pagination = PaginationView::new(&ctx, total_items, SUBSCRIPTIONS_PER_PAGE);
 
-        let mut components = view.create();
+        let mut components = view.create_components();
         pagination.attach_if_multipage(&mut components);
 
         let msg = CreateReply::new()
             .flags(MessageFlags::IS_COMPONENTS_V2)
             .components(components);
 
-        msg_handle.edit(ctx, msg).await?;
-    }
+        let msg_handle = ctx.send(msg).await?;
 
+        while (pagination.listen_once().await).is_some() {
+            let subscriptions = ctx
+                .data()
+                .service
+                .feed_subscription
+                .list_paginated_subscriptions(
+                    &subscriber,
+                    pagination.state.current_page,
+                    SUBSCRIPTIONS_PER_PAGE,
+                )
+                .await?;
+
+            view.set_subscriptions(subscriptions);
+
+            let mut components = view.create_components();
+            pagination.attach_if_multipage(&mut components);
+
+            let msg = CreateReply::new()
+                .flags(MessageFlags::IS_COMPONENTS_V2)
+                .components(components);
+
+            msg_handle.edit(ctx, msg).await?;
+        }
+
+        Ok(NavigationResult::Exit)
+    }
+}
+
+controller! { pub struct FeedSubscribeController<'a> {
+    links: String,
+    send_into: Option<SendInto>,
+} }
+
+#[async_trait::async_trait]
+impl<'a, S: Send + Sync + 'static> Controller<S> for FeedSubscribeController<'a> {
+    async fn run(
+        &mut self,
+        coordinator: &mut Coordinator<'_, S>,
+    ) -> Result<NavigationResult, Error> {
+        let ctx = *coordinator.context();
+        ctx.defer().await?;
+
+        let send_into = self.send_into.unwrap_or(SendInto::DM);
+        let urls = parse_and_validate_urls(&self.links)?;
+
+        verify_server_config(ctx, &send_into, true).await?;
+
+        let subscriber = get_or_create_subscriber(ctx, &send_into).await?;
+        process_subscription_batch(ctx, &urls, &subscriber, true).await?;
+
+        Ok(NavigationResult::Exit)
+    }
+}
+
+controller! { pub struct FeedUnsubscribeController<'a> {
+    links: String,
+    send_into: Option<SendInto>,
+} }
+
+#[async_trait::async_trait]
+impl<'a, S: Send + Sync + 'static> Controller<S> for FeedUnsubscribeController<'a> {
+    async fn run(
+        &mut self,
+        coordinator: &mut Coordinator<'_, S>,
+    ) -> Result<NavigationResult, Error> {
+        let ctx = *coordinator.context();
+        ctx.defer().await?;
+
+        let send_into = self.send_into.unwrap_or(SendInto::DM);
+        let urls = parse_and_validate_urls(&self.links)?;
+
+        verify_server_config(ctx, &send_into, false).await?;
+
+        let subscriber = get_or_create_subscriber(ctx, &send_into).await?;
+        process_subscription_batch(ctx, &urls, &subscriber, false).await?;
+
+        Ok(NavigationResult::Exit)
+    }
+}
+
+/// Legacy function for feed settings command.
+pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
+    run_settings(ctx, Some(SettingsPage::Feeds)).await
+}
+
+/// Legacy function for subscribe command.
+pub async fn subscribe(
+    ctx: Context<'_>,
+    links: String,
+    send_into: Option<SendInto>,
+) -> Result<(), Error> {
+    let mut coordinator = Coordinator::new(ctx);
+    let mut controller = FeedSubscribeController::new(&ctx, links, send_into);
+    let _result = controller.run(&mut coordinator).await?;
     Ok(())
 }
 
+/// Legacy function for unsubscribe command.
+pub async fn unsubscribe(
+    ctx: Context<'_>,
+    links: String,
+    send_into: Option<SendInto>,
+) -> Result<(), Error> {
+    let mut coordinator = Coordinator::new(ctx);
+    let mut controller = FeedUnsubscribeController::new(&ctx, links, send_into);
+    let _result = controller.run(&mut coordinator).await?;
+    Ok(())
+}
+
+/// Legacy function for subscriptions list command.
+pub async fn subscriptions(ctx: Context<'_>, sent_into: Option<SendInto>) -> Result<(), Error> {
+    let sent_into = sent_into.unwrap_or(SendInto::DM);
+    let mut coordinator = Coordinator::new(ctx);
+    let mut controller = FeedSubscriptionsController::new(&ctx, sent_into);
+    let _result = controller.run(&mut coordinator).await?;
+    Ok(())
+}
+
+/// Processes a batch of subscription/unsubscription operations.
 async fn process_subscription_batch(
     ctx: Context<'_>,
     urls: &[&str],
     subscriber: &SubscriberModel,
     is_subscribe: bool,
 ) -> Result<(), Error> {
-    use std::time::Instant;
-
     let mut states: Vec<String> = vec!["⏳ Processing...".to_string(); urls.len()];
     let mut last_send = Instant::now();
     let mut msg_handle: Option<ReplyHandle<'_>> = None;
-    let mut view: Option<SubscriptionBatchView> = None;
+    let mut view: Option<FeedSubscriptionBatchView> = None;
 
     for (i, url) in urls.iter().enumerate() {
         let result_str = if is_subscribe {
@@ -270,7 +362,7 @@ async fn process_subscription_batch(
 
         let is_final = i + 1 == urls.len();
         if last_send.elapsed().as_secs() > UPDATE_INTERVAL_SECS || is_final {
-            let batch_view = SubscriptionBatchView::new(states.clone(), is_final);
+            let batch_view = FeedSubscriptionBatchView::new(&ctx, states.clone(), is_final);
             let resp = batch_view.create_reply();
             match msg_handle {
                 None => msg_handle = Some(ctx.send(resp).await?),
@@ -284,23 +376,22 @@ async fn process_subscription_batch(
     }
 
     // Listen for "View Subscriptions" button click after final message
-    if let Some(mut view) = view {
-        let timeout = Duration::from_secs(INTERACTION_TIMEOUT_SECS);
-        if let Some((action, _)) = view.listen_once(&ctx, timeout).await
-            && action == SubscriptionBatchAction::ViewSubscriptions
-        {
-            // Convert subscriber type back to SendInto
-            let send_into = match subscriber.r#type {
-                SubscriberType::Guild => SendInto::Server,
-                SubscriberType::Dm => SendInto::DM,
-            };
-            subscriptions(ctx, Some(send_into)).await?;
-        }
+    if let Some(mut view) = view
+        && let Some((action, _)) = view.listen_once().await
+        && action == FeedSubscriptionBatchAction::ViewSubscriptions
+    {
+        // Convert subscriber type back to SendInto
+        let send_into = match subscriber.r#type {
+            SubscriberType::Guild => SendInto::Server,
+            SubscriberType::Dm => SendInto::DM,
+        };
+        subscriptions(ctx, Some(send_into)).await?;
     }
 
     Ok(())
 }
 
+/// Verifies server configuration is valid for the operation.
 async fn verify_server_config(
     ctx: Context<'_>,
     send_into: &SendInto,
@@ -315,16 +406,16 @@ async fn verify_server_config(
             .get_server_settings(guild_id.get())
             .await?;
 
-        if settings.channel_id.is_none() {
+        if settings.feeds.channel_id.is_none() {
             return Err(BotError::ConfigurationError(
                 "Server feed settings are not configured. A server admin must run `/settings` to configure a notification channel first.".to_string(),
             ).into());
         }
 
         let role_id = if is_subscribe {
-            &settings.subscribe_role_id
+            &settings.feeds.subscribe_role_id
         } else {
-            &settings.unsubscribe_role_id
+            &settings.feeds.unsubscribe_role_id
         };
 
         let role_id = match role_id.as_ref() {
@@ -337,6 +428,7 @@ async fn verify_server_config(
     Ok(())
 }
 
+/// Gets the target ID based on send target type.
 fn get_target_id(
     guild_id: Option<GuildId>,
     author_id: UserId,
@@ -355,6 +447,7 @@ fn get_target_id(
     }
 }
 
+/// Gets or creates a subscriber for the current context.
 async fn get_or_create_subscriber(
     ctx: Context<'_>,
     send_into: &SendInto,
@@ -373,6 +466,7 @@ async fn get_or_create_subscriber(
         .await?)
 }
 
+/// Gets both DM and guild subscribers for the current user.
 async fn get_both_subscribers(
     ctx: Context<'_>,
 ) -> (Option<SubscriberModel>, Option<SubscriberModel>) {
@@ -430,6 +524,7 @@ pub async fn autocomplete_supported_feeds<'a>(
     CreateAutocompleteResponse::new().set_choices(choices)
 }
 
+/// Autocompletes subscriptions for the current user.
 pub async fn autocomplete_subscriptions<'a>(
     ctx: Context<'_>,
     partial: &str,
@@ -463,6 +558,7 @@ pub async fn autocomplete_subscriptions<'a>(
     CreateAutocompleteResponse::new().set_choices(choices)
 }
 
+/// Searches and combines feeds from both user and guild subscriptions.
 async fn search_and_combine_feeds(
     ctx: Context<'_>,
     partial: &str,
@@ -502,6 +598,7 @@ async fn search_and_combine_feeds(
     user_feeds
 }
 
+/// Adds a prefix to feed name indicating subscription type.
 fn format_subscription_with_prefix(feed: &mut FeedModel, is_dm: bool) {
     let prefix = if is_dm { "(DM) " } else { "(Server) " };
     feed.name.insert_str(0, prefix);

@@ -1,3 +1,5 @@
+//! Database table operations and implementations.
+
 use async_trait::async_trait;
 use sqlx::SqlitePool;
 use sqlx::sqlite::SqliteArguments;
@@ -13,23 +15,30 @@ use crate::database::model::SubscriberType;
 use crate::database::model::VoiceLeaderboardEntry;
 use crate::database::model::VoiceSessionsModel;
 
+/// Base table struct providing database pool access.
 pub struct BaseTable {
     pub pool: SqlitePool,
 }
 
 impl BaseTable {
+    /// Creates a new base table with the given pool.
     pub fn new(pool: SqlitePool) -> Self {
         Self { pool }
     }
 }
 
+/// Base trait for table operations.
 #[async_trait]
 pub trait TableBase {
+    /// Creates the table if it doesn't exist.
     async fn create_table(&self) -> Result<(), DatabaseError>;
+    /// Drops the table.
     async fn drop_table(&self) -> Result<(), DatabaseError>;
+    /// Deletes all rows from the table.
     async fn delete_all(&self) -> Result<(), DatabaseError>;
 }
 
+/// Trait for tables with CRUD operations.
 #[async_trait]
 pub trait Table<T, ID>: TableBase {
     async fn select_all(&self) -> Result<Vec<T>, DatabaseError>;
@@ -40,7 +49,7 @@ pub trait Table<T, ID>: TableBase {
     async fn replace(&self, model: &T) -> Result<ID, DatabaseError>;
 }
 
-// Helper trait to handle binding parameters, especially for casting u64 to i64 for SQLite
+/// Helper trait to handle binding parameters, especially for casting u64 to i64 for SQLite.
 pub trait BindParam<'q> {
     fn bind_param<O>(
         self,

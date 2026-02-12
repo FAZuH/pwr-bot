@@ -1,8 +1,11 @@
+//! Integration tests for feed subscription service.
+
 use std::sync::Arc;
 
 use chrono::Utc;
 use pwr_bot::database::model::FeedItemModel;
 use pwr_bot::database::model::FeedModel;
+use pwr_bot::database::model::ServerSettings;
 use pwr_bot::database::model::SubscriberType;
 use pwr_bot::database::table::Table;
 use pwr_bot::feed::FeedItem;
@@ -135,7 +138,7 @@ async fn test_server_settings_service() {
         platforms: feeds.clone(),
     };
 
-    use pwr_bot::database::model::ServerSettings;
+    use pwr_bot::database::model::FeedsSettings;
 
     let guild_id: u64 = 1234567890;
 
@@ -144,15 +147,18 @@ async fn test_server_settings_service() {
         .get_server_settings(guild_id)
         .await
         .expect("Failed to get settings");
-    assert!(settings.channel_id.is_none());
+    assert!(settings.feeds.channel_id.is_none());
 
     // 2. Update settings
-    let new_settings = ServerSettings {
+    let feed_settings = FeedsSettings {
         enabled: Some(false),
         channel_id: Some("chan_456".to_string()),
         subscribe_role_id: Some("role_123".to_string()),
         unsubscribe_role_id: Some("role_456".to_string()),
-        voice_tracking_enabled: None,
+    };
+    let new_settings = ServerSettings {
+        feeds: feed_settings,
+        ..Default::default()
     };
     service
         .update_server_settings(guild_id, new_settings.clone())
@@ -164,9 +170,15 @@ async fn test_server_settings_service() {
         .get_server_settings(guild_id)
         .await
         .expect("Failed to get updated settings");
-    assert_eq!(fetched.channel_id, Some("chan_456".to_string()));
-    assert_eq!(fetched.subscribe_role_id, Some("role_123".to_string()));
-    assert_eq!(fetched.unsubscribe_role_id, Some("role_456".to_string()));
+    assert_eq!(fetched.feeds.channel_id, Some("chan_456".to_string()));
+    assert_eq!(
+        fetched.feeds.subscribe_role_id,
+        Some("role_123".to_string())
+    );
+    assert_eq!(
+        fetched.feeds.unsubscribe_role_id,
+        Some("role_456".to_string())
+    );
 
     common::teardown_db(db_path).await;
 }

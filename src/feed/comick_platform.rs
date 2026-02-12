@@ -1,3 +1,5 @@
+//! Comick manga platform integration.
+
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::num::NonZeroU32;
@@ -24,8 +26,10 @@ use crate::feed::Platform;
 use crate::feed::PlatformInfo;
 use crate::feed::error::FeedError;
 
+/// Comick API platform for manga tracking.
 type Json = Map<String, Value>;
 
+/// Comick platform implementation.
 pub struct ComickPlatform {
     pub base: BasePlatform,
     client: Client,
@@ -33,6 +37,7 @@ pub struct ComickPlatform {
 }
 
 impl ComickPlatform {
+    /// Creates a new Comick platform with rate limiting.
     pub fn new() -> Self {
         let client = Client::builder()
             .emulation(Emulation::Chrome137)

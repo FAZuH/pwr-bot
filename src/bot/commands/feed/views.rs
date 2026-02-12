@@ -1,4 +1,7 @@
+//! Views for feed-related commands.
+
 use std::str::FromStr;
+use std::time::Duration;
 
 use serenity::all::ButtonStyle;
 use serenity::all::ChannelId;
@@ -15,49 +18,62 @@ use serenity::all::CreateSectionAccessory;
 use serenity::all::CreateSectionComponent;
 use serenity::all::CreateSelectMenu;
 use serenity::all::CreateSelectMenuKind;
-use serenity::all::CreateSelectMenuOption;
 use serenity::all::CreateTextDisplay;
 use serenity::all::CreateThumbnail;
 use serenity::all::CreateUnfurledMediaItem;
 use serenity::all::GenericChannelId;
 use serenity::all::RoleId;
 
+use crate::bot::commands::Context;
 use crate::bot::views::Action;
 use crate::bot::views::InteractableComponentView;
 use crate::bot::views::ResponseComponentView;
-use crate::bot::views::ViewProvider;
 use crate::custom_id_enum;
 use crate::database::model::ServerSettings;
 use crate::service::feed_subscription_service::Subscription;
+use crate::stateful_view;
 
-custom_id_enum!(SettingsFeedsAction {
+custom_id_enum!(SettingsFeedAction {
     Enabled,
     Channel,
     SubRole,
-    UnsubRole
+    UnsubRole,
+    Back = "❮ Back",
+    About = "🛈 About",
 });
 
-custom_id_enum!(SubscriptionBatchAction { ViewSubscriptions });
+custom_id_enum!(FeedSubscriptionBatchAction { ViewSubscriptions });
 
-pub struct SettingsFeedsView<'a> {
-    pub settings: &'a mut ServerSettings,
+stateful_view! {
+    timeout = Duration::from_secs(120),
+    /// View for configuring server feed settings.
+    pub struct SettingsFeedView<'a> {
+        pub settings: &'a mut ServerSettings,
+    }
 }
 
-impl<'a> SettingsFeedsView<'a> {
-    pub fn new(settings: &'a mut ServerSettings) -> Self {
-        Self { settings }
+impl<'a> SettingsFeedView<'a> {
+    /// Creates a new settings view with the given settings reference.
+    pub fn new(ctx: &'a Context<'a>, settings: &'a mut ServerSettings) -> Self {
+        Self {
+            settings,
+            ctx: Self::create_context(ctx),
+        }
     }
 
+    /// Updates the settings reference.
     pub fn set_settings(&mut self, settings: &'a mut ServerSettings) {
         self.settings = settings;
     }
 
+    /// Parses a role ID string into a RoleId vector.
     fn parse_role_id(id: Option<&String>) -> Vec<RoleId> {
         id.and_then(|id| RoleId::from_str(id).ok())
             .into_iter()
             .collect()
     }
 
+    /// Parses a channel ID string into a GenericChannelId vector.
     fn parse_channel_id(id: Option<&String>) -> Vec<GenericChannelId> {
         id.and_then(|id| ChannelId::from_str(id).ok().map(GenericChannelId::from))
             .into_iter()
@@ -65,41 +81,36 @@ impl<'a> SettingsFeedsView<'a> {
     }
 }
 
-impl<'a> ViewProvider<'a> for SettingsFeedsView<'_> {
-    fn create(&self) -> Vec<CreateComponent<'a>> {
-        let settings = &self.settings;
+impl ResponseComponentView for SettingsFeedView<'_> {
+    fn create_components<'a>(&self) -> Vec<CreateComponent<'a>> {
+        let settings = &self.settings.feeds;
         let is_enabled = settings.enabled.unwrap_or(true);
 
         let status_text = format!(
-            "## Server Feed Settings\n\n> 🛈  {}",
+            "-# **Settings > Feeds**\n## Feed Subscription Settings\n\n> 🛈  {}",
             if is_enabled {
-                format!(
-                    "Feed notifications are currently active. Notifications will be sent to <#{}>",
-                    settings.channel_id.as_deref().unwrap_or("Unknown")
-                )
+                match &settings.channel_id {
+                    Some(id) => format!("Feed notifications are currently **active**. Notifications will be sent to <#{id}>"),
+                    None => "Feed notifications are currently **active**, but notification channel is not set.".to_string(),
+                }
             } else {
-                "Feed notifications are currently paused. No notifications will be sent until re-enabled.".to_string()
+                "Feed notifications are currently **paused**. No notifications will be sent until it is re-enabled.".to_string()
             }
         );
 
-        let enabled_select = CreateSelectMenu::new(
-            SettingsFeedsAction::Enabled.as_str(),
-            CreateSelectMenuKind::String {
-                options: vec![
-                    CreateSelectMenuOption::new("🟢 Enabled", "true").default_selection(is_enabled),
-                    CreateSelectMenuOption::new("🔴 Disabled", "false")
-                        .default_selection(!is_enabled),
-                ]
-                .into(),
-            },
-        )
-        .placeholder("Toggle feed notifications");
+        let enabled_button = CreateButton::new(SettingsFeedAction::Enabled.custom_id())
+            .label(if is_enabled { "Disable" } else { "Enable" })
+            .style(if is_enabled {
+                ButtonStyle::Danger
+            } else {
+                ButtonStyle::Success
+            });
 
         let channel_text =
             "### Notification Channel\n\n> 🛈  Choose where feed updates will be posted.";
 
         let channel_select = CreateSelectMenu::new(
-            SettingsFeedsAction::Channel.as_str(),
+            SettingsFeedAction::Channel.custom_id(),
             CreateSelectMenuKind::Channel {
                 channel_types: Some(vec![ChannelType::Text, ChannelType::News].into()),
                 default_channels: Some(Self::parse_channel_id(settings.channel_id.as_ref()).into()),
@@ -113,7 +124,7 @@ impl<'a> ViewProvider<'a> for SettingsFeedsView<'_> {
 
         let sub_role_text = "### Subscribe Permission\n\n> 🛈  Who can add new feeds to this server. Leave empty to allow users with \"Manage Server\" permission.";
         let sub_role_select = CreateSelectMenu::new(
-            SettingsFeedsAction::SubRole.as_str(),
+            SettingsFeedAction::SubRole.custom_id(),
             CreateSelectMenuKind::Role {
                 default_roles: Some(
                     Self::parse_role_id(settings.subscribe_role_id.as_ref()).into(),
@@ -129,7 +140,7 @@ impl<'a> ViewProvider<'a> for SettingsFeedsView<'_> {
 
         let unsub_role_text = "### Unsubscribe Permission\n\n> 🛈  Who can remove feeds from this server. Leave empty to allow users with \"Manage Server\" permission.";
         let unsub_role_select = CreateSelectMenu::new(
-            SettingsFeedsAction::UnsubRole.as_str(),
+            SettingsFeedAction::UnsubRole.custom_id(),
             CreateSelectMenuKind::Role {
                 default_roles: Some(
                     Self::parse_role_id(settings.unsubscribe_role_id.as_ref()).into(),
@@ -145,7 +156,9 @@ impl<'a> ViewProvider<'a> for SettingsFeedsView<'_> {
 
         let container = CreateComponent::Container(CreateContainer::new(vec![
             CreateContainerComponent::TextDisplay(CreateTextDisplay::new(status_text)),
-            CreateContainerComponent::ActionRow(CreateActionRow::SelectMenu(enabled_select)),
+            CreateContainerComponent::ActionRow(CreateActionRow::Buttons(
+                vec![enabled_button].into(),
+            )),
             CreateContainerComponent::TextDisplay(CreateTextDisplay::new(channel_text)),
             CreateContainerComponent::ActionRow(CreateActionRow::SelectMenu(channel_select)),
             CreateContainerComponent::TextDisplay(CreateTextDisplay::new(sub_role_text)),
@@ -154,63 +167,78 @@ impl<'a> ViewProvider<'a> for SettingsFeedsView<'_> {
             CreateContainerComponent::ActionRow(CreateActionRow::SelectMenu(unsub_role_select)),
         ]));
 
-        vec![container]
+        let nav_buttons = CreateComponent::ActionRow(CreateActionRow::Buttons(
+            vec![
+                CreateButton::new(SettingsFeedAction::Back.custom_id())
+                    .label(SettingsFeedAction::Back.label())
+                    .style(ButtonStyle::Secondary),
+                CreateButton::new(SettingsFeedAction::About.custom_id())
+                    .label(SettingsFeedAction::About.label())
+                    .style(ButtonStyle::Secondary),
+            ]
+            .into(),
+        ));
+
+        vec![container, nav_buttons]
     }
 }
 
-impl ResponseComponentView for SettingsFeedsView<'_> {}
-
 #[async_trait::async_trait]
-impl InteractableComponentView<SettingsFeedsAction> for SettingsFeedsView<'_> {
-    async fn handle(&mut self, interaction: &ComponentInteraction) -> Option<SettingsFeedsAction> {
-        let action = SettingsFeedsAction::from_str(&interaction.data.custom_id).ok()?;
+impl<'a> InteractableComponentView<'a, SettingsFeedAction> for SettingsFeedView<'a> {
+    async fn handle(&mut self, interaction: &ComponentInteraction) -> Option<SettingsFeedAction> {
+        let action = SettingsFeedAction::from_str(&interaction.data.custom_id).ok()?;
         let data = &interaction.data;
 
+        let settings = &mut self.settings.feeds;
         match (&data.kind, action) {
-            (
-                ComponentInteractionDataKind::StringSelect { values },
-                SettingsFeedsAction::Enabled,
-            ) => {
-                self.settings.enabled = values.first().map(|v| v == "true");
+            (ComponentInteractionDataKind::Button, SettingsFeedAction::Enabled) => {
+                let current = settings.enabled.unwrap_or(true);
+                settings.enabled = Some(!current);
                 Some(action)
             }
             (
                 ComponentInteractionDataKind::ChannelSelect { values },
-                SettingsFeedsAction::Channel,
+                SettingsFeedAction::Channel,
             ) => {
-                self.settings.channel_id = values.first().map(|id| id.to_string());
+                settings.channel_id = values.first().map(|id| id.to_string());
                 Some(action)
             }
-            (ComponentInteractionDataKind::RoleSelect { values }, SettingsFeedsAction::SubRole) => {
-                self.settings.subscribe_role_id = values.first().map(|v| v.to_string());
+            (ComponentInteractionDataKind::RoleSelect { values }, SettingsFeedAction::SubRole) => {
+                settings.subscribe_role_id = values.first().map(|v| v.to_string());
                 Some(action)
             }
             (
                 ComponentInteractionDataKind::RoleSelect { values },
-                SettingsFeedsAction::UnsubRole,
+                SettingsFeedAction::UnsubRole,
             ) => {
-                self.settings.unsubscribe_role_id = values.first().map(|v| v.to_string());
+                settings.unsubscribe_role_id = values.first().map(|v| v.to_string());
                 Some(action)
             }
+            (ComponentInteractionDataKind::Button, SettingsFeedAction::Back)
+            | (ComponentInteractionDataKind::Button, SettingsFeedAction::About) => Some(action),
             _ => None,
         }
     }
 }
 
-pub struct SubscriptionsListView {
+/// View that displays a list of feed subscriptions.
+pub struct FeedSubscriptionsListView {
     subscriptions: Vec<Subscription>,
 }
 
-impl SubscriptionsListView {
+impl FeedSubscriptionsListView {
+    /// Creates a new subscriptions list view.
     pub fn new(subscriptions: Vec<Subscription>) -> Self {
         Self { subscriptions }
     }
 
+    /// Updates the subscriptions list.
     pub fn set_subscriptions(&mut self, subscriptions: Vec<Subscription>) -> &mut Self {
         self.subscriptions = subscriptions;
         self
     }
 
+    /// Creates an empty state view.
     fn create_empty<'a>() -> Vec<CreateComponent<'a>> {
         vec![CreateComponent::Container(CreateContainer::new(vec![
             CreateContainerComponent::TextDisplay(CreateTextDisplay::new(
@@ -219,6 +247,7 @@ impl SubscriptionsListView {
         ]))]
     }
 
+    /// Creates a section component for a single subscription.
     fn create_subscription_section<'a>(sub: Subscription) -> CreateContainerComponent<'a> {
         let text = if let Some(latest) = sub.feed_latest {
             CreateTextDisplay::new(format!(
@@ -244,8 +273,8 @@ impl SubscriptionsListView {
     }
 }
 
-impl<'a> ViewProvider<'a> for SubscriptionsListView {
-    fn create(&self) -> Vec<CreateComponent<'a>> {
+impl ResponseComponentView for FeedSubscriptionsListView {
+    fn create_components<'a>(&self) -> Vec<CreateComponent<'a>> {
         if self.subscriptions.is_empty() {
             return Self::create_empty();
         }
@@ -262,19 +291,28 @@ impl<'a> ViewProvider<'a> for SubscriptionsListView {
     }
 }
 
-pub struct SubscriptionBatchView {
-    states: Vec<String>,
-    is_final: bool,
-}
-
-impl SubscriptionBatchView {
-    pub fn new(states: Vec<String>, is_final: bool) -> Self {
-        Self { states, is_final }
+stateful_view! {
+    timeout = Duration::from_secs(120),
+    /// View that shows the progress of a subscription batch operation.
+    pub struct FeedSubscriptionBatchView<'a> {
+        states: Vec<String>,
+        is_final: bool,
     }
 }
 
-impl<'a> ViewProvider<'a> for SubscriptionBatchView {
-    fn create(&self) -> Vec<CreateComponent<'a>> {
+impl<'a> FeedSubscriptionBatchView<'a> {
+    /// Creates a new batch view with the given states.
+    pub fn new(ctx: &'a Context<'a>, states: Vec<String>, is_final: bool) -> Self {
+        Self {
+            states,
+            is_final,
+            ctx: Self::create_context(ctx),
+        }
+    }
+}
+
+impl<'a> ResponseComponentView for FeedSubscriptionBatchView<'a> {
+    fn create_components<'b>(&self) -> Vec<CreateComponent<'b>> {
         let text_components: Vec<CreateContainerComponent> = self
             .states
             .iter()
@@ -286,9 +324,10 @@ impl<'a> ViewProvider<'a> for SubscriptionBatchView {
         ))];
 
         if self.is_final {
-            let nav_button = CreateButton::new(SubscriptionBatchAction::ViewSubscriptions.as_str())
-                .label("View Subscriptions")
-                .style(ButtonStyle::Secondary);
+            let nav_button =
+                CreateButton::new(FeedSubscriptionBatchAction::ViewSubscriptions.custom_id())
+                    .label("View Subscriptions")
+                    .style(ButtonStyle::Secondary);
 
             components.push(CreateComponent::ActionRow(CreateActionRow::Buttons(
                 vec![nav_button].into(),
@@ -299,14 +338,14 @@ impl<'a> ViewProvider<'a> for SubscriptionBatchView {
     }
 }
 
-impl ResponseComponentView for SubscriptionBatchView {}
-
 #[async_trait::async_trait]
-impl InteractableComponentView<SubscriptionBatchAction> for SubscriptionBatchView {
+impl<'a> InteractableComponentView<'a, FeedSubscriptionBatchAction>
+    for FeedSubscriptionBatchView<'a>
+{
     async fn handle(
         &mut self,
         interaction: &ComponentInteraction,
-    ) -> Option<SubscriptionBatchAction> {
-        SubscriptionBatchAction::from_str(&interaction.data.custom_id).ok()
+    ) -> Option<FeedSubscriptionBatchAction> {
+        FeedSubscriptionBatchAction::from_str(&interaction.data.custom_id).ok()
     }
 }

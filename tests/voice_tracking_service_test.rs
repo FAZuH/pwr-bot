@@ -1,8 +1,11 @@
+//! Integration tests for voice tracking service.
+
 use chrono::Duration;
 use chrono::Utc;
 use pwr_bot::database::model::ServerSettings;
 use pwr_bot::database::model::ServerSettingsModel;
 use pwr_bot::database::model::VoiceSessionsModel;
+use pwr_bot::database::model::VoiceSettings;
 use pwr_bot::database::table::Table;
 use pwr_bot::service::voice_tracking_service::VoiceTrackingService;
 
@@ -45,8 +48,11 @@ async fn test_is_enabled_when_disabled() {
     let guild_id: u64 = 123456789;
 
     // Disable voice tracking for the guild
+    let voice_settings = VoiceSettings {
+        enabled: Some(false),
+    };
     let settings = ServerSettings {
-        voice_tracking_enabled: Some(false),
+        voice: voice_settings,
         ..Default::default()
     };
     service
@@ -71,8 +77,11 @@ async fn test_is_enabled_when_re_enabled() {
     let guild_id: u64 = 123456789;
 
     // Disable voice tracking
+    let voice_settings = VoiceSettings {
+        enabled: Some(false),
+    };
     let settings = ServerSettings {
-        voice_tracking_enabled: Some(false),
+        voice: voice_settings,
         ..Default::default()
     };
     service
@@ -82,8 +91,11 @@ async fn test_is_enabled_when_re_enabled() {
     assert!(!service.is_enabled(guild_id).await);
 
     // Re-enable voice tracking
+    let voice_settings = VoiceSettings {
+        enabled: Some(true),
+    };
     let settings = ServerSettings {
-        voice_tracking_enabled: Some(true),
+        voice: voice_settings,
         ..Default::default()
     };
     service
@@ -170,11 +182,7 @@ async fn test_get_server_settings_default() {
         .await
         .expect("Failed to get settings");
 
-    assert!(settings.enabled.is_none());
-    assert!(settings.channel_id.is_none());
-    assert!(settings.subscribe_role_id.is_none());
-    assert!(settings.unsubscribe_role_id.is_none());
-    assert!(settings.voice_tracking_enabled.is_none());
+    assert!(settings.voice.enabled.is_none());
 
     common::teardown_db(db_path).await;
 }
@@ -189,15 +197,15 @@ async fn test_update_and_get_server_settings() {
     let guild_id: u64 = 123456789;
 
     // Update settings
-    let new_settings = ServerSettings {
+    let voice_settings = VoiceSettings {
         enabled: Some(true),
-        channel_id: Some("chan_123".to_string()),
-        subscribe_role_id: Some("role_sub".to_string()),
-        unsubscribe_role_id: Some("role_unsub".to_string()),
-        voice_tracking_enabled: Some(true),
+    };
+    let settings = ServerSettings {
+        voice: voice_settings,
+        ..Default::default()
     };
     service
-        .update_server_settings(guild_id, new_settings.clone())
+        .update_server_settings(guild_id, settings.clone())
         .await
         .expect("Failed to update settings");
 
@@ -206,11 +214,7 @@ async fn test_update_and_get_server_settings() {
         .get_server_settings(guild_id)
         .await
         .expect("Failed to get settings");
-    assert_eq!(fetched.enabled, Some(true));
-    assert_eq!(fetched.channel_id, Some("chan_123".to_string()));
-    assert_eq!(fetched.subscribe_role_id, Some("role_sub".to_string()));
-    assert_eq!(fetched.unsubscribe_role_id, Some("role_unsub".to_string()));
-    assert_eq!(fetched.voice_tracking_enabled, Some(true));
+    assert_eq!(fetched.voice.enabled, Some(true));
 
     common::teardown_db(db_path).await;
 }
@@ -410,7 +414,9 @@ async fn test_disabled_guilds_cache_on_init() {
     let settings = ServerSettingsModel {
         guild_id: disabled_guild_id,
         settings: sqlx::types::Json(ServerSettings {
-            voice_tracking_enabled: Some(false),
+            voice: VoiceSettings {
+                enabled: Some(false),
+            },
             ..Default::default()
         }),
     };

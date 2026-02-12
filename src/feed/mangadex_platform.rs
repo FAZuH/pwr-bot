@@ -1,3 +1,5 @@
+//! MangaDex manga platform integration.
+
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::num::NonZeroU32;
@@ -27,8 +29,10 @@ use crate::feed::Platform;
 use crate::feed::PlatformInfo;
 use crate::feed::error::FeedError;
 
+/// MangaDex API platform for manga tracking.
 type Json<'a> = &'a Map<String, Value>;
 
+/// MangaDex platform implementation.
 pub struct MangaDexPlatform {
     pub base: BasePlatform,
     client: reqwest::Client,
@@ -36,6 +40,7 @@ pub struct MangaDexPlatform {
 }
 
 impl MangaDexPlatform {
+    /// Creates a new MangaDex platform with rate limiting.
     pub fn new() -> Self {
         // See https://api.mangadex.org/docs/2-limitations/
         // "The request MUST have a User-Agent header, and it must not be spoofed"

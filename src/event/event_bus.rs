@@ -1,3 +1,5 @@
+//! Event bus for publish-subscribe communication.
+
 use std::any::Any;
 use std::any::TypeId;
 use std::collections::HashMap;
@@ -14,17 +16,20 @@ type AsyncSubscriber<E> =
     Box<dyn Fn(E) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> + Send + Sync>;
 type Subscribers = Arc<RwLock<HashMap<TypeId, Vec<Box<dyn Any + Send + Sync>>>>>;
 
+/// Event bus for publishing events to subscribers.
 pub struct EventBus {
     subscribers: Subscribers,
 }
 
 impl EventBus {
+    /// Creates a new event bus with no subscribers.
     pub fn new() -> Self {
         Self {
             subscribers: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
+    /// Registers a callback function for events of type E.
     pub fn register_callback<E, F, Fut>(&self, callback: F) -> &Self
     where
         E: 'static + Send + Sync,
@@ -42,6 +47,7 @@ impl EventBus {
         self
     }
 
+    /// Registers a subscriber that implements the Subscriber trait.
     pub fn register_subcriber<E, S>(&self, subscriber: Arc<S>) -> &Self
     where
         E: 'static + Send + Sync + Clone,
@@ -53,6 +59,7 @@ impl EventBus {
         })
     }
 
+    /// Publishes an event to all registered subscribers.
     pub fn publish<E>(&self, event: E) -> &Self
     where
         E: 'static + Send + Sync + Clone,

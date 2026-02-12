@@ -1,3 +1,5 @@
+//! Integration tests for publisher-subscriber event flow.
+
 use std::sync::Arc;
 use std::time::Duration;
 

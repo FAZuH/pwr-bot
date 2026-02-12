@@ -1,3 +1,5 @@
+//! Feed subscription management service.
+
 use std::sync::Arc;
 
 // TODO: Improve error handling here in general
@@ -19,12 +21,14 @@ use crate::feed::error::FeedError;
 use crate::feed::platforms::Platforms;
 use crate::service::error::ServiceError;
 
+/// Service for managing feed subscriptions and updates.
 pub struct FeedSubscriptionService {
     pub db: Arc<Database>,
     pub platforms: Arc<Platforms>,
 }
 
 impl FeedSubscriptionService {
+    /// Creates a new feed subscription service.
     pub fn new(db: Arc<Database>, platforms: Arc<Platforms>) -> Self {
         Self { db, platforms }
     }

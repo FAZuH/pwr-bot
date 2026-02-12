@@ -1,9 +1,11 @@
+//! Integration tests for database table operations.
+
 use chrono::Duration;
 use chrono::Utc;
 use pwr_bot::database::model::FeedItemModel;
 use pwr_bot::database::model::FeedModel;
 use pwr_bot::database::model::FeedSubscriptionModel;
-use pwr_bot::database::model::ServerSettings;
+use pwr_bot::database::model::FeedsSettings;
 use pwr_bot::database::model::ServerSettingsModel;
 use pwr_bot::database::model::SubscriberModel;
 use pwr_bot::database::model::SubscriberType;
@@ -442,17 +444,22 @@ mod feed_subscription_table_tests {
 }
 
 mod server_settings_table_tests {
+    use pwr_bot::database::model::ServerSettings;
+    use pwr_bot::database::model::VoiceSettings;
+
     use super::*;
 
     fn create_settings(guild_id: u64, chan: &str) -> ServerSettingsModel {
         ServerSettingsModel {
             guild_id,
             settings: sqlx::types::Json(ServerSettings {
-                enabled: Some(true),
-                channel_id: Some(chan.to_string()),
-                subscribe_role_id: None,
-                unsubscribe_role_id: None,
-                voice_tracking_enabled: None,
+                voice: VoiceSettings::default(),
+                feeds: FeedsSettings {
+                    enabled: Some(true),
+                    channel_id: Some(chan.to_string()),
+                    subscribe_role_id: None,
+                    unsubscribe_role_id: None,
+                },
             }),
         }
     }
@@ -471,7 +478,7 @@ mod server_settings_table_tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(fetched.settings.0.channel_id, Some("c1".to_string()));
+        assert_eq!(fetched.settings.0.feeds.channel_id, Some("c1".to_string()));
     });
 
     db_test!(update, |db| {
@@ -489,7 +496,7 @@ mod server_settings_table_tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(fetched.settings.0.channel_id, Some("c2".to_string()));
+        assert_eq!(fetched.settings.0.feeds.channel_id, Some("c2".to_string()));
     });
 
     db_test!(delete, |db| {

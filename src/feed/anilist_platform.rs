@@ -1,3 +1,5 @@
+//! AniList anime platform integration.
+
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::num::NonZeroU32;
@@ -21,6 +23,7 @@ use crate::feed::Platform;
 use crate::feed::PlatformInfo;
 use crate::feed::error::FeedError;
 
+/// AniList GraphQL API platform for anime tracking.
 pub struct AniListPlatform {
     pub base: BasePlatform,
     client: reqwest::Client,
@@ -28,6 +31,7 @@ pub struct AniListPlatform {
 }
 
 impl AniListPlatform {
+    /// Creates a new AniList platform with rate limiting.
     pub fn new() -> Self {
         let info = PlatformInfo {
             name: "AniList Anime".to_string(),

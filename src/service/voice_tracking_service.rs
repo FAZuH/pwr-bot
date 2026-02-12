@@ -1,3 +1,5 @@
+//! Voice channel activity tracking service.
+
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -12,12 +14,14 @@ use crate::database::model::VoiceLeaderboardEntry;
 use crate::database::model::VoiceSessionsModel;
 use crate::database::table::Table;
 
+/// Service for tracking voice channel activity.
 pub struct VoiceTrackingService {
     db: Arc<Database>,
     disabled_guilds: Arc<RwLock<HashSet<u64>>>,
 }
 
 impl VoiceTrackingService {
+    /// Creates a new voice tracking service and loads disabled guilds.
     pub async fn new(db: Arc<Database>) -> anyhow::Result<Self> {
         let _self = Self {
             db,
@@ -27,7 +31,7 @@ impl VoiceTrackingService {
         let mut disabled = _self.disabled_guilds.write().await;
 
         for model in all_settings {
-            if let Some(false) = model.settings.0.voice_tracking_enabled {
+            if let Some(false) = model.settings.0.voice.enabled {
                 disabled.insert(model.guild_id);
             }
         }
@@ -65,7 +69,7 @@ impl VoiceTrackingService {
         // Update cache
         {
             let mut disabled = self.disabled_guilds.write().await;
-            if let Some(false) = settings.voice_tracking_enabled {
+            if let Some(false) = settings.voice.enabled {
                 disabled.insert(guild_id);
             } else {
                 disabled.remove(&guild_id);

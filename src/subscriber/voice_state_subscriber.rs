@@ -1,3 +1,5 @@
+//! Subscriber that tracks voice channel state changes.
+
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -13,7 +15,7 @@ use crate::event::VoiceStateEvent;
 use crate::service::Services;
 use crate::subscriber::Subscriber;
 
-/// Tracks active voice sessions with their join times
+/// Tracks active voice sessions with their join times.
 #[derive(Clone, Debug)]
 #[allow(dead_code)]
 struct ActiveSession {
@@ -23,12 +25,14 @@ struct ActiveSession {
     join_time: DateTime<Utc>,
 }
 
+/// Subscriber that tracks voice channel state changes.
 pub struct VoiceStateSubscriber {
     pub services: Arc<Services>,
     active_sessions: Mutex<HashMap<String, ActiveSession>>,
 }
 
 impl VoiceStateSubscriber {
+    /// Creates a new voice state subscriber.
     pub fn new(services: Arc<Services>) -> Self {
         Self {
             services,
@@ -36,8 +40,7 @@ impl VoiceStateSubscriber {
         }
     }
 
-    /// Start tracking a user who is already in a voice channel on bot startup.
-    /// This is called for each user found in voice when the bot connects.
+    /// Tracks an existing user in a voice channel (used on bot startup).
     pub async fn track_existing_user(
         &self,
         user_id: u64,

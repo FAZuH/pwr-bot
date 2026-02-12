@@ -1,4 +1,7 @@
+//! Pagination component for Discord views.
+
 use std::str::FromStr;
+use std::time::Duration;
 
 use serenity::all::ButtonStyle;
 use serenity::all::ComponentInteraction;
@@ -6,12 +9,14 @@ use serenity::all::CreateActionRow;
 use serenity::all::CreateButton;
 use serenity::all::CreateComponent;
 
+use crate::bot::commands::Context;
 use crate::bot::views::Action;
-use crate::bot::views::AttachableView;
 use crate::bot::views::InteractableComponentView;
-use crate::bot::views::ViewProvider;
+use crate::bot::views::ResponseComponentView;
 use crate::custom_id_enum;
+use crate::stateful_view;
 
+/// Model for tracking pagination state.
 pub struct PaginationModel {
     pub current_page: u32,
     pub pages: u32,
@@ -19,6 +24,7 @@ pub struct PaginationModel {
 }
 
 impl PaginationModel {
+    /// Creates a new pagination model with the given parameters.
     pub fn new(pages: u32, per_page: u32, current_page: u32) -> Self {
         let pages = pages.max(1);
         let per_page = per_page.max(1);
@@ -30,26 +36,31 @@ impl PaginationModel {
         }
     }
 
+    /// Navigates to the first page.
     pub fn first_page(&mut self) {
         self.current_page = 1;
     }
 
+    /// Navigates to the previous page if not on the first page.
     pub fn prev_page(&mut self) {
         if self.current_page > 1 {
             self.current_page -= 1;
         }
     }
 
+    /// Navigates to the next page if not on the last page.
     pub fn next_page(&mut self) {
         if self.current_page < self.pages {
             self.current_page += 1;
         }
     }
 
+    /// Navigates to the last page.
     pub fn last_page(&mut self) {
         self.current_page = self.pages;
     }
 
+    /// Creates the pagination control buttons.
     pub fn create_buttons(&self) -> CreateComponent<'static> {
         let page_label = format!("{}/{}", self.current_page, self.pages);
 
@@ -85,49 +96,66 @@ custom_id_enum!(PaginationAction {
     Last,
 });
 
-pub struct PaginationView {
-    pub state: PaginationModel,
+stateful_view! {
+    timeout = Duration::from_secs(120),
+    /// View that provides pagination controls for multi-page content.
+    pub struct PaginationView<'a> {
+        pub state: PaginationModel,
+    }
 }
 
-impl PaginationView {
-    pub fn new(total_items: impl Into<u32>, per_page: impl Into<u32>) -> Self {
+impl<'a> PaginationView<'a> {
+    /// Creates a new pagination view with the given item count and page size.
+    pub fn new(
+        ctx: &'a Context<'a>,
+        total_items: impl Into<u32>,
+        per_page: impl Into<u32>,
+    ) -> Self {
         let per_page = per_page.into();
         let pages = total_items.into().div_ceil(per_page);
         let model = PaginationModel::new(pages, per_page, 1);
-        Self { state: model }
+        Self {
+            state: model,
+            ctx: Self::create_context(ctx),
+        }
     }
 
-    pub fn from_model(model: PaginationModel) -> Self {
-        Self { state: model }
+    /// Creates a pagination view from an existing model.
+    pub fn from_model(ctx: &'a Context<'a>, model: PaginationModel) -> Self {
+        Self {
+            state: model,
+            ctx: Self::create_context(ctx),
+        }
     }
 
+    /// Attaches pagination controls only if there are multiple pages.
     pub fn attach_if_multipage<'b>(&self, components: &mut impl Extend<CreateComponent<'b>>) {
         if self.state.pages > 1 {
-            self.attach(components);
+            components.extend(self.create_components());
         }
     }
 }
 
-impl<'a> ViewProvider<'a> for PaginationView {
-    fn create(&self) -> Vec<CreateComponent<'a>> {
+impl<'a> ResponseComponentView for PaginationView<'a> {
+    fn create_components<'b>(&self) -> Vec<CreateComponent<'b>> {
         let page_label = format!("{}/{}", self.state.current_page, self.state.pages);
 
         vec![CreateComponent::ActionRow(CreateActionRow::Buttons(
             vec![
-                CreateButton::new(PaginationAction::First.as_str())
+                CreateButton::new(PaginationAction::First.custom_id())
                     .label("⏮")
                     .disabled(self.state.current_page == 1),
-                CreateButton::new(PaginationAction::Prev.as_str())
+                CreateButton::new(PaginationAction::Prev.custom_id())
                     .label("◀")
                     .disabled(self.state.current_page == 1),
-                CreateButton::new(PaginationAction::Page.as_str())
+                CreateButton::new(PaginationAction::Page.custom_id())
                     .label(page_label)
                     .disabled(true)
                     .style(ButtonStyle::Secondary),
-                CreateButton::new(PaginationAction::Next.as_str())
+                CreateButton::new(PaginationAction::Next.custom_id())
                     .label("▶")
                     .disabled(self.state.current_page == self.state.pages),
-                CreateButton::new(PaginationAction::Last.as_str())
+                CreateButton::new(PaginationAction::Last.custom_id())
                     .label("⏭")
                     .disabled(self.state.current_page == self.state.pages),
             ]
@@ -137,7 +165,7 @@ impl<'a> ViewProvider<'a> for PaginationView {
 }
 
 #[async_trait::async_trait]
-impl InteractableComponentView<PaginationAction> for PaginationView {
+impl<'a> InteractableComponentView<'a, PaginationAction> for PaginationView<'a> {
     async fn handle(&mut self, interaction: &ComponentInteraction) -> Option<PaginationAction> {
         let action = PaginationAction::from_str(&interaction.data.custom_id).ok()?;
 

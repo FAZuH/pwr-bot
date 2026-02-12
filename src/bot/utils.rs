@@ -1,13 +1,18 @@
+//! Utility functions for bot commands.
+
 use crate::bot::error::BotError;
 
+/// Maximum number of URLs allowed per subscription request.
 pub const MAX_URLS_PER_REQUEST: usize = 10;
 
+/// Parses a comma-separated string of URLs and validates the count.
 pub fn parse_and_validate_urls(links: &str) -> Result<Vec<&str>, BotError> {
     let urls: Vec<&str> = links.split(',').map(|s| s.trim()).collect();
     validate_url_count(&urls)?;
     Ok(urls)
 }
 
+/// Validates that the number of URLs does not exceed the maximum.
 pub fn validate_url_count(urls: &[&str]) -> Result<(), BotError> {
     if urls.len() > MAX_URLS_PER_REQUEST {
         return Err(BotError::InvalidCommandArgument {

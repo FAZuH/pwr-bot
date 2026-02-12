@@ -1,3 +1,5 @@
+//! Error handling for Discord bot commands.
+
 use log::error;
 use poise::CreateReply;
 use poise::FrameworkError;
@@ -12,9 +14,11 @@ use crate::bot::Error;
 use crate::bot::error::BotError;
 use crate::service::error::ServiceError;
 
+/// Handles framework errors and sends appropriate responses to users.
 pub struct ErrorHandler;
 
 impl ErrorHandler {
+    /// Handles a framework error by classifying and responding appropriately.
     pub async fn handle(error: FrameworkError<'_, Data, Error>) {
         match error {
             FrameworkError::Command { error, ctx, .. } => {
@@ -44,6 +48,7 @@ impl ErrorHandler {
         }
     }
 
+    /// Classifies an error and returns user-friendly title and description.
     fn classify_error(
         error: &Error,
         ctx: &poise::Context<'_, Data, Error>,
@@ -65,6 +70,7 @@ impl ErrorHandler {
         }
     }
 
+    /// Sends an error message as a Components V2 container.
     async fn send_component(ctx: &poise::Context<'_, Data, Error>, message: &str) {
         let components = vec![CreateComponent::Container(CreateContainer::new(vec![
             CreateContainerComponent::TextDisplay(CreateTextDisplay::new(message)),

@@ -1,3 +1,5 @@
+//! Tests for feed platform integrations using mock servers.
+
 use std::path::PathBuf;
 
 use httpmock::Method::GET;
@@ -8,6 +10,7 @@ use pwr_bot::feed::anilist_platform::AniListPlatform;
 use pwr_bot::feed::comick_platform::ComickPlatform;
 use pwr_bot::feed::mangadex_platform::MangaDexPlatform;
 
+/// Loads a test response file from the responses directory.
 fn get_response(filename: &str) -> String {
     let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     path.push("tests/responses");

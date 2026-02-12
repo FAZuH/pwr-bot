@@ -1,3 +1,5 @@
+//! Database module with SQLite storage and SQLx.
+
 use std::str::FromStr;
 
 use log::debug;
@@ -17,6 +19,7 @@ pub mod error;
 pub mod model;
 pub mod table;
 
+/// Main database struct containing all table handlers.
 pub struct Database {
     pub pool: SqlitePool,
     pub feed_table: FeedTable,
@@ -28,6 +31,7 @@ pub struct Database {
 }
 
 impl Database {
+    /// Creates a new database connection and initializes table handlers.
     pub async fn new(db_url: &str, db_path: &str) -> anyhow::Result<Self> {
         let path = std::path::Path::new(db_path);
         if !path.exists() {
@@ -62,11 +66,13 @@ impl Database {
         })
     }
 
+    /// Runs database migrations from the migrations directory.
     pub async fn run_migrations(&self) -> anyhow::Result<()> {
         sqlx::migrate!("./migrations").run(&self.pool).await?;
         Ok(())
     }
 
+    /// Drops all tables. Use with caution!
     pub async fn drop_all_tables(&self) -> anyhow::Result<()> {
         self.feed_table.drop_table().await?;
         self.feed_item_table.drop_table().await?;
@@ -77,6 +83,7 @@ impl Database {
         Ok(())
     }
 
+    /// Deletes all data from all tables. Use with caution!
     pub async fn delete_all_tables(&self) -> anyhow::Result<()> {
         self.feed_table.delete_all().await?;
         self.feed_item_table.delete_all().await?;

@@ -1,3 +1,5 @@
+//! Platform registry and management.
+
 use std::sync::Arc;
 
 use crate::feed::Platform;
@@ -6,6 +8,7 @@ use crate::feed::comick_platform::ComickPlatform;
 use crate::feed::error::FeedError;
 use crate::feed::mangadex_platform::MangaDexPlatform;
 
+/// Registry of all feed platforms.
 pub struct Platforms {
     platforms: Vec<Arc<dyn Platform>>,
     pub anilist: Arc<AniListPlatform>,
@@ -14,6 +17,7 @@ pub struct Platforms {
 }
 
 impl Platforms {
+    /// Creates a new platform registry with all supported platforms.
     pub fn new() -> Self {
         let anilist = Arc::new(AniListPlatform::new());
         let mangadex = Arc::new(MangaDexPlatform::new());
@@ -32,7 +36,7 @@ impl Platforms {
         _self
     }
 
-    /// Extract source id of a source url.
+    /// Extracts source id from a source url.
     pub fn get_id_from_source_url<'a>(&self, source_url: &'a str) -> Result<&'a str, FeedError> {
         let feed = self.get_platform_by_source_url(source_url).ok_or_else(|| {
             FeedError::UnsupportedUrl {
@@ -44,7 +48,7 @@ impl Platforms {
         Ok(ret)
     }
 
-    /// Get platform by source url.
+    /// Gets a platform that handles the given source url.
     pub fn get_platform_by_source_url(&self, source_url: &str) -> Option<&Arc<dyn Platform>> {
         self.platforms.iter().find(|feed| {
             feed.get_base()
@@ -54,14 +58,17 @@ impl Platforms {
         })
     }
 
+    /// Returns all registered platforms.
     pub fn get_all_platforms(&self) -> Vec<Arc<dyn Platform>> {
         self.platforms.clone()
     }
 
+    /// Adds a platform to the registry.
     pub fn add_platform(&mut self, feed: Arc<dyn Platform>) {
         self.platforms.push(feed);
     }
 
+    /// Extracts the domain from a URL.
     fn extract_domain(url: &str) -> String {
         let after_protocol = if let Some(domain_start) = url.find("://") {
             &url[domain_start + 3..]
