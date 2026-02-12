@@ -9,6 +9,7 @@ use crate::bot::commands::Error;
 use crate::bot::commands::settings::SettingsPage;
 use crate::bot::commands::settings::run_settings;
 use crate::bot::commands::voice::LeaderboardEntry;
+use crate::bot::commands::voice::VoiceLeaderboardTimeRange;
 use crate::bot::commands::voice::image_generator::LeaderboardImageGenerator;
 use crate::bot::commands::voice::views::SettingsVoiceAction;
 use crate::bot::commands::voice::views::SettingsVoiceView;
@@ -22,6 +23,7 @@ use crate::bot::views::ResponseComponentView;
 use crate::bot::views::pagination::PaginationView;
 use crate::controller;
 use crate::database::model::VoiceLeaderboardEntry;
+use crate::database::model::VoiceLeaderboardOptBuilder;
 use crate::error::AppError;
 
 /// Number of leaderboard entries per page.
@@ -74,7 +76,9 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceSettingsController<'a>
     }
 }
 
-controller! { pub struct VoiceLeaderboardController<'a> {} }
+controller! { pub struct VoiceLeaderboardController<'a> {
+    time_range: VoiceLeaderboardTimeRange
+} }
 
 #[async_trait::async_trait]
 impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceLeaderboardController<'a> {
@@ -87,11 +91,22 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceLeaderboardController<
         let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?.get();
         let author_id = ctx.author().id.get();
 
+        let (since, until) = self.time_range.to_range();
+
+        let voice_lb_otps = VoiceLeaderboardOptBuilder::default()
+            .guild_id(guild_id)
+            // TODO: Performance should be improved or this will become a problem
+            .limit(Some(u32::MAX))
+            .since(Some(since))
+            .until(Some(until))
+            .build()
+            .map_err(AppError::from)?;
+
         let total_entries = ctx
             .data()
             .service
             .voice_tracking
-            .get_leaderboard(guild_id, u32::MAX)
+            .get_leaderboard_withopt(&voice_lb_otps)
             .await
             .map_err(Error::from)?;
 
@@ -110,7 +125,7 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceLeaderboardController<
             .map(|pos| pos as u32 + 1);
 
         let image_gen = LeaderboardImageGenerator::new().map_err(|e| {
-            AppError::internal_with_ref(format!("Failed to initialize image generator: {}", e))
+            AppError::internal_with_ref(format!("Failed to initialize image generator: {e}"))
         })?;
 
         let current_page_entries =
@@ -160,9 +175,12 @@ pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
 }
 
 /// Legacy function for voice leaderboard command.
-pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
+pub async fn leaderboard(
+    ctx: Context<'_>,
+    time_range: VoiceLeaderboardTimeRange,
+) -> Result<(), Error> {
     let mut coordinator = Coordinator::new(ctx);
-    let mut controller = VoiceLeaderboardController::new(&ctx);
+    let mut controller = VoiceLeaderboardController::new(&ctx, time_range);
     let _result = controller.run(&mut coordinator).await?;
     Ok(())
 }

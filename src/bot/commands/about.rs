@@ -233,7 +233,11 @@ async fn gather_stats(ctx: &Context<'_>) -> Result<AboutStats, Error> {
         .cache()
         .guilds()
         .iter()
-        .filter_map(|guild_id| ctx.cache().guild(*guild_id).map(|guild| guild.member_count as usize))
+        .filter_map(|guild_id| {
+            ctx.cache()
+                .guild(*guild_id)
+                .map(|guild| guild.member_count as usize)
+        })
         .sum();
 
     // Make a request to Discord server to get latency
