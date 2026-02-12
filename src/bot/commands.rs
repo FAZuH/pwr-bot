@@ -4,8 +4,9 @@ use crate::bot::Data;
 
 pub mod about;
 pub mod admin;
-pub mod feeds;
+pub mod feed;
 pub mod owner;
+pub mod settings;
 pub mod voice;
 
 /// Error type used across bot commands.
@@ -16,7 +17,7 @@ pub type Context<'a> = poise::Context<'a, Data, Error>;
 
 pub use about::AboutCog;
 pub use admin::AdminCog;
-pub use feeds::FeedsCog;
+pub use feed::FeedCog;
 pub use owner::OwnerCog;
 use poise::Command;
 pub use voice::VoiceCog;
@@ -32,7 +33,7 @@ pub struct Cogs;
 
 impl Cog for Cogs {
     fn commands(&self) -> Vec<Command<Data, Error>> {
-        let feeds_cog = FeedsCog;
+        let feeds_cog = FeedCog;
         let admin_cog = AdminCog;
         let owner_cog = OwnerCog;
         let voice_cog = VoiceCog;

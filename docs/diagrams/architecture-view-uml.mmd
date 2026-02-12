@@ -1,0 +1,113 @@
+%% UI UML
+classDiagram
+    %% Interfaces
+    class ViewProvider~T = CreateComponent~ {
+        <<interface>>
+        create() Vec~T~
+    }
+
+    class ResponseComponentView {
+        <<interface>>
+        create_components() Vec~CreateComponent~
+        create_reply() CreateReply
+        create_message() CreateMessage
+        attach(&mut Vec~CreateComponent~)
+    }
+
+    class StatefulView~D = ()~ {
+        <<interface>>
+        view_context() &ViewContext~D~
+        view_context_mut() &mut ViewContext~D~
+        send() Result~()~
+        edit() Result~()~
+    }
+
+    class InteractableComponentView~T = Action, D = ()~ {
+        <<interface>>
+        handle(interaction) Option~T~
+        listen_once() Option~(T, ComponentInteraction)~
+    }
+
+    class Action {
+        <<interface>>
+        ALL &[&str]
+        custom_id() &str
+        label() &str
+    }
+
+    %% Controller Pattern
+    class Controller~S~ {
+        <<interface>>
+        run(coordinator: &mut Coordinator~S~) Result~NavigationResult~
+    }
+
+    class Coordinator~S~ {
+        <<struct>>
+        ctx: Context
+        state: S
+        send(reply) Result~()~
+        edit(reply) Result~()~
+        context() &Context
+    }
+
+    class NavigationResult {
+        <<enum>>
+        SettingsMain
+        SettingsFeeds
+        SettingsVoice
+        SettingsAbout
+        Back
+        Exit
+        FeedSubscriptions
+        FeedSubscribe
+        FeedUnsubscribe
+        VoiceLeaderboard
+    }
+
+    %% Interface Relationships
+    ViewProvider <-- ResponseComponentView : blanket impl
+    ResponseComponentView <|-- StatefulView
+    StatefulView <|-- InteractableComponentView
+
+    %% Classes
+    class AboutView
+    class FeedSubscriptionsListView
+    class FeedSubscriptionBatchView
+    class PaginationView
+    class SettingsFeedView
+    class SettingsMainView
+    class SettingsNavigationView
+    class SettingsVoiceView
+    class VoiceLeaderboardView
+
+    %% Class Relationships
+    StatefulView <|.. FeedSubscriptionBatchView
+    StatefulView <|.. PaginationView
+    StatefulView <|.. SettingsFeedView
+    StatefulView <|.. SettingsMainView
+    StatefulView <|.. SettingsVoiceView
+    StatefulView <|.. AboutView
+
+    InteractableComponentView <|.. FeedSubscriptionBatchView : T=FeedSubscriptionBatchAction
+    InteractableComponentView <|.. PaginationView : T=PaginationAction
+    InteractableComponentView <|.. SettingsFeedView : T=SettingsFeedAction
+    InteractableComponentView <|.. SettingsMainView : T=SettingsMainAction
+    InteractableComponentView <|.. SettingsVoiceView : T=SettingsVoiceAction
+    InteractableComponentView <|.. AboutView : T=AboutAction
+
+    ResponseComponentView <|.. FeedSubscriptionsListView
+    ResponseComponentView <|.. SettingsNavigationView
+    ResponseComponentView <|.. VoiceLeaderboardView
+
+    %% Controller Pattern Relationships
+    Controller <|.. SettingsMainController
+    Controller <|.. FeedSettingsController
+    Controller <|.. VoiceSettingsController
+    Controller <|.. FeedSubscriptionsController
+    Controller <|.. FeedSubscribeController
+    Controller <|.. FeedUnsubscribeController
+    Controller <|.. VoiceLeaderboardController
+    Controller <|.. AboutController
+
+    Coordinator ..> Controller : executes
+    Controller ..> NavigationResult : returns

@@ -1,0 +1,54 @@
+%% UI Flow
+graph TB
+    subgraph Architecture
+        Coordinator["Coordinator<br/>(Manages Context & Message)"]
+        Controller["Controller<br/>(Business Logic)"]
+        View["View<br/>(UI Components)"]
+        NavigationResult["NavigationResult<br/>(Navigation Intent)"]
+    end
+
+    Coordinator -->|Runs| Controller
+    Controller -->|Creates| View
+    Coordinator -->|Sends/Edits| View
+    Controller -->|Returns| NavigationResult
+    NavigationResult -->|Directs| Coordinator
+
+    subgraph Navigation
+        direction LR
+        SettingsMain[SettingsMain]
+        SettingsFeeds[SettingsFeeds]
+        SettingsVoice[SettingsVoice]
+        SettingsAbout[SettingsAbout]
+        Back[Back]
+        Exit[Exit]
+    end
+
+    SettingsMain -->|Navigate| SettingsFeeds
+    SettingsMain -->|Navigate| SettingsVoice
+    SettingsMain -->|Navigate| SettingsAbout
+    SettingsFeeds -->|Back| SettingsMain
+    SettingsVoice -->|Back| SettingsMain
+    SettingsAbout -->|Back| SettingsMain
+
+    subgraph Views
+        subgraph Settings
+            SettingsMainView
+            SettingsFeedView
+            SettingsVoiceView
+            SettingsNavigationView
+        end
+
+        subgraph Feed
+            FeedSubscriptionBatchView
+            FeedSubscriptionListView
+        end
+
+        subgraph Voice
+            VoiceLeaderboardView
+        end
+
+        subgraph Common
+            AboutView
+            PaginationView
+        end
+    end

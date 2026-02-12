@@ -31,7 +31,7 @@ impl VoiceTrackingService {
         let mut disabled = _self.disabled_guilds.write().await;
 
         for model in all_settings {
-            if let Some(false) = model.settings.0.voice_tracking_enabled {
+            if let Some(false) = model.settings.0.voice.enabled {
                 disabled.insert(model.guild_id);
             }
         }
@@ -69,7 +69,7 @@ impl VoiceTrackingService {
         // Update cache
         {
             let mut disabled = self.disabled_guilds.write().await;
-            if let Some(false) = settings.voice_tracking_enabled {
+            if let Some(false) = settings.voice.enabled {
                 disabled.insert(guild_id);
             } else {
                 disabled.remove(&guild_id);

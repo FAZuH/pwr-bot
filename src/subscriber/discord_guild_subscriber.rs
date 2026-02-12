@@ -70,7 +70,7 @@ impl DiscordGuildSubscriber {
             .await?
             .ok_or_else(|| anyhow::anyhow!("Settings not found"))?;
         let channel_id_str =
-            settings.settings.0.channel_id.ok_or_else(|| {
+            settings.settings.0.feeds.channel_id.ok_or_else(|| {
                 anyhow::anyhow!("No channel configured for guild {}", &sub.target_id)
             })?;
 
