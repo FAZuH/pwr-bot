@@ -12,7 +12,7 @@ pub mod views;
 pub struct FeedCog;
 
 impl FeedCog {
-    /// Manage feed subscriptions and settings.
+    /// Manage feed subscriptions and settings
     ///
     /// Base command for feed management. Use subcommands to:
     /// - Subscribe to feeds
@@ -32,7 +32,7 @@ impl FeedCog {
         Ok(())
     }
 
-    /// Configure feed settings for this server.
+    /// Configure feed settings for this server
     ///
     /// Set up notification channels and required roles for feed subscriptions.
     /// Only server administrators can use this command.
@@ -44,7 +44,7 @@ impl FeedCog {
         controllers::settings(ctx).await
     }
 
-    /// Subscribe to one or more feeds.
+    /// Subscribe to one or more feeds
     ///
     /// Add feeds to receive notifications. You can subscribe in your DM or
     /// in the server (if server feed settings are configured).
@@ -61,7 +61,7 @@ impl FeedCog {
         controllers::subscribe(ctx, links, send_into).await
     }
 
-    /// Unsubscribe from one or more feeds.
+    /// Unsubscribe from one or more feeds
     ///
     /// Remove feeds from your subscriptions. Use autocomplete to find
     /// feeds you are currently subscribed to.
@@ -78,7 +78,7 @@ impl FeedCog {
         controllers::unsubscribe(ctx, links, send_into).await
     }
 
-    /// List your current feed subscriptions.
+    /// List your current feed subscriptions
     ///
     /// View all feeds you are subscribed to, with pagination support.
     #[poise::command(slash_command)]

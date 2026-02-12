@@ -139,7 +139,8 @@ impl AboutView<'_> {
 impl ResponseComponentView for AboutView<'_> {
     fn create_components<'b>(&self) -> Vec<CreateComponent<'b>> {
         let content_text = format!(
-            "## pwr-bot
+            "-# **Settings > About**
+## pwr-bot
 ### Stats
 - **Uptime**: {}
 - **Servers**: {}

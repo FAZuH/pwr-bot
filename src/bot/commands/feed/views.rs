@@ -40,7 +40,7 @@ custom_id_enum!(SettingsFeedAction {
     SubRole,
     UnsubRole,
     Back = "❮ Back",
-    About = "About",
+    About = "🛈 About",
 });
 
 custom_id_enum!(FeedSubscriptionBatchAction { ViewSubscriptions });
@@ -88,14 +88,14 @@ impl ResponseComponentView for SettingsFeedView<'_> {
         let is_enabled = settings.enabled.unwrap_or(true);
 
         let status_text = format!(
-            "### Server Feed Settings\n\n> 🛈  {}",
+            "-# **Settings > Feeds**\n## Feed Subscription Settings\n\n> 🛈  {}",
             if is_enabled {
                 match &settings.channel_id {
-                    Some(id) => format!("Feed notifications are currently active. Notifications will be sent to <#{id}>"),
-                    None => "Feed notifications are currently active, but notification channel is not set.".to_string(),
+                    Some(id) => format!("Feed notifications are currently **active**. Notifications will be sent to <#{id}>"),
+                    None => "Feed notifications are currently **active**, but notification channel is not set.".to_string(),
                 }
             } else {
-                "Feed notifications are currently paused. No notifications will be sent until re-enabled.".to_string()
+                "Feed notifications are currently **paused**. No notifications will be sent until it is re-enabled.".to_string()
             }
         );
 

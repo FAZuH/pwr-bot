@@ -69,7 +69,7 @@ custom_id_enum! {
         /// Navigate back to the parent settings page
         Back = "< Back",
         /// Show information about the bot
-        About = "About",
+        About = "🛈 About",
         /// Show help (not yet implemented)
         Help = "Help",
     }

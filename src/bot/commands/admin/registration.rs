@@ -45,14 +45,14 @@ impl ResponseComponentView for CommandRegistrationView {
 
         let status_text = if self.is_complete {
             format!(
-                "## {}\nSuccessfully registered {} commands in {}ms",
+                "### {}\nSuccessfully registered {} commands in {}ms",
                 title,
                 self.num_commands,
                 self.duration_ms.unwrap_or(0)
             )
         } else {
             format!(
-                "## {}\nRegistering {} guild commands...",
+                "### {}\nRegistering {} guild commands...",
                 title, self.num_commands
             )
         };
@@ -100,12 +100,12 @@ impl ResponseComponentView for CommandUnregistrationView {
 
         let status_text = if self.is_complete {
             format!(
-                "## {}\nSuccessfully unregistered all commands in {}ms",
+                "### {}\nSuccessfully unregistered all commands in {}ms",
                 title,
                 self.duration_ms.unwrap_or(0)
             )
         } else {
-            format!("## {}\nUnregistering all guild commands...", title)
+            format!("### {}\nUnregistering all guild commands...", title)
         };
 
         let container = CreateComponent::Container(CreateContainer::new(vec![

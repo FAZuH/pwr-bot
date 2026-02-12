@@ -28,7 +28,7 @@ pub struct PageGenerationResult {
 pub struct VoiceCog;
 
 impl VoiceCog {
-    /// Voice channel tracking and leaderboard commands.
+    /// Voice channel tracking and leaderboard commands
     ///
     /// Track voice channel activity and view leaderboards.
     /// Use subcommands to configure settings or view the leaderboard.
@@ -37,7 +37,7 @@ impl VoiceCog {
         Ok(())
     }
 
-    /// Configure voice tracking settings for this server.
+    /// Configure voice tracking settings for this server
     ///
     /// Enable or disable voice channel activity tracking.
     /// Only server administrators can use this command.
@@ -49,7 +49,7 @@ impl VoiceCog {
         controllers::settings(ctx).await
     }
 
-    /// Display the voice activity leaderboard.
+    /// Display the voice activity leaderboard
     ///
     /// Shows a ranked list of users by total time spent in voice channels.
     /// Includes your current rank position.

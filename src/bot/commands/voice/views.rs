@@ -33,7 +33,7 @@ use crate::stateful_view;
 custom_id_enum!(SettingsVoiceAction {
     EnabledSelect,
     Back = "❮ Back",
-    About = "About",
+    About = "🛈 About",
 });
 
 stateful_view! {
@@ -59,7 +59,7 @@ impl<'a> ResponseComponentView for SettingsVoiceView<'a> {
         let is_enabled = self.settings.voice.enabled.unwrap_or(true);
 
         let status_text = format!(
-            "## Voice Tracking Settings\n\n> {}",
+            "-# **Settings > Voice**\n## Voice Tracking Settings\n\n> 🛈  {}",
             if is_enabled {
                 "Voice tracking is **active**."
             } else {

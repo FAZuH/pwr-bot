@@ -14,7 +14,7 @@ use crate::database::table::Table;
 pub struct OwnerCog;
 
 impl OwnerCog {
-    /// Register application commands (owner only).
+    /// Register application commands (owner only)
     ///
     /// Opens a dialog to register global or guild application commands.
     /// Restricted to bot owners only.
@@ -24,7 +24,7 @@ impl OwnerCog {
         Ok(())
     }
 
-    /// Export database contents (owner only).
+    /// Export database contents (owner only)
     ///
     /// Dumps all database tables as JSON files for inspection.
     /// Includes feeds, feed items, subscribers, and subscriptions.
