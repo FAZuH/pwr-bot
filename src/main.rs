@@ -115,18 +115,18 @@ async fn main() -> anyhow::Result<()> {
         init_start.elapsed().as_secs_f64()
     );
 
-    // Setup publishers
-    debug!("Setting up Publishers...");
-    SeriesFeedPublisher::new(
-        services.feed_subscription.clone(),
-        event_bus.clone(),
-        config.poll_interval,
-    )
-    .start()?;
-    info!(
-        "Publishers setup complete ({:.2}s).",
-        init_start.elapsed().as_secs_f64()
-    );
+    // // Setup publishers
+    // debug!("Setting up Publishers...");
+    // SeriesFeedPublisher::new(
+    //     services.feed_subscription.clone(),
+    //     event_bus.clone(),
+    //     config.poll_interval,
+    // )
+    // .start()?;
+    // info!(
+    //     "Publishers setup complete ({:.2}s).",
+    //     init_start.elapsed().as_secs_f64()
+    // );
 
     // Listen for exit signal
     let init_done = init_start.elapsed();

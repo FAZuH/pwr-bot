@@ -316,18 +316,19 @@ macro_rules! controller {
 ///     EnumName {
 ///         Variant1,
 ///         Variant2 = "Custom Label",
-///         Variant3,
+///         Variant3(Type1, Type2),
+///         Variant4 { field: Type } = "Label",
 ///     }
 /// }
 /// ```
 ///
 /// # Generated Code
 ///
-/// - Derives: `Debug`, `Clone`, `Copy`, `PartialEq`, `Eq`
+/// - Derives: `Debug`, `Clone`, `PartialEq`, `Eq` (Copy only if all fields are Copy)
 /// - Implements `Action` trait with:
 ///   - `custom_id()`: Returns `"EnumName_Variant"`
 ///   - `label()`: Returns custom label or stringified variant name
-/// - Implements `FromStr` for parsing custom IDs back to enum variants
+/// - Implements `FromStr` for parsing custom IDs back to enum variants (unit variants only)
 ///
 /// # Example
 ///
@@ -339,13 +340,18 @@ macro_rules! controller {
 ///     SettingsAction {
 ///         Enable = "Enable Feature",
 ///         Disable = "Disable Feature",
-///         Configure,  // Label will be "Configure"
+///         Configure,
+///         SetValue(u32),
+///         Update { name: String, value: i32 },
 ///     }
 /// }
 ///
 /// let action = SettingsAction::Enable;
 /// assert_eq!(action.custom_id(), "SettingsAction_Enable");
 /// assert_eq!(action.label(), "Enable Feature");
+///
+/// let action = SettingsAction::SetValue(42);
+/// assert_eq!(action.custom_id(), "SettingsAction_SetValue");
 /// ```
 #[macro_export]
 macro_rules! custom_id_enum {
@@ -354,31 +360,38 @@ macro_rules! custom_id_enum {
         $name:ident {
             $(
                 $(#[$variant_meta:meta])*
-                $variant:ident $(= $label:literal)?
+                $variant:ident
+                $( ( $($tuple_field:ty),* $(,)? ) )?
+                $( { $($struct_field:ident : $struct_type:ty),* $(,)? } )?
+                $(= $label:literal)?
             ),* $(,)?
         }
     ) => {
         $(#[$meta])*
-        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        #[derive(Debug, Clone, PartialEq, Eq)]
         pub enum $name {
             $(
                 $(#[$variant_meta])*
-                $variant,
+                $variant $( ( $($tuple_field),* ) )? $( { $($struct_field : $struct_type),* } )?,
             )*
         }
 
         impl $crate::bot::views::Action for $name {
             #[doc = "All possible custom_id strings for this action enum."]
-            const ALL: &'static [&'static str] = &[
-                $(concat!(stringify!($name), "_", stringify!($variant)),)*
-            ];
+            fn all() -> &'static [&'static str] {
+                &[$(concat!(stringify!($name), "_", stringify!($variant)),)*]
+            }
 
             #[doc = "Returns the Discord custom_id for this action."]
             #[doc = ""]
             #[doc = "Format: `EnumName_Variant`"]
             fn custom_id(&self) -> &'static str {
                 match self {
-                    $(Self::$variant => concat!(stringify!($name), "_", stringify!($variant)),)*
+                    $(
+                        custom_id_enum!(@match_pattern Self::$variant $(, tuple: $($tuple_field)*)? $(, struct: $($struct_field)*)?) => {
+                            concat!(stringify!($name), "_", stringify!($variant))
+                        }
+                    )*
                 }
             }
 
@@ -387,7 +400,11 @@ macro_rules! custom_id_enum {
             #[doc = "Uses custom label if provided, otherwise uses the variant name."]
             fn label(&self) -> &'static str {
                 match self {
-                    $(Self::$variant => custom_id_enum!(@label $variant $(, $label)?),)*
+                    $(
+                        custom_id_enum!(@match_pattern Self::$variant $(, tuple: $($tuple_field)*)? $(, struct: $($struct_field)*)?) => {
+                            custom_id_enum!(@label $variant $(, $label)?)
+                        }
+                    )*
                 }
             }
         }
@@ -397,10 +414,14 @@ macro_rules! custom_id_enum {
 
             #[doc = "Parses a custom_id string into an action variant."]
             #[doc = ""]
-            #[doc = "Returns `Err(())` if the string doesn't match any variant."]
+            #[doc = "Only works for unit variants. Returns `Err(())` for variants with data or unrecognized strings."]
             fn from_str(s: &str) -> Result<Self, Self::Err> {
                 match s {
-                    $(concat!(stringify!($name), "_", stringify!($variant)) => Ok(Self::$variant),)*
+                    $(
+                        concat!(stringify!($name), "_", stringify!($variant)) => {
+                            custom_id_enum!(@from_str_result $variant $(, $($tuple_field)*)? $(, $($struct_field)*)?)
+                        }
+                    )*
                     _ => Err(()),
                 }
             }
@@ -409,4 +430,178 @@ macro_rules! custom_id_enum {
 
     (@label $variant:ident, $label:literal) => { $label };
     (@label $variant:ident) => { stringify!($variant) };
+
+    (@from_str_result $variant:ident) => {
+        Ok(Self::$variant)
+    };
+
+    (@from_str_result $variant:ident, $($field:tt)+) => {
+        Err(())
+    };
+    (@match_pattern $path:path) => {
+        $path
+    };
+
+    (@match_pattern $path:path, tuple: $($field:tt)+) => {
+        $path(..)
+    };
+
+    (@match_pattern $path:path, struct: $($field:tt)+) => {
+        $path { .. }
+    };
+}
+
+/// Extends an existing Action enum with additional variants.
+///
+/// # Syntax
+///
+/// ```rust
+/// custom_id_extends! {
+///     NewEnumName extends BaseEnumName {
+///         ExtraVariant1,
+///         ExtraVariant2 = "Custom Label",
+///         ExtraVariant3(Type),
+///         ExtraVariant4 { field: Type },
+///     }
+/// }
+/// ```
+///
+/// # Generated Code
+///
+/// - Derives: `Debug`, `Clone`, `PartialEq`, `Eq`
+/// - Implements `Action` trait with `all()` returning combined IDs from base + new variants
+/// - Implements `FromStr` for parsing (base variants parse to their original enum, not this one)
+///
+/// # Example
+///
+/// ```rust
+/// use pwr_bot::{custom_id_enum, custom_id_extends};
+/// use pwr_bot::bot::views::Action;
+///
+/// custom_id_enum! {
+///     PaginationAction {
+///         Prev,
+///         Next,
+///     }
+/// }
+///
+/// custom_id_extends! {
+///     FeedListAction extends PaginationAction {
+///         Exit = "Close",
+///         Refresh,
+///         Filter(String),
+///     }
+/// }
+/// ```
+#[macro_export]
+macro_rules! custom_id_extends {
+    (
+        $(#[$meta:meta])*
+        $name:ident extends $base:ty {
+            $(
+                $(#[$variant_meta:meta])*
+                $variant:ident
+                $( ( $($tuple_field:ty),* $(,)? ) )?
+                $( { $($struct_field:ident : $struct_type:ty),* $(,)? } )?
+                $(= $label:literal)?
+            ),* $(,)?
+        }
+    ) => {
+        $(#[$meta])*
+        #[derive(Debug, Clone, PartialEq, Eq)]
+        pub enum $name {
+            #[doc = "Variants from the extended action"]
+            Base($base),
+            $(
+                $(#[$variant_meta])*
+                $variant $( ( $($tuple_field),* ) )? $( { $($struct_field : $struct_type),* } )?,
+            )*
+        }
+
+        impl $name {
+            #[doc = "Create from base action"]
+            pub fn from_base(base: $base) -> Self {
+                Self::Base(base)
+            }
+        }
+
+        impl $crate::bot::views::Action for $name {
+            fn all() -> &'static [&'static str] {
+                use std::sync::LazyLock;
+                static ALL: LazyLock<Box<[&'static str]>> = LazyLock::new(|| {
+                    <$base as $crate::bot::views::Action>::all()
+                        .iter()
+                        .copied()
+                        .chain([$(concat!(stringify!($name), "_", stringify!($variant))),*])
+                        .collect::<Vec<_>>()
+                        .into_boxed_slice()
+                });
+                &ALL
+            }
+
+            fn custom_id(&self) -> &'static str {
+                match self {
+                    Self::Base(base) => base.custom_id(),
+                    $(
+                        custom_id_extends!(@match_pattern Self::$variant $(, tuple: $($tuple_field)*)? $(, struct: $($struct_field)*)?) => {
+                            concat!(stringify!($name), "_", stringify!($variant))
+                        }
+                    )*
+                }
+            }
+
+            fn label(&self) -> &'static str {
+                match self {
+                    Self::Base(base) => base.label(),
+                    $(
+                        custom_id_extends!(@match_pattern Self::$variant $(, tuple: $($tuple_field)*)? $(, struct: $($struct_field)*)?) => {
+                            $crate::custom_id_extends!(@label $variant $(, $label)?)
+                        }
+                    )*
+                }
+            }
+        }
+
+        impl std::str::FromStr for $name {
+            type Err = ();
+
+            fn from_str(s: &str) -> Result<Self, Self::Err> {
+                // Try base first
+                if let Ok(base) = <$base as std::str::FromStr>::from_str(s) {
+                    return Ok(Self::Base(base));
+                }
+                // Then own variants (unit variants only)
+                match s {
+                    $(
+                        concat!(stringify!($name), "_", stringify!($variant)) => {
+                            custom_id_extends!(@from_str_result $variant $(, $($tuple_field)*)? $(, $($struct_field)*)?)
+                        }
+                    )*
+                    _ => Err(()),
+                }
+            }
+        }
+    };
+
+    (@label $variant:ident, $label:literal) => { $label };
+    (@label $variant:ident) => { stringify!($variant) };
+
+    (@from_str_result $variant:ident) => {
+        Ok(Self::$variant)
+    };
+
+    (@from_str_result $variant:ident, $($field:tt)+) => {
+        Err(())
+    };
+    (@match_pattern $path:path) => {
+        $path
+    };
+
+    (@match_pattern $path:path, tuple: $($field:tt)+) => {
+        $path(..)
+    };
+
+    (@match_pattern $path:path, struct: $($field:tt)+) => {
+        $path { .. }
+    };
 }

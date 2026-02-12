@@ -16,7 +16,8 @@ use image::imageops::FilterType;
 use image::imageops::overlay;
 use log::trace;
 
-use crate::bot::commands::voice::LeaderboardEntry;
+use crate::bot::commands::voice::image_builder::LeaderboardEntry;
+use crate::bot::utils::format_duration;
 
 /// Dark gray background (Discord dark mode).
 const BACKGROUND_COLOR: Rgba<u8> = Rgba([43, 45, 49, 255]);
@@ -82,23 +83,25 @@ pub struct LeaderboardImageGenerator {
 
 impl LeaderboardImageGenerator {
     /// Creates a new image generator with embedded Roboto font.
-    pub fn new() -> Result<Self> {
+    pub fn new() -> Self {
         // Load the Roboto font from embedded bytes
         let font_data = include_bytes!("../../../../assets/fonts/Roboto-Regular.ttf");
-        let font = FontArc::try_from_slice(font_data)?;
+        // NOTE: If the code below doesn't work there's something seriously wrong and we should just unwrap
+        let font = FontArc::try_from_slice(font_data).unwrap();
 
         // Create HTTP client with connection pooling for faster avatar downloads
         let http_client = reqwest::Client::builder()
             .pool_idle_timeout(std::time::Duration::from_secs(30))
             .pool_max_idle_per_host(10)
-            .build()?;
+            .build()
+            .expect("Failed to build HTTP client - TLS backend or system DNS resolver unavailable");
 
-        Ok(Self {
+        Self {
             font,
             http_client,
             glyph_cache: HashMap::with_capacity(256),
             avatar_cache: HashMap::new(),
-        })
+        }
     }
 
     /// Checks if the avatar for the given URL is already cached.
@@ -213,7 +216,11 @@ impl Renderer {
         let mut img = RgbaImage::from_pixel(IMAGE_WIDTH, total_height, BACKGROUND_COLOR);
 
         // Get max duration for progress bar scaling
-        let max_duration = entries.first().map(|(e, _)| e.duration_seconds).unwrap_or(0).max(1);
+        let max_duration = entries
+            .first()
+            .map(|(e, _)| e.duration_seconds)
+            .unwrap_or(0)
+            .max(1);
 
         for (idx, (entry, avatar)) in entries.iter().enumerate() {
             let y = PADDING + (idx as u32 * IMAGE_HEIGHT_PER_ENTRY);
@@ -236,15 +243,6 @@ impl Renderer {
         let encode_start = Instant::now();
         let mut bytes: Vec<u8> = Vec::new();
         let mut cursor = Cursor::new(&mut bytes);
-        // Use JPEG for smaller size and faster upload
-        // JPEG doesn't support transparency, but our background is opaque anyway
-        // except for the corners of circular avatars?
-        // Wait, RgbaImage can have transparency. If we use JPEG, transparency becomes black.
-        // Our background is dark blue, so transparency isn't critical for the main image,
-        // but the circular avatars are overlayed on the dark background, so they should be fine.
-        // The only issue is if the final image itself needs transparency.
-        // The background color is opaque Rgba([26, 26, 46, 255]), so the whole image is opaque.
-        // So JPEG is safe to use.
 
         // Convert to RgbImage for JPEG encoding (drops alpha channel)
         let rgb_img = image::DynamicImage::ImageRgba8(img).to_rgb8();
@@ -259,6 +257,7 @@ impl Renderer {
     }
 
     /// Draws a single leaderboard entry at the given vertical position.
+    #[allow(clippy::too_many_arguments)]
     fn draw_entry(
         &mut self,
         img: &mut RgbaImage,
@@ -276,12 +275,24 @@ impl Renderer {
 
         // Draw card background
         self.draw_rounded_rect(img, card_x, card_y, card_w, card_h, 8, CARD_COLOR);
-        
+
         // Draw progress bar background
         let progress_width = ((duration as f32 / max_duration as f32) * card_w as f32) as u32;
-        let progress_color = if rank <= 3 { PROGRESS_TOP_COLOR } else { PROGRESS_COLOR };
+        let progress_color = if rank <= 3 {
+            PROGRESS_TOP_COLOR
+        } else {
+            PROGRESS_COLOR
+        };
         if progress_width > 0 {
-            self.draw_rounded_rect(img, card_x, card_y, progress_width, card_h, 8, progress_color);
+            self.draw_rounded_rect(
+                img,
+                card_x,
+                card_y,
+                progress_width,
+                card_h,
+                8,
+                progress_color,
+            );
         }
 
         // Draw card border
@@ -319,7 +330,13 @@ impl Renderer {
         if let Some(circular_avatar) = avatar {
             overlay(img, circular_avatar, avatar_x as i64, avatar_y as i64);
             // Optional: draw avatar border
-            self.draw_circle_outline(img, avatar_x + AVATAR_SIZE / 2, avatar_y + AVATAR_SIZE / 2, AVATAR_SIZE / 2, CARD_BORDER_COLOR);
+            self.draw_circle_outline(
+                img,
+                avatar_x + AVATAR_SIZE / 2,
+                avatar_y + AVATAR_SIZE / 2,
+                AVATAR_SIZE / 2,
+                CARD_BORDER_COLOR,
+            );
         } else {
             let circle_cx = avatar_x + AVATAR_SIZE / 2;
             let circle_cy = avatar_y + AVATAR_SIZE / 2;
@@ -354,18 +371,38 @@ impl Renderer {
     }
 
     /// Draws a rounded rectangle.
-    fn draw_rounded_rect(&self, img: &mut RgbaImage, x: u32, y: u32, w: u32, h: u32, radius: u32, color: Rgba<u8>) {
+    #[allow(clippy::too_many_arguments)]
+    fn draw_rounded_rect(
+        &self,
+        img: &mut RgbaImage,
+        x: u32,
+        y: u32,
+        w: u32,
+        h: u32,
+        radius: u32,
+        color: Rgba<u8>,
+    ) {
         for py in y..y + h {
             for px in x..x + w {
-                if px >= img.width() || py >= img.height() { continue; }
-                
-                let dx = if px < x + radius { (x + radius) as i32 - px as i32 } 
-                         else if px >= x + w - radius { px as i32 - (x + w - radius - 1) as i32 } 
-                         else { 0 };
-                let dy = if py < y + radius { (y + radius) as i32 - py as i32 } 
-                         else if py >= y + h - radius { py as i32 - (y + h - radius - 1) as i32 } 
-                         else { 0 };
-                
+                if px >= img.width() || py >= img.height() {
+                    continue;
+                }
+
+                let dx = if px < x + radius {
+                    (x + radius) as i32 - px as i32
+                } else if px >= x + w - radius {
+                    px as i32 - (x + w - radius - 1) as i32
+                } else {
+                    0
+                };
+                let dy = if py < y + radius {
+                    (y + radius) as i32 - py as i32
+                } else if py >= y + h - radius {
+                    py as i32 - (y + h - radius - 1) as i32
+                } else {
+                    0
+                };
+
                 if dx > 0 && dy > 0 {
                     if (dx * dx + dy * dy) as f32 <= (radius * radius) as f32 {
                         self.blend_pixel(img, px, py, color);
@@ -378,24 +415,48 @@ impl Renderer {
     }
 
     /// Draws a rounded rectangle outline.
-    fn draw_rounded_rect_outline(&self, img: &mut RgbaImage, x: u32, y: u32, w: u32, h: u32, radius: u32, color: Rgba<u8>) {
+    #[allow(clippy::too_many_arguments)]
+    fn draw_rounded_rect_outline(
+        &self,
+        img: &mut RgbaImage,
+        x: u32,
+        y: u32,
+        w: u32,
+        h: u32,
+        radius: u32,
+        color: Rgba<u8>,
+    ) {
         for py in y..y + h {
             for px in x..x + w {
-                if px >= img.width() || py >= img.height() { continue; }
-                
-                let is_edge = px == x || px == x + w - 1 || py == y || py == y + h - 1;
-                if !is_edge { continue; }
+                if px >= img.width() || py >= img.height() {
+                    continue;
+                }
 
-                let dx = if px < x + radius { (x + radius) as i32 - px as i32 } 
-                         else if px >= x + w - radius { px as i32 - (x + w - radius - 1) as i32 } 
-                         else { 0 };
-                let dy = if py < y + radius { (y + radius) as i32 - py as i32 } 
-                         else if py >= y + h - radius { py as i32 - (y + h - radius - 1) as i32 } 
-                         else { 0 };
-                
+                let is_edge = px == x || px == x + w - 1 || py == y || py == y + h - 1;
+                if !is_edge {
+                    continue;
+                }
+
+                let dx = if px < x + radius {
+                    (x + radius) as i32 - px as i32
+                } else if px >= x + w - radius {
+                    px as i32 - (x + w - radius - 1) as i32
+                } else {
+                    0
+                };
+                let dy = if py < y + radius {
+                    (y + radius) as i32 - py as i32
+                } else if py >= y + h - radius {
+                    py as i32 - (y + h - radius - 1) as i32
+                } else {
+                    0
+                };
+
                 if dx > 0 && dy > 0 {
                     let dist_sq = dx * dx + dy * dy;
-                    if dist_sq as f32 <= (radius * radius) as f32 && dist_sq as f32 > ((radius-1) * (radius-1)) as f32 {
+                    if dist_sq as f32 <= (radius * radius) as f32
+                        && dist_sq as f32 > ((radius - 1) * (radius - 1)) as f32
+                    {
                         self.blend_pixel(img, px, py, color);
                     }
                 } else {
@@ -406,7 +467,14 @@ impl Renderer {
     }
 
     /// Draws a circle outline.
-    fn draw_circle_outline(&self, img: &mut RgbaImage, cx: u32, cy: u32, radius: u32, color: Rgba<u8>) {
+    fn draw_circle_outline(
+        &self,
+        img: &mut RgbaImage,
+        cx: u32,
+        cy: u32,
+        radius: u32,
+        color: Rgba<u8>,
+    ) {
         let r_sq = (radius * radius) as f32;
         let r_inner_sq = ((radius.saturating_sub(1)) * (radius.saturating_sub(1))) as f32;
         for y in (cy.saturating_sub(radius))..=(cy + radius).min(img.height() - 1) {
@@ -522,41 +590,27 @@ impl Renderer {
     }
 }
 
-/// Formats a duration in seconds into a human-readable string.
-fn format_duration(seconds: i64) -> String {
-    if seconds < 60 {
-        format!("{}s", seconds)
-    } else if seconds < 3600 {
-        format!("{}m", seconds / 60)
-    } else if seconds < 86400 {
-        let hours = seconds / 3600;
-        let mins = (seconds % 3600) / 60;
-        if mins > 0 {
-            format!("{}h {}m", hours, mins)
-        } else {
-            format!("{}h", hours)
-        }
-    } else {
-        let days = seconds / 86400;
-        let hours = (seconds % 86400) / 3600;
-        if hours > 0 {
-            format!("{}d {}h", days, hours)
-        } else {
-            format!("{}d", days)
-        }
-    }
-}
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_format_duration() {
-        assert_eq!(format_duration(30), "30s");
-        assert_eq!(format_duration(120), "2m");
-        assert_eq!(format_duration(3660), "1h 1m");
-        assert_eq!(format_duration(86400), "1d");
-        assert_eq!(format_duration(90000), "1d 1h");
+    fn test_leaderboard_entry_clone() {
+        let entry = LeaderboardEntry {
+            rank: 1,
+            user_id: 123456789,
+            display_name: "Test User".to_string(),
+            avatar_url: "https://example.com/avatar.png".to_string(),
+            duration_seconds: 3600,
+            avatar_image: None,
+        };
+
+        let cloned = entry.clone();
+        assert_eq!(cloned.rank, entry.rank);
+        assert_eq!(cloned.user_id, entry.user_id);
+        assert_eq!(cloned.display_name, entry.display_name);
+        assert_eq!(cloned.avatar_url, entry.avatar_url);
+        assert_eq!(cloned.duration_seconds, entry.duration_seconds);
     }
 }

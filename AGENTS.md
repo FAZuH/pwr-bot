@@ -29,40 +29,11 @@ Standard `cargo` commands work as expected. Tests require `SQLX_OFFLINE=true` (h
 - **Logging**: Use `log` macros (`info!`, `debug!`) with context.
 - **Testing**: `#[tokio::test]`. Use `tests/common/` for utilities.
 
-### Project Structure
-
-```
-src/
-├── main.rs              # Application entry point
-├── lib.rs               # Library exports
-├── config.rs            # Configuration handling
-├── error.rs             # Top-level errors
-├── logging.rs           # Logging setup
-├── bot/                 # Discord bot module
-│   ├── mod.rs
-│   ├── commands/        # Bot commands
-│   ├── views/           # UI components
-│   └── error.rs
-├── database/            # Database layer
-│   ├── mod.rs
-│   ├── model/           # Data models
-│   ├── table/           # Table operations
-│   └── error.rs
-├── service/             # Business logic
-│   ├── mod.rs
-│   ├── feed_subscription_service.rs
-│   └── voice_tracking_service.rs
-├── feed/                # Feed platform integrations
-├── subscriber/          # Event subscribers
-└── task/                # Background tasks
-```
-
 ## Adding Commands
 
 Commands use the **Cog pattern**:
 1. Create a Cog struct implementing `Cog` trait.
 2. Implement commands with `#[poise::command]`.
-3. Register in `src/bot/commands/mod.rs`.
 
 ```rust
 pub struct MyCog;

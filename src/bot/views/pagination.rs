@@ -1,10 +1,8 @@
 //! Pagination component for Discord views.
 
-use std::str::FromStr;
 use std::time::Duration;
 
 use serenity::all::ButtonStyle;
-use serenity::all::ComponentInteraction;
 use serenity::all::CreateActionRow;
 use serenity::all::CreateButton;
 use serenity::all::CreateComponent;
@@ -166,9 +164,7 @@ impl<'a> ResponseComponentView for PaginationView<'a> {
 
 #[async_trait::async_trait]
 impl<'a> InteractableComponentView<'a, PaginationAction> for PaginationView<'a> {
-    async fn handle(&mut self, interaction: &ComponentInteraction) -> Option<PaginationAction> {
-        let action = PaginationAction::from_str(&interaction.data.custom_id).ok()?;
-
+    async fn handle_action(&mut self, action: PaginationAction) -> Option<PaginationAction> {
         match action {
             PaginationAction::First => self.state.first_page(),
             PaginationAction::Prev => self.state.prev_page(),
@@ -176,7 +172,6 @@ impl<'a> InteractableComponentView<'a, PaginationAction> for PaginationView<'a> 
             PaginationAction::Last => self.state.last_page(),
             _ => return None,
         }
-
         Some(action)
     }
 }
