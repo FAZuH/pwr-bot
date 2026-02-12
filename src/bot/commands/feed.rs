@@ -3,7 +3,7 @@
 use crate::bot::commands::Cog;
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;
-use crate::bot::commands::feed::controllers::SendInto;
+pub use crate::bot::commands::feed::controllers::SendInto;
 
 pub mod controllers;
 pub mod views;

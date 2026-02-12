@@ -8,9 +8,13 @@ use crate::bot::commands::Context;
 use crate::bot::commands::Error;
 use crate::bot::commands::voice::LeaderboardEntry;
 use crate::bot::commands::voice::image_generator::LeaderboardImageGenerator;
+use crate::bot::commands::voice::views::SettingsVoiceAction;
 use crate::bot::commands::voice::views::SettingsVoiceView;
 use crate::bot::commands::voice::views::VoiceLeaderboardView;
+use crate::bot::controller::Controller;
+use crate::bot::controller::Coordinator;
 use crate::bot::error::BotError;
+use crate::bot::navigation::NavigationResult;
 use crate::bot::views::InteractableComponentView;
 use crate::bot::views::ResponseComponentView;
 use crate::bot::views::pagination::PaginationView;
@@ -19,102 +23,124 @@ use crate::database::model::VoiceLeaderboardEntry;
 /// Number of leaderboard entries per page.
 const LEADERBOARD_PER_PAGE: u32 = 10;
 
-/// Handles the voice settings command.
-pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
-    ctx.defer().await?;
-    let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?.get();
+/// Controller for voice tracking settings.
+pub struct VoiceSettingsController<'a> {
+    ctx: &'a Context<'a>,
+}
 
-    let settings = ctx
-        .data()
-        .service
-        .voice_tracking
-        .get_server_settings(guild_id)
-        .await
-        .map_err(Error::from)?;
+impl<'a> VoiceSettingsController<'a> {
+    /// Creates a new voice settings controller.
+    pub fn new(ctx: &'a Context<'a>) -> Self {
+        Self { ctx }
+    }
+}
 
-    let mut view = SettingsVoiceView::new(&ctx, settings);
-    let msg_handle = ctx.send(view.create_reply()).await?;
+#[async_trait::async_trait]
+impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceSettingsController<'a> {
+    async fn run(&mut self, coordinator: &mut Coordinator<'_, S>) -> Result<NavigationResult, Error> {
+        let ctx = *coordinator.context();
+        ctx.defer().await?;
+        let guild_id = ctx
+            .guild_id()
+            .ok_or(BotError::GuildOnlyCommand)?
+            .get();
 
-    while let Some((_action, _interaction)) = view.listen_once().await {
-        // Update the settings in the database
-        ctx.data()
+        let settings = ctx
+            .data()
             .service
             .voice_tracking
-            .update_server_settings(guild_id, view.settings.clone())
+            .get_server_settings(guild_id)
             .await
             .map_err(Error::from)?;
 
-        let reply = CreateReply::new()
-            .flags(MessageFlags::IS_COMPONENTS_V2)
-            .components(view.create_components());
-        msg_handle.edit(ctx, reply).await?;
-    }
+        let mut view = SettingsVoiceView::new(&ctx, settings);
+        coordinator.send(view.create_reply()).await?;
 
-    Ok(())
+        while let Some((action, _interaction)) = view.listen_once().await {
+
+            match action {
+                SettingsVoiceAction::Back => return Ok(NavigationResult::Back),
+                SettingsVoiceAction::About => {
+                    return Ok(NavigationResult::SettingsAbout);
+                }
+                SettingsVoiceAction::EnabledSelect => {
+                    // Update the settings in the database
+                    ctx
+                        .data()
+                        .service
+                        .voice_tracking
+                        .update_server_settings(guild_id, view.settings.clone())
+                        .await
+                        .map_err(Error::from)?;
+
+                    coordinator.edit(view.create_reply()).await?;
+                }
+            }
+        }
+
+        Ok(NavigationResult::Exit)
+    }
 }
 
-/// Handles the voice leaderboard command.
-pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
-    ctx.defer().await?;
-    let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?.get();
-    let author_id = ctx.author().id.get();
+/// Controller for voice leaderboard display.
+pub struct VoiceLeaderboardController<'a> {
+    ctx: &'a Context<'a>,
+}
 
-    let total_entries = ctx
-        .data()
-        .service
-        .voice_tracking
-        .get_leaderboard(guild_id, u32::MAX)
-        .await
-        .map_err(Error::from)?;
-
-    if total_entries.is_empty() {
-        let reply = VoiceLeaderboardView::create_empty_reply();
-        ctx.send(reply).await?;
-        return Ok(());
+impl<'a> VoiceLeaderboardController<'a> {
+    /// Creates a new voice leaderboard controller.
+    pub fn new(ctx: &'a Context<'a>) -> Self {
+        Self { ctx }
     }
+}
 
-    let total_items = total_entries.len() as u32;
-    let mut pagination = PaginationView::new(&ctx, total_items, LEADERBOARD_PER_PAGE);
+#[async_trait::async_trait]
+impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceLeaderboardController<'a> {
+    async fn run(&mut self, coordinator: &mut Coordinator<'_, S>) -> Result<NavigationResult, Error> {
+        let ctx = *coordinator.context();
+        ctx.defer().await?;
+        let guild_id = ctx
+            .guild_id()
+            .ok_or(BotError::GuildOnlyCommand)?
+            .get();
+        let author_id = ctx.author().id.get();
 
-    let user_rank = total_entries
-        .iter()
-        .position(|e| e.user_id == author_id)
-        .map(|pos| pos as u32 + 1);
+        let total_entries = ctx
+            .data()
+            .service
+            .voice_tracking
+            .get_leaderboard(guild_id, u32::MAX)
+            .await
+            .map_err(Error::from)?;
 
-    let image_gen = LeaderboardImageGenerator::new().map_err(|e| {
-        Error::from(std::io::Error::other(format!(
-            "Failed to initialize image generator: {}",
-            e
-        )))
-    })?;
+        if total_entries.is_empty() {
+            let reply = VoiceLeaderboardView::create_empty_reply();
+            ctx.send(reply).await?;
+            return Ok(NavigationResult::Exit);
+        }
 
-    let current_page_entries =
-        &total_entries[..(total_entries.len().min(LEADERBOARD_PER_PAGE as usize))];
-    let page_result = generate_page(ctx, &image_gen, current_page_entries, 0).await?;
+        let total_items = total_entries.len() as u32;
+        let mut pagination = PaginationView::new(&ctx, total_items, LEADERBOARD_PER_PAGE);
 
-    let view = VoiceLeaderboardView::new(user_rank);
-    let mut components = view.create_components();
-    pagination.attach_if_multipage(&mut components);
-    let attachment = CreateAttachment::bytes(page_result.image_bytes, "leaderboard.png");
+        let user_rank = total_entries
+            .iter()
+            .position(|e| e.user_id == author_id)
+            .map(|pos| pos as u32 + 1);
 
-    let reply = CreateReply::new()
-        .flags(MessageFlags::IS_COMPONENTS_V2)
-        .components(components)
-        .attachment(attachment);
+        let image_gen = LeaderboardImageGenerator::new().map_err(|e| {
+            Error::from(std::io::Error::other(format!(
+                "Failed to initialize image generator: {}",
+                e
+            )))
+        })?;
 
-    let msg_handle = ctx.send(reply).await?;
+        let current_page_entries =
+            &total_entries[..(total_entries.len().min(LEADERBOARD_PER_PAGE as usize))];
+        let page_result = generate_page(ctx, &image_gen, current_page_entries, 0).await?;
 
-    while pagination.listen_once().await.is_some() {
-        let current_page = pagination.state.current_page;
-        let offset = ((current_page - 1) * LEADERBOARD_PER_PAGE) as usize;
-        let end = (offset + LEADERBOARD_PER_PAGE as usize).min(total_entries.len());
-
-        let page_entries = &total_entries[offset..end];
-        let page_result = generate_page(ctx, &image_gen, page_entries, offset as u32).await?;
-
-        components = view.create_components();
+        let view = VoiceLeaderboardView::new(user_rank);
+        let mut components = view.create_components();
         pagination.attach_if_multipage(&mut components);
-
         let attachment = CreateAttachment::bytes(page_result.image_bytes, "leaderboard.png");
 
         let reply = CreateReply::new()
@@ -122,9 +148,47 @@ pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
             .components(components)
             .attachment(attachment);
 
-        msg_handle.edit(ctx, reply).await?;
-    }
+        let msg_handle = ctx.send(reply).await?;
 
+        while pagination.listen_once().await.is_some() {
+            let current_page = pagination.state.current_page;
+            let offset = ((current_page - 1) * LEADERBOARD_PER_PAGE) as usize;
+            let end = (offset + LEADERBOARD_PER_PAGE as usize).min(total_entries.len());
+
+            let page_entries = &total_entries[offset..end];
+            let page_result =
+                generate_page(ctx, &image_gen, page_entries, offset as u32).await?;
+
+            components = view.create_components();
+            pagination.attach_if_multipage(&mut components);
+
+            let attachment = CreateAttachment::bytes(page_result.image_bytes, "leaderboard.png");
+
+            let reply = CreateReply::new()
+                .flags(MessageFlags::IS_COMPONENTS_V2)
+                .components(components)
+                .attachment(attachment);
+
+            msg_handle.edit(ctx, reply).await?;
+        }
+
+        Ok(NavigationResult::Exit)
+    }
+}
+
+/// Legacy function for voice settings command.
+pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
+    let mut coordinator = Coordinator::new(ctx);
+    let mut controller = VoiceSettingsController::new(&ctx);
+    let _result = controller.run(&mut coordinator).await?;
+    Ok(())
+}
+
+/// Legacy function for voice leaderboard command.
+pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
+    let mut coordinator = Coordinator::new(ctx);
+    let mut controller = VoiceLeaderboardController::new(&ctx);
+    let _result = controller.run(&mut coordinator).await?;
     Ok(())
 }
 

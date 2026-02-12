@@ -17,7 +17,7 @@ use serenity::all::CreateSelectMenuOption;
 use serenity::all::CreateTextDisplay;
 
 use crate::bot::commands::Context;
-use crate::bot::commands::about::about;
+use crate::bot::navigation::NavigationResult;
 use crate::bot::views::Action;
 use crate::bot::views::InteractableComponentView;
 use crate::bot::views::ResponseComponentView;
@@ -290,7 +290,8 @@ impl<'a> InteractableComponentView<'a, SettingsMainAction> for SettingsMainView<
                 Some(action)
             }
             (SettingsMainAction::About, _) => {
-                let _ = about(*self.ctx.poise_ctx).await;
+                // About navigation is handled by returning NavigationResult::SettingsAbout
+                // from the controller, not by calling about directly
                 Some(action)
             }
             _ => None,

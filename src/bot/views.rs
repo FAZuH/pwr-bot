@@ -86,11 +86,6 @@ pub trait ResponseComponentView {
             .flags(MessageFlags::IS_COMPONENTS_V2)
             .components(self.create_components())
     }
-
-    /// Attaches this view's components to the given collection.
-    fn attach<'a>(&self, components: &mut impl Extend<CreateComponent<'a>>) {
-        components.extend(self.create_components());
-    }
 }
 
 impl<'a, T: ResponseComponentView> ViewProvider<'a> for T {

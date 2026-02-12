@@ -4,9 +4,12 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use poise::CreateReply;
+use serenity::all::ButtonStyle;
 use serenity::all::ComponentInteraction;
+use serenity::all::ComponentInteractionDataKind;
 use serenity::all::CreateActionRow;
 use serenity::all::CreateAttachment;
+use serenity::all::CreateButton;
 use serenity::all::CreateComponent;
 use serenity::all::CreateContainer;
 use serenity::all::CreateContainerComponent;
@@ -27,7 +30,11 @@ use crate::custom_id_enum;
 use crate::database::model::ServerSettings;
 use crate::stateful_view;
 
-custom_id_enum!(SettingsVoiceAction { EnabledSelect });
+custom_id_enum!(SettingsVoiceAction {
+    EnabledSelect,
+    Back = "❮ Back",
+    About = "About",
+});
 
 stateful_view! {
     timeout = Duration::from_secs(120),
@@ -52,7 +59,7 @@ impl<'a> ResponseComponentView for SettingsVoiceView<'a> {
         let is_enabled = self.settings.voice.enabled.unwrap_or(true);
 
         let status_text = format!(
-            "## Voice Tracking Settings\n\n> 🛈  {}",
+            "## Voice Tracking Settings\n\n> {}",
             if is_enabled {
                 "Voice tracking is **active**."
             } else {
@@ -64,9 +71,8 @@ impl<'a> ResponseComponentView for SettingsVoiceView<'a> {
             SettingsVoiceAction::EnabledSelect.custom_id(),
             CreateSelectMenuKind::String {
                 options: vec![
-                    CreateSelectMenuOption::new("🟢 Enabled", "true").default_selection(is_enabled),
-                    CreateSelectMenuOption::new("🔴 Disabled", "false")
-                        .default_selection(!is_enabled),
+                    CreateSelectMenuOption::new("Enabled", "true").default_selection(is_enabled),
+                    CreateSelectMenuOption::new("Disabled", "false").default_selection(!is_enabled),
                 ]
                 .into(),
             },
@@ -78,15 +84,25 @@ impl<'a> ResponseComponentView for SettingsVoiceView<'a> {
             CreateContainerComponent::ActionRow(CreateActionRow::SelectMenu(enabled_select)),
         ]));
 
-        vec![container]
+        let nav_buttons = CreateComponent::ActionRow(CreateActionRow::Buttons(
+            vec![
+                CreateButton::new(SettingsVoiceAction::Back.custom_id())
+                    .label(SettingsVoiceAction::Back.label())
+                    .style(ButtonStyle::Secondary),
+                CreateButton::new(SettingsVoiceAction::About.custom_id())
+                    .label(SettingsVoiceAction::About.label())
+                    .style(ButtonStyle::Secondary),
+            ]
+            .into(),
+        ));
+
+        vec![container, nav_buttons]
     }
 }
 
 #[async_trait::async_trait]
 impl<'a> InteractableComponentView<'a, SettingsVoiceAction> for SettingsVoiceView<'a> {
     async fn handle(&mut self, interaction: &ComponentInteraction) -> Option<SettingsVoiceAction> {
-        use serenity::all::ComponentInteractionDataKind;
-
         let action = SettingsVoiceAction::from_str(&interaction.data.custom_id).ok()?;
 
         match (&action, &interaction.data.kind) {
@@ -99,6 +115,7 @@ impl<'a> InteractableComponentView<'a, SettingsVoiceAction> for SettingsVoiceVie
                 }
                 Some(action)
             }
+            (SettingsVoiceAction::Back, _) | (SettingsVoiceAction::About, _) => Some(action),
             _ => None,
         }
     }
@@ -125,17 +142,17 @@ impl VoiceLeaderboardView {
 
 impl ResponseComponentView for VoiceLeaderboardView {
     fn create_components<'a>(&self) -> Vec<CreateComponent<'a>> {
-        let mut text_components = vec![CreateContainerComponent::TextDisplay(
-            CreateTextDisplay::new("## 🎙️ Voice Leaderboard"),
+        let mut container = vec![CreateContainerComponent::TextDisplay(
+            CreateTextDisplay::new("### Voice Leaderboard"),
         )];
 
         if let Some(rank) = self.user_rank {
-            text_components.push(CreateContainerComponent::TextDisplay(
+            container.push(CreateContainerComponent::TextDisplay(
                 CreateTextDisplay::new(format!("\n> Your current rank: **#{}**", rank)),
             ));
         }
 
-        text_components.push(CreateContainerComponent::TextDisplay(
+        container.push(CreateContainerComponent::TextDisplay(
             CreateTextDisplay::new(
                 "\nVoice activity is being tracked. Use `/voice stats` to see detailed statistics.",
             ),
@@ -146,7 +163,7 @@ impl ResponseComponentView for VoiceLeaderboardView {
         )]);
 
         vec![
-            CreateComponent::Container(CreateContainer::new(text_components)),
+            CreateComponent::Container(CreateContainer::new(container)),
             CreateComponent::MediaGallery(gallery),
         ]
     }

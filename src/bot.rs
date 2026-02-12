@@ -5,6 +5,7 @@ pub mod commands;
 pub mod controller;
 pub mod error;
 pub mod error_handler;
+pub mod navigation;
 pub mod utils;
 pub mod views;
 

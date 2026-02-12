@@ -233,3 +233,59 @@ macro_rules! with_data {
         }
     };
 }
+
+/// Generates boilerplate for a Controller implementation.
+///
+/// This macro creates a controller struct with context field, constructor,
+/// and Controller trait implementation with the run method signature.
+///
+/// # Syntax
+///
+/// ```rust,ignore
+/// controller! {
+///     pub struct MyController<'a> {}
+/// }
+/// ```
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use pwr_bot::controller;
+/// use pwr_bot::bot::navigation::NavigationResult;
+///
+/// controller! {
+///     pub struct MySettingsController<'a> {}
+/// }
+///
+/// // Then implement the run method:
+/// #[async_trait::async_trait]
+/// impl<S: Send + Sync + 'static> Controller<S> for MySettingsController<'_> {
+///     async fn run(&mut self, coordinator: &mut Coordinator<'_, S>) -> Result<NavigationResult, Error> {
+///         let ctx = *coordinator.context();
+///         ctx.defer().await?;
+///         
+///         // Controller logic here
+///         
+///         Ok(NavigationResult::Exit)
+///     }
+/// }
+/// ```
+#[macro_export]
+macro_rules! controller {
+    (
+        $(#[$meta:meta])*
+        $vis:vis struct $name:ident<$lt:lifetime> {}
+    ) => {
+        $(#[$meta])*
+        $vis struct $name<$lt> {
+            ctx: &$lt $crate::bot::commands::Context<$lt>,
+        }
+
+        impl<$lt> $name<$lt> {
+            /// Creates a new controller instance.
+            pub fn new(ctx: &$lt $crate::bot::commands::Context<$lt>) -> Self {
+                Self { ctx }
+            }
+        }
+    };
+}

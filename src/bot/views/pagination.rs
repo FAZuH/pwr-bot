@@ -131,7 +131,7 @@ impl<'a> PaginationView<'a> {
     /// Attaches pagination controls only if there are multiple pages.
     pub fn attach_if_multipage<'b>(&self, components: &mut impl Extend<CreateComponent<'b>>) {
         if self.state.pages > 1 {
-            ResponseComponentView::attach(self, components);
+            components.extend(self.create_components());
         }
     }
 }

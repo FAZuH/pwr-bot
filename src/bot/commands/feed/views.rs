@@ -38,7 +38,9 @@ custom_id_enum!(SettingsFeedAction {
     Enabled,
     Channel,
     SubRole,
-    UnsubRole
+    UnsubRole,
+    Back = "❮ Back",
+    About = "About",
 });
 
 custom_id_enum!(FeedSubscriptionBatchAction { ViewSubscriptions });
@@ -86,12 +88,12 @@ impl ResponseComponentView for SettingsFeedView<'_> {
         let is_enabled = settings.enabled.unwrap_or(true);
 
         let status_text = format!(
-            "## Server Feed Settings\n\n> 🛈  {}",
+            "### Server Feed Settings\n\n> 🛈  {}",
             if is_enabled {
-                format!(
-                    "Feed notifications are currently active. Notifications will be sent to <#{}>",
-                    settings.channel_id.as_deref().unwrap_or("Unknown")
-                )
+                match &settings.channel_id {
+                    Some(id) => format!("Feed notifications are currently active. Notifications will be sent to <#{id}>"),
+                    None => "Feed notifications are currently active, but notification channel is not set.".to_string(),
+                }
             } else {
                 "Feed notifications are currently paused. No notifications will be sent until re-enabled.".to_string()
             }
@@ -169,7 +171,19 @@ impl ResponseComponentView for SettingsFeedView<'_> {
             CreateContainerComponent::ActionRow(CreateActionRow::SelectMenu(unsub_role_select)),
         ]));
 
-        vec![container]
+        let nav_buttons = CreateComponent::ActionRow(CreateActionRow::Buttons(
+            vec![
+                CreateButton::new(SettingsFeedAction::Back.custom_id())
+                    .label(SettingsFeedAction::Back.label())
+                    .style(ButtonStyle::Secondary),
+                CreateButton::new(SettingsFeedAction::About.custom_id())
+                    .label(SettingsFeedAction::About.label())
+                    .style(ButtonStyle::Secondary),
+            ]
+            .into(),
+        ));
+
+        vec![container, nav_buttons]
     }
 }
 
@@ -206,6 +220,8 @@ impl<'a> InteractableComponentView<'a, SettingsFeedAction> for SettingsFeedView<
                 settings.unsubscribe_role_id = values.first().map(|v| v.to_string());
                 Some(action)
             }
+            (ComponentInteractionDataKind::Button, SettingsFeedAction::Back)
+            | (ComponentInteractionDataKind::Button, SettingsFeedAction::About) => Some(action),
             _ => None,
         }
     }
