@@ -1,42 +1,54 @@
 %% UI Flow
 graph TB
+    subgraph Architecture
+        Coordinator["Coordinator<br/>(Manages Context & Message)"]
+        Controller["Controller<br/>(Business Logic)"]
+        View["View<br/>(UI Components)"]
+        NavigationResult["NavigationResult<br/>(Navigation Intent)"]
+    end
+
+    Coordinator -->|Runs| Controller
+    Controller -->|Creates| View
+    Coordinator -->|Sends/Edits| View
+    Controller -->|Returns| NavigationResult
+    NavigationResult -->|Directs| Coordinator
+
+    subgraph Navigation
+        direction LR
+        SettingsMain[SettingsMain]
+        SettingsFeeds[SettingsFeeds]
+        SettingsVoice[SettingsVoice]
+        SettingsAbout[SettingsAbout]
+        Back[Back]
+        Exit[Exit]
+    end
+
+    SettingsMain -->|Navigate| SettingsFeeds
+    SettingsMain -->|Navigate| SettingsVoice
+    SettingsMain -->|Navigate| SettingsAbout
+    SettingsFeeds -->|Back| SettingsMain
+    SettingsVoice -->|Back| SettingsMain
+    SettingsAbout -->|Back| SettingsMain
+
     subgraph Views
-        subgraph About
-            AboutView["AboutView<br/>/about"]
-        end
-
-        subgraph Feed
-            FeedNavigationView
-            FeedSubscribeView
-            FeedUnsubscribeView
-
-            FeedSubscriptionBatchView["FeedSubscriptionBatchView<br/>/feed subscribe<br/>/feed unsubscribe"]
-            FeedSubscriptionListView["FeedSubscriptionListView<br/>/feed subscriptions"]
-        end
-
-        subgraph Voice
-            VoiceLeaderboardView["VoiceLeaderboardView<br/>/vc leaderboard"]
-        end
-
         subgraph Settings
-            SettingsMainView["SettingsMainView<br/>/settings"]
-            SettingsFeedView["SettingsFeedView<br/>/feed settings"]
-            SettingsVoiceView["SettingsVoiceView<br/>/vc settings"]
+            SettingsMainView
+            SettingsFeedView
+            SettingsVoiceView
             SettingsNavigationView
         end
 
-        PaginationView
+        subgraph Feed
+            FeedSubscriptionBatchView
+            FeedSubscriptionListView
+        end
+
+        subgraph Voice
+            VoiceLeaderboardView
+        end
+
+        subgraph Common
+            AboutView
+            PaginationView
+        end
     end
-
-    %% View relationships
-    FeedSubscriptionListView -.uses.-> PaginationView
-    VoiceLeaderboardView -.uses.-> PaginationView
-
-    SettingsNavigationView <-->|navigates| SettingsMainView
-    SettingsNavigationView <-->|navigates| SettingsFeedView
-    SettingsNavigationView <-->|navigates| SettingsVoiceView
-
-    FeedNavigationView <-->|navigates| FeedSubscribeView
-    FeedNavigationView <-->|navigates| FeedUnsubscribeView
-    FeedNavigationView <-->|navigates| FeedSubscriptionListView
-    FeedNavigationView <-->|navigates| FeedSubscriptionBatchView

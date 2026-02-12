@@ -36,14 +36,32 @@ classDiagram
     }
 
     %% Controller Pattern
-    class Controller~O~ {
+    class Controller~S~ {
         <<interface>>
-        run() Result~O~
+        run(coordinator: &mut Coordinator~S~) Result~NavigationResult~
     }
 
-    class Coordinator {
+    class Coordinator~S~ {
         <<struct>>
-        run(initial, next) Result~O~
+        ctx: Context
+        state: S
+        send(reply) Result~()~
+        edit(reply) Result~()~
+        context() &Context
+    }
+
+    class NavigationResult {
+        <<enum>>
+        SettingsMain
+        SettingsFeeds
+        SettingsVoice
+        SettingsAbout
+        Back
+        Exit
+        FeedSubscriptions
+        FeedSubscribe
+        FeedUnsubscribe
+        VoiceLeaderboard
     }
 
     %% Interface Relationships
@@ -68,31 +86,28 @@ classDiagram
     StatefulView <|.. SettingsFeedView
     StatefulView <|.. SettingsMainView
     StatefulView <|.. SettingsVoiceView
+    StatefulView <|.. AboutView
 
     InteractableComponentView <|.. FeedSubscriptionBatchView : T=FeedSubscriptionBatchAction
     InteractableComponentView <|.. PaginationView : T=PaginationAction
     InteractableComponentView <|.. SettingsFeedView : T=SettingsFeedAction
     InteractableComponentView <|.. SettingsMainView : T=SettingsMainAction
     InteractableComponentView <|.. SettingsVoiceView : T=SettingsVoiceAction
+    InteractableComponentView <|.. AboutView : T=AboutAction
 
-    ResponseComponentView <|.. AboutView
     ResponseComponentView <|.. FeedSubscriptionsListView
     ResponseComponentView <|.. SettingsNavigationView
     ResponseComponentView <|.. VoiceLeaderboardView
 
     %% Controller Pattern Relationships
     Controller <|.. SettingsMainController
-    Controller <|.. SettingsFeedController
-    Controller <|.. SettingsVoiceController
-    Coordinator ..> Controller : manages
+    Controller <|.. FeedSettingsController
+    Controller <|.. VoiceSettingsController
+    Controller <|.. FeedSubscriptionsController
+    Controller <|.. FeedSubscribeController
+    Controller <|.. FeedUnsubscribeController
+    Controller <|.. VoiceLeaderboardController
+    Controller <|.. AboutController
 
-    %% Unimplemented (but planned) stuff
-    InteractableComponentView <|.. FeedNavigationView : T=FeedNavigationAction
-    InteractableComponentView <|.. SettingsNavigationView : T=SettingsNavigationAction
-
-    InteractableComponentView <|.. FeedSubscribeView : T=FeedSubscribeAction
-    InteractableComponentView <|.. FeedUnsubscribeView : T=FeedUnsubscribeAction
-
-    ResponseComponentView <|.. FeedSubscribeView
-    ResponseComponentView <|.. FeedUnsubscribeView
-    ResponseComponentView <|.. SettingsMainView
+    Coordinator ..> Controller : executes
+    Controller ..> NavigationResult : returns
