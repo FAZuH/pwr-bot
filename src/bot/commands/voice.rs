@@ -16,12 +16,14 @@ pub mod image_generator;
 pub mod views;
 
 /// A single entry in the voice leaderboard.
+#[derive(Clone)]
 pub struct LeaderboardEntry {
     pub rank: u32,
     pub user_id: u64,
     pub display_name: String,
-    pub avatar_url: Option<String>,
+    pub avatar_url: String,
     pub duration_seconds: i64,
+    pub avatar_image: Option<image::DynamicImage>,
 }
 
 /// Result of generating a leaderboard page.
@@ -107,16 +109,13 @@ pub enum VoiceLeaderboardTimeRange {
 impl From<VoiceLeaderboardTimeRange> for DateTime<Utc> {
     fn from(range: VoiceLeaderboardTimeRange) -> Self {
         let now = Utc::now();
-        
+
         match range {
             VoiceLeaderboardTimeRange::Today => {
                 // From 00:00 today
-                now.date_naive()
-                    .and_hms_opt(0, 0, 0)
-                    .unwrap()
-                    .and_utc()
+                now.date_naive().and_hms_opt(0, 0, 0).unwrap().and_utc()
             }
-            
+
             VoiceLeaderboardTimeRange::Past3Days => {
                 // From 00:00 3 days ago (today + 2 days ago = 3 days total)
                 (now - Duration::days(2))
@@ -125,7 +124,7 @@ impl From<VoiceLeaderboardTimeRange> for DateTime<Utc> {
                     .unwrap()
                     .and_utc()
             }
-            
+
             VoiceLeaderboardTimeRange::ThisWeek => {
                 // From Sunday 00:00 of this week
                 let days_since_sunday = now.weekday().num_days_from_sunday();
@@ -135,7 +134,7 @@ impl From<VoiceLeaderboardTimeRange> for DateTime<Utc> {
                     .unwrap()
                     .and_utc()
             }
-            
+
             VoiceLeaderboardTimeRange::Past2Weeks => {
                 // From Sunday 00:00 of previous week
                 let days_since_sunday = now.weekday().num_days_from_sunday();
@@ -146,7 +145,7 @@ impl From<VoiceLeaderboardTimeRange> for DateTime<Utc> {
                     .unwrap()
                     .and_utc()
             }
-            
+
             VoiceLeaderboardTimeRange::ThisMonth => {
                 // From 00:00 on 1st of this month
                 now.date_naive()
@@ -156,7 +155,7 @@ impl From<VoiceLeaderboardTimeRange> for DateTime<Utc> {
                     .unwrap()
                     .and_utc()
             }
-            
+
             VoiceLeaderboardTimeRange::ThisYear => {
                 // From 00:00 on January 1st this year
                 now.date_naive()
@@ -168,7 +167,7 @@ impl From<VoiceLeaderboardTimeRange> for DateTime<Utc> {
                     .unwrap()
                     .and_utc()
             }
-            
+
             VoiceLeaderboardTimeRange::AllTime => DateTime::UNIX_EPOCH,
         }
     }
