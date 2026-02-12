@@ -1,6 +1,5 @@
 //! About command showing bot statistics and information.
 
-use std::borrow::Cow;
 use std::str::FromStr;
 use std::time::Duration;
 
@@ -23,14 +22,15 @@ use poise::serenity_prelude::CreateUnfurledMediaItem;
 use crate::bot::commands::Cog;
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;
+use crate::bot::commands::settings::SettingsPage;
+use crate::bot::commands::settings::run_settings;
 use crate::bot::controller::Controller;
 use crate::bot::controller::Coordinator;
 use crate::bot::navigation::NavigationResult;
 use crate::bot::views::Action;
 use crate::bot::views::InteractableComponentView;
 use crate::bot::views::ResponseComponentView;
-use crate::bot::views::StatefulView;
-use crate::bot::views::ViewContext;
+use crate::controller;
 use crate::custom_id_enum;
 use crate::stateful_view;
 
@@ -41,12 +41,7 @@ impl AboutCog {
     /// Show information about the bot
     #[poise::command(slash_command)]
     pub async fn about(ctx: Context<'_>) -> Result<(), Error> {
-        // For standalone /about command (not within settings)
-        // Just show the view without navigation
-        let mut coordinator = Coordinator::new(ctx);
-        let mut controller = AboutController::new(&ctx);
-        let _result = controller.run(&mut coordinator).await?;
-        Ok(())
+        run_settings(ctx, Some(SettingsPage::About)).await
     }
 }
 
@@ -63,32 +58,25 @@ custom_id_enum! {
     }
 }
 
-/// Controller for about page.
-pub struct AboutController<'a> {
-    ctx: &'a Context<'a>,
-}
-
-impl<'a> AboutController<'a> {
-    /// Creates a new about controller.
-    pub fn new(ctx: &'a Context<'a>) -> Self {
-        Self { ctx }
-    }
-}
+controller! { pub struct AboutController<'a> {} }
 
 #[async_trait::async_trait]
 impl<S: Send + Sync + 'static> Controller<S> for AboutController<'_> {
-    async fn run(&mut self, coordinator: &mut Coordinator<'_, S>) -> Result<NavigationResult, Error> {
+    async fn run(
+        &mut self,
+        coordinator: &mut Coordinator<'_, S>,
+    ) -> Result<NavigationResult, Error> {
         let ctx = *coordinator.context();
         ctx.defer().await?;
 
         let stats = gather_stats(&ctx).await?;
         let avatar_url = ctx.cache().current_user().face();
         let mut view = AboutView::new(&ctx, stats, avatar_url);
-        
+
         coordinator.send(view.create_reply()).await?;
 
         // Wait for user interaction (Back button)
-        while let Some((action, _interaction)) = view.listen_once().await {
+        if let Some((action, _)) = view.listen_once().await {
             match action {
                 AboutAction::Back => {
                     return Ok(NavigationResult::Back);
@@ -191,26 +179,32 @@ Copyright © 2025-{} FAZuH  —  v{}",
             CreateButton::new_link("https://github.com/FAZuH/pwr-bot/blob/main/LICENSE")
                 .label("License");
 
-        let back_button = CreateButton::new(AboutAction::Back.custom_id())
-            .label(AboutAction::Back.label())
-            .style(ButtonStyle::Secondary);
+        let back_button = CreateComponent::ActionRow(CreateActionRow::Buttons(
+            vec![
+                CreateButton::new(AboutAction::Back.custom_id())
+                    .label(AboutAction::Back.label())
+                    .style(ButtonStyle::Secondary),
+            ]
+            .into(),
+        ));
 
         let container = CreateComponent::Container(CreateContainer::new(vec![
             CreateContainerComponent::Section(content_section),
-            CreateContainerComponent::ActionRow(CreateActionRow::Buttons(Cow::Owned(vec![
-                back_button,
-                github_button,
-                license_button,
-            ]))),
+            CreateContainerComponent::ActionRow(CreateActionRow::Buttons(
+                vec![github_button, license_button].into(),
+            )),
         ]));
 
-        vec![container]
+        vec![container, back_button]
     }
 }
 
 #[async_trait::async_trait]
 impl<'a> InteractableComponentView<'a, AboutAction> for AboutView<'a> {
-    async fn handle(&mut self, interaction: &serenity::all::ComponentInteraction) -> Option<AboutAction> {
+    async fn handle(
+        &mut self,
+        interaction: &serenity::all::ComponentInteraction,
+    ) -> Option<AboutAction> {
         AboutAction::from_str(&interaction.data.custom_id).ok()
     }
 }

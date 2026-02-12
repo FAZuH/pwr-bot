@@ -6,8 +6,8 @@ pub mod about;
 pub mod admin;
 pub mod feed;
 pub mod owner;
-pub mod voice;
 pub mod settings;
+pub mod voice;
 
 /// Error type used across bot commands.
 pub type Error = Box<dyn std::error::Error + Send + Sync>;

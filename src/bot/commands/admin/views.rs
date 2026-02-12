@@ -17,7 +17,6 @@ use serenity::all::CreateSelectMenuOption;
 use serenity::all::CreateTextDisplay;
 
 use crate::bot::commands::Context;
-use crate::bot::navigation::NavigationResult;
 use crate::bot::views::Action;
 use crate::bot::views::InteractableComponentView;
 use crate::bot::views::ResponseComponentView;

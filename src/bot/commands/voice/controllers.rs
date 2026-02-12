@@ -6,6 +6,8 @@ use serenity::all::MessageFlags;
 
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;
+use crate::bot::commands::settings::SettingsPage;
+use crate::bot::commands::settings::run_settings;
 use crate::bot::commands::voice::LeaderboardEntry;
 use crate::bot::commands::voice::image_generator::LeaderboardImageGenerator;
 use crate::bot::commands::voice::views::SettingsVoiceAction;
@@ -18,32 +20,23 @@ use crate::bot::navigation::NavigationResult;
 use crate::bot::views::InteractableComponentView;
 use crate::bot::views::ResponseComponentView;
 use crate::bot::views::pagination::PaginationView;
+use crate::controller;
 use crate::database::model::VoiceLeaderboardEntry;
 
 /// Number of leaderboard entries per page.
 const LEADERBOARD_PER_PAGE: u32 = 10;
 
-/// Controller for voice tracking settings.
-pub struct VoiceSettingsController<'a> {
-    ctx: &'a Context<'a>,
-}
-
-impl<'a> VoiceSettingsController<'a> {
-    /// Creates a new voice settings controller.
-    pub fn new(ctx: &'a Context<'a>) -> Self {
-        Self { ctx }
-    }
-}
+controller! { pub struct VoiceSettingsController<'a> {} }
 
 #[async_trait::async_trait]
 impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceSettingsController<'a> {
-    async fn run(&mut self, coordinator: &mut Coordinator<'_, S>) -> Result<NavigationResult, Error> {
+    async fn run(
+        &mut self,
+        coordinator: &mut Coordinator<'_, S>,
+    ) -> Result<NavigationResult, Error> {
         let ctx = *coordinator.context();
         ctx.defer().await?;
-        let guild_id = ctx
-            .guild_id()
-            .ok_or(BotError::GuildOnlyCommand)?
-            .get();
+        let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?.get();
 
         let settings = ctx
             .data()
@@ -57,7 +50,6 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceSettingsController<'a>
         coordinator.send(view.create_reply()).await?;
 
         while let Some((action, _interaction)) = view.listen_once().await {
-
             match action {
                 SettingsVoiceAction::Back => return Ok(NavigationResult::Back),
                 SettingsVoiceAction::About => {
@@ -65,8 +57,7 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceSettingsController<'a>
                 }
                 SettingsVoiceAction::EnabledSelect => {
                     // Update the settings in the database
-                    ctx
-                        .data()
+                    ctx.data()
                         .service
                         .voice_tracking
                         .update_server_settings(guild_id, view.settings.clone())
@@ -82,27 +73,17 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceSettingsController<'a>
     }
 }
 
-/// Controller for voice leaderboard display.
-pub struct VoiceLeaderboardController<'a> {
-    ctx: &'a Context<'a>,
-}
-
-impl<'a> VoiceLeaderboardController<'a> {
-    /// Creates a new voice leaderboard controller.
-    pub fn new(ctx: &'a Context<'a>) -> Self {
-        Self { ctx }
-    }
-}
+controller! { pub struct VoiceLeaderboardController<'a> {} }
 
 #[async_trait::async_trait]
 impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceLeaderboardController<'a> {
-    async fn run(&mut self, coordinator: &mut Coordinator<'_, S>) -> Result<NavigationResult, Error> {
+    async fn run(
+        &mut self,
+        coordinator: &mut Coordinator<'_, S>,
+    ) -> Result<NavigationResult, Error> {
         let ctx = *coordinator.context();
         ctx.defer().await?;
-        let guild_id = ctx
-            .guild_id()
-            .ok_or(BotError::GuildOnlyCommand)?
-            .get();
+        let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?.get();
         let author_id = ctx.author().id.get();
 
         let total_entries = ctx
@@ -156,8 +137,7 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceLeaderboardController<
             let end = (offset + LEADERBOARD_PER_PAGE as usize).min(total_entries.len());
 
             let page_entries = &total_entries[offset..end];
-            let page_result =
-                generate_page(ctx, &image_gen, page_entries, offset as u32).await?;
+            let page_result = generate_page(ctx, &image_gen, page_entries, offset as u32).await?;
 
             components = view.create_components();
             pagination.attach_if_multipage(&mut components);
@@ -178,10 +158,7 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceLeaderboardController<
 
 /// Legacy function for voice settings command.
 pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
-    let mut coordinator = Coordinator::new(ctx);
-    let mut controller = VoiceSettingsController::new(&ctx);
-    let _result = controller.run(&mut coordinator).await?;
-    Ok(())
+    run_settings(ctx, Some(SettingsPage::Voice)).await
 }
 
 /// Legacy function for voice leaderboard command.

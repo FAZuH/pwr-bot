@@ -243,7 +243,10 @@ macro_rules! with_data {
 ///
 /// ```rust,ignore
 /// controller! {
-///     pub struct MyController<'a> {}
+///     pub struct MyController<'a> {
+///         field1: Type1,
+///         field2: Type2,
+///     }
 /// }
 /// ```
 ///
@@ -274,17 +277,30 @@ macro_rules! with_data {
 macro_rules! controller {
     (
         $(#[$meta:meta])*
-        $vis:vis struct $name:ident<$lt:lifetime> {}
+        $vis:vis struct $name:ident<$lt:lifetime> {
+            $($field:ident : $field_type:ty),* $(,)?
+        }
     ) => {
         $(#[$meta])*
         $vis struct $name<$lt> {
+            #[allow(dead_code)]
             ctx: &$lt $crate::bot::commands::Context<$lt>,
+            $(
+                #[doc = concat!("Field `", stringify!($field), "`.")]
+                pub $field: $field_type,
+            )*
         }
 
         impl<$lt> $name<$lt> {
             /// Creates a new controller instance.
-            pub fn new(ctx: &$lt $crate::bot::commands::Context<$lt>) -> Self {
-                Self { ctx }
+            pub fn new(
+                ctx: &$lt $crate::bot::commands::Context<$lt>,
+                $($field: $field_type),*
+            ) -> Self {
+                Self {
+                    ctx,
+                    $($field,)*
+                }
             }
         }
     };

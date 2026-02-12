@@ -22,6 +22,8 @@ use crate::bot::commands::feed::views::FeedSubscriptionBatchView;
 use crate::bot::commands::feed::views::FeedSubscriptionsListView;
 use crate::bot::commands::feed::views::SettingsFeedAction;
 use crate::bot::commands::feed::views::SettingsFeedView;
+use crate::bot::commands::settings::SettingsPage;
+use crate::bot::commands::settings::run_settings;
 use crate::bot::controller::Controller;
 use crate::bot::controller::Coordinator;
 use crate::bot::error::BotError;
@@ -30,6 +32,7 @@ use crate::bot::utils::parse_and_validate_urls;
 use crate::bot::views::InteractableComponentView;
 use crate::bot::views::ResponseComponentView;
 use crate::bot::views::pagination::PaginationView;
+use crate::controller;
 use crate::database::model::FeedModel;
 use crate::database::model::SubscriberModel;
 use crate::database::model::SubscriberType;
@@ -119,27 +122,17 @@ impl From<UnsubscribeResult> for String {
     }
 }
 
-/// Controller for feed settings.
-pub struct FeedSettingsController<'a> {
-    ctx: &'a Context<'a>,
-}
-
-impl<'a> FeedSettingsController<'a> {
-    /// Creates a new feed settings controller.
-    pub fn new(ctx: &'a Context<'a>) -> Self {
-        Self { ctx }
-    }
-}
+controller! { pub struct FeedSettingsController<'a> {} }
 
 #[async_trait::async_trait]
 impl<'a, S: Send + Sync + 'static> Controller<S> for FeedSettingsController<'a> {
-    async fn run(&mut self, coordinator: &mut Coordinator<'_, S>) -> Result<NavigationResult, Error> {
+    async fn run(
+        &mut self,
+        coordinator: &mut Coordinator<'_, S>,
+    ) -> Result<NavigationResult, Error> {
         let ctx = *coordinator.context();
         ctx.defer().await?;
-        let guild_id = ctx
-            .guild_id()
-            .ok_or(BotError::GuildOnlyCommand)?
-            .get();
+        let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?.get();
 
         let mut settings = ctx
             .data()
@@ -158,8 +151,7 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for FeedSettingsController<'a> 
                 return Ok(NavigationResult::SettingsAbout);
             }
 
-            ctx
-                .data()
+            ctx.data()
                 .service
                 .feed_subscription
                 .update_server_settings(guild_id, view.settings.clone())
@@ -171,31 +163,23 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for FeedSettingsController<'a> 
                     .components(view.create_components()),
             );
 
-            interaction
-                .create_response(ctx.http(), reply)
-                .await?;
+            interaction.create_response(ctx.http(), reply).await?;
         }
 
         Ok(NavigationResult::Exit)
     }
 }
 
-/// Controller for subscriptions list with pagination.
-pub struct FeedSubscriptionsController<'a> {
-    ctx: &'a Context<'a>,
-    send_into: SendInto,
-}
-
-impl<'a> FeedSubscriptionsController<'a> {
-    /// Creates a new subscriptions controller.
-    pub fn new(ctx: &'a Context<'a>, send_into: SendInto) -> Self {
-        Self { ctx, send_into }
-    }
-}
+controller! { pub struct FeedSubscriptionsController<'a> {
+    send_into: SendInto
+} }
 
 #[async_trait::async_trait]
 impl<'a, S: Send + Sync + 'static> Controller<S> for FeedSubscriptionsController<'a> {
-    async fn run(&mut self, coordinator: &mut Coordinator<'_, S>) -> Result<NavigationResult, Error> {
+    async fn run(
+        &mut self,
+        coordinator: &mut Coordinator<'_, S>,
+    ) -> Result<NavigationResult, Error> {
         let ctx = *coordinator.context();
         ctx.defer().await?;
 
@@ -255,27 +239,17 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for FeedSubscriptionsController
     }
 }
 
-/// Controller for subscription batch operations.
-pub struct FeedSubscribeController<'a> {
-    ctx: Context<'a>,
+controller! { pub struct FeedSubscribeController<'a> {
     links: String,
     send_into: Option<SendInto>,
-}
-
-impl<'a> FeedSubscribeController<'a> {
-    /// Creates a new subscribe controller.
-    pub fn new(ctx: Context<'a>, links: String, send_into: Option<SendInto>) -> Self {
-        Self {
-            ctx,
-            links,
-            send_into,
-        }
-    }
-}
+} }
 
 #[async_trait::async_trait]
 impl<'a, S: Send + Sync + 'static> Controller<S> for FeedSubscribeController<'a> {
-    async fn run(&mut self, coordinator: &mut Coordinator<'_, S>) -> Result<NavigationResult, Error> {
+    async fn run(
+        &mut self,
+        coordinator: &mut Coordinator<'_, S>,
+    ) -> Result<NavigationResult, Error> {
         let ctx = *coordinator.context();
         ctx.defer().await?;
 
@@ -291,27 +265,17 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for FeedSubscribeController<'a>
     }
 }
 
-/// Controller for unsubscription batch operations.
-pub struct FeedUnsubscribeController<'a> {
-    ctx: Context<'a>,
+controller! { pub struct FeedUnsubscribeController<'a> {
     links: String,
     send_into: Option<SendInto>,
-}
-
-impl<'a> FeedUnsubscribeController<'a> {
-    /// Creates a new unsubscribe controller.
-    pub fn new(ctx: Context<'a>, links: String, send_into: Option<SendInto>) -> Self {
-        Self {
-            ctx,
-            links,
-            send_into,
-        }
-    }
-}
+} }
 
 #[async_trait::async_trait]
 impl<'a, S: Send + Sync + 'static> Controller<S> for FeedUnsubscribeController<'a> {
-    async fn run(&mut self, coordinator: &mut Coordinator<'_, S>) -> Result<NavigationResult, Error> {
+    async fn run(
+        &mut self,
+        coordinator: &mut Coordinator<'_, S>,
+    ) -> Result<NavigationResult, Error> {
         let ctx = *coordinator.context();
         ctx.defer().await?;
 
@@ -329,10 +293,7 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for FeedUnsubscribeController<'
 
 /// Legacy function for feed settings command.
 pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
-    let mut coordinator = Coordinator::new(ctx);
-    let mut controller = FeedSettingsController::new(&ctx);
-    let _result = controller.run(&mut coordinator).await?;
-    Ok(())
+    run_settings(ctx, Some(SettingsPage::Feeds)).await
 }
 
 /// Legacy function for subscribe command.
@@ -342,7 +303,7 @@ pub async fn subscribe(
     send_into: Option<SendInto>,
 ) -> Result<(), Error> {
     let mut coordinator = Coordinator::new(ctx);
-    let mut controller = FeedSubscribeController::new(ctx, links, send_into);
+    let mut controller = FeedSubscribeController::new(&ctx, links, send_into);
     let _result = controller.run(&mut coordinator).await?;
     Ok(())
 }
@@ -354,7 +315,7 @@ pub async fn unsubscribe(
     send_into: Option<SendInto>,
 ) -> Result<(), Error> {
     let mut coordinator = Coordinator::new(ctx);
-    let mut controller = FeedUnsubscribeController::new(ctx, links, send_into);
+    let mut controller = FeedUnsubscribeController::new(&ctx, links, send_into);
     let _result = controller.run(&mut coordinator).await?;
     Ok(())
 }

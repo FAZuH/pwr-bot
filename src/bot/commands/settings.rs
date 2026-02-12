@@ -125,9 +125,17 @@ pub enum SettingsPage {
 ///
 /// This is the entry point for the settings command. It creates a coordinator
 /// and runs controllers in a loop based on their NavigationResult.
-pub async fn run_settings(ctx: Context<'_>) -> Result<(), Error> {
+///
+/// # Parameters
+///
+/// - `ctx`: The Discord command context
+/// - `current_page`: Initial page to show. If None, defaults to [`SettingsPage::Main`]
+pub async fn run_settings(
+    ctx: Context<'_>,
+    initial_page: Option<SettingsPage>,
+) -> Result<(), Error> {
     let mut coordinator = Coordinator::new(ctx);
-    let mut current_page = SettingsPage::Main;
+    let mut current_page = initial_page.unwrap_or(SettingsPage::Main);
 
     loop {
         // Create controller based on current page

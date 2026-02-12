@@ -129,7 +129,7 @@ impl<'a, S> Coordinator<'a, S> {
     /// ```
     pub async fn edit(&self, reply: CreateReply<'a>) -> Result<(), Error> {
         if let Some(handle) = &self.msg_handle {
-            handle.edit(self.ctx.clone(), reply).await?;
+            handle.edit(self.ctx, reply).await?;
         }
         Ok(())
     }
@@ -235,5 +235,8 @@ pub trait Controller<S>: Send + Sync {
     ///
     /// Returns a `NavigationResult` indicating where to navigate next,
     /// or an error if something goes wrong.
-    async fn run(&mut self, coordinator: &mut Coordinator<'_, S>) -> Result<NavigationResult, Error>;
+    async fn run(
+        &mut self,
+        coordinator: &mut Coordinator<'_, S>,
+    ) -> Result<NavigationResult, Error>;
 }

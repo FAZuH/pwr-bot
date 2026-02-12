@@ -1,10 +1,10 @@
-
-use poise::CreateReply;
 use poise::samples::create_application_commands;
 
 use crate::bot::checks::is_author_guild_admin;
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;
+use crate::bot::commands::admin::registration::CommandRegistrationView;
+use crate::bot::commands::admin::registration::CommandUnregistrationView;
 use crate::bot::commands::admin::views::SettingsMainAction;
 use crate::bot::commands::admin::views::SettingsMainView;
 use crate::bot::controller::Controller;
@@ -13,29 +13,21 @@ use crate::bot::error::BotError;
 use crate::bot::navigation::NavigationResult;
 use crate::bot::views::InteractableComponentView;
 use crate::bot::views::ResponseComponentView;
+use crate::controller;
 use crate::database::model::ServerSettingsModel;
 use crate::database::table::Table;
 
-/// Controller for admin settings with navigation support.
-pub struct SettingsMainController<'a> {
-    ctx: &'a Context<'a>,
-}
-
-impl<'a> SettingsMainController<'a> {
-    /// Creates a new admin settings controller.
-    pub fn new(ctx: &'a Context<'a>) -> Self {
-        Self { ctx }
-    }
-}
+controller! { pub struct SettingsMainController<'a> {} }
 
 #[async_trait::async_trait]
 impl<'a, S: Send + Sync + 'static> Controller<S> for SettingsMainController<'a> {
-    async fn run(&mut self, coordinator: &mut Coordinator<'_, S>) -> Result<NavigationResult, Error> {
+    async fn run(
+        &mut self,
+        coordinator: &mut Coordinator<'_, S>,
+    ) -> Result<NavigationResult, Error> {
         let ctx = *coordinator.context();
         is_author_guild_admin(ctx).await?;
-        let guild_id = ctx
-            .guild_id()
-            .ok_or(BotError::GuildOnlyCommand)?;
+        let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?;
 
         let settings = ctx
             .data()
@@ -54,8 +46,7 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for SettingsMainController<'a> 
         while let Some((action, _)) = view.listen_once().await {
             coordinator.edit(view.create_reply()).await?;
             if view.is_settings_modified {
-                ctx
-                    .data()
+                ctx.data()
                     .db
                     .server_settings_table
                     .replace(&view.settings)
@@ -91,22 +82,18 @@ pub async fn register(ctx: Context<'_>) -> Result<(), Error> {
     let num_commands = create_commands.len();
 
     let start_time = std::time::Instant::now();
-    let reply = ctx
-        .reply(format!(
-            ":gear: Registering {num_commands} guild commands..."
-        ))
-        .await?;
+
+    // Send initial view
+    let initial_view = CommandRegistrationView::new(num_commands);
+    let msg = ctx.send(initial_view.create_reply()).await?;
+
+    // Register commands
     guild_id.set_commands(ctx.http(), &create_commands).await?;
 
-    reply
-        .edit(
-            ctx,
-            CreateReply::default().content(format!(
-                ":white_check_mark: Done! Took {}ms",
-                start_time.elapsed().as_millis()
-            )),
-        )
-        .await?;
+    // Update with completion view
+    let duration_ms = start_time.elapsed().as_millis() as u64;
+    let complete_view = CommandRegistrationView::new(num_commands).complete(duration_ms);
+    msg.edit(ctx, complete_view.create_reply()).await?;
 
     Ok(())
 }
@@ -117,23 +104,23 @@ pub async fn unregister(ctx: Context<'_>) -> Result<(), Error> {
     let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?;
 
     let start_time = std::time::Instant::now();
-    let reply = ctx.reply(":gear: Unregistering guild commands...").await?;
+
+    // Send initial view
+    let initial_view = CommandUnregistrationView::new();
+    let msg = ctx.send(initial_view.create_reply()).await?;
+
+    // Unregister commands
     guild_id.set_commands(ctx.http(), &[]).await?;
 
-    reply
-        .edit(
-            ctx,
-            CreateReply::default().content(format!(
-                ":white_check_mark: Done! Took {}ms",
-                start_time.elapsed().as_millis()
-            )),
-        )
-        .await?;
+    // Update with completion view
+    let duration_ms = start_time.elapsed().as_millis() as u64;
+    let complete_view = CommandUnregistrationView::new().complete(duration_ms);
+    msg.edit(ctx, complete_view.create_reply()).await?;
 
     Ok(())
 }
 
-/// Legacy function for admin settings command.
+/// Entrypoint for /settings command
 pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
-    crate::bot::commands::settings::run_settings(ctx).await
+    crate::bot::commands::settings::run_settings(ctx, None).await
 }
