@@ -36,6 +36,7 @@ image = "0.25"
 ab_glyph = "0.2"
 html2md = "0.2.15"
 sysinfo = "0.33"
+derive_builder = "0.20.2"
 
 [dev-dependencies]
 httpmock = "0.7.0"

@@ -1,6 +1,8 @@
 //! Image generation for voice leaderboard.
 
+use std::collections::HashMap;
 use std::io::Cursor;
+use std::time::Instant;
 
 use ab_glyph::Font;
 use ab_glyph::FontArc;
@@ -12,6 +14,7 @@ use image::Rgba;
 use image::RgbaImage;
 use image::imageops::FilterType;
 use image::imageops::overlay;
+use log::trace;
 
 use crate::bot::commands::voice::LeaderboardEntry;
 
@@ -51,10 +54,18 @@ const FONT_SIZE: f32 = 20.0;
 /// Vertical offset for text alignment.
 const TEXT_VERTICAL_OFFSET: f32 = 6.0;
 
+/// Cached glyph metrics for faster text rendering.
+#[derive(Clone)]
+struct GlyphCache {
+    h_advance: f32,
+}
+
 /// Generates leaderboard images with user rankings.
 pub struct LeaderboardImageGenerator {
     font: FontArc,
-    http_client: reqwest::Client,
+    pub http_client: reqwest::Client,
+    glyph_cache: HashMap<char, GlyphCache>,
+    avatar_cache: HashMap<String, RgbaImage>, // Cache processed circular avatars
 }
 
 impl LeaderboardImageGenerator {
@@ -64,29 +75,133 @@ impl LeaderboardImageGenerator {
         let font_data = include_bytes!("../../../../assets/fonts/Roboto-Regular.ttf");
         let font = FontArc::try_from_slice(font_data)?;
 
+        // Create HTTP client with connection pooling for faster avatar downloads
+        let http_client = reqwest::Client::builder()
+            .pool_idle_timeout(std::time::Duration::from_secs(30))
+            .pool_max_idle_per_host(10)
+            .build()?;
+
         Ok(Self {
             font,
-            http_client: reqwest::Client::new(),
+            http_client,
+            glyph_cache: HashMap::with_capacity(256),
+            avatar_cache: HashMap::new(),
         })
     }
 
+    /// Checks if the avatar for the given URL is already cached.
+    pub fn has_avatar(&self, url: &str) -> bool {
+        self.avatar_cache.contains_key(url)
+    }
+
+    /// Downloads an avatar image from a URL.
+    pub async fn download_avatar(&self, url: &str) -> Result<DynamicImage> {
+        // Download avatar from the provided URL (could be WEBP or GIF)
+        let response = self.http_client.get(url).send().await?;
+
+        if !response.status().is_success() {
+            return Err(anyhow::anyhow!(
+                "Failed to download avatar: {}",
+                response.status()
+            ));
+        }
+
+        let bytes = response.bytes().await?;
+        let img = image::load_from_memory(&bytes)?;
+        Ok(img)
+    }
+
     /// Generates a leaderboard image with the given entries.
-    pub async fn generate_leaderboard(&self, entries: &[LeaderboardEntry]) -> Result<Vec<u8>> {
+    pub async fn generate_leaderboard(&mut self, entries: &[LeaderboardEntry]) -> Result<Vec<u8>> {
+        let total_start = Instant::now();
+
+        // 1. Update avatar cache with new images provided in entries
+        for entry in entries {
+            if let Some(img) = &entry.avatar_image
+                && !self.avatar_cache.contains_key(&entry.avatar_url)
+            {
+                let circular = self.make_circular(img, AVATAR_SIZE);
+                self.avatar_cache.insert(entry.avatar_url.clone(), circular);
+            }
+        }
+
+        // 2. Prepare data for renderer (clones necessary for 'static move closure)
+        let font = self.font.clone();
+        let glyph_cache = self.glyph_cache.clone();
+
+        // Resolve images: prefer cached circular avatar
+        let render_data: Vec<(LeaderboardEntry, Option<RgbaImage>)> = entries
+            .iter()
+            .map(|e| {
+                let img = self.avatar_cache.get(&e.avatar_url).cloned();
+                (e.clone(), img)
+            })
+            .collect();
+
+        trace!("prepare_data {} ms", total_start.elapsed().as_millis());
+
+        // 3. Spawn blocking task for CPU-intensive drawing
+        let (bytes, new_glyph_cache) = tokio::task::spawn_blocking(move || {
+            let mut renderer = Renderer { font, glyph_cache };
+            let bytes = renderer.draw(render_data)?;
+            Ok::<_, anyhow::Error>((bytes, renderer.glyph_cache))
+        })
+        .await??;
+
+        // 4. Update glyph cache with any new metrics found during rendering
+        self.glyph_cache = new_glyph_cache;
+
+        trace!(
+            "generate_leaderboard total {} ms",
+            total_start.elapsed().as_millis()
+        );
+
+        Ok(bytes)
+    }
+
+    /// Crops an image to a circular shape.
+    fn make_circular(&self, img: &DynamicImage, size: u32) -> RgbaImage {
+        // Resize image to desired size
+        let resized = img.resize_exact(size, size, FilterType::Lanczos3);
+
+        // Create circular mask
+        let mut circular = RgbaImage::new(size, size);
+        let center = size as f32 / 2.0;
+        let radius = size as f32 / 2.0;
+
+        for (x, y, pixel) in resized.pixels() {
+            let dx = x as f32 - center;
+            let dy = y as f32 - center;
+            let distance = (dx * dx + dy * dy).sqrt();
+
+            if distance <= radius {
+                circular.put_pixel(x, y, pixel);
+            } else {
+                circular.put_pixel(x, y, Rgba([0, 0, 0, 0])); // Transparent
+            }
+        }
+
+        circular
+    }
+}
+
+/// Renderer for leaderboard images.
+/// Handles the CPU-intensive drawing operations.
+struct Renderer {
+    font: FontArc,
+    glyph_cache: HashMap<char, GlyphCache>,
+}
+
+impl Renderer {
+    /// Draws the full leaderboard image.
+    fn draw(&mut self, entries: Vec<(LeaderboardEntry, Option<RgbaImage>)>) -> Result<Vec<u8>> {
+        let draw_start = Instant::now();
         let total_height = (entries.len() as u32 * IMAGE_HEIGHT_PER_ENTRY) + PADDING * 2;
 
-        // Create base image with dark background
         let mut img = RgbaImage::from_pixel(IMAGE_WIDTH, total_height, BACKGROUND_COLOR);
 
-        // Draw entries
-        for (idx, entry) in entries.iter().enumerate() {
+        for (idx, (entry, avatar)) in entries.iter().enumerate() {
             let y = PADDING + (idx as u32 * IMAGE_HEIGHT_PER_ENTRY);
-
-            // Download and process avatar
-            let avatar = match &entry.avatar_url {
-                Some(url) => self.download_avatar_from_url(url).await.ok(),
-                None => self.download_default_avatar(entry.user_id).await.ok(),
-            };
-
             self.draw_entry(
                 &mut img,
                 y,
@@ -97,21 +212,43 @@ impl LeaderboardImageGenerator {
             )?;
         }
 
-        // Encode to PNG
+        trace!(
+            "draw_entries_blocking {} ms",
+            draw_start.elapsed().as_millis()
+        );
+
+        let encode_start = Instant::now();
         let mut bytes: Vec<u8> = Vec::new();
         let mut cursor = Cursor::new(&mut bytes);
-        img.write_to(&mut cursor, image::ImageFormat::Png)?;
+        // Use JPEG for smaller size and faster upload
+        // JPEG doesn't support transparency, but our background is opaque anyway
+        // except for the corners of circular avatars?
+        // Wait, RgbaImage can have transparency. If we use JPEG, transparency becomes black.
+        // Our background is dark blue, so transparency isn't critical for the main image,
+        // but the circular avatars are overlayed on the dark background, so they should be fine.
+        // The only issue is if the final image itself needs transparency.
+        // The background color is opaque Rgba([26, 26, 46, 255]), so the whole image is opaque.
+        // So JPEG is safe to use.
+
+        // Convert to RgbImage for JPEG encoding (drops alpha channel)
+        let rgb_img = image::DynamicImage::ImageRgba8(img).to_rgb8();
+        rgb_img.write_to(&mut cursor, image::ImageFormat::Jpeg)?;
+
+        trace!(
+            "encode_jpeg_blocking {} ms",
+            encode_start.elapsed().as_millis()
+        );
 
         Ok(bytes)
     }
 
     /// Draws a single leaderboard entry at the given vertical position.
     fn draw_entry(
-        &self,
+        &mut self,
         img: &mut RgbaImage,
         y: u32,
         rank: u32,
-        avatar: Option<&DynamicImage>,
+        avatar: Option<&RgbaImage>,
         display_name: &str,
         duration: i64,
     ) -> Result<()> {
@@ -146,9 +283,8 @@ impl LeaderboardImageGenerator {
         let avatar_x = PADDING + rank_text_width as u32 + 5;
         let avatar_y = row_center_y.saturating_sub(AVATAR_SIZE / 2);
 
-        if let Some(avatar_img) = avatar {
-            let circular_avatar = self.make_circular(avatar_img, AVATAR_SIZE);
-            overlay(img, &circular_avatar, avatar_x as i64, avatar_y as i64);
+        if let Some(circular_avatar) = avatar {
+            overlay(img, circular_avatar, avatar_x as i64, avatar_y as i64);
         } else {
             // Draw placeholder circle - centered vertically
             let circle_cx = avatar_x + AVATAR_SIZE / 2;
@@ -183,101 +319,25 @@ impl LeaderboardImageGenerator {
         Ok(())
     }
 
-    /// Calculates the width of text at the given scale.
-    fn calculate_text_width(&self, text: &str, scale: PxScale) -> f32 {
+    /// Calculates the width of text at the given scale using cached glyph metrics.
+    fn calculate_text_width(&mut self, text: &str, scale: PxScale) -> f32 {
         let mut width = 0.0;
+        let scale_factor = scale.x / self.font.height_unscaled();
+
         for c in text.chars() {
-            let glyph_id = self.font.glyph_id(c);
-            let h_advance = self.font.h_advance_unscaled(glyph_id);
-            let scale_factor = scale.x / self.font.height_unscaled();
-            width += h_advance * scale_factor;
+            let cache = self.glyph_cache.entry(c).or_insert_with(|| {
+                let glyph_id = self.font.glyph_id(c);
+                let h_advance = self.font.h_advance_unscaled(glyph_id);
+                GlyphCache { h_advance }
+            });
+            width += cache.h_advance * scale_factor;
         }
         width
     }
 
-    /// Crops an image to a circular shape.
-    fn make_circular(&self, img: &DynamicImage, size: u32) -> RgbaImage {
-        // Resize image to desired size
-        let resized = img.resize_exact(size, size, FilterType::Lanczos3);
-
-        // Create circular mask
-        let mut circular = RgbaImage::new(size, size);
-        let center = size as f32 / 2.0;
-        let radius = size as f32 / 2.0;
-
-        for (x, y, pixel) in resized.pixels() {
-            let dx = x as f32 - center;
-            let dy = y as f32 - center;
-            let distance = (dx * dx + dy * dy).sqrt();
-
-            if distance <= radius {
-                circular.put_pixel(x, y, pixel);
-            } else {
-                circular.put_pixel(x, y, Rgba([0, 0, 0, 0])); // Transparent
-            }
-        }
-
-        circular
-    }
-
-    /// Draws a circular placeholder avatar.
-    fn draw_circle_placeholder(&self, img: &mut RgbaImage, cx: u32, cy: u32, radius: u32) {
-        for y in (cy.saturating_sub(radius))..=(cy + radius).min(img.height() - 1) {
-            for x in (cx.saturating_sub(radius))..=(cx + radius).min(img.width() - 1) {
-                let dx = x as f32 - cx as f32;
-                let dy = y as f32 - cy as f32;
-                let distance = (dx * dx + dy * dy).sqrt();
-
-                if distance <= radius as f32 {
-                    img.put_pixel(x, y, PLACEHOLDER_COLOR);
-                }
-            }
-        }
-    }
-
-    /// Downloads an avatar image from a URL.
-    async fn download_avatar_from_url(&self, url: &str) -> Result<DynamicImage> {
-        // Download avatar from the provided URL (could be WEBP or GIF)
-        let response = self.http_client.get(url).send().await?;
-
-        if !response.status().is_success() {
-            return Err(anyhow::anyhow!(
-                "Failed to download avatar: {}",
-                response.status()
-            ));
-        }
-
-        let bytes = response.bytes().await?;
-        let img = image::load_from_memory(&bytes)?;
-        Ok(img)
-    }
-
-    /// Downloads a Discord default avatar based on user ID.
-    async fn download_default_avatar(&self, user_id: u64) -> Result<DynamicImage> {
-        // Discord uses a discriminator-based default avatar if no custom avatar is set
-        let discriminator = user_id % 5;
-        let url = format!(
-            "https://cdn.discordapp.com/embed/avatars/{}.png",
-            discriminator
-        );
-
-        let response = self.http_client.get(&url).send().await?;
-
-        if !response.status().is_success() {
-            return Err(anyhow::anyhow!(
-                "Failed to download default avatar: {}",
-                response.status()
-            ));
-        }
-
-        let bytes = response.bytes().await?;
-        let img = image::load_from_memory(&bytes)?;
-        Ok(img)
-    }
-
-    /// Draws text onto the image at the given position.
+    /// Draws text onto the image at the given position using cached glyph metrics.
     fn draw_text(
-        &self,
+        &mut self,
         img: &mut RgbaImage,
         text: &str,
         mut x: f32,
@@ -287,10 +347,17 @@ impl LeaderboardImageGenerator {
     ) -> Result<()> {
         use ab_glyph::Glyph;
 
-        for c in text.chars() {
-            let glyph_id = self.font.glyph_id(c);
-            let h_advance_unscaled = self.font.h_advance_unscaled(glyph_id);
+        let scale_factor = scale.x / self.font.height_unscaled();
 
+        for c in text.chars() {
+            // Use cached glyph metrics
+            let cache = self.glyph_cache.entry(c).or_insert_with(|| {
+                let glyph_id = self.font.glyph_id(c);
+                let h_advance = self.font.h_advance_unscaled(glyph_id);
+                GlyphCache { h_advance }
+            });
+
+            let glyph_id = self.font.glyph_id(c);
             let glyph: Glyph = glyph_id.with_scale_and_position(scale.x, ab_glyph::point(x, y));
 
             if let Some(outlined) = self.font.outline_glyph(glyph) {
@@ -313,12 +380,26 @@ impl LeaderboardImageGenerator {
                 });
             }
 
-            // Advance x position for next character using unscaled advance
-            let scale_factor = scale.x / self.font.height_unscaled();
-            x += h_advance_unscaled * scale_factor;
+            // Advance x position using cached advance
+            x += cache.h_advance * scale_factor;
         }
 
         Ok(())
+    }
+
+    /// Draws a circular placeholder avatar.
+    fn draw_circle_placeholder(&self, img: &mut RgbaImage, cx: u32, cy: u32, radius: u32) {
+        for y in (cy.saturating_sub(radius))..=(cy + radius).min(img.height() - 1) {
+            for x in (cx.saturating_sub(radius))..=(cx + radius).min(img.width() - 1) {
+                let dx = x as f32 - cx as f32;
+                let dy = y as f32 - cy as f32;
+                let distance = (dx * dx + dy * dy).sqrt();
+
+                if distance <= radius as f32 {
+                    img.put_pixel(x, y, PLACEHOLDER_COLOR);
+                }
+            }
+        }
     }
 }
 

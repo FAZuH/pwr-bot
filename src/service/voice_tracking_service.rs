@@ -11,6 +11,7 @@ use crate::database::Database;
 use crate::database::model::ServerSettings;
 use crate::database::model::ServerSettingsModel;
 use crate::database::model::VoiceLeaderboardEntry;
+use crate::database::model::VoiceLeaderboardOpt;
 use crate::database::model::VoiceSessionsModel;
 use crate::database::table::Table;
 
@@ -82,6 +83,17 @@ impl VoiceTrackingService {
         };
         self.db.server_settings_table.replace(&model).await?;
         Ok(())
+    }
+
+    pub async fn get_leaderboard_withopt(
+        &self,
+        options: &VoiceLeaderboardOpt,
+    ) -> anyhow::Result<Vec<VoiceLeaderboardEntry>> {
+        Ok(self
+            .db
+            .voice_sessions_table
+            .get_leaderboard_opt(options)
+            .await?)
     }
 
     pub async fn get_leaderboard(

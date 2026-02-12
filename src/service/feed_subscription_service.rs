@@ -16,6 +16,7 @@ use crate::database::model::ServerSettingsModel;
 use crate::database::model::SubscriberModel;
 use crate::database::model::SubscriberType;
 use crate::database::table::Table;
+use crate::error::AppError;
 use crate::feed::PlatformInfo;
 use crate::feed::error::FeedError;
 use crate::feed::platforms::Platforms;
@@ -93,9 +94,9 @@ impl FeedSubscriptionService {
             .platforms
             .get_platform_by_source_url(&feed.source_url)
             .ok_or_else(|| {
-                ServiceError::DatabaseError(DatabaseError::InternalError {
-                    message: format!("Series feed source with url {} not found.", feed.source_url),
-                })
+                ServiceError::DatabaseError(DatabaseError::AppError(AppError::internal_with_ref(
+                    "Series feed source with url {} not found.",
+                )))
             })?;
 
         // Fetch current state from source

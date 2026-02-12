@@ -18,8 +18,8 @@ use crate::service::voice_tracking_service::VoiceTrackingService;
 /// File to store the last heartbeat timestamp.
 const HEARTBEAT_FILE: &str = "voice_heartbeat.json";
 
-/// Interval between heartbeats (5 minutes).
-const HEARTBEAT_INTERVAL_SECS: u64 = 300;
+/// Interval between heartbeats
+const HEARTBEAT_INTERVAL_SECS: u64 = 10;
 
 /// Data stored in the heartbeat file.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
