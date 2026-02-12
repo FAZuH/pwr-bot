@@ -13,7 +13,10 @@ use crate::database::model::ServerSettingsModel;
 use crate::database::model::SubscriberModel;
 use crate::database::model::SubscriberType;
 use crate::database::model::VoiceLeaderboardEntry;
+use crate::database::model::VoiceLeaderboardOpt;
+use crate::database::model::VoiceLeaderboardOptBuilder;
 use crate::database::model::VoiceSessionsModel;
+use crate::error::AppError;
 
 /// Base table struct providing database pool access.
 pub struct BaseTable {
@@ -684,14 +687,15 @@ impl_table!(
 );
 
 impl VoiceSessionsTable {
-    /// Get top users by voice duration in a guild
-    /// For active sessions (leave_time == join_time), uses current time as leave_time
-    pub async fn get_leaderboard(
+    pub async fn get_leaderboard_opt(
         &self,
-        guild_id: u64,
-        limit: u32,
+        opts: &VoiceLeaderboardOpt,
     ) -> Result<Vec<VoiceLeaderboardEntry>, DatabaseError> {
-        Ok(sqlx::query_as::<_, VoiceLeaderboardEntry>(
+        let limit = opts.limit.unwrap_or(10) as i64;
+        let offset = opts.offset.unwrap_or(0) as i64;
+
+        // Build query dynamically based on which filters are present
+        let mut query = String::from(
             r#"
             SELECT 
                 user_id, 
@@ -704,48 +708,62 @@ impl VoiceSessionsTable {
                 ) as total_duration
             FROM voice_sessions
             WHERE guild_id = ?
-            GROUP BY user_id
-            ORDER BY total_duration DESC
-            LIMIT ?
             "#,
-        )
-        .bind(guild_id as i64)
-        .bind(limit)
-        .fetch_all(&self.base.pool)
-        .await?)
+        );
+
+        // Add time range filters if provided
+        if opts.since.is_some() {
+            query.push_str(" AND join_time >= ?");
+        }
+        if opts.until.is_some() {
+            query.push_str(" AND join_time <= ?");
+        }
+
+        query.push_str(" GROUP BY user_id ORDER BY total_duration DESC LIMIT ? OFFSET ?");
+
+        // Build the query
+        let mut q = sqlx::query_as::<_, VoiceLeaderboardEntry>(&query).bind(opts.guild_id as i64);
+
+        // Bind time filters
+        if let Some(since) = opts.since {
+            q = q.bind(since);
+        }
+        if let Some(until) = opts.until {
+            q = q.bind(until);
+        }
+
+        // Bind limit and offset
+        q = q.bind(limit).bind(offset);
+
+        Ok(q.fetch_all(&self.base.pool).await?)
     }
 
-    /// Get paginated leaderboard with offset
-    /// For active sessions (leave_time == join_time), uses current time as leave_time
+    pub async fn get_leaderboard(
+        &self,
+        guild_id: u64,
+        limit: u32,
+    ) -> Result<Vec<VoiceLeaderboardEntry>, DatabaseError> {
+        let opts = VoiceLeaderboardOptBuilder::default()
+            .guild_id(guild_id)
+            .limit(Some(limit))
+            .build()
+            .map_err(AppError::from)?;
+        self.get_leaderboard_opt(&opts).await
+    }
+
     pub async fn get_leaderboard_with_offset(
         &self,
         guild_id: u64,
         offset: u32,
         limit: u32,
     ) -> Result<Vec<VoiceLeaderboardEntry>, DatabaseError> {
-        Ok(sqlx::query_as::<_, VoiceLeaderboardEntry>(
-            r#"
-            SELECT 
-                user_id, 
-                SUM(
-                    CASE 
-                        WHEN leave_time = join_time 
-                        THEN strftime('%s', 'now') - strftime('%s', join_time)
-                        ELSE strftime('%s', leave_time) - strftime('%s', join_time)
-                    END
-                ) as total_duration
-            FROM voice_sessions
-            WHERE guild_id = ?
-            GROUP BY user_id
-            ORDER BY total_duration DESC
-            LIMIT ? OFFSET ?
-            "#,
-        )
-        .bind(guild_id as i64)
-        .bind(limit)
-        .bind(offset)
-        .fetch_all(&self.base.pool)
-        .await?)
+        let opts = VoiceLeaderboardOptBuilder::default()
+            .guild_id(guild_id)
+            .offset(Some(offset))
+            .limit(Some(limit))
+            .build()
+            .map_err(AppError::from)?;
+        self.get_leaderboard_opt(&opts).await
     }
 
     /// Update leave_time for a specific session (user, channel, join_time combination)

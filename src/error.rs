@@ -7,6 +7,7 @@ use uuid::Uuid;
 
 use crate::database::error::DatabaseError;
 use crate::feed::error::FeedError;
+use crate::service::error::ServiceError;
 
 /// Application-level errors.
 #[derive(Debug, thiserror::Error)]
@@ -39,4 +40,5 @@ pub enum AppErrorKind {
     AppError(AppError),
     DatabaseError(DatabaseError),
     FeedError(FeedError),
+    ServiceError(ServiceError),
 }

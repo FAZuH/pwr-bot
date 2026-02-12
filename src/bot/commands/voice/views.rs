@@ -151,7 +151,7 @@ impl ResponseComponentView for VoiceLeaderboardView {
 
         container.push(CreateContainerComponent::MediaGallery(
             CreateMediaGallery::new(vec![CreateMediaGalleryItem::new(
-                CreateUnfurledMediaItem::new("attachment://voice_leaderboard.png"),
+                CreateUnfurledMediaItem::new("attachment://voice_leaderboard.jpg"),
             )]),
         ));
 
@@ -170,7 +170,7 @@ pub trait VoiceLeaderboardReply {
 
 impl VoiceLeaderboardReply for VoiceLeaderboardView {
     async fn create_leaderboard_reply(&self, image_data: Vec<u8>) -> CreateReply<'static> {
-        let attachment = CreateAttachment::bytes(image_data, "voice_leaderboard.png");
+        let attachment = CreateAttachment::bytes(image_data, "voice_leaderboard.jpg");
 
         CreateReply::new()
             .attachment(attachment)
