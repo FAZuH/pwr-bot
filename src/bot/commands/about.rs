@@ -69,7 +69,7 @@ impl<S: Send + Sync + 'static> Controller<S> for AboutController<'_> {
         let ctx = *coordinator.context();
         ctx.defer().await?;
 
-        let stats = gather_stats(&ctx).await?;
+        let stats = AboutStats::gather_stats(&ctx).await?;
         let avatar_url = ctx.cache().current_user().face();
         let mut view = AboutView::new(&ctx, stats, avatar_url);
 
@@ -222,60 +222,62 @@ struct AboutStats {
     current_year: i32,
 }
 
-/// Gathers bot statistics for the about command.
-async fn gather_stats(ctx: &Context<'_>) -> Result<AboutStats, Error> {
-    let start_time = ctx.data().start_time;
-    let uptime = start_time.elapsed();
+impl AboutStats {
+    /// Gathers bot statistics for the about command.
+    async fn gather_stats(ctx: &Context<'_>) -> Result<AboutStats, Error> {
+        let start_time = ctx.data().start_time;
+        let uptime = start_time.elapsed();
 
-    let guild_count = ctx.cache().guilds().len();
+        let guild_count = ctx.cache().guilds().len();
 
-    let user_count: usize = ctx
-        .cache()
-        .guilds()
-        .iter()
-        .filter_map(|guild_id| {
-            ctx.cache()
-                .guild(*guild_id)
-                .map(|guild| guild.member_count as usize)
+        let user_count: usize = ctx
+            .cache()
+            .guilds()
+            .iter()
+            .filter_map(|guild_id| {
+                ctx.cache()
+                    .guild(*guild_id)
+                    .map(|guild| guild.member_count as usize)
+            })
+            .sum();
+
+        // Make a request to Discord server to get latency
+        let latency_start = std::time::Instant::now();
+        let _ = ctx.http().get_current_user().await?;
+        let latency_ms = latency_start.elapsed().as_millis() as u64;
+
+        let command_count = ctx.framework().options().commands.len();
+
+        let memory_mb = Self::get_process_memory_mb();
+
+        let current_year = Utc::now().year();
+
+        Ok(AboutStats {
+            version: env!("CARGO_PKG_VERSION").to_string(),
+            uptime,
+            guild_count,
+            user_count,
+            latency_ms,
+            command_count,
+            memory_mb,
+            current_year,
         })
-        .sum();
-
-    // Make a request to Discord server to get latency
-    let latency_start = std::time::Instant::now();
-    let _ = ctx.http().get_current_user().await?;
-    let latency_ms = latency_start.elapsed().as_millis() as u64;
-
-    let command_count = ctx.framework().options().commands.len();
-
-    let memory_mb = get_process_memory_mb();
-
-    let current_year = Utc::now().year();
-
-    Ok(AboutStats {
-        version: env!("CARGO_PKG_VERSION").to_string(),
-        uptime,
-        guild_count,
-        user_count,
-        latency_ms,
-        command_count,
-        memory_mb,
-        current_year,
-    })
-}
-
-/// Gets the current process memory usage in megabytes.
-fn get_process_memory_mb() -> f64 {
-    use sysinfo::System;
-    use sysinfo::get_current_pid;
-
-    let mut s = System::new_all();
-    s.refresh_all();
-
-    if let Ok(pid) = get_current_pid()
-        && let Some(process) = s.process(pid)
-    {
-        return process.memory() as f64 / (1024.0 * 1024.0);
     }
 
-    0.0
+    /// Gets the current process memory usage in megabytes.
+    fn get_process_memory_mb() -> f64 {
+        use sysinfo::System;
+        use sysinfo::get_current_pid;
+
+        let mut s = System::new_all();
+        s.refresh_all();
+
+        if let Ok(pid) = get_current_pid()
+            && let Some(process) = s.process(pid)
+        {
+            return process.memory() as f64 / (1024.0 * 1024.0);
+        }
+
+        0.0
+    }
 }
