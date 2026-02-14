@@ -1,3 +1,15 @@
+## [0.2.4](https://github.com/FAZuH/pwr-bot/compare/v0.2.3...v0.2.4) (2026-02-14)
+
+
+### New Features
+
+* **bot:** Add options to disable app features ([27b6038](https://github.com/FAZuH/pwr-bot/commit/27b60386d4d061d589ae2ae770b7f10758af58d9))
+
+
+### UI/UX Changes
+
+* **bot:** Remove page navigation buttons on timeout ([ad28e23](https://github.com/FAZuH/pwr-bot/commit/ad28e231df2f1f68eb6fe3daa7575367b8d3d823))
+
 ## [0.2.3](https://github.com/FAZuH/pwr-bot/compare/v0.2.2...v0.2.3) (2026-02-14)
 
 
@@ -39,6 +51,4 @@
 * **bot:** Improve various command UI/UX ([81bb2e2](https://github.com/FAZuH/pwr-bot/commit/81bb2e234bae1f7d9301f3056559f098a517de88))
 * **bot:** Modify various command descriptions and UI text ([7e3f808](https://github.com/FAZuH/pwr-bot/commit/7e3f808246986505c8546f2cbe3018d18c5b26dd))
 * **bot:** Turn feature toggle into a button instead of a select menu ([d5a3355](https://github.com/FAZuH/pwr-bot/commit/d5a3355d2bb35ed674b408d1cf0b2d41765d93df))
-
-## [0.1.31](https://github.com/FAZuH/pwr-bot/compare/v0.1.30...v0.1.31) (2026-02-11)
 
