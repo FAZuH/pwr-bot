@@ -76,7 +76,7 @@ impl<S: Send + Sync + 'static> Controller<S> for AboutController<'_> {
         coordinator.send(view.create_reply()).await?;
 
         // Wait for user interaction (Back button)
-        if let Some((action, _)) = view.listen_once().await {
+        if let Some((action, _)) = view.listen_once().await? {
             match action {
                 AboutAction::Back => {
                     return Ok(NavigationResult::Back);

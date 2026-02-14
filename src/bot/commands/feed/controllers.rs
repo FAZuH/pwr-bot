@@ -137,7 +137,7 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for FeedSettingsController<'a> 
         let mut view = SettingsFeedView::new(&ctx, &mut settings);
         coordinator.send(view.create_reply()).await?;
 
-        while let Some((action, _)) = view.listen_once().await {
+        while let Some((action, _)) = view.listen_once().await? {
             if action == SettingsFeedAction::Back {
                 return Ok(NavigationResult::Back);
             } else if action == SettingsFeedAction::About {
@@ -186,7 +186,7 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for FeedSubscriptionsController
         let reply = view.create_reply();
         let msg_handle = ctx.send(reply).await?;
 
-        while view.listen_once().await.is_some() {
+        while view.listen_once().await?.is_some() {
             let subscriptions = service
                 .list_paginated_subscriptions(
                     &subscriber,
@@ -344,7 +344,7 @@ async fn process_subscription_batch(
 
     // Listen for "View Subscriptions" button click after final message
     if let Some(mut view) = view
-        && let Some((action, _)) = view.listen_once().await
+        && let Some((action, _)) = view.listen_once().await?
         && action == FeedSubscriptionBatchAction::ViewSubscriptions
     {
         // Convert subscriber type back to SendInto

@@ -43,7 +43,7 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for SettingsMainController<'a> 
         let mut view = SettingsMainView::new(&ctx, settings);
         coordinator.send(view.create_reply()).await?;
 
-        while let Some((action, _)) = view.listen_once().await {
+        while let Some((action, _)) = view.listen_once().await? {
             coordinator.edit(view.create_reply()).await?;
             if view.is_settings_modified {
                 ctx.data()

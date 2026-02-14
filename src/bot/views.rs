@@ -140,6 +140,12 @@ where
         None
     }
 
+    /// Callback to execute when the interaction is timed out.
+    #[allow(unused_variables)]
+    async fn on_timeout(&mut self) -> Result<(), Error> {
+        Ok(())
+    }
+
     /// Handles an interaction and returns the action if recognized.
     async fn handle(&mut self, interaction: &ComponentInteraction) -> Option<T> {
         let action = Self::get_action(interaction)?;
@@ -147,7 +153,7 @@ where
     }
 
     /// Waits for a single interaction and handles it.
-    async fn listen_once(&mut self) -> Option<(T, ComponentInteraction)> {
+    async fn listen_once(&mut self) -> Result<Option<(T, ComponentInteraction)>, Error> {
         let ctx = self.view_context();
         let mut collector = Self::create_collector(ctx).await;
 
@@ -156,18 +162,25 @@ where
             collector = collector.message_id(msg_id);
         }
 
-        let interaction = collector.next().await?;
+        let interaction = match collector.next().await {
+            Some(i) => i,
+            None => {
+                self.on_timeout().await?;
+                return Ok(None)
+            },
+        };
 
         interaction
             .create_response(ctx.poise_ctx.http(), CreateInteractionResponse::Acknowledge)
             .await
             .ok();
 
-        self.handle(&interaction)
+        Ok(self.handle(&interaction)
             .await
-            .map(|action| (action, interaction))
+            .map(|action| (action, interaction)))
     }
 
+    /// Create a collector to collect this interaction
     async fn create_collector(ctx: &ViewContext<'a, D>) -> ComponentInteractionCollector<'a> {
         let filter_ids = Self::collector_custom_id_filter();
         let mut collector = ComponentInteractionCollector::new(ctx.poise_ctx.serenity_context())
@@ -181,10 +194,12 @@ where
         collector
     }
 
+    /// Array or custom_id used to filter interactions
     fn collector_custom_id_filter() -> &'static [&'static str] {
         T::all()
     }
 
+    /// Convert [`ComponentInteraction`] into [`T`]
     fn get_action(interaction: &ComponentInteraction) -> Option<T> {
         T::from_str(&interaction.data.custom_id).ok()
     }
