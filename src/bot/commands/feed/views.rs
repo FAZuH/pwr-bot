@@ -25,9 +25,11 @@ use serenity::all::GenericChannelId;
 use serenity::all::RoleId;
 
 use crate::bot::commands::Context;
+use crate::bot::commands::Error;
 use crate::bot::views::Action;
 use crate::bot::views::InteractableComponentView;
 use crate::bot::views::ResponseComponentView;
+use crate::bot::views::StatefulView;
 use crate::bot::views::pagination::PaginationAction;
 use crate::bot::views::pagination::PaginationView;
 use crate::custom_id_enum;
@@ -328,6 +330,11 @@ impl<'a> InteractableComponentView<'a, FeedSubscriptionsListAction>
             }
             FeedSubscriptionsListAction::Exit => Some(action),
         }
+    }
+
+    async fn on_timeout(&mut self) -> Result<(), Error> {
+        let _ = self.pagination.on_timeout().await?;
+        self.edit().await
     }
 }
 
