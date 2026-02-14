@@ -1,3 +1,11 @@
+## [0.2.2](https://github.com/FAZuH/pwr-bot/compare/v0.2.1...v0.2.2) (2026-02-14)
+
+
+### UI/UX Changes
+
+* **bot:** Add select menu to select time range in /vc leaderboard ([37f42ba](https://github.com/FAZuH/pwr-bot/commit/37f42ba3e5dc201a257fe0046f12d81c5b760cc7))
+* **bot:** Improve /vc leaderboard image ([b330ee6](https://github.com/FAZuH/pwr-bot/commit/b330ee684d577e7eef344b41cca6517f4091a579))
+
 ## [0.2.1](https://github.com/FAZuH/pwr-bot/compare/v0.2.0...v0.2.1) (2026-02-12)
 
 
@@ -28,6 +36,4 @@
 ## [0.1.31](https://github.com/FAZuH/pwr-bot/compare/v0.1.30...v0.1.31) (2026-02-11)
 
 ## [0.1.30](https://github.com/FAZuH/pwr-bot/compare/v0.1.29...v0.1.30) (2026-02-11)
-
-## [0.1.29](https://github.com/FAZuH/pwr-bot/compare/v0.1.28...v0.1.29) (2026-02-10)
 
