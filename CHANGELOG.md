@@ -1,3 +1,10 @@
+## [0.2.3](https://github.com/FAZuH/pwr-bot/compare/v0.2.2...v0.2.3) (2026-02-14)
+
+
+### Bug Fixes
+
+* **bot:** Fix command count in /about command ([62bfcf6](https://github.com/FAZuH/pwr-bot/commit/62bfcf6ca83a2f31c26f450188f6d1f8c516e907))
+
 ## [0.2.2](https://github.com/FAZuH/pwr-bot/compare/v0.2.1...v0.2.2) (2026-02-14)
 
 
@@ -34,6 +41,4 @@
 * **bot:** Turn feature toggle into a button instead of a select menu ([d5a3355](https://github.com/FAZuH/pwr-bot/commit/d5a3355d2bb35ed674b408d1cf0b2d41765d93df))
 
 ## [0.1.31](https://github.com/FAZuH/pwr-bot/compare/v0.1.30...v0.1.31) (2026-02-11)
-
-## [0.1.30](https://github.com/FAZuH/pwr-bot/compare/v0.1.29...v0.1.30) (2026-02-11)
 
