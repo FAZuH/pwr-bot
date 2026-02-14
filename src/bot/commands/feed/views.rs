@@ -266,7 +266,7 @@ impl<'a> FeedSubscriptionsListView<'a> {
     fn create_subscription_section<'b>(sub: Subscription) -> CreateContainerComponent<'b> {
         let text = if let Some(latest) = sub.feed_latest {
             CreateTextDisplay::new(format!(
-                "### {}\n\n- **Last version**: {}\n- **Last updated**: <t:{}>\n- **Source**: <{}>",
+                "### {}\n\n- **Last version**: {}\n- **Last updated**: <t:{}>\n- [**Source** 🗗](<{}>)",
                 sub.feed.name,
                 latest.description,
                 latest.published.timestamp(),
