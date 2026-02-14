@@ -104,7 +104,7 @@ async fn setup_voice_tracking(
     init_start: Instant,
 ) -> Result<()> {
     if !config.features.voice_tracking {
-        return Ok(())
+        return Ok(());
     }
     let voice_heartbeat =
         VoiceHeartbeatManager::new(&config.data_path, services.voice_tracking.clone());
@@ -180,7 +180,7 @@ fn setup_publishers(
     init_start: Instant,
 ) -> Result<()> {
     if !config.features.feed_publisher {
-        return Ok(())
+        return Ok(());
     }
     debug!("Setting up Publishers...");
 

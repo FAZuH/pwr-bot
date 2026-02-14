@@ -7,6 +7,7 @@ use serenity::all::CreateActionRow;
 use serenity::all::CreateButton;
 use serenity::all::CreateComponent;
 
+use crate::bot::Error;
 use crate::bot::commands::Context;
 use crate::bot::views::Action;
 use crate::bot::views::InteractableComponentView;
@@ -99,6 +100,7 @@ stateful_view! {
     /// View that provides pagination controls for multi-page content.
     pub struct PaginationView<'a> {
         pub state: PaginationModel,
+        pub disabled: bool,
     }
 }
 
@@ -114,6 +116,7 @@ impl<'a> PaginationView<'a> {
         let model = PaginationModel::new(pages, per_page, 1);
         Self {
             state: model,
+            disabled: false,
             ctx: Self::create_context(ctx),
         }
     }
@@ -122,13 +125,14 @@ impl<'a> PaginationView<'a> {
     pub fn from_model(ctx: &'a Context<'a>, model: PaginationModel) -> Self {
         Self {
             state: model,
+            disabled: false,
             ctx: Self::create_context(ctx),
         }
     }
 
-    /// Attaches pagination controls only if there are multiple pages.
+    /// Attaches pagination controls only if there are multiple pages and not disabled.
     pub fn attach_if_multipage<'b>(&self, components: &mut impl Extend<CreateComponent<'b>>) {
-        if self.state.pages > 1 {
+        if !self.disabled && self.state.pages > 1 {
             components.extend(self.create_components());
         }
     }
@@ -136,6 +140,10 @@ impl<'a> PaginationView<'a> {
 
 impl<'a> ResponseComponentView for PaginationView<'a> {
     fn create_components<'b>(&self) -> Vec<CreateComponent<'b>> {
+        if self.disabled {
+            return vec![];
+        }
+
         let page_label = format!("{}/{}", self.state.current_page, self.state.pages);
 
         vec![CreateComponent::ActionRow(CreateActionRow::Buttons(
@@ -173,6 +181,12 @@ impl<'a> InteractableComponentView<'a, PaginationAction> for PaginationView<'a> 
             _ => return None,
         }
         Some(action)
+    }
+
+    /// Disables pagination controls when the view times out.
+    async fn on_timeout(&mut self) -> Result<(), Error> {
+        self.disabled = true;
+        Ok(())
     }
 }
 

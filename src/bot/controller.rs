@@ -5,18 +5,15 @@
 //! inversion - controllers receive a coordinator to manage message lifecycle,
 //! keeping controllers focused on their interactive logic.
 
-use poise::CreateReply;
-use poise::ReplyHandle;
-
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;
 use crate::bot::navigation::NavigationResult;
 
-/// Manages message lifecycle and provides context to controllers.
+/// Provides context and state management to controllers.
 ///
-/// The Coordinator handles Discord message operations (send/edit) and
-/// provides context to controllers. Controllers receive a reference to
-/// the coordinator to access context and update views.
+/// The Coordinator provides access to Discord context and state for controllers.
+/// Views handle their own message lifecycle via [`StatefulView`](crate::bot::views::StatefulView).
+/// Controllers receive a reference to the coordinator to access context and state.
 ///
 /// # Type Parameters
 ///
@@ -25,10 +22,9 @@ use crate::bot::navigation::NavigationResult;
 /// # Lifecycle
 ///
 /// 1. Create coordinator with [`Coordinator::new`]
-/// 2. Controllers call [`Coordinator::send`] to display initial view
-/// 3. Controllers call [`Coordinator::edit`] to update the view
-/// 4. Access Discord context via [`Coordinator::context`]
-/// 5. Access state via [`Coordinator::state`] and [`Coordinator::state_mut`]
+/// 2. Views handle sending/editing via [`StatefulView`](crate::bot::views::StatefulView)
+/// 3. Access Discord context via [`Coordinator::context`]
+/// 4. Access state via [`Coordinator::state`] and [`Coordinator::state_mut`]
 ///
 /// # Example
 ///
@@ -40,7 +36,6 @@ use crate::bot::navigation::NavigationResult;
 /// ```
 pub struct Coordinator<'a, S = ()> {
     ctx: Context<'a>,
-    msg_handle: Option<ReplyHandle<'a>>,
     state: S,
 }
 
@@ -57,11 +52,7 @@ impl<'a> Coordinator<'a, ()> {
     /// let coordinator = Coordinator::new(ctx, ());
     /// ```
     pub fn new(ctx: Context<'a>) -> Self {
-        Self {
-            ctx,
-            msg_handle: None,
-            state: (),
-        }
+        Self { ctx, state: () }
     }
 }
 
@@ -79,98 +70,7 @@ impl<'a, S> Coordinator<'a, S> {
     /// let coordinator = Coordinator::with_state(ctx, my_state);
     /// ```
     pub fn with_state(ctx: Context<'a>, state: S) -> Self {
-        Self {
-            ctx,
-            msg_handle: None,
-            state,
-        }
-    }
-
-    /// Sends the initial message with the given reply.
-    ///
-    /// This should be called once at the start of a controller's execution.
-    /// Subsequent updates should use [`Coordinator::edit`].
-    ///
-    /// # Parameters
-    ///
-    /// - `reply`: The reply to send (typically from `view.create_reply()`)
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(())` on success, or an error if the message fails to send.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// coordinator.send(view.create_reply()).await?;
-    /// ```
-    pub async fn send(&mut self, reply: CreateReply<'a>) -> Result<(), Error> {
-        self.msg_handle = Some(self.ctx.send(reply).await?);
-        Ok(())
-    }
-
-    /// Edits the current message with the given reply.
-    ///
-    /// Updates the previously sent message with new content. Does nothing
-    /// if no message has been sent yet.
-    ///
-    /// # Parameters
-    ///
-    /// - `reply`: The updated reply to display (typically from `view.create_reply()`)
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(())` on success, or an error if the edit fails.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// coordinator.edit(view.create_reply()).await?;
-    /// ```
-    pub async fn edit(&self, reply: CreateReply<'a>) -> Result<(), Error> {
-        if let Some(handle) = &self.msg_handle {
-            handle.edit(self.ctx, reply).await?;
-        }
-        Ok(())
-    }
-
-    /// Edits the existing message if one has been sent, otherwise sends a new message.
-    ///
-    /// This is a convenience method that handles both initial sends and subsequent
-    /// updates without needing to track whether `send()` was already called.
-    ///
-    /// # Parameters
-    ///
-    /// - `reply`: The reply to display (typically from `view.create_reply()`)
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(())` on success, or an error if the send or edit fails.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// coordinator.edit_or_send(view.create_reply()).await?;
-    /// ```
-    pub async fn edit_or_send(&mut self, reply: CreateReply<'a>) -> Result<(), Error> {
-        if let Some(handle) = &self.msg_handle {
-            handle.edit(self.ctx, reply).await?;
-        } else {
-            self.msg_handle = Some(self.ctx.send(reply).await?);
-        }
-        Ok(())
-    }
-
-    /// Returns a reference to the message handle, if a message has been sent.
-    ///
-    /// The handle can be used for advanced message operations not covered
-    /// by the coordinator's API.
-    ///
-    /// # Returns
-    ///
-    /// Returns `Some(&ReplyHandle)` if a message has been sent, `None` otherwise.
-    pub fn message_handle(&self) -> Option<&ReplyHandle<'a>> {
-        self.msg_handle.as_ref()
+        Self { ctx, state }
     }
 
     /// Returns the Discord command context.
@@ -230,8 +130,8 @@ impl<'a, S> Coordinator<'a, S> {
 /// #[async_trait::async_trait]
 /// impl<'a, S> Controller<S> for SettingsController<'a> {
 ///     async fn run(&mut self, coordinator: &mut Coordinator<'_, S>) -> Result<NavigationResult, Error> {
-///         // Send initial view
-///         coordinator.send(&self.view).await?;
+///         // Send initial view via StatefulView
+///         self.view.send().await?;
 ///         
 ///         // Listen for user interaction
 ///         let (action, _) = self.view.listen_once().await?;
@@ -249,14 +149,13 @@ pub trait Controller<S>: Send + Sync {
     /// user interactions until the controller decides to exit.
     ///
     /// The controller uses the provided coordinator to:
-    /// - Send the initial view
-    /// - Edit the view as state changes
     /// - Access Discord context
     /// - Read/write coordinator state
+    /// Views handle their own message lifecycle via [`StatefulView`](crate::bot::views::StatefulView).
     ///
     /// # Parameters
     ///
-    /// - `coordinator`: Reference to the coordinator for message operations
+    /// - `coordinator`: Reference to the coordinator for context and state
     ///
     /// # Returns
     ///
