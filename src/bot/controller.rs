@@ -52,10 +52,7 @@ impl<'a> Coordinator<'a, ()> {
     /// let coordinator = Coordinator::new(ctx, ());
     /// ```
     pub fn new(ctx: Context<'a>) -> Self {
-        Self {
-            ctx,
-            state: (),
-        }
+        Self { ctx, state: () }
     }
 }
 
@@ -73,10 +70,7 @@ impl<'a, S> Coordinator<'a, S> {
     /// let coordinator = Coordinator::with_state(ctx, my_state);
     /// ```
     pub fn with_state(ctx: Context<'a>, state: S) -> Self {
-        Self {
-            ctx,
-            state,
-        }
+        Self { ctx, state }
     }
 
     /// Returns the Discord command context.

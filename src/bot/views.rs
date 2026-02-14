@@ -8,8 +8,8 @@ use std::time::Duration;
 use poise::CreateReply;
 use poise::ReplyHandle;
 use serenity::all::ComponentInteraction;
-use serenity::all::CreateAttachment;
 use serenity::all::ComponentInteractionCollector;
+use serenity::all::CreateAttachment;
 use serenity::all::CreateComponent;
 use serenity::all::CreateInteractionResponse;
 use serenity::all::CreateMessage;
@@ -140,10 +140,7 @@ where
     }
 
     /// Edits the stored reply with updated components and an attachment.
-    async fn edit_with_attachment(
-        &self,
-        attachment: CreateAttachment<'a>,
-    ) -> Result<(), Error> {
+    async fn edit_with_attachment(&self, attachment: CreateAttachment<'a>) -> Result<(), Error> {
         if let Some(handle) = &self.view_context().reply_handle {
             let reply = self.create_reply().attachment(attachment);
             handle.edit(*self.view_context().poise_ctx, reply).await?;

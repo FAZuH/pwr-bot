@@ -188,7 +188,6 @@ impl<'a> InteractableComponentView<'a, PaginationAction> for PaginationView<'a> 
         self.disabled = true;
         Ok(())
     }
-
 }
 
 #[cfg(test)]

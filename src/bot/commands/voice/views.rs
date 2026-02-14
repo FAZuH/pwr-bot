@@ -217,7 +217,8 @@ impl<'a> StatefulView<'a, ()> for VoiceLeaderboardView<'a> {
     async fn edit(&self) -> Result<(), Error> {
         if let Some(handle) = &self.view_context().reply_handle {
             let reply = if let Some(ref bytes) = self.current_page_bytes {
-                let attachment = CreateAttachment::bytes(bytes.clone(), VOICE_LEADERBOARD_IMAGE_FILENAME);
+                let attachment =
+                    CreateAttachment::bytes(bytes.clone(), VOICE_LEADERBOARD_IMAGE_FILENAME);
                 self.create_reply().attachment(attachment)
             } else {
                 self.create_reply()
