@@ -11,8 +11,8 @@ use crate::bot::commands::Context;
 use crate::bot::commands::Error;
 
 pub mod controllers;
-pub mod image_generator;
 pub mod image_builder;
+pub mod image_generator;
 pub mod views;
 
 /// Cog for voice tracking commands.

@@ -159,10 +159,7 @@ where
         let interaction = collector.next().await?;
 
         interaction
-            .create_response(
-                ctx.poise_ctx.http(),
-                CreateInteractionResponse::Acknowledge,
-            )
+            .create_response(ctx.poise_ctx.http(), CreateInteractionResponse::Acknowledge)
             .await
             .ok();
 

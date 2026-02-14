@@ -138,7 +138,7 @@ stateful_view! {
     }
 }
 
-custom_id_extends! { VoiceLeaderboardAction extends PaginationAction { 
+custom_id_extends! { VoiceLeaderboardAction extends PaginationAction {
     TimeRange
 } }
 
@@ -149,14 +149,15 @@ impl<'a> VoiceLeaderboardView<'a> {
         leaderboard_data: LeaderboardSessionData,
         time_range: VoiceLeaderboardTimeRange,
     ) -> Self {
-        let pagination = PaginationView::new(ctx, leaderboard_data.len() as u32, LEADERBOARD_PER_PAGE);
+        let pagination =
+            PaginationView::new(ctx, leaderboard_data.len() as u32, LEADERBOARD_PER_PAGE);
         let page_builder = LeaderboardPageBuilder::new(ctx);
         Self {
             leaderboard_data,
             time_range,
             ctx: Self::create_context(ctx),
             pagination,
-            page_builder
+            page_builder,
         }
     }
 
@@ -195,7 +196,6 @@ impl<'a> VoiceLeaderboardView<'a> {
 }
 
 impl ResponseComponentView for VoiceLeaderboardView<'_> {
-
     fn create_components<'a>(&self) -> Vec<CreateComponent<'a>> {
         let mut container = vec![CreateContainerComponent::TextDisplay(
             CreateTextDisplay::new("### Voice Leaderboard"),
@@ -228,7 +228,7 @@ impl ResponseComponentView for VoiceLeaderboardView<'_> {
             true,
         )));
 
-        if self.leaderboard_data.is_empty(){
+        if self.leaderboard_data.is_empty() {
             container.push(CreateContainerComponent::TextDisplay(
                 CreateTextDisplay::new(
                     "No voice activity recorded yet at this time range.\n\nJoin a **voice channel** to start tracking!",
@@ -306,16 +306,21 @@ impl<'a> InteractableComponentView<'a, VoiceLeaderboardAction> for VoiceLeaderbo
                 VoiceLeaderboardAction::TimeRange,
                 ComponentInteractionDataKind::StringSelect { values },
             ) => {
-
-                if let Some(time_range) = values.iter().flat_map(|val| VoiceLeaderboardTimeRange::from_name(val)).next()
-                    && self.time_range != time_range {
-                        self.time_range = time_range;
-                        return Some(VoiceLeaderboardAction::TimeRange)
-                    }
+                if let Some(time_range) = values
+                    .iter()
+                    .flat_map(|val| VoiceLeaderboardTimeRange::from_name(val))
+                    .next()
+                    && self.time_range != time_range
+                {
+                    self.time_range = time_range;
+                    return Some(VoiceLeaderboardAction::TimeRange);
+                }
                 None
-            },
+            }
             (VoiceLeaderboardAction::Base(pagination_action), _) => {
-                Some(VoiceLeaderboardAction::Base(self.pagination.handle_action(pagination_action).await?))
+                Some(VoiceLeaderboardAction::Base(
+                    self.pagination.handle_action(pagination_action).await?,
+                ))
             }
             _ => None,
         }

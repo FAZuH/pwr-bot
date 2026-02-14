@@ -155,7 +155,7 @@ fn test_time_range_relative_durations() {
 
 #[test]
 fn test_leaderboard_entry_clone() {
-    use pwr_bot::bot::commands::voice::LeaderboardEntry;
+    use pwr_bot::bot::commands::voice::image_builder::LeaderboardEntry;
 
     let entry = LeaderboardEntry {
         rank: 1,

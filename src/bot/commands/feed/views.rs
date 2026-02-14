@@ -233,8 +233,11 @@ stateful_view! {
 }
 
 impl<'a> FeedSubscriptionsListView<'a> {
-
-    pub fn new(ctx: &'a Context<'a>, subscriptions: Vec<Subscription> , pagination: PaginationView<'a>) -> Self {
+    pub fn new(
+        ctx: &'a Context<'a>,
+        subscriptions: Vec<Subscription>,
+        pagination: PaginationView<'a>,
+    ) -> Self {
         Self {
             subscriptions,
             pagination,
@@ -305,17 +308,24 @@ impl<'a> ResponseComponentView for FeedSubscriptionsListView<'a> {
     }
 }
 
-custom_id_extends!{ FeedSubscriptionsListAction extends PaginationAction {
+custom_id_extends! { FeedSubscriptionsListAction extends PaginationAction {
     Exit,
 }}
 
 #[async_trait::async_trait]
-impl<'a> InteractableComponentView<'a, FeedSubscriptionsListAction> for FeedSubscriptionsListView<'a> {
-    async fn handle_action(&mut self, action: FeedSubscriptionsListAction) -> Option<FeedSubscriptionsListAction> {
+impl<'a> InteractableComponentView<'a, FeedSubscriptionsListAction>
+    for FeedSubscriptionsListView<'a>
+{
+    async fn handle_action(
+        &mut self,
+        action: FeedSubscriptionsListAction,
+    ) -> Option<FeedSubscriptionsListAction> {
         match action {
             FeedSubscriptionsListAction::Base(pagination_action) => {
-                Some(FeedSubscriptionsListAction::Base(self.pagination.handle_action(pagination_action).await?))
-            },
+                Some(FeedSubscriptionsListAction::Base(
+                    self.pagination.handle_action(pagination_action).await?,
+                ))
+            }
             FeedSubscriptionsListAction::Exit => Some(action),
         }
     }

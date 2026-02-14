@@ -590,7 +590,6 @@ impl Renderer {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

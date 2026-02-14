@@ -1,9 +1,14 @@
-use std::{collections::HashMap, time::Instant};
+use std::collections::HashMap;
+use std::time::Instant;
 
 use log::trace;
 use serenity::all::UserId;
 
-use crate::{bot::commands::{Context, Error, voice::image_generator::LeaderboardImageGenerator}, database::model::VoiceLeaderboardEntry, error::AppError};
+use crate::bot::commands::Context;
+use crate::bot::commands::Error;
+use crate::bot::commands::voice::image_generator::LeaderboardImageGenerator;
+use crate::database::model::VoiceLeaderboardEntry;
+use crate::error::AppError;
 
 /// A single entry in the voice leaderboard.
 #[derive(Clone)]

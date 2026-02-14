@@ -134,7 +134,6 @@ impl<'a, S> Coordinator<'a, S> {
         Ok(())
     }
 
-
     /// Edits the existing message if one has been sent, otherwise sends a new message.
     ///
     /// This is a convenience method that handles both initial sends and subsequent

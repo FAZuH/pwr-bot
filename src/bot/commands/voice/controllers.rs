@@ -103,7 +103,7 @@ impl LeaderboardSessionData {
 
 impl Deref for LeaderboardSessionData {
     type Target = Vec<VoiceLeaderboardEntry>;
-    
+
     fn deref(&self) -> &Self::Target {
         &self.entries
     }
@@ -123,7 +123,10 @@ impl<'a> VoiceLeaderboardController<'a> {
     }
 
     /// Fetches leaderboard entries for the current time range.
-    async fn fetch_entries(ctx: &Context<'_>, time_range: VoiceLeaderboardTimeRange) -> Result<LeaderboardSessionData, Error> {
+    async fn fetch_entries(
+        ctx: &Context<'_>,
+        time_range: VoiceLeaderboardTimeRange,
+    ) -> Result<LeaderboardSessionData, Error> {
         let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?.get();
         let (since, until) = time_range.to_range();
 
@@ -135,7 +138,8 @@ impl<'a> VoiceLeaderboardController<'a> {
             .build()
             .map_err(AppError::from)?;
 
-        let new_entries = ctx.data()
+        let new_entries = ctx
+            .data()
             .service
             .voice_tracking
             .get_leaderboard_withopt(&voice_lb_opts)

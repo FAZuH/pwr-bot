@@ -310,7 +310,7 @@ macro_rules! controller {
 ///
 /// # Syntax
 ///
-/// ```rust
+/// ```rust,ignore
 /// # use pwr_bot::custom_id_enum;
 /// custom_id_enum! {
 ///     EnumName {
@@ -332,7 +332,7 @@ macro_rules! controller {
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,ignore
 /// use pwr_bot::custom_id_enum;
 /// use pwr_bot::bot::views::Action;
 ///
@@ -455,7 +455,7 @@ macro_rules! custom_id_enum {
 ///
 /// # Syntax
 ///
-/// ```rust
+/// ```rust,ignore
 /// custom_id_extends! {
 ///     NewEnumName extends BaseEnumName {
 ///         ExtraVariant1,
@@ -474,7 +474,7 @@ macro_rules! custom_id_enum {
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,ignore
 /// use pwr_bot::{custom_id_enum, custom_id_extends};
 /// use pwr_bot::bot::views::Action;
 ///

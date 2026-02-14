@@ -132,9 +132,7 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for FeedSettingsController<'a> 
 
         let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?.get();
 
-        let mut settings = service
-            .get_server_settings(guild_id)
-            .await?;
+        let mut settings = service.get_server_settings(guild_id).await?;
 
         let mut view = SettingsFeedView::new(&ctx, &mut settings);
         coordinator.send(view.create_reply()).await?;
@@ -146,7 +144,9 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for FeedSettingsController<'a> 
                 return Ok(NavigationResult::SettingsAbout);
             }
 
-            service.update_server_settings(guild_id, view.settings.clone()).await?;
+            service
+                .update_server_settings(guild_id, view.settings.clone())
+                .await?;
 
             let reply = view.create_reply();
 
