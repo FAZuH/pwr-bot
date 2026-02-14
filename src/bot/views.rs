@@ -13,6 +13,7 @@ use serenity::all::CreateComponent;
 use serenity::all::CreateInteractionResponse;
 use serenity::all::CreateMessage;
 use serenity::all::MessageFlags;
+use serenity::all::MessageId;
 
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;
@@ -52,7 +53,7 @@ impl<'a, D> ViewContext<'a, D> {
     }
 
     /// Gets the message ID for filtering interactions, if available.
-    pub async fn message_id(&self) -> Option<serenity::all::MessageId> {
+    pub async fn message_id(&self) -> Option<MessageId> {
         self.reply_handle
             .as_ref()?
             .message()
@@ -130,19 +131,25 @@ where
 #[async_trait::async_trait]
 pub trait InteractableComponentView<'a, T, D = ()>: StatefulView<'a, D>
 where
-    T: Action,
+    for<'async_trait> T: Action + 'async_trait,
     D: Send + Sync + 'static,
 {
+    /// Handles an action and returns the next action if any.
+    #[allow(unused_variables)]
+    async fn handle_action(&mut self, action: T) -> Option<T> {
+        None
+    }
+
     /// Handles an interaction and returns the action if recognized.
-    async fn handle(&mut self, interaction: &ComponentInteraction) -> Option<T>;
+    async fn handle(&mut self, interaction: &ComponentInteraction) -> Option<T> {
+        let action = Self::get_action(interaction)?;
+        self.handle_action(action).await
+    }
 
     /// Waits for a single interaction and handles it.
     async fn listen_once(&mut self) -> Option<(T, ComponentInteraction)> {
         let ctx = self.view_context();
-        let mut collector = ComponentInteractionCollector::new(ctx.poise_ctx.serenity_context())
-            .author_id(ctx.poise_ctx.author().id)
-            .timeout(ctx.timeout)
-            .filter(move |i| T::ALL.contains(&i.data.custom_id.as_str()));
+        let mut collector = Self::create_collector(ctx).await;
 
         // Filter by message ID if we have a reply handle
         if let Some(msg_id) = ctx.message_id().await {
@@ -152,10 +159,7 @@ where
         let interaction = collector.next().await?;
 
         interaction
-            .create_response(
-                self.view_context().poise_ctx.http(),
-                CreateInteractionResponse::Acknowledge,
-            )
+            .create_response(ctx.poise_ctx.http(), CreateInteractionResponse::Acknowledge)
             .await
             .ok();
 
@@ -163,12 +167,33 @@ where
             .await
             .map(|action| (action, interaction))
     }
+
+    async fn create_collector(ctx: &ViewContext<'a, D>) -> ComponentInteractionCollector<'a> {
+        let filter_ids = Self::collector_custom_id_filter();
+        let mut collector = ComponentInteractionCollector::new(ctx.poise_ctx.serenity_context())
+            .author_id(ctx.poise_ctx.author().id)
+            .timeout(ctx.timeout)
+            .filter(move |i| filter_ids.contains(&i.data.custom_id.as_str()));
+
+        if let Some(id) = ctx.message_id().await {
+            collector = collector.message_id(id);
+        }
+        collector
+    }
+
+    fn collector_custom_id_filter() -> &'static [&'static str] {
+        T::all()
+    }
+
+    fn get_action(interaction: &ComponentInteraction) -> Option<T> {
+        T::from_str(&interaction.data.custom_id).ok()
+    }
 }
 
 /// Trait for action enums used in interactive views.
 pub trait Action: FromStr + Send {
     /// All possible action strings.
-    const ALL: &'static [&'static str];
+    fn all() -> &'static [&'static str];
 
     /// Returns the custom_id for this action.
     fn custom_id(&self) -> &'static str;

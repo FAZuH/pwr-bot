@@ -3,14 +3,10 @@
 use std::time::Instant;
 
 use poise::ChoiceParameter;
-use poise::CreateReply;
 use poise::ReplyHandle;
 use serenity::all::AutocompleteChoice;
 use serenity::all::CreateAutocompleteResponse;
-use serenity::all::CreateInteractionResponse;
-use serenity::all::CreateInteractionResponseMessage;
 use serenity::all::GuildId;
-use serenity::all::MessageFlags;
 use serenity::all::RoleId;
 use serenity::all::UserId;
 
@@ -132,38 +128,29 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for FeedSettingsController<'a> 
     ) -> Result<NavigationResult, Error> {
         let ctx = *coordinator.context();
         ctx.defer().await?;
+        let service = ctx.data().service.feed_subscription.clone();
+
         let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?.get();
 
-        let mut settings = ctx
-            .data()
-            .service
-            .feed_subscription
-            .get_server_settings(guild_id)
-            .await?;
+        let mut settings = service.get_server_settings(guild_id).await?;
 
         let mut view = SettingsFeedView::new(&ctx, &mut settings);
         coordinator.send(view.create_reply()).await?;
 
-        while let Some((action, interaction)) = view.listen_once().await {
+        while let Some((action, _)) = view.listen_once().await {
             if action == SettingsFeedAction::Back {
                 return Ok(NavigationResult::Back);
             } else if action == SettingsFeedAction::About {
                 return Ok(NavigationResult::SettingsAbout);
             }
 
-            ctx.data()
-                .service
-                .feed_subscription
+            service
                 .update_server_settings(guild_id, view.settings.clone())
                 .await?;
 
-            let reply = CreateInteractionResponse::UpdateMessage(
-                CreateInteractionResponseMessage::new()
-                    .flags(MessageFlags::IS_COMPONENTS_V2)
-                    .components(view.create_components()),
-            );
+            let reply = view.create_reply();
 
-            interaction.create_response(ctx.http(), reply).await?;
+            coordinator.edit(reply).await?;
         }
 
         Ok(NavigationResult::Exit)
@@ -185,54 +172,34 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for FeedSubscriptionsController
 
         let subscriber = get_or_create_subscriber(ctx, &self.send_into).await?;
 
-        let total_items = ctx
-            .data()
-            .service
-            .feed_subscription
-            .get_subscription_count(&subscriber)
-            .await?;
+        let service = ctx.data().service.feed_subscription.clone();
 
-        let subscriptions = ctx
-            .data()
-            .service
-            .feed_subscription
+        let total_items = service.get_subscription_count(&subscriber).await?;
+
+        let subscriptions = service
             .list_paginated_subscriptions(&subscriber, 1u32, SUBSCRIPTIONS_PER_PAGE)
             .await?;
 
-        let mut view = FeedSubscriptionsListView::new(subscriptions);
-        let mut pagination = PaginationView::new(&ctx, total_items, SUBSCRIPTIONS_PER_PAGE);
+        let pagination = PaginationView::new(&ctx, total_items, SUBSCRIPTIONS_PER_PAGE);
+        let mut view = FeedSubscriptionsListView::new(&ctx, subscriptions, pagination);
 
-        let mut components = view.create_components();
-        pagination.attach_if_multipage(&mut components);
+        let reply = view.create_reply();
+        let msg_handle = ctx.send(reply).await?;
 
-        let msg = CreateReply::new()
-            .flags(MessageFlags::IS_COMPONENTS_V2)
-            .components(components);
-
-        let msg_handle = ctx.send(msg).await?;
-
-        while (pagination.listen_once().await).is_some() {
-            let subscriptions = ctx
-                .data()
-                .service
-                .feed_subscription
+        while view.listen_once().await.is_some() {
+            let subscriptions = service
                 .list_paginated_subscriptions(
                     &subscriber,
-                    pagination.state.current_page,
+                    view.pagination.state.current_page,
                     SUBSCRIPTIONS_PER_PAGE,
                 )
                 .await?;
 
             view.set_subscriptions(subscriptions);
 
-            let mut components = view.create_components();
-            pagination.attach_if_multipage(&mut components);
+            let reply = view.create_reply();
 
-            let msg = CreateReply::new()
-                .flags(MessageFlags::IS_COMPONENTS_V2)
-                .components(components);
-
-            msg_handle.edit(ctx, msg).await?;
+            msg_handle.edit(ctx, reply).await?;
         }
 
         Ok(NavigationResult::Exit)
