@@ -50,7 +50,7 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceSettingsController<'a>
         let mut view = SettingsVoiceView::new(&ctx, settings);
         coordinator.send(view.create_reply()).await?;
 
-        while let Some((action, _interaction)) = view.listen_once().await {
+        while let Some((action, _interaction)) = view.listen_once().await? {
             match action {
                 SettingsVoiceAction::Back => return Ok(NavigationResult::Back),
                 SettingsVoiceAction::About => {
@@ -185,7 +185,7 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceLeaderboardController<
             controller_start.elapsed().as_millis()
         );
 
-        while let Some((action, _)) = view.listen_once().await {
+        while let Some((action, _)) = view.listen_once().await? {
             if matches!(action, VoiceLeaderboardAction::TimeRange) {
                 let new_data = Self::fetch_entries(&ctx, view.time_range).await?;
                 view.update_leaderboard_data(new_data);
