@@ -156,8 +156,8 @@ Copyright © 2025-{} FAZuH  —  v{}",
             Self::format_uptime(self.stats.uptime),
             Self::format_number(self.stats.guild_count),
             Self::format_number(self.stats.user_count),
-            self.stats.latency_ms,
             self.stats.command_count,
+            self.stats.latency_ms,
             self.stats.memory_mb,
             self.stats.current_year,
             self.stats.version,
@@ -246,7 +246,7 @@ impl AboutStats {
         let _ = ctx.http().get_current_user().await?;
         let latency_ms = latency_start.elapsed().as_millis() as u64;
 
-        let command_count = ctx.framework().options().commands.len();
+        let command_count = Self::count_commands(&ctx.framework().options().commands);
 
         let memory_mb = Self::get_process_memory_mb();
 
@@ -262,6 +262,12 @@ impl AboutStats {
             memory_mb,
             current_year,
         })
+    }
+
+    fn count_commands<U, E>(commands: &[Command<U, E>]) -> usize {
+        commands.iter().map(|cmd| {
+            1 + Self::count_commands(&cmd.subcommands)
+        }).sum()
     }
 
     /// Gets the current process memory usage in megabytes.
