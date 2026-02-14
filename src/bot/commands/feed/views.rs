@@ -265,24 +265,26 @@ impl<'a> FeedSubscriptionsListView<'a> {
     /// Creates a section component for a single subscription.
     fn create_subscription_section<'b>(sub: Subscription) -> CreateContainerComponent<'b> {
         let text = if let Some(latest) = sub.feed_latest {
-            CreateTextDisplay::new(format!(
+            format!(
                 "### {}\n\n- **Last version**: {}\n- **Last updated**: <t:{}>\n- [**Source** 🗗](<{}>)",
                 sub.feed.name,
                 latest.description,
                 latest.published.timestamp(),
                 sub.feed.source_url
-            ))
+            )
         } else {
-            CreateTextDisplay::new(format!(
-                "### {}\n\n> No latest version found.\n- **Source**: <{}>",
+            format!(
+                "### {}\n\n> No latest version found.\n- [**Source** 🗗](<{}>)",
                 sub.feed.name, sub.feed.source_url
-            ))
+            )
         };
+
+        let text_component = CreateTextDisplay::new(text);
 
         let thumbnail = CreateThumbnail::new(CreateUnfurledMediaItem::new(sub.feed.cover_url));
 
         CreateContainerComponent::Section(CreateSection::new(
-            vec![CreateSectionComponent::TextDisplay(text)],
+            vec![CreateSectionComponent::TextDisplay(text_component)],
             CreateSectionAccessory::Thumbnail(thumbnail),
         ))
     }
