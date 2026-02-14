@@ -7,6 +7,7 @@ use serenity::all::ButtonStyle;
 use serenity::all::ComponentInteraction;
 use serenity::all::ComponentInteractionDataKind;
 use serenity::all::CreateActionRow;
+use serenity::all::CreateAttachment;
 use serenity::all::CreateButton;
 use serenity::all::CreateComponent;
 use serenity::all::CreateContainer;
@@ -30,6 +31,8 @@ use crate::bot::utils::format_duration;
 use crate::bot::views::Action;
 use crate::bot::views::InteractableComponentView;
 use crate::bot::views::ResponseComponentView;
+use crate::bot::views::StatefulView;
+use crate::bot::views::ViewContext;
 use crate::bot::views::pagination::PaginationAction;
 use crate::bot::views::pagination::PaginationView;
 use crate::custom_id_enum;
@@ -128,14 +131,14 @@ impl<'a> InteractableComponentView<'a, SettingsVoiceAction> for SettingsVoiceVie
     }
 }
 
-stateful_view! {
-    timeout = Duration::from_secs(120),
-    pub struct VoiceLeaderboardView<'a> {
-        pub leaderboard_data: LeaderboardSessionData,
-        pub time_range: VoiceLeaderboardTimeRange,
-        pub pagination: PaginationView<'a>,
-        pub page_builder: LeaderboardPageBuilder<'a>,
-    }
+/// View for displaying voice leaderboard with pagination.
+pub struct VoiceLeaderboardView<'a> {
+    ctx: ViewContext<'a, ()>,
+    pub leaderboard_data: LeaderboardSessionData,
+    pub time_range: VoiceLeaderboardTimeRange,
+    pub pagination: PaginationView<'a>,
+    pub page_builder: LeaderboardPageBuilder<'a>,
+    current_page_bytes: Option<Vec<u8>>,
 }
 
 custom_id_extends! { VoiceLeaderboardAction extends PaginationAction {
@@ -155,9 +158,10 @@ impl<'a> VoiceLeaderboardView<'a> {
         Self {
             leaderboard_data,
             time_range,
-            ctx: Self::create_context(ctx),
+            ctx: ViewContext::new(ctx, Duration::from_secs(120)),
             pagination,
             page_builder,
+            current_page_bytes: None,
         }
     }
 
@@ -192,6 +196,36 @@ impl<'a> VoiceLeaderboardView<'a> {
             self.leaderboard_data.len() as u32,
             LEADERBOARD_PER_PAGE,
         );
+    }
+
+    /// Sets the current page image bytes for attachment on edit.
+    pub fn set_current_page_bytes(&mut self, bytes: Vec<u8>) {
+        self.current_page_bytes = Some(bytes);
+    }
+}
+
+#[async_trait::async_trait]
+impl<'a> StatefulView<'a, ()> for VoiceLeaderboardView<'a> {
+    fn view_context(&self) -> &crate::bot::views::ViewContext<'a, ()> {
+        &self.ctx
+    }
+
+    fn view_context_mut(&mut self) -> &mut crate::bot::views::ViewContext<'a, ()> {
+        &mut self.ctx
+    }
+
+    async fn edit(&self) -> Result<(), Error> {
+        if let Some(handle) = &self.view_context().reply_handle {
+            let reply = if let Some(ref bytes) = self.current_page_bytes {
+                let attachment =
+                    CreateAttachment::bytes(bytes.clone(), VOICE_LEADERBOARD_IMAGE_FILENAME);
+                self.create_reply().attachment(attachment)
+            } else {
+                self.create_reply()
+            };
+            handle.edit(*self.view_context().poise_ctx, reply).await?;
+        }
+        Ok(())
     }
 }
 
@@ -324,6 +358,11 @@ impl<'a> InteractableComponentView<'a, VoiceLeaderboardAction> for VoiceLeaderbo
             }
             _ => None,
         }
+    }
+
+    async fn on_timeout(&mut self) -> Result<(), Error> {
+        let _ = self.pagination.on_timeout().await?;
+        self.edit().await
     }
 }
 

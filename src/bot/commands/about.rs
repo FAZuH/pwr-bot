@@ -30,6 +30,7 @@ use crate::bot::navigation::NavigationResult;
 use crate::bot::views::Action;
 use crate::bot::views::InteractableComponentView;
 use crate::bot::views::ResponseComponentView;
+use crate::bot::views::StatefulView;
 use crate::controller;
 use crate::custom_id_enum;
 use crate::stateful_view;
@@ -73,7 +74,7 @@ impl<S: Send + Sync + 'static> Controller<S> for AboutController<'_> {
         let avatar_url = ctx.cache().current_user().face();
         let mut view = AboutView::new(&ctx, stats, avatar_url);
 
-        coordinator.send(view.create_reply()).await?;
+        view.send().await?;
 
         // Wait for user interaction (Back button)
         if let Some((action, _)) = view.listen_once().await? {

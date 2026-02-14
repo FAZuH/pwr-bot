@@ -17,6 +17,7 @@ pub mod task;
 use std::sync::Arc;
 use std::time::Instant;
 
+use anyhow::Result;
 use dotenv::dotenv;
 use log::debug;
 use log::info;
@@ -37,24 +38,51 @@ use crate::task::series_feed_publisher::SeriesFeedPublisher;
 use crate::task::voice_heartbeat::VoiceHeartbeatManager;
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    let init_start = Instant::now();
+async fn main() -> Result<()> {
     dotenv().ok();
 
+    let init_start = Instant::now();
+    let config = load_config().await?;
+    let event_bus = Arc::new(EventBus::new());
+
+    let db = setup_database(&config, init_start).await?;
+    let platforms = Arc::new(Platforms::new());
+    let services = setup_services(db.clone(), platforms.clone()).await?;
+
+    setup_voice_tracking(&config, &services, init_start).await?;
+
+    let voice_subscriber = Arc::new(VoiceStateSubscriber::new(services.clone()));
+    let bot = setup_bot(
+        &config,
+        db.clone(),
+        event_bus.clone(),
+        platforms,
+        services.clone(),
+        voice_subscriber.clone(),
+        init_start,
+    )
+    .await?;
+
+    setup_subscribers(event_bus.clone(), bot.clone(), db.clone(), voice_subscriber).await?;
+    setup_publishers(&config, &services, event_bus.clone(), init_start)?;
+
+    run(init_start).await
+}
+
+async fn load_config() -> Result<Arc<Config>> {
+    debug!("Loading configuration...");
     let mut config = Config::new();
     config.load()?;
     let config = Arc::new(config);
-
     setup_logging(&config)?;
-
     info!("Starting pwr-bot...");
+    Ok(config)
+}
 
-    debug!("Setting up EventBus...");
-    let event_bus = Arc::new(EventBus::new());
-
-    // Setup database
+async fn setup_database(config: &Config, init_start: Instant) -> Result<Arc<Database>> {
     debug!("Setting up Database...");
     let db = Arc::new(Database::new(&config.db_url, &config.db_path).await?);
+
     info!("Running database migrations...");
     db.run_migrations().await?;
     info!(
@@ -62,38 +90,60 @@ async fn main() -> anyhow::Result<()> {
         init_start.elapsed().as_secs_f64()
     );
 
-    // Setup Platforms
-    debug!("Setting up Platforms...");
-    let platforms = Arc::new(Platforms::new());
+    Ok(db)
+}
 
-    // Setup Services
+async fn setup_services(db: Arc<Database>, platforms: Arc<Platforms>) -> Result<Arc<Services>> {
     debug!("Setting up Services...");
-    let services = Arc::new(Services::new(db.clone(), platforms.clone()).await?);
+    Ok(Arc::new(Services::new(db, platforms).await?))
+}
 
-    // Perform voice tracking crash recovery before starting the bot
+async fn setup_voice_tracking(
+    config: &Config,
+    services: &Services,
+    init_start: Instant,
+) -> Result<()> {
+    if !config.features.voice_tracking {
+        return Ok(());
+    }
     let voice_heartbeat =
         VoiceHeartbeatManager::new(&config.data_path, services.voice_tracking.clone());
+
     info!("Performing voice tracking crash recovery...");
     let recovered = voice_heartbeat.recover_from_crash().await?;
     if recovered > 0 {
         info!("Recovered {} orphaned voice sessions", recovered);
     }
+
     voice_heartbeat.start().await;
+    debug!(
+        "Voice tracking setup complete ({:.2}s).",
+        init_start.elapsed().as_secs_f64()
+    );
 
-    // Create voice_subscriber first (needed by BotEventHandler)
-    let voice_subscriber = Arc::new(VoiceStateSubscriber::new(services.clone()));
+    Ok(())
+}
 
-    // Setup & start bot (needs voice_subscriber for voice channel scanning)
+async fn setup_bot(
+    config: &Arc<Config>,
+    db: Arc<Database>,
+    event_bus: Arc<EventBus>,
+    platforms: Arc<Platforms>,
+    services: Arc<Services>,
+    voice_subscriber: Arc<VoiceStateSubscriber>,
+    init_start: Instant,
+) -> Result<Arc<Bot>> {
     info!("Starting bot...");
     let mut bot = Bot::new(
         config.clone(),
-        db.clone(),
-        event_bus.clone(),
-        platforms.clone(),
-        services.clone(),
-        voice_subscriber.clone(),
+        db,
+        event_bus,
+        platforms,
+        services,
+        voice_subscriber,
     )
     .await?;
+
     bot.start();
     let bot = Arc::new(bot);
     info!(
@@ -101,42 +151,61 @@ async fn main() -> anyhow::Result<()> {
         init_start.elapsed().as_secs_f64()
     );
 
-    // Setup subscribers
-    let discord_dm_subscriber = Arc::new(DiscordDmSubscriber::new(bot.clone(), db.clone()));
-    let discord_channel_subscriber = Arc::new(DiscordGuildSubscriber::new(bot.clone(), db.clone()));
+    Ok(bot)
+}
 
+async fn setup_subscribers(
+    event_bus: Arc<EventBus>,
+    bot: Arc<Bot>,
+    db: Arc<Database>,
+    voice_subscriber: Arc<VoiceStateSubscriber>,
+) -> Result<()> {
     debug!("Setting up Subscribers...");
-    event_bus
-        .register_subcriber::<FeedUpdateEvent, _>(discord_dm_subscriber.clone())
-        .register_subcriber::<FeedUpdateEvent, _>(discord_channel_subscriber.clone())
-        .register_subcriber::<VoiceStateEvent, _>(voice_subscriber.clone());
-    info!(
-        "Subscribers setup complete ({:.2}s).",
-        init_start.elapsed().as_secs_f64()
-    );
 
-    // Setup publishers
+    let discord_dm_subscriber = Arc::new(DiscordDmSubscriber::new(bot.clone(), db.clone()));
+    let discord_channel_subscriber = Arc::new(DiscordGuildSubscriber::new(bot, db));
+
+    event_bus
+        .register_subcriber::<FeedUpdateEvent, _>(discord_dm_subscriber)
+        .register_subcriber::<FeedUpdateEvent, _>(discord_channel_subscriber)
+        .register_subcriber::<VoiceStateEvent, _>(voice_subscriber);
+
+    Ok(())
+}
+
+fn setup_publishers(
+    config: &Config,
+    services: &Services,
+    event_bus: Arc<EventBus>,
+    init_start: Instant,
+) -> Result<()> {
+    if !config.features.feed_publisher {
+        return Ok(());
+    }
     debug!("Setting up Publishers...");
+
     SeriesFeedPublisher::new(
         services.feed_subscription.clone(),
-        event_bus.clone(),
+        event_bus,
         config.poll_interval,
     )
     .start()?;
+
     info!(
         "Publishers setup complete ({:.2}s).",
         init_start.elapsed().as_secs_f64()
     );
+    Ok(())
+}
 
-    // Listen for exit signal
-    let init_done = init_start.elapsed();
+async fn run(init_start: Instant) -> Result<()> {
     info!(
         "pwr-bot is up in {:.2}s. Press Ctrl+C to stop.",
-        init_done.as_secs_f64()
+        init_start.elapsed().as_secs_f64()
     );
+
     tokio::signal::ctrl_c().await?;
     info!("Ctrl+C received, shutting down.");
-    // Stop publishers
 
     Ok(())
 }

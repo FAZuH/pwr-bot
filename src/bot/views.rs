@@ -9,6 +9,7 @@ use poise::CreateReply;
 use poise::ReplyHandle;
 use serenity::all::ComponentInteraction;
 use serenity::all::ComponentInteractionCollector;
+use serenity::all::CreateAttachment;
 use serenity::all::CreateComponent;
 use serenity::all::CreateInteractionResponse;
 use serenity::all::CreateMessage;
@@ -116,12 +117,33 @@ where
         Ok(())
     }
 
+    /// Sends this view with an attachment and stores the reply handle.
+    async fn send_with_attachment(
+        &mut self,
+        attachment: CreateAttachment<'a>,
+    ) -> Result<(), Error> {
+        let reply = self.create_reply().attachment(attachment);
+        let ctx = self.view_context_mut();
+        let handle = ctx.poise_ctx.send(reply).await?;
+        ctx.reply_handle = Some(handle);
+        Ok(())
+    }
+
     /// Edits the stored reply with updated components.
     async fn edit(&self) -> Result<(), Error> {
         if let Some(handle) = &self.view_context().reply_handle {
             handle
                 .edit(*self.view_context().poise_ctx, self.create_reply())
                 .await?;
+        }
+        Ok(())
+    }
+
+    /// Edits the stored reply with updated components and an attachment.
+    async fn edit_with_attachment(&self, attachment: CreateAttachment<'a>) -> Result<(), Error> {
+        if let Some(handle) = &self.view_context().reply_handle {
+            let reply = self.create_reply().attachment(attachment);
+            handle.edit(*self.view_context().poise_ctx, reply).await?;
         }
         Ok(())
     }
@@ -166,8 +188,8 @@ where
             Some(i) => i,
             None => {
                 self.on_timeout().await?;
-                return Ok(None)
-            },
+                return Ok(None);
+            }
         };
 
         interaction
@@ -175,7 +197,8 @@ where
             .await
             .ok();
 
-        Ok(self.handle(&interaction)
+        Ok(self
+            .handle(&interaction)
             .await
             .map(|action| (action, interaction)))
     }

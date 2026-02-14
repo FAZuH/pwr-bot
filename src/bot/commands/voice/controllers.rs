@@ -22,6 +22,7 @@ use crate::bot::error::BotError;
 use crate::bot::navigation::NavigationResult;
 use crate::bot::views::InteractableComponentView;
 use crate::bot::views::ResponseComponentView;
+use crate::bot::views::StatefulView;
 use crate::controller;
 use crate::database::model::VoiceLeaderboardEntry;
 use crate::database::model::VoiceLeaderboardOptBuilder;
@@ -48,7 +49,7 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceSettingsController<'a>
             .map_err(Error::from)?;
 
         let mut view = SettingsVoiceView::new(&ctx, settings);
-        coordinator.send(view.create_reply()).await?;
+        view.send().await?;
 
         while let Some((action, _interaction)) = view.listen_once().await? {
             match action {
@@ -65,7 +66,7 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceSettingsController<'a>
                         .await
                         .map_err(Error::from)?;
 
-                    coordinator.edit(view.create_reply()).await?;
+                    view.edit().await?;
                 }
             }
         }
@@ -175,10 +176,10 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceLeaderboardController<
 
         // Generate and send initial page
         let page_result = view.generate_current_page().await?;
+        view.set_current_page_bytes(page_result.image_bytes.clone());
         let attachment =
             CreateAttachment::bytes(page_result.image_bytes, VOICE_LEADERBOARD_IMAGE_FILENAME);
-        let reply = view.create_reply().attachment(attachment);
-        coordinator.send(reply).await?;
+        view.send_with_attachment(attachment).await?;
 
         trace!(
             "controller_initial_response {} ms",
@@ -191,10 +192,10 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceLeaderboardController<
                 view.update_leaderboard_data(new_data);
             }
             let page_result = view.generate_current_page().await?;
+            view.set_current_page_bytes(page_result.image_bytes.clone());
             let attachment =
                 CreateAttachment::bytes(page_result.image_bytes, VOICE_LEADERBOARD_IMAGE_FILENAME);
-            let reply = view.create_reply().attachment(attachment);
-            coordinator.edit(reply).await?;
+            view.edit_with_attachment(attachment).await?;
         }
 
         trace!(

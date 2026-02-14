@@ -3,7 +3,6 @@
 use std::time::Instant;
 
 use poise::ChoiceParameter;
-use poise::ReplyHandle;
 use serenity::all::AutocompleteChoice;
 use serenity::all::CreateAutocompleteResponse;
 use serenity::all::GuildId;
@@ -26,7 +25,7 @@ use crate::bot::error::BotError;
 use crate::bot::navigation::NavigationResult;
 use crate::bot::utils::parse_and_validate_urls;
 use crate::bot::views::InteractableComponentView;
-use crate::bot::views::ResponseComponentView;
+use crate::bot::views::StatefulView;
 use crate::bot::views::pagination::PaginationView;
 use crate::controller;
 use crate::database::model::FeedModel;
@@ -135,7 +134,7 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for FeedSettingsController<'a> 
         let mut settings = service.get_server_settings(guild_id).await?;
 
         let mut view = SettingsFeedView::new(&ctx, &mut settings);
-        coordinator.send(view.create_reply()).await?;
+        view.send().await?;
 
         while let Some((action, _)) = view.listen_once().await? {
             if action == SettingsFeedAction::Back {
@@ -148,9 +147,7 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for FeedSettingsController<'a> 
                 .update_server_settings(guild_id, view.settings.clone())
                 .await?;
 
-            let reply = view.create_reply();
-
-            coordinator.edit(reply).await?;
+            view.edit().await?;
         }
 
         Ok(NavigationResult::Exit)
@@ -183,8 +180,7 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for FeedSubscriptionsController
         let pagination = PaginationView::new(&ctx, total_items, SUBSCRIPTIONS_PER_PAGE);
         let mut view = FeedSubscriptionsListView::new(&ctx, subscriptions, pagination);
 
-        let reply = view.create_reply();
-        let msg_handle = ctx.send(reply).await?;
+        view.send().await?;
 
         while view.listen_once().await?.is_some() {
             let subscriptions = service
@@ -197,9 +193,7 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for FeedSubscriptionsController
 
             view.set_subscriptions(subscriptions);
 
-            let reply = view.create_reply();
-
-            msg_handle.edit(ctx, reply).await?;
+            view.edit().await?;
         }
 
         Ok(NavigationResult::Exit)
@@ -305,7 +299,6 @@ async fn process_subscription_batch(
 ) -> Result<(), Error> {
     let mut states: Vec<String> = vec!["⏳ Processing...".to_string(); urls.len()];
     let mut last_send = Instant::now();
-    let mut msg_handle: Option<ReplyHandle<'_>> = None;
     let mut view: Option<FeedSubscriptionBatchView> = None;
 
     for (i, url) in urls.iter().enumerate() {
@@ -329,11 +322,11 @@ async fn process_subscription_batch(
 
         let is_final = i + 1 == urls.len();
         if last_send.elapsed().as_secs() > UPDATE_INTERVAL_SECS || is_final {
-            let batch_view = FeedSubscriptionBatchView::new(&ctx, states.clone(), is_final);
-            let resp = batch_view.create_reply();
-            match msg_handle {
-                None => msg_handle = Some(ctx.send(resp).await?),
-                Some(ref handle) => handle.edit(ctx, resp).await?,
+            let mut batch_view = FeedSubscriptionBatchView::new(&ctx, states.clone(), is_final);
+            if view.is_none() {
+                batch_view.send().await?;
+            } else {
+                batch_view.edit().await?;
             }
             if is_final {
                 view = Some(batch_view);
