@@ -28,7 +28,10 @@ use crate::bot::commands::Context;
 use crate::bot::views::Action;
 use crate::bot::views::InteractableComponentView;
 use crate::bot::views::ResponseComponentView;
+use crate::bot::views::pagination::PaginationAction;
+use crate::bot::views::pagination::PaginationView;
 use crate::custom_id_enum;
+use crate::custom_id_extends;
 use crate::database::model::ServerSettings;
 use crate::service::feed_subscription_service::Subscription;
 use crate::stateful_view;
@@ -190,7 +193,7 @@ impl<'a> InteractableComponentView<'a, SettingsFeedAction> for SettingsFeedView<
         let data = &interaction.data;
 
         let settings = &mut self.settings.feeds;
-        match (&data.kind, action) {
+        match (&data.kind, action.clone()) {
             (ComponentInteractionDataKind::Button, SettingsFeedAction::Enabled) => {
                 let current = settings.enabled.unwrap_or(true);
                 settings.enabled = Some(!current);
@@ -221,15 +224,25 @@ impl<'a> InteractableComponentView<'a, SettingsFeedAction> for SettingsFeedView<
     }
 }
 
-/// View that displays a list of feed subscriptions.
-pub struct FeedSubscriptionsListView {
-    subscriptions: Vec<Subscription>,
+stateful_view! {
+    timeout = Duration::from_secs(120),
+    pub struct FeedSubscriptionsListView<'a> {
+        subscriptions: Vec<Subscription>,
+        pub pagination: PaginationView<'a>,
+    }
 }
 
-impl FeedSubscriptionsListView {
-    /// Creates a new subscriptions list view.
-    pub fn new(subscriptions: Vec<Subscription>) -> Self {
-        Self { subscriptions }
+impl<'a> FeedSubscriptionsListView<'a> {
+    pub fn new(
+        ctx: &'a Context<'a>,
+        subscriptions: Vec<Subscription>,
+        pagination: PaginationView<'a>,
+    ) -> Self {
+        Self {
+            subscriptions,
+            pagination,
+            ctx: Self::create_context(ctx),
+        }
     }
 
     /// Updates the subscriptions list.
@@ -239,7 +252,7 @@ impl FeedSubscriptionsListView {
     }
 
     /// Creates an empty state view.
-    fn create_empty<'a>() -> Vec<CreateComponent<'a>> {
+    fn create_empty<'b>() -> Vec<CreateComponent<'b>> {
         vec![CreateComponent::Container(CreateContainer::new(vec![
             CreateContainerComponent::TextDisplay(CreateTextDisplay::new(
                 "You have no subscriptions.",
@@ -248,7 +261,7 @@ impl FeedSubscriptionsListView {
     }
 
     /// Creates a section component for a single subscription.
-    fn create_subscription_section<'a>(sub: Subscription) -> CreateContainerComponent<'a> {
+    fn create_subscription_section<'b>(sub: Subscription) -> CreateContainerComponent<'b> {
         let text = if let Some(latest) = sub.feed_latest {
             CreateTextDisplay::new(format!(
                 "### {}\n\n- **Last version**: {}\n- **Last updated**: <t:{}>\n- **Source**: <{}>",
@@ -273,13 +286,13 @@ impl FeedSubscriptionsListView {
     }
 }
 
-impl ResponseComponentView for FeedSubscriptionsListView {
-    fn create_components<'a>(&self) -> Vec<CreateComponent<'a>> {
+impl<'a> ResponseComponentView for FeedSubscriptionsListView<'a> {
+    fn create_components<'b>(&self) -> Vec<CreateComponent<'b>> {
         if self.subscriptions.is_empty() {
             return Self::create_empty();
         }
 
-        let sections: Vec<CreateContainerComponent<'a>> = self
+        let sections: Vec<CreateContainerComponent<'b>> = self
             .subscriptions
             .clone()
             .into_iter()
@@ -287,7 +300,34 @@ impl ResponseComponentView for FeedSubscriptionsListView {
             .collect();
 
         let container = CreateComponent::Container(CreateContainer::new(sections));
-        vec![container]
+        let mut components = vec![container];
+
+        self.pagination.attach_if_multipage(&mut components);
+
+        components
+    }
+}
+
+custom_id_extends! { FeedSubscriptionsListAction extends PaginationAction {
+    Exit,
+}}
+
+#[async_trait::async_trait]
+impl<'a> InteractableComponentView<'a, FeedSubscriptionsListAction>
+    for FeedSubscriptionsListView<'a>
+{
+    async fn handle_action(
+        &mut self,
+        action: FeedSubscriptionsListAction,
+    ) -> Option<FeedSubscriptionsListAction> {
+        match action {
+            FeedSubscriptionsListAction::Base(pagination_action) => {
+                Some(FeedSubscriptionsListAction::Base(
+                    self.pagination.handle_action(pagination_action).await?,
+                ))
+            }
+            FeedSubscriptionsListAction::Exit => Some(action),
+        }
     }
 }
 

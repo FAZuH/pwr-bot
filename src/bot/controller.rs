@@ -134,6 +134,33 @@ impl<'a, S> Coordinator<'a, S> {
         Ok(())
     }
 
+    /// Edits the existing message if one has been sent, otherwise sends a new message.
+    ///
+    /// This is a convenience method that handles both initial sends and subsequent
+    /// updates without needing to track whether `send()` was already called.
+    ///
+    /// # Parameters
+    ///
+    /// - `reply`: The reply to display (typically from `view.create_reply()`)
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` on success, or an error if the send or edit fails.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// coordinator.edit_or_send(view.create_reply()).await?;
+    /// ```
+    pub async fn edit_or_send(&mut self, reply: CreateReply<'a>) -> Result<(), Error> {
+        if let Some(handle) = &self.msg_handle {
+            handle.edit(self.ctx, reply).await?;
+        } else {
+            self.msg_handle = Some(self.ctx.send(reply).await?);
+        }
+        Ok(())
+    }
+
     /// Returns a reference to the message handle, if a message has been sent.
     ///
     /// The handle can be used for advanced message operations not covered

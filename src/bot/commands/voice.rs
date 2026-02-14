@@ -9,28 +9,11 @@ use poise::ChoiceParameter;
 use crate::bot::commands::Cog;
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;
-use crate::database::model::VoiceLeaderboardEntry;
 
 pub mod controllers;
+pub mod image_builder;
 pub mod image_generator;
 pub mod views;
-
-/// A single entry in the voice leaderboard.
-#[derive(Clone)]
-pub struct LeaderboardEntry {
-    pub rank: u32,
-    pub user_id: u64,
-    pub display_name: String,
-    pub avatar_url: String,
-    pub duration_seconds: i64,
-    pub avatar_image: Option<image::DynamicImage>,
-}
-
-/// Result of generating a leaderboard page.
-pub struct PageGenerationResult {
-    pub entries_with_names: Vec<(VoiceLeaderboardEntry, String)>,
-    pub image_bytes: Vec<u8>,
-}
 
 /// Cog for voice tracking commands.
 pub struct VoiceCog;
@@ -64,7 +47,7 @@ impl VoiceCog {
     #[poise::command(slash_command)]
     pub async fn leaderboard(
         ctx: Context<'_>,
-        #[description = "Time period to filter voice activity. Defaults to \"Past month\""]
+        #[description = "Time period to filter voice activity. Defaults to \"This month\""]
         time_range: Option<VoiceLeaderboardTimeRange>,
     ) -> Result<(), Error> {
         controllers::leaderboard(
@@ -82,7 +65,7 @@ impl Cog for VoiceCog {
 }
 
 /// Time range filter for voice activity leaderboard.
-#[derive(ChoiceParameter, Clone, Copy, Debug)]
+#[derive(ChoiceParameter, Clone, Copy, Debug, PartialEq)]
 pub enum VoiceLeaderboardTimeRange {
     /// From 00:00 today until now
     Today,
@@ -178,5 +161,32 @@ impl VoiceLeaderboardTimeRange {
     /// Returns (since, until) where until is always now
     pub fn to_range(self) -> (DateTime<Utc>, DateTime<Utc>) {
         (self.into(), Utc::now())
+    }
+
+    /// Returns the user-facing name for this time range.
+    pub fn name(&self) -> &'static str {
+        match self {
+            VoiceLeaderboardTimeRange::Today => "Today",
+            VoiceLeaderboardTimeRange::Past3Days => "Past 3 days",
+            VoiceLeaderboardTimeRange::ThisWeek => "This week",
+            VoiceLeaderboardTimeRange::Past2Weeks => "Past 2 weeks",
+            VoiceLeaderboardTimeRange::ThisMonth => "This month",
+            VoiceLeaderboardTimeRange::ThisYear => "This year",
+            VoiceLeaderboardTimeRange::AllTime => "All time",
+        }
+    }
+
+    /// Returns the user-facing name for this time range.
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "Today" => Some(VoiceLeaderboardTimeRange::Today),
+            "Past 3 days" => Some(VoiceLeaderboardTimeRange::Past3Days),
+            "This week" => Some(VoiceLeaderboardTimeRange::ThisWeek),
+            "Past 2 weeks" => Some(VoiceLeaderboardTimeRange::Past2Weeks),
+            "This month" => Some(VoiceLeaderboardTimeRange::ThisMonth),
+            "This year" => Some(VoiceLeaderboardTimeRange::ThisYear),
+            "All time" => Some(VoiceLeaderboardTimeRange::AllTime),
+            _ => None,
+        }
     }
 }
