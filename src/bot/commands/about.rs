@@ -265,9 +265,10 @@ impl AboutStats {
     }
 
     fn count_commands<U, E>(commands: &[Command<U, E>]) -> usize {
-        commands.iter().map(|cmd| {
-            1 + Self::count_commands(&cmd.subcommands)
-        }).sum()
+        commands
+            .iter()
+            .map(|cmd| 1 + Self::count_commands(&cmd.subcommands))
+            .sum()
     }
 
     /// Gets the current process memory usage in megabytes.
