@@ -278,7 +278,10 @@ macro_rules! controller {
     (
         $(#[$meta:meta])*
         $vis:vis struct $name:ident<$lt:lifetime> {
-            $($field:ident : $field_type:ty),* $(,)?
+            $(
+                $(#[$field_meta:meta])*
+                $field:ident : $field_type:ty
+            ),* $(,)?
         }
     ) => {
         $(#[$meta])*
@@ -286,7 +289,7 @@ macro_rules! controller {
             #[allow(dead_code)]
             ctx: &$lt $crate::bot::commands::Context<$lt>,
             $(
-                #[doc = concat!("Field `", stringify!($field), "`.")]
+                $(#[$field_meta])*
                 pub $field: $field_type,
             )*
         }
