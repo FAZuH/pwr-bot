@@ -3,11 +3,15 @@
 //! This module provides the settings coordinator and reusable view components
 //! for settings interfaces.
 
+use std::time::Duration;
+
 use serenity::all::ButtonStyle;
 use serenity::all::CreateActionRow;
 use serenity::all::CreateButton;
 use serenity::all::CreateComponent;
 
+use crate::bot::views::View;
+use crate::action_enum;
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;
 use crate::bot::commands::about::AboutController;
@@ -19,70 +23,56 @@ use crate::bot::controller::Coordinator;
 use crate::bot::navigation::NavigationResult;
 use crate::bot::views::Action;
 use crate::bot::views::ResponseKind;
-use crate::bot::views::ResponseProvider;
-use crate::custom_id_enum;
+use crate::bot::views::ResponseView;
+use crate::view_core;
 
-/// Navigation bar for settings views.
-///
-/// Provides a consistent navigation bar with optional back button,
-/// about button, and help button (placeholder).
-pub struct SettingsNavigationView {
-    /// Whether to show the back button
-    show_back: bool,
-    /// Whether to show the help button (currently disabled)
-    show_help: bool,
+view_core! {
+    timeout = Duration::from_secs(120),
+    /// Navigation bar for settings views.
+    ///
+    /// Provides a consistent navigation bar with optional back button,
+    /// about button, and help button (placeholder).
+    pub struct SettingsNavigationView<'a, SettingsNavAction> {
+        /// Whether to show the back button
+        show_back: bool,
+        /// Whether to show the help button (currently disabled)
+        #[allow(dead_code)]
+        show_help: bool,
+    }
 }
 
-impl SettingsNavigationView {
+impl<'a> SettingsNavigationView<'a> {
     /// Creates a new navigation view for the main settings page.
-    pub fn main() -> Self {
+    pub fn main(ctx: &'a Context<'a>) -> Self {
         Self {
             show_back: false,
             show_help: false,
+            core: Self::create_core(ctx)
         }
-    }
-
-    /// Creates a new navigation view for nested settings pages.
-    pub fn nested() -> Self {
-        Self {
-            show_back: true,
-            show_help: false,
-        }
-    }
-
-    /// Sets whether to show the back button.
-    pub fn with_back(mut self, show: bool) -> Self {
-        self.show_back = show;
-        self
-    }
-
-    /// Sets whether to show the help button.
-    ///
-    /// Note: Help functionality is not yet implemented.
-    pub fn with_help(mut self, show: bool) -> Self {
-        self.show_help = show;
-        self
     }
 }
 
-custom_id_enum! {
+action_enum! {
     SettingsNavAction {
         /// Navigate back to the parent settings page
-        Back = "< Back",
+        #[label = "< Back"]
+        Back,
         /// Show information about the bot
-        About = "🛈 About",
+        #[label = "🛈 About"]
+        About,
         /// Show help (not yet implemented)
-        Help = "Help",
+        #[label = "Help"]
+        Help,
     }
 }
 
-impl ResponseProvider for SettingsNavigationView {
-    fn create_response<'a>(&self) -> ResponseKind<'a> {
+impl<'a> ResponseView<'a> for SettingsNavigationView<'a> {
+    fn create_response<'b>(&mut self) -> ResponseKind<'b> {
         let mut buttons = Vec::new();
 
         if self.show_back {
             buttons.push(
-                CreateButton::new(SettingsNavAction::Back.custom_id())
+                CreateButton::new(self.register(SettingsNavAction::Back))
                     .label(SettingsNavAction::Back.label())
                     .style(ButtonStyle::Secondary),
             );
@@ -98,7 +88,7 @@ impl ResponseProvider for SettingsNavigationView {
         // }
 
         buttons.push(
-            CreateButton::new(SettingsNavAction::About.custom_id())
+            CreateButton::new(self.register(SettingsNavAction::About))
                 .label(SettingsNavAction::About.label())
                 .style(ButtonStyle::Secondary),
         );

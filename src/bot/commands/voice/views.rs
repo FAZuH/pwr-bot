@@ -1,6 +1,5 @@
 //! Views for voice tracking commands.
 
-use std::str::FromStr;
 use std::time::Duration;
 
 use serenity::all::ButtonStyle;
@@ -21,6 +20,8 @@ use serenity::all::CreateSeparator;
 use serenity::all::CreateTextDisplay;
 use serenity::all::CreateUnfurledMediaItem;
 
+use crate::action_enum;
+use crate::action_extends;
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;
 use crate::bot::commands::voice::VoiceLeaderboardTimeRange;
@@ -29,34 +30,35 @@ use crate::bot::commands::voice::image_builder::LeaderboardPageBuilder;
 use crate::bot::commands::voice::image_builder::PageGenerationResult;
 use crate::bot::utils::format_duration;
 use crate::bot::views::Action;
-use crate::bot::views::InteractableComponentView;
+use crate::bot::views::InteractiveView;
 use crate::bot::views::ResponseKind;
-use crate::bot::views::ResponseProvider;
-use crate::bot::views::StatefulView;
-use crate::bot::views::ViewContext;
+use crate::bot::views::ResponseView;
+use crate::bot::views::View;
 use crate::bot::views::pagination::PaginationAction;
 use crate::bot::views::pagination::PaginationView;
-use crate::custom_id_enum;
-use crate::custom_id_extends;
 use crate::database::model::ServerSettings;
-use crate::stateful_view;
+use crate::view_core;
 
 /// Number of leaderboard entries per page.
 const LEADERBOARD_PER_PAGE: u32 = 10;
 
-custom_id_enum!(SettingsVoiceAction {
-    ToggleEnabled,
-    Back = "❮ Back",
-    About = "🛈 About",
-});
+action_enum! {
+    SettingsVoiceAction {
+        ToggleEnabled,
+        #[label = "❮ Back"]
+        Back,
+        #[label = "🛈 About"]
+        About,
+    }
+}
 
 /// Filename for the voice leaderboard image attachment.
 pub const VOICE_LEADERBOARD_IMAGE_FILENAME: &str = "voice_leaderboard.jpg";
 
-stateful_view! {
+view_core! {
     timeout = Duration::from_secs(120),
     /// View for voice tracking settings.
-    pub struct SettingsVoiceView<'a> {
+    pub struct SettingsVoiceView<'a, SettingsVoiceAction> {
         pub settings: ServerSettings,
     }
 }
@@ -66,13 +68,13 @@ impl<'a> SettingsVoiceView<'a> {
     pub fn new(ctx: &'a Context<'a>, settings: ServerSettings) -> Self {
         Self {
             settings,
-            ctx: Self::create_context(ctx),
+            core: Self::create_core(ctx),
         }
     }
 }
 
-impl<'a> ResponseProvider for SettingsVoiceView<'a> {
-    fn create_response<'b>(&self) -> ResponseKind<'b> {
+impl<'a> ResponseView<'a> for SettingsVoiceView<'a> {
+    fn create_response<'b>(&mut self) -> ResponseKind<'b> {
         let is_enabled = self.settings.voice.enabled.unwrap_or(true);
 
         let status_text = format!(
@@ -84,7 +86,9 @@ impl<'a> ResponseProvider for SettingsVoiceView<'a> {
             }
         );
 
-        let enabled_button = CreateButton::new(SettingsVoiceAction::ToggleEnabled.custom_id())
+        let registry = &mut self.core_mut().registry;
+        let enabled_id = registry.register(SettingsVoiceAction::ToggleEnabled);
+        let enabled_button = CreateButton::new(enabled_id)
             .label(if is_enabled { "Disable" } else { "Enable" })
             .style(if is_enabled {
                 ButtonStyle::Danger
@@ -99,12 +103,15 @@ impl<'a> ResponseProvider for SettingsVoiceView<'a> {
             )),
         ]));
 
+        let back_id = registry.register(SettingsVoiceAction::Back);
+        let about_id = registry.register(SettingsVoiceAction::About);
+
         let nav_buttons = CreateComponent::ActionRow(CreateActionRow::Buttons(
             vec![
-                CreateButton::new(SettingsVoiceAction::Back.custom_id())
+                CreateButton::new(back_id)
                     .label(SettingsVoiceAction::Back.label())
                     .style(ButtonStyle::Secondary),
-                CreateButton::new(SettingsVoiceAction::About.custom_id())
+                CreateButton::new(about_id)
                     .label(SettingsVoiceAction::About.label())
                     .style(ButtonStyle::Secondary),
             ]
@@ -116,35 +123,40 @@ impl<'a> ResponseProvider for SettingsVoiceView<'a> {
 }
 
 #[async_trait::async_trait]
-impl<'a> InteractableComponentView<'a, SettingsVoiceAction> for SettingsVoiceView<'a> {
-    async fn handle(&mut self, interaction: &ComponentInteraction) -> Option<SettingsVoiceAction> {
-        let action = SettingsVoiceAction::from_str(&interaction.data.custom_id).ok()?;
-
-        match (&action, &interaction.data.kind) {
-            (SettingsVoiceAction::ToggleEnabled, ComponentInteractionDataKind::Button) => {
+impl<'a> InteractiveView<'a, SettingsVoiceAction> for SettingsVoiceView<'a> {
+    async fn handle(
+        &mut self,
+        action: &SettingsVoiceAction,
+        _interaction: &ComponentInteraction,
+    ) -> Option<SettingsVoiceAction> {
+        match action {
+            SettingsVoiceAction::ToggleEnabled => {
                 let current = self.settings.voice.enabled.unwrap_or(true);
                 self.settings.voice.enabled = Some(!current);
-                Some(action)
+                Some(action.clone())
             }
-            (SettingsVoiceAction::Back, _) | (SettingsVoiceAction::About, _) => Some(action),
-            _ => None,
+            SettingsVoiceAction::Back | SettingsVoiceAction::About => Some(action.clone()),
         }
     }
 }
 
-/// View for displaying voice leaderboard with pagination.
-pub struct VoiceLeaderboardView<'a> {
-    ctx: ViewContext<'a>,
-    pub leaderboard_data: LeaderboardSessionData,
-    pub time_range: VoiceLeaderboardTimeRange,
-    pub pagination: PaginationView<'a>,
-    pub page_builder: LeaderboardPageBuilder<'a>,
-    current_page_bytes: Option<Vec<u8>>,
+view_core! {
+    timeout = Duration::from_secs(120),
+    /// View for displaying voice leaderboard with pagination.
+    pub struct VoiceLeaderboardView<'a, VoiceLeaderboardAction> {
+        pub leaderboard_data: LeaderboardSessionData,
+        pub time_range: VoiceLeaderboardTimeRange,
+        pub pagination: PaginationView<'a>,
+        pub page_builder: LeaderboardPageBuilder<'a>,
+        current_page_bytes: Option<Vec<u8>>,
+    }
 }
 
-custom_id_extends! { VoiceLeaderboardAction extends PaginationAction {
-    TimeRange
-} }
+action_extends! {
+    VoiceLeaderboardAction extends PaginationAction {
+        TimeRange,
+    }
+}
 
 impl<'a> VoiceLeaderboardView<'a> {
     /// Creates a new leaderboard view.
@@ -159,10 +171,10 @@ impl<'a> VoiceLeaderboardView<'a> {
         Self {
             leaderboard_data,
             time_range,
-            ctx: ViewContext::new(ctx, Duration::from_secs(120)),
             pagination,
             page_builder,
             current_page_bytes: None,
+            core: Self::create_core(ctx),
         }
     }
 
@@ -192,8 +204,9 @@ impl<'a> VoiceLeaderboardView<'a> {
     /// Updates the leaderboard data and resets pagination to page 1.
     pub fn update_leaderboard_data(&mut self, data: LeaderboardSessionData) {
         self.leaderboard_data = data;
+        let poise_ctx = self.core().ctx.poise_ctx;
         self.pagination = PaginationView::new(
-            self.ctx.poise_ctx,
+            poise_ctx,
             self.leaderboard_data.len() as u32,
             LEADERBOARD_PER_PAGE,
         );
@@ -203,35 +216,31 @@ impl<'a> VoiceLeaderboardView<'a> {
     pub fn set_current_page_bytes(&mut self, bytes: Vec<u8>) {
         self.current_page_bytes = Some(bytes);
     }
-}
 
-#[async_trait::async_trait]
-impl<'a> StatefulView<'a> for VoiceLeaderboardView<'a> {
-    fn view_context(&self) -> &ViewContext<'a> {
-        &self.ctx
+    /// Sends the view with the given attachment.
+    pub async fn send_with_attachment(
+        &mut self,
+        attachment: CreateAttachment<'_>,
+    ) -> Result<(), Error> {
+        let reply = self.create_reply_with_attachment();
+        let mut create_reply: poise::CreateReply<'_> = reply.into();
+        create_reply = create_reply.attachment(attachment);
+        self.core_mut().send(create_reply).await
     }
 
-    fn view_context_mut(&mut self) -> &mut ViewContext<'a> {
-        &mut self.ctx
+    /// Edits the view with the given attachment.
+    pub async fn edit_with_attachment(
+        &mut self,
+        attachment: CreateAttachment<'_>,
+    ) -> Result<(), Error> {
+        let reply = self.create_reply_with_attachment();
+        let mut create_reply: poise::CreateReply<'_> = reply.into();
+        create_reply = create_reply.attachment(attachment);
+        self.core().edit(create_reply).await
     }
 
-    async fn edit(&self) -> Result<(), Error> {
-        if let Some(handle) = &self.view_context().reply_handle {
-            let reply = if let Some(ref bytes) = self.current_page_bytes {
-                let attachment =
-                    CreateAttachment::bytes(bytes.clone(), VOICE_LEADERBOARD_IMAGE_FILENAME);
-                self.create_reply().attachment(attachment)
-            } else {
-                self.create_reply()
-            };
-            handle.edit(*self.view_context().poise_ctx, reply).await?;
-        }
-        Ok(())
-    }
-}
-
-impl ResponseProvider for VoiceLeaderboardView<'_> {
-    fn create_response<'a>(&self) -> ResponseKind<'a> {
+    /// Creates a reply with optional attachment.
+    fn create_reply_with_attachment<'b>(&mut self) -> ResponseKind<'b> {
         let mut container = vec![CreateContainerComponent::TextDisplay(
             CreateTextDisplay::new("### Voice Leaderboard"),
         )];
@@ -280,8 +289,9 @@ impl ResponseProvider for VoiceLeaderboardView<'_> {
             ));
         }
 
+        let time_range_id = self.core_mut().registry.register(VoiceLeaderboardAction::TimeRange);
         let time_range_menu = CreateSelectMenu::new(
-            VoiceLeaderboardAction::TimeRange.custom_id(),
+            time_range_id,
             CreateSelectMenuKind::String {
                 options: vec![
                     CreateSelectMenuOption::new("Today", VoiceLeaderboardTimeRange::Today.name()),
@@ -328,14 +338,31 @@ impl ResponseProvider for VoiceLeaderboardView<'_> {
     }
 }
 
+impl<'a> ResponseView<'a> for VoiceLeaderboardView<'a> {
+    fn create_response<'b>(&mut self) -> ResponseKind<'b> {
+        self.create_reply_with_attachment()
+    }
+
+    fn create_reply<'b>(&mut self) -> poise::CreateReply<'b> {
+        let response = self.create_response();
+        let mut reply: poise::CreateReply<'b> = response.into();
+
+        if let Some(ref bytes) = self.current_page_bytes {
+            let attachment = CreateAttachment::bytes(bytes.clone(), VOICE_LEADERBOARD_IMAGE_FILENAME);
+            reply = reply.attachment(attachment);
+        }
+
+        reply
+    }
+}
+
 #[async_trait::async_trait]
-impl<'a> InteractableComponentView<'a, VoiceLeaderboardAction> for VoiceLeaderboardView<'a> {
+impl<'a> InteractiveView<'a, VoiceLeaderboardAction> for VoiceLeaderboardView<'a> {
     async fn handle(
         &mut self,
+        action: &VoiceLeaderboardAction,
         interaction: &ComponentInteraction,
     ) -> Option<VoiceLeaderboardAction> {
-        let action = Self::get_action(interaction)?;
-
         match (action, &interaction.data.kind) {
             (
                 VoiceLeaderboardAction::TimeRange,
@@ -348,22 +375,21 @@ impl<'a> InteractableComponentView<'a, VoiceLeaderboardAction> for VoiceLeaderbo
                     && self.time_range != time_range
                 {
                     self.time_range = time_range;
-                    return Some(VoiceLeaderboardAction::TimeRange);
+                    return Some(action.clone());
                 }
                 None
             }
             (VoiceLeaderboardAction::Base(pagination_action), _) => {
-                Some(VoiceLeaderboardAction::Base(
-                    self.pagination.handle_action(pagination_action).await?,
-                ))
+                let action = self.pagination.handle(pagination_action, interaction).await?;
+                Some(VoiceLeaderboardAction::Base(action))
             }
             _ => None,
         }
     }
 
     async fn on_timeout(&mut self) -> Result<(), Error> {
-        let _ = self.pagination.on_timeout().await?;
-        self.edit().await
+        self.pagination.disabled = true;
+        Ok(())
     }
 }
 

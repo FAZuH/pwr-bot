@@ -1,6 +1,5 @@
 //! About command showing bot statistics and information.
 
-use std::str::FromStr;
 use std::time::Duration;
 
 use chrono::Datelike;
@@ -18,7 +17,9 @@ use poise::serenity_prelude::CreateSectionComponent;
 use poise::serenity_prelude::CreateTextDisplay;
 use poise::serenity_prelude::CreateThumbnail;
 use poise::serenity_prelude::CreateUnfurledMediaItem;
+use serenity::all::ComponentInteraction;
 
+use crate::action_enum;
 use crate::bot::commands::Cog;
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;
@@ -28,13 +29,13 @@ use crate::bot::controller::Controller;
 use crate::bot::controller::Coordinator;
 use crate::bot::navigation::NavigationResult;
 use crate::bot::views::Action;
-use crate::bot::views::InteractableComponentView;
+use crate::bot::views::InteractiveView;
+use crate::bot::views::RenderExt;
 use crate::bot::views::ResponseKind;
-use crate::bot::views::ResponseProvider;
-use crate::bot::views::StatefulView;
+use crate::bot::views::ResponseView;
+use crate::bot::views::View;
 use crate::controller;
-use crate::custom_id_enum;
-use crate::stateful_view;
+use crate::view_core;
 
 /// Cog for the about command.
 pub struct AboutCog;
@@ -53,13 +54,6 @@ impl Cog for AboutCog {
     }
 }
 
-custom_id_enum! {
-    AboutAction {
-        /// Navigate back
-        Back = "< Back",
-    }
-}
-
 controller! { pub struct AboutController<'a> {} }
 
 #[async_trait::async_trait]
@@ -75,7 +69,7 @@ impl<S: Send + Sync + 'static> Controller<S> for AboutController<'_> {
         let avatar_url = ctx.cache().current_user().face();
         let mut view = AboutView::new(&ctx, stats, avatar_url);
 
-        view.send().await?;
+        view.render().await?;
 
         // Wait for user interaction (Back button)
         if let Some((action, _)) = view.listen_once().await? {
@@ -91,9 +85,18 @@ impl<S: Send + Sync + 'static> Controller<S> for AboutController<'_> {
     }
 }
 
-stateful_view! {
+action_enum! {
+    AboutAction {
+        #[label = "< Back"]
+        Back,
+    }
+}
+
+
+view_core! {
     timeout = Duration::from_secs(120),
-    struct AboutView<'a> {
+    /// View for displaying bot statistics and information.
+    struct AboutView<'a, AboutAction> {
         stats: AboutStats,
         avatar_url: String,
     }
@@ -103,14 +106,12 @@ impl<'a> AboutView<'a> {
     /// Creates a new about view with the given context, stats, and avatar URL.
     pub fn new(ctx: &'a Context<'a>, stats: AboutStats, avatar_url: String) -> Self {
         Self {
-            ctx: Self::create_context(ctx),
+            core: Self::create_core(ctx),
             stats,
             avatar_url,
         }
     }
-}
 
-impl AboutView<'_> {
     /// Formats a duration into a human-readable uptime string.
     fn format_uptime(duration: Duration) -> String {
         let days = duration.as_secs() / 86400;
@@ -138,8 +139,8 @@ impl AboutView<'_> {
     }
 }
 
-impl ResponseProvider for AboutView<'_> {
-    fn create_response<'b>(&self) -> ResponseKind<'b> {
+impl<'a> ResponseView<'a> for AboutView<'a> {
+    fn create_response<'b>(&mut self) -> ResponseKind<'b> {
         let content_text = format!(
             "-# **Settings > About**
 ## pwr-bot
@@ -182,9 +183,12 @@ Copyright © 2025-{} FAZuH  —  v{}",
             CreateButton::new_link("https://github.com/FAZuH/pwr-bot/blob/main/LICENSE")
                 .label("License");
 
+        // Register the back action and get its ID
+        let back_id = self.register(AboutAction::Back);
+
         let back_button = CreateComponent::ActionRow(CreateActionRow::Buttons(
             vec![
-                CreateButton::new(AboutAction::Back.custom_id())
+                CreateButton::new(back_id)
                     .label(AboutAction::Back.label())
                     .style(ButtonStyle::Secondary),
             ]
@@ -203,12 +207,15 @@ Copyright © 2025-{} FAZuH  —  v{}",
 }
 
 #[async_trait::async_trait]
-impl<'a> InteractableComponentView<'a, AboutAction> for AboutView<'a> {
+impl<'a> InteractiveView<'a, AboutAction> for AboutView<'a> {
     async fn handle(
         &mut self,
-        interaction: &serenity::all::ComponentInteraction,
+        action: &AboutAction,
+        _interaction: &ComponentInteraction,
     ) -> Option<AboutAction> {
-        AboutAction::from_str(&interaction.data.custom_id).ok()
+        match action {
+            AboutAction::Back => Some(AboutAction::Back),
+        }
     }
 }
 

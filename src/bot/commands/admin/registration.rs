@@ -6,7 +6,7 @@ use serenity::all::CreateContainerComponent;
 use serenity::all::CreateTextDisplay;
 
 use crate::bot::views::ResponseKind;
-use crate::bot::views::ResponseProvider;
+use crate::bot::views::ResponseView;
 
 /// View for command registration status.
 pub struct CommandRegistrationView {
@@ -36,8 +36,8 @@ impl CommandRegistrationView {
     }
 }
 
-impl ResponseProvider for CommandRegistrationView {
-    fn create_response<'a>(&self) -> ResponseKind<'a> {
+impl<'a> ResponseView<'a> for CommandRegistrationView {
+    fn create_response<'b>(&mut self) -> ResponseKind<'b> {
         let title = if self.is_complete {
             "Command Registration Complete"
         } else {
@@ -91,8 +91,8 @@ impl CommandUnregistrationView {
     }
 }
 
-impl ResponseProvider for CommandUnregistrationView {
-    fn create_response<'a>(&self) -> ResponseKind<'a> {
+impl<'a> ResponseView<'a> for CommandUnregistrationView {
+    fn create_response<'b>(&mut self) -> ResponseKind<'b> {
         let title = if self.is_complete {
             "Command Unregistration Complete"
         } else {

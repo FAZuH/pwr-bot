@@ -20,8 +20,8 @@ use crate::bot::controller::Controller;
 use crate::bot::controller::Coordinator;
 use crate::bot::error::BotError;
 use crate::bot::navigation::NavigationResult;
-use crate::bot::views::InteractableComponentView;
-use crate::bot::views::StatefulView;
+use crate::bot::views::InteractiveView;
+use crate::bot::views::RenderExt;
 use crate::controller;
 use crate::database::model::VoiceLeaderboardEntry;
 use crate::database::model::VoiceLeaderboardOptBuilder;
@@ -48,7 +48,7 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceSettingsController<'a>
             .map_err(Error::from)?;
 
         let mut view = SettingsVoiceView::new(&ctx, settings);
-        view.send().await?;
+        view.render().await?;
 
         while let Some((action, _interaction)) = view.listen_once().await? {
             match action {
@@ -65,7 +65,7 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceSettingsController<'a>
                         .await
                         .map_err(Error::from)?;
 
-                    view.edit().await?;
+                    view.render().await?;
                 }
             }
         }
@@ -168,7 +168,7 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceLeaderboardController<
         let mut view = VoiceLeaderboardView::new(&ctx, session_data, self.time_range);
 
         if view.leaderboard_data.is_empty() {
-            view.send().await?;
+            view.render().await?;
             return Ok(NavigationResult::Exit);
         }
 
