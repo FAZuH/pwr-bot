@@ -246,22 +246,22 @@ impl<'a> InteractiveView<'a, SettingsFeedAction> for SettingsFeedView<'a> {
     }
 }
 
-pub enum FeedSubscriptionsListState {
+pub enum FeedListState {
     View,
     Edit,
 }
 
 view_core! {
     timeout = Duration::from_secs(120),
-    pub struct FeedSubscriptionsListView<'a, FeedSubscriptionsListAction> {
+    pub struct FeedListView<'a, FeedListAction> {
         subscriptions: Vec<Subscription>,
         pub pagination: PaginationView<'a>,
-        pub state: FeedSubscriptionsListState,
+        pub state: FeedListState,
         pub marked_unsub: HashSet<String>
     }
 }
 
-impl<'a> FeedSubscriptionsListView<'a> {
+impl<'a> FeedListView<'a> {
     pub fn new(
         ctx: &'a Context<'a>,
         subscriptions: Vec<Subscription>,
@@ -271,7 +271,7 @@ impl<'a> FeedSubscriptionsListView<'a> {
             subscriptions,
             pagination,
             core: Self::create_core(ctx),
-            state: FeedSubscriptionsListState::View,
+            state: FeedListState::View,
             marked_unsub: HashSet::new(),
         }
     }
@@ -296,7 +296,7 @@ impl<'a> FeedSubscriptionsListView<'a> {
         &mut self,
         sub: Subscription,
     ) -> CreateContainerComponent<'b> {
-        use FeedSubscriptionsListAction::*;
+        use FeedListAction::*;
         let text = if let Some(latest) = sub.feed_latest {
             format!(
                 "### {}\n\n- **Last version**: {}\n- **Last updated**: <t:{}>\n- [**Source** 🗗](<{}>)",
@@ -315,10 +315,10 @@ impl<'a> FeedSubscriptionsListView<'a> {
         let text_component = CreateSectionComponent::TextDisplay(CreateTextDisplay::new(text));
 
         let accessory = match self.state {
-            FeedSubscriptionsListState::View => CreateSectionAccessory::Thumbnail(
-                CreateThumbnail::new(CreateUnfurledMediaItem::new(sub.feed.cover_url)),
-            ),
-            FeedSubscriptionsListState::Edit => {
+            FeedListState::View => CreateSectionAccessory::Thumbnail(CreateThumbnail::new(
+                CreateUnfurledMediaItem::new(sub.feed.cover_url),
+            )),
+            FeedListState::Edit => {
                 let source_url = sub.feed.source_url;
                 let button = if self.marked_unsub.contains(&source_url) {
                     self.register(UndoUnsub { source_url })
@@ -339,8 +339,8 @@ impl<'a> FeedSubscriptionsListView<'a> {
     /// Create button section of the view at the bottom.
     fn create_toggle_button<'b>(&mut self) -> CreateComponent<'b> {
         let action = match self.state {
-            FeedSubscriptionsListState::Edit => FeedSubscriptionsListAction::View,
-            FeedSubscriptionsListState::View => FeedSubscriptionsListAction::Edit,
+            FeedListState::Edit => FeedListAction::View,
+            FeedListState::View => FeedListAction::Edit,
         };
 
         let state_button = self
@@ -348,7 +348,8 @@ impl<'a> FeedSubscriptionsListView<'a> {
             .as_button()
             .style(ButtonStyle::Primary);
 
-        let mut save_button = self.register(FeedSubscriptionsListAction::Save)
+        let mut save_button = self
+            .register(FeedListAction::Save)
             .as_button()
             .style(ButtonStyle::Success);
 
@@ -362,7 +363,7 @@ impl<'a> FeedSubscriptionsListView<'a> {
     }
 }
 
-impl<'a> ResponseView<'a> for FeedSubscriptionsListView<'a> {
+impl<'a> ResponseView<'a> for FeedListView<'a> {
     fn create_response<'b>(&mut self) -> ResponseKind<'b> {
         if self.subscriptions.is_empty() {
             return Self::create_empty().into();
@@ -385,7 +386,7 @@ impl<'a> ResponseView<'a> for FeedSubscriptionsListView<'a> {
     }
 }
 
-action_extends! { FeedSubscriptionsListAction extends PaginationAction {
+action_extends! { FeedListAction extends PaginationAction {
     #[label =  "✎ Edit"]
     Edit,
     #[label = "👁 View"]
@@ -399,13 +400,13 @@ action_extends! { FeedSubscriptionsListAction extends PaginationAction {
 }}
 
 #[async_trait::async_trait]
-impl<'a> InteractiveView<'a, FeedSubscriptionsListAction> for FeedSubscriptionsListView<'a> {
+impl<'a> InteractiveView<'a, FeedListAction> for FeedListView<'a> {
     async fn handle(
         &mut self,
-        action: &FeedSubscriptionsListAction,
+        action: &FeedListAction,
         interaction: &ComponentInteraction,
-    ) -> Option<FeedSubscriptionsListAction> {
-        use FeedSubscriptionsListAction::*;
+    ) -> Option<FeedListAction> {
+        use FeedListAction::*;
         match action {
             Base(pagination_action) => {
                 let action = self
@@ -415,11 +416,11 @@ impl<'a> InteractiveView<'a, FeedSubscriptionsListAction> for FeedSubscriptionsL
                 Some(Base(action))
             }
             Edit => {
-                self.state = FeedSubscriptionsListState::Edit;
+                self.state = FeedListState::Edit;
                 Some(action.clone())
             }
             View => {
-                self.state = FeedSubscriptionsListState::View;
+                self.state = FeedListState::View;
                 Some(action.clone())
             }
             Unsubscribe { source_url } => {
@@ -430,7 +431,7 @@ impl<'a> InteractiveView<'a, FeedSubscriptionsListAction> for FeedSubscriptionsL
                 self.marked_unsub.remove(source_url);
                 Some(action.clone())
             }
-            Exit | Save => Some(action.clone())
+            Exit | Save => Some(action.clone()),
         }
     }
 
@@ -440,11 +441,8 @@ impl<'a> InteractiveView<'a, FeedSubscriptionsListAction> for FeedSubscriptionsL
         Ok(())
     }
 
-    fn children(&mut self) -> Vec<Box<dyn ChildViewResolver<FeedSubscriptionsListAction> + '_>> {
-        vec![Self::child(
-            &mut self.pagination,
-            FeedSubscriptionsListAction::Base,
-        )]
+    fn children(&mut self) -> Vec<Box<dyn ChildViewResolver<FeedListAction> + '_>> {
+        vec![Self::child(&mut self.pagination, FeedListAction::Base)]
     }
 }
 
