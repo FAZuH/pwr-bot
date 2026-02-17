@@ -14,6 +14,7 @@ use crate::bot::commands::Context;
 use crate::bot::commands::Error;
 use crate::bot::commands::feed::views::FeedSubscriptionBatchAction;
 use crate::bot::commands::feed::views::FeedSubscriptionBatchView;
+use crate::bot::commands::feed::views::FeedSubscriptionsListAction;
 use crate::bot::commands::feed::views::FeedSubscriptionsListView;
 use crate::bot::commands::feed::views::SettingsFeedAction;
 use crate::bot::commands::feed::views::SettingsFeedView;
@@ -182,7 +183,12 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for FeedSubscriptionsController
 
         view.render().await?;
 
-        while view.listen_once().await?.is_some() {
+        while let Some((action, _)) = view.listen_once().await? {
+            if matches!(action, FeedSubscriptionsListAction::Save) {
+                for url in &view.marked_unsub {
+                    service.unsubscribe(url, &subscriber).await?;
+                }
+            }
             let subscriptions = service
                 .list_paginated_subscriptions(
                     &subscriber,
@@ -194,10 +200,6 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for FeedSubscriptionsController
             view.set_subscriptions(subscriptions);
 
             view.render().await?;
-        }
-
-        for url in &view.marked_unsub {
-            service.unsubscribe(url, &subscriber).await?;
         }
 
         Ok(NavigationResult::Exit)

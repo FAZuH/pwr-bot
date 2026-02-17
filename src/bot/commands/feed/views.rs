@@ -348,7 +348,15 @@ impl<'a> FeedSubscriptionsListView<'a> {
             .as_button()
             .style(ButtonStyle::Primary);
 
-        let buttons = vec![state_button];
+        let mut save_button = self.register(FeedSubscriptionsListAction::Save)
+            .as_button()
+            .style(ButtonStyle::Success);
+
+        if self.marked_unsub.is_empty() {
+            save_button = save_button.disabled(true)
+        }
+
+        let buttons = vec![state_button, save_button];
 
         CreateComponent::ActionRow(CreateActionRow::Buttons(buttons.into()))
     }
@@ -386,6 +394,7 @@ action_extends! { FeedSubscriptionsListAction extends PaginationAction {
     Unsubscribe { source_url: String },
     #[label = "↶ Undo"]
     UndoUnsub { source_url: String },
+    Save,
     Exit,
 }}
 
@@ -421,7 +430,7 @@ impl<'a> InteractiveView<'a, FeedSubscriptionsListAction> for FeedSubscriptionsL
                 self.marked_unsub.remove(source_url);
                 Some(action.clone())
             }
-            Exit => Some(action.clone()),
+            Exit | Save => Some(action.clone())
         }
     }
 
