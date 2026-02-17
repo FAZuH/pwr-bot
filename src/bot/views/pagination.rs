@@ -5,7 +5,6 @@ use std::time::Duration;
 use serenity::all::ButtonStyle;
 use serenity::all::ComponentInteraction;
 use serenity::all::CreateActionRow;
-use serenity::all::CreateButton;
 use serenity::all::CreateComponent;
 
 use crate::action_enum;
@@ -63,10 +62,14 @@ impl PaginationModel {
 }
 
 action_enum!(PaginationAction {
+    #[label = "⏮"]
     First,
+    #[label = "◀"]
     Prev,
     Page,
+    #[label = "▶"]
     Next,
+    #[label = "⏭"]
     Last,
 });
 
@@ -118,21 +121,22 @@ impl<'a> ResponseView<'a> for PaginationView<'a> {
 
         vec![CreateComponent::ActionRow(CreateActionRow::Buttons(
             vec![
-                CreateButton::new(self.register(PaginationAction::First))
-                    .label("⏮")
+                self.register(PaginationAction::First)
+                    .as_button()
                     .disabled(self.state.current_page == 1),
-                CreateButton::new(self.register(PaginationAction::Prev))
-                    .label("◀")
+                self.register(PaginationAction::Prev)
+                    .as_button()
                     .disabled(self.state.current_page == 1),
-                CreateButton::new(self.register(PaginationAction::Page))
+                self.register(PaginationAction::Page)
+                    .as_button()
                     .label(page_label)
                     .disabled(true)
                     .style(ButtonStyle::Secondary),
-                CreateButton::new(self.register(PaginationAction::Next))
-                    .label("▶")
+                self.register(PaginationAction::Next)
+                    .as_button()
                     .disabled(self.state.current_page == self.state.pages),
-                CreateButton::new(self.register(PaginationAction::Last))
-                    .label("⏭")
+                self.register(PaginationAction::Last)
+                    .as_button()
                     .disabled(self.state.current_page == self.state.pages),
             ]
             .into(),

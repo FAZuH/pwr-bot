@@ -1,5 +1,6 @@
 //! Views for feed-related commands.
 
+use std::collections::HashSet;
 use std::str::FromStr;
 use std::time::Duration;
 
@@ -16,7 +17,6 @@ use serenity::all::CreateContainerComponent;
 use serenity::all::CreateSection;
 use serenity::all::CreateSectionAccessory;
 use serenity::all::CreateSectionComponent;
-use serenity::all::CreateSelectMenu;
 use serenity::all::CreateSelectMenuKind;
 use serenity::all::CreateTextDisplay;
 use serenity::all::CreateThumbnail;
@@ -56,6 +56,7 @@ action_enum! {
 
 action_enum! {
     FeedSubscriptionBatchAction {
+        #[label = "View Subscriptions"]
         ViewSubscriptions,
     }
 }
@@ -113,8 +114,9 @@ impl<'a> ResponseView<'a> for SettingsFeedView<'a> {
             }
         );
 
-        let enabled_id = self.register(SettingsFeedAction::Enabled);
-        let enabled_button = CreateButton::new(enabled_id)
+        let enabled_button = self
+            .register(SettingsFeedAction::Enabled)
+            .as_button()
             .label(if is_enabled { "Disable" } else { "Enable" })
             .style(if is_enabled {
                 ButtonStyle::Danger
@@ -125,55 +127,49 @@ impl<'a> ResponseView<'a> for SettingsFeedView<'a> {
         let channel_text =
             "### Notification Channel\n\n> 🛈  Choose where feed updates will be posted.";
 
-        let channel_id = self.register(SettingsFeedAction::Channel);
-        let channel_select = CreateSelectMenu::new(
-            channel_id,
-            CreateSelectMenuKind::Channel {
+        let channel_select = self
+            .register(SettingsFeedAction::Channel)
+            .as_select(CreateSelectMenuKind::Channel {
                 channel_types: Some(vec![ChannelType::Text, ChannelType::News].into()),
                 default_channels: Some(
                     Self::parse_channel_id(self.settings.feeds.channel_id.as_ref()).into(),
                 ),
-            },
-        )
-        .placeholder(if self.settings.feeds.channel_id.is_some() {
-            "Change notification channel"
-        } else {
-            "⚠️ Required: Select a notification channel"
-        });
+            })
+            .placeholder(if self.settings.feeds.channel_id.is_some() {
+                "Change notification channel"
+            } else {
+                "⚠️ Required: Select a notification channel"
+            });
 
         let sub_role_text = "### Subscribe Permission\n\n> 🛈  Who can add new feeds to this server. Leave empty to allow users with \"Manage Server\" permission.";
-        let sub_role_id = self.register(SettingsFeedAction::SubRole);
-        let sub_role_select = CreateSelectMenu::new(
-            sub_role_id,
-            CreateSelectMenuKind::Role {
+        let sub_role_select = self
+            .register(SettingsFeedAction::SubRole)
+            .as_select(CreateSelectMenuKind::Role {
                 default_roles: Some(
                     Self::parse_role_id(self.settings.feeds.subscribe_role_id.as_ref()).into(),
                 ),
-            },
-        )
-        .min_values(0)
-        .placeholder(if self.settings.feeds.subscribe_role_id.is_some() {
-            "Change subscribe role"
-        } else {
-            "Optional: Select role for subscribe permission"
-        });
+            })
+            .min_values(0)
+            .placeholder(if self.settings.feeds.subscribe_role_id.is_some() {
+                "Change subscribe role"
+            } else {
+                "Optional: Select role for subscribe permission"
+            });
 
         let unsub_role_text = "### Unsubscribe Permission\n\n> 🛈  Who can remove feeds from this server. Leave empty to allow users with \"Manage Server\" permission.";
-        let unsub_role_id = self.register(SettingsFeedAction::UnsubRole);
-        let unsub_role_select = CreateSelectMenu::new(
-            unsub_role_id,
-            CreateSelectMenuKind::Role {
+        let unsub_role_select = self
+            .register(SettingsFeedAction::UnsubRole)
+            .as_select(CreateSelectMenuKind::Role {
                 default_roles: Some(
                     Self::parse_role_id(self.settings.feeds.unsubscribe_role_id.as_ref()).into(),
                 ),
-            },
-        )
-        .min_values(0)
-        .placeholder(if self.settings.feeds.unsubscribe_role_id.is_some() {
-            "Change unsubscribe role"
-        } else {
-            "Optional: Select role for unsubscribe permission"
-        });
+            })
+            .min_values(0)
+            .placeholder(if self.settings.feeds.unsubscribe_role_id.is_some() {
+                "Change unsubscribe role"
+            } else {
+                "Optional: Select role for unsubscribe permission"
+            });
 
         let container = CreateComponent::Container(CreateContainer::new(vec![
             CreateContainerComponent::TextDisplay(CreateTextDisplay::new(status_text)),
@@ -188,15 +184,15 @@ impl<'a> ResponseView<'a> for SettingsFeedView<'a> {
             CreateContainerComponent::ActionRow(CreateActionRow::SelectMenu(unsub_role_select)),
         ]));
 
-        let back_id = self.register(SettingsFeedAction::Back);
-        let about_id = self.register(SettingsFeedAction::About);
+        let back = self.register(SettingsFeedAction::Back);
+        let about = self.register(SettingsFeedAction::About);
 
         let nav_buttons = CreateComponent::ActionRow(CreateActionRow::Buttons(
             vec![
-                CreateButton::new(back_id)
+                CreateButton::new(back.id)
                     .label(SettingsFeedAction::Back.label())
                     .style(ButtonStyle::Secondary),
-                CreateButton::new(about_id)
+                CreateButton::new(about.id)
                     .label(SettingsFeedAction::About.label())
                     .style(ButtonStyle::Secondary),
             ]
@@ -250,11 +246,18 @@ impl<'a> InteractiveView<'a, SettingsFeedAction> for SettingsFeedView<'a> {
     }
 }
 
+pub enum FeedSubscriptionsListState {
+    View,
+    Edit,
+}
+
 view_core! {
     timeout = Duration::from_secs(120),
     pub struct FeedSubscriptionsListView<'a, FeedSubscriptionsListAction> {
         subscriptions: Vec<Subscription>,
         pub pagination: PaginationView<'a>,
+        pub state: FeedSubscriptionsListState,
+        pub marked_unsub: HashSet<String>
     }
 }
 
@@ -268,6 +271,8 @@ impl<'a> FeedSubscriptionsListView<'a> {
             subscriptions,
             pagination,
             core: Self::create_core(ctx),
+            state: FeedSubscriptionsListState::View,
+            marked_unsub: HashSet::new(),
         }
     }
 
@@ -287,7 +292,11 @@ impl<'a> FeedSubscriptionsListView<'a> {
     }
 
     /// Creates a section component for a single subscription.
-    fn create_subscription_section<'b>(sub: Subscription) -> CreateContainerComponent<'b> {
+    fn create_subscription_section<'b>(
+        &mut self,
+        sub: Subscription,
+    ) -> CreateContainerComponent<'b> {
+        use FeedSubscriptionsListAction::*;
         let text = if let Some(latest) = sub.feed_latest {
             format!(
                 "### {}\n\n- **Last version**: {}\n- **Last updated**: <t:{}>\n- [**Source** 🗗](<{}>)",
@@ -303,14 +312,45 @@ impl<'a> FeedSubscriptionsListView<'a> {
             )
         };
 
-        let text_component = CreateTextDisplay::new(text);
+        let text_component = CreateSectionComponent::TextDisplay(CreateTextDisplay::new(text));
 
-        let thumbnail = CreateThumbnail::new(CreateUnfurledMediaItem::new(sub.feed.cover_url));
+        let accessory = match self.state {
+            FeedSubscriptionsListState::View => CreateSectionAccessory::Thumbnail(
+                CreateThumbnail::new(CreateUnfurledMediaItem::new(sub.feed.cover_url)),
+            ),
+            FeedSubscriptionsListState::Edit => {
+                let source_url = sub.feed.source_url;
+                let button = if self.marked_unsub.contains(&source_url) {
+                    self.register(Unsubscribe { source_url })
+                        .as_button()
+                        .style(ButtonStyle::Danger)
+                } else {
+                    self.register(UndoUnsub { source_url })
+                        .as_button()
+                        .style(ButtonStyle::Secondary)
+                };
+                CreateSectionAccessory::Button(button)
+            }
+        };
 
-        CreateContainerComponent::Section(CreateSection::new(
-            vec![CreateSectionComponent::TextDisplay(text_component)],
-            CreateSectionAccessory::Thumbnail(thumbnail),
-        ))
+        CreateContainerComponent::Section(CreateSection::new(vec![text_component], accessory))
+    }
+
+    /// Create button section of the view at the bottom.
+    fn create_toggle_button<'b>(&mut self) -> CreateComponent<'b> {
+        let action = match self.state {
+            FeedSubscriptionsListState::Edit => FeedSubscriptionsListAction::View,
+            FeedSubscriptionsListState::View => FeedSubscriptionsListAction::Edit,
+        };
+
+        let state_button = self
+            .register(action)
+            .as_button()
+            .style(ButtonStyle::Primary);
+
+        let buttons = vec![state_button];
+
+        CreateComponent::ActionRow(CreateActionRow::Buttons(buttons.into()))
     }
 }
 
@@ -324,23 +364,30 @@ impl<'a> ResponseView<'a> for FeedSubscriptionsListView<'a> {
             .subscriptions
             .clone()
             .into_iter()
-            .map(Self::create_subscription_section)
+            .map(|sub| self.create_subscription_section(sub))
             .collect();
 
         let container = CreateComponent::Container(CreateContainer::new(sections));
         let mut components = vec![container];
 
         self.pagination.attach_if_multipage(&mut components);
+        components.push(self.create_toggle_button());
 
         components.into()
     }
 }
 
-action_extends! {
-    FeedSubscriptionsListAction extends PaginationAction {
-        Exit,
-    }
-}
+action_extends! { FeedSubscriptionsListAction extends PaginationAction {
+    #[label =  "✎ Edit"]
+    Edit,
+    #[label = "👁 View"]
+    View,
+    #[label = "🗑 Unsubscribe"]
+    Unsubscribe { source_url: String },
+    #[label = "↶ Undo"]
+    UndoUnsub { source_url: String },
+    Exit,
+}}
 
 #[async_trait::async_trait]
 impl<'a> InteractiveView<'a, FeedSubscriptionsListAction> for FeedSubscriptionsListView<'a> {
@@ -349,15 +396,32 @@ impl<'a> InteractiveView<'a, FeedSubscriptionsListAction> for FeedSubscriptionsL
         action: &FeedSubscriptionsListAction,
         interaction: &ComponentInteraction,
     ) -> Option<FeedSubscriptionsListAction> {
+        use FeedSubscriptionsListAction::*;
         match action {
-            FeedSubscriptionsListAction::Base(pagination_action) => {
+            Base(pagination_action) => {
                 let action = self
                     .pagination
                     .handle(pagination_action, interaction)
                     .await?;
-                Some(FeedSubscriptionsListAction::Base(action))
+                Some(Base(action))
             }
-            FeedSubscriptionsListAction::Exit => Some(action.clone()),
+            Edit => {
+                self.state = FeedSubscriptionsListState::Edit;
+                Some(action.clone())
+            }
+            View => {
+                self.state = FeedSubscriptionsListState::View;
+                Some(action.clone())
+            }
+            Unsubscribe { source_url } => {
+                self.marked_unsub.insert(source_url.clone());
+                Some(action.clone())
+            }
+            UndoUnsub { source_url } => {
+                self.marked_unsub.remove(source_url);
+                Some(action.clone())
+            }
+            Exit => Some(action.clone()),
         }
     }
 
@@ -408,9 +472,9 @@ impl<'a> ResponseView<'a> for FeedSubscriptionBatchView<'a> {
         ))];
 
         if self.is_final {
-            let action_id = self.register(FeedSubscriptionBatchAction::ViewSubscriptions);
-            let nav_button = CreateButton::new(action_id)
-                .label("View Subscriptions")
+            let nav_button = self
+                .register(FeedSubscriptionBatchAction::ViewSubscriptions)
+                .as_button()
                 .style(ButtonStyle::Secondary);
 
             components.push(CreateComponent::ActionRow(CreateActionRow::Buttons(

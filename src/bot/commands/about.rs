@@ -28,7 +28,6 @@ use crate::bot::commands::settings::run_settings;
 use crate::bot::controller::Controller;
 use crate::bot::controller::Coordinator;
 use crate::bot::navigation::NavigationResult;
-use crate::bot::views::Action;
 use crate::bot::views::InteractiveView;
 use crate::bot::views::RenderExt;
 use crate::bot::views::ResponseKind;
@@ -183,12 +182,10 @@ Copyright © 2025-{} FAZuH  —  v{}",
                 .label("License");
 
         // Register the back action and get its ID
-        let back_id = self.register(AboutAction::Back);
-
         let back_button = CreateComponent::ActionRow(CreateActionRow::Buttons(
             vec![
-                CreateButton::new(back_id)
-                    .label(AboutAction::Back.label())
+                self.register(AboutAction::Back)
+                    .as_button()
                     .style(ButtonStyle::Secondary),
             ]
             .into(),

@@ -17,7 +17,6 @@ use serenity::all::CreateTextDisplay;
 
 use crate::action_enum;
 use crate::bot::commands::Context;
-use crate::bot::views::Action;
 use crate::bot::views::InteractiveView;
 use crate::bot::views::ResponseKind;
 use crate::bot::views::ResponseView;
@@ -160,23 +159,20 @@ impl<'a> ResponseView<'a> for SettingsMainView<'a> {
                 active_features
                     .into_iter()
                     .map(|feat| {
-                        let action_id = self.register(feat.clone());
-                        CreateButton::new(action_id)
-                            .label(feat.label())
-                            .style(match &self.state {
-                                SettingsMainState::FeatureSettings => ButtonStyle::Primary,
-                                SettingsMainState::DeactivateFeatures => ButtonStyle::Danger,
-                            })
+                        self.register(feat).as_button().style(match &self.state {
+                            SettingsMainState::FeatureSettings => ButtonStyle::Primary,
+                            SettingsMainState::DeactivateFeatures => ButtonStyle::Danger,
+                        })
                     })
                     .collect(),
             )
         };
         components.push(CreateContainerComponent::ActionRow(button_active_features));
 
-        let toggle_state_id = self.register(SettingsMainAction::ToggleState);
         let button_toggle_state = CreateActionRow::Buttons(
             vec![
-                CreateButton::new(toggle_state_id)
+                self.register(SettingsMainAction::ToggleState)
+                    .as_button()
                     .label(match &self.state {
                         SettingsMainState::FeatureSettings => "Deactivate Features",
                         SettingsMainState::DeactivateFeatures => "Feature Settings",
@@ -212,29 +208,25 @@ impl<'a> ResponseView<'a> for SettingsMainView<'a> {
                 .disabled(true),
             )
         } else {
-            let add_features_id = self.register(SettingsMainAction::AddFeatures);
-            CreateActionRow::SelectMenu(CreateSelectMenu::new(
-                add_features_id,
-                CreateSelectMenuKind::String {
-                    options: inactive_features
-                        .into_iter()
-                        .map(|feat| {
-                            let feat_id = self.register(feat.clone());
-                            CreateSelectMenuOption::new(feat.label(), feat_id)
-                        })
-                        .collect(),
-                },
-            ))
+            CreateActionRow::SelectMenu(
+                self.register(SettingsMainAction::AddFeatures).as_select(
+                    CreateSelectMenuKind::String {
+                        options: inactive_features
+                            .into_iter()
+                            .map(|feat| self.register(feat).as_select_option())
+                            .collect(),
+                    },
+                ),
+            )
         };
         components.push(CreateContainerComponent::ActionRow(selectmenu_add_features));
 
         let container = CreateComponent::Container(CreateContainer::new(components));
 
-        let about_id = self.register(SettingsMainAction::About);
         let bottom_buttons = CreateComponent::ActionRow(CreateActionRow::Buttons(
             vec![
-                CreateButton::new(about_id)
-                    .label(SettingsMainAction::About.label())
+                self.register(SettingsMainAction::About)
+                    .as_button()
                     .style(ButtonStyle::Secondary),
             ]
             .into(),

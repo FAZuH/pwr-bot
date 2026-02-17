@@ -9,9 +9,13 @@ use poise::CreateReply;
 use poise::ReplyHandle;
 use serenity::all::ComponentInteraction;
 use serenity::all::ComponentInteractionCollector;
+use serenity::all::CreateButton;
 use serenity::all::CreateComponent;
 use serenity::all::CreateEmbed;
 use serenity::all::CreateInteractionResponse;
+use serenity::all::CreateSelectMenu;
+use serenity::all::CreateSelectMenuKind;
+use serenity::all::CreateSelectMenuOption;
 use serenity::all::MessageFlags;
 use serenity::all::MessageId;
 
@@ -179,9 +183,6 @@ pub trait View<'a, T = ()> {
     fn core(&self) -> &ViewCore<'a, T>;
     fn core_mut(&mut self) -> &mut ViewCore<'a, T>;
     fn create_core(poise_ctx: &'a Context<'a>) -> ViewCore<'a, T>;
-    fn register(&mut self, action: T) -> String {
-        self.core_mut().registry.register(action)
-    }
 }
 
 #[async_trait::async_trait]
@@ -202,6 +203,7 @@ pub trait RenderExt<'a, T> {
 impl<'a, T, S> RenderExt<'a, T> for S
 where
     S: View<'a, T> + ResponseView<'a> + Send,
+    T: Action,
 {
     async fn render(&mut self) -> Result<(), Error> {
         let reply = self.create_reply();
@@ -212,6 +214,25 @@ where
             self.core_mut().ctx.reply_handle = Some(handle);
         }
         Ok(())
+    }
+}
+
+pub struct RegisteredAction {
+    pub id: String,
+    pub label: &'static str,
+}
+
+impl RegisteredAction {
+    pub fn as_button(self) -> CreateButton<'static> {
+        CreateButton::new(self.id).label(self.label)
+    }
+
+    pub fn as_select<'a>(self, kind: CreateSelectMenuKind<'a>) -> CreateSelectMenu<'a> {
+        CreateSelectMenu::new(self.id, kind)
+    }
+
+    pub fn as_select_option(self) -> CreateSelectMenuOption<'static> {
+        CreateSelectMenuOption::new(self.label, self.id)
     }
 }
 
@@ -262,6 +283,12 @@ pub trait InteractiveView<'a, T: Action + 'a>: View<'a, T> + Sync {
         self.clear_registry();
 
         Ok(Some((action, interaction)))
+    }
+
+    fn register(&mut self, action: T) -> RegisteredAction {
+        let label = action.label();
+        let id = self.core_mut().registry.register(action);
+        RegisteredAction { id, label }
     }
 
     /// Creates a collector for interactions.

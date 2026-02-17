@@ -7,13 +7,11 @@ use serenity::all::ComponentInteraction;
 use serenity::all::ComponentInteractionDataKind;
 use serenity::all::CreateActionRow;
 use serenity::all::CreateAttachment;
-use serenity::all::CreateButton;
 use serenity::all::CreateComponent;
 use serenity::all::CreateContainer;
 use serenity::all::CreateContainerComponent;
 use serenity::all::CreateMediaGallery;
 use serenity::all::CreateMediaGalleryItem;
-use serenity::all::CreateSelectMenu;
 use serenity::all::CreateSelectMenuKind;
 use serenity::all::CreateSelectMenuOption;
 use serenity::all::CreateSeparator;
@@ -29,7 +27,7 @@ use crate::bot::commands::voice::controllers::LeaderboardSessionData;
 use crate::bot::commands::voice::image_builder::LeaderboardPageBuilder;
 use crate::bot::commands::voice::image_builder::PageGenerationResult;
 use crate::bot::utils::format_duration;
-use crate::bot::views::Action;
+use crate::bot::views::ChildViewResolver;
 use crate::bot::views::InteractiveView;
 use crate::bot::views::ResponseKind;
 use crate::bot::views::ResponseView;
@@ -86,9 +84,9 @@ impl<'a> ResponseView<'a> for SettingsVoiceView<'a> {
             }
         );
 
-        let registry = &mut self.core_mut().registry;
-        let enabled_id = registry.register(SettingsVoiceAction::ToggleEnabled);
-        let enabled_button = CreateButton::new(enabled_id)
+        let enabled_button = self
+            .register(SettingsVoiceAction::ToggleEnabled)
+            .as_button()
             .label(if is_enabled { "Disable" } else { "Enable" })
             .style(if is_enabled {
                 ButtonStyle::Danger
@@ -103,16 +101,13 @@ impl<'a> ResponseView<'a> for SettingsVoiceView<'a> {
             )),
         ]));
 
-        let back_id = registry.register(SettingsVoiceAction::Back);
-        let about_id = registry.register(SettingsVoiceAction::About);
-
         let nav_buttons = CreateComponent::ActionRow(CreateActionRow::Buttons(
             vec![
-                CreateButton::new(back_id)
-                    .label(SettingsVoiceAction::Back.label())
+                self.register(SettingsVoiceAction::Back)
+                    .as_button()
                     .style(ButtonStyle::Secondary),
-                CreateButton::new(about_id)
-                    .label(SettingsVoiceAction::About.label())
+                self.register(SettingsVoiceAction::About)
+                    .as_button()
                     .style(ButtonStyle::Secondary),
             ]
             .into(),
@@ -289,13 +284,9 @@ impl<'a> VoiceLeaderboardView<'a> {
             ));
         }
 
-        let time_range_id = self
-            .core_mut()
-            .registry
-            .register(VoiceLeaderboardAction::TimeRange);
-        let time_range_menu = CreateSelectMenu::new(
-            time_range_id,
-            CreateSelectMenuKind::String {
+        let time_range_id = self.register(VoiceLeaderboardAction::TimeRange);
+        let time_range_menu = time_range_id
+            .as_select(CreateSelectMenuKind::String {
                 options: vec![
                     CreateSelectMenuOption::new("Today", VoiceLeaderboardTimeRange::Today.name()),
                     CreateSelectMenuOption::new(
@@ -324,9 +315,8 @@ impl<'a> VoiceLeaderboardView<'a> {
                     ),
                 ]
                 .into(),
-            },
-        )
-        .placeholder("Select time range");
+            })
+            .placeholder("Select time range");
 
         let action_row = CreateActionRow::SelectMenu(time_range_menu);
 
@@ -397,6 +387,12 @@ impl<'a> InteractiveView<'a, VoiceLeaderboardAction> for VoiceLeaderboardView<'a
     async fn on_timeout(&mut self) -> Result<(), Error> {
         self.pagination.disabled = true;
         Ok(())
+    }
+    fn children(&mut self) -> Vec<Box<dyn ChildViewResolver<VoiceLeaderboardAction> + '_>> {
+        vec![Self::child(
+            &mut self.pagination,
+            VoiceLeaderboardAction::Base,
+        )]
     }
 }
 

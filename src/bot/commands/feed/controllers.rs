@@ -196,6 +196,10 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for FeedSubscriptionsController
             view.render().await?;
         }
 
+        for url in &view.marked_unsub {
+            service.unsubscribe(url, &subscriber).await?;
+        }
+
         Ok(NavigationResult::Exit)
     }
 }

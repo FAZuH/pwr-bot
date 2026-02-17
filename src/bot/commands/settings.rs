@@ -3,14 +3,6 @@
 //! This module provides the settings coordinator and reusable view components
 //! for settings interfaces.
 
-use std::time::Duration;
-
-use serenity::all::ButtonStyle;
-use serenity::all::CreateActionRow;
-use serenity::all::CreateButton;
-use serenity::all::CreateComponent;
-
-use crate::action_enum;
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;
 use crate::bot::commands::about::AboutController;
@@ -20,85 +12,6 @@ use crate::bot::commands::voice::controllers::VoiceSettingsController;
 use crate::bot::controller::Controller;
 use crate::bot::controller::Coordinator;
 use crate::bot::navigation::NavigationResult;
-use crate::bot::views::Action;
-use crate::bot::views::ResponseKind;
-use crate::bot::views::ResponseView;
-use crate::bot::views::View;
-use crate::view_core;
-
-view_core! {
-    timeout = Duration::from_secs(120),
-    /// Navigation bar for settings views.
-    ///
-    /// Provides a consistent navigation bar with optional back button,
-    /// about button, and help button (placeholder).
-    pub struct SettingsNavigationView<'a, SettingsNavAction> {
-        /// Whether to show the back button
-        show_back: bool,
-        /// Whether to show the help button (currently disabled)
-        #[allow(dead_code)]
-        show_help: bool,
-    }
-}
-
-impl<'a> SettingsNavigationView<'a> {
-    /// Creates a new navigation view for the main settings page.
-    pub fn main(ctx: &'a Context<'a>) -> Self {
-        Self {
-            show_back: false,
-            show_help: false,
-            core: Self::create_core(ctx),
-        }
-    }
-}
-
-action_enum! {
-    SettingsNavAction {
-        /// Navigate back to the parent settings page
-        #[label = "< Back"]
-        Back,
-        /// Show information about the bot
-        #[label = "🛈 About"]
-        About,
-        /// Show help (not yet implemented)
-        #[label = "Help"]
-        Help,
-    }
-}
-
-impl<'a> ResponseView<'a> for SettingsNavigationView<'a> {
-    fn create_response<'b>(&mut self) -> ResponseKind<'b> {
-        let mut buttons = Vec::new();
-
-        if self.show_back {
-            buttons.push(
-                CreateButton::new(self.register(SettingsNavAction::Back))
-                    .label(SettingsNavAction::Back.label())
-                    .style(ButtonStyle::Secondary),
-            );
-        }
-
-        // Help button placeholder - commented out until /help command is implemented
-        // if self.show_help {
-        //     buttons.push(
-        //         CreateButton::new(SettingsNavAction::Help.custom_id())
-        //             .label(SettingsNavAction::Help.label())
-        //             .style(ButtonStyle::Secondary),
-        //     );
-        // }
-
-        buttons.push(
-            CreateButton::new(self.register(SettingsNavAction::About))
-                .label(SettingsNavAction::About.label())
-                .style(ButtonStyle::Secondary),
-        );
-
-        vec![CreateComponent::ActionRow(CreateActionRow::Buttons(
-            buttons.into(),
-        ))]
-        .into()
-    }
-}
 
 /// Tracks the current settings page for navigation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -170,3 +83,85 @@ pub async fn run_settings(
 
     Ok(())
 }
+
+// view_core! {
+//     timeout = Duration::from_secs(120),
+//     /// Navigation bar for settings views.
+//     ///
+//     /// Provides a consistent navigation bar with optional back button,
+//     /// about button, and help button (placeholder).
+//     pub struct SettingsNavigationView<'a, SettingsNavigationAction> {
+//         /// Whether to show the back button
+//         show_back: bool,
+//         /// Whether to show the help button (currently disabled)
+//         #[allow(dead_code)]
+//         show_help: bool,
+//     }
+// }
+//
+// impl<'a> SettingsNavigationView<'a> {
+//     /// Creates a new navigation view for the main settings page.
+//     pub fn main(ctx: &'a Context<'a>) -> Self {
+//         Self {
+//             show_back: false,
+//             show_help: false,
+//             core: Self::create_core(ctx),
+//         }
+//     }
+// }
+//
+// action_enum! {
+//     SettingsNavigationAction {
+//         /// Navigate back to the parent settings page
+//         #[label = "< Back"]
+//         Back,
+//         /// Show information about the bot
+//         #[label = "🛈 About"]
+//         About,
+//         /// Show help (not yet implemented)
+//         #[label = "Help"]
+//         Help,
+//     }
+// }
+//
+// impl<'a> ResponseView<'a> for SettingsNavigationView<'a> {
+//     fn create_response<'b>(&mut self) -> ResponseKind<'b> {
+//         let mut buttons = Vec::new();
+//
+//         if self.show_back {
+//             buttons.push(
+//                 self.register(SettingsNavigationAction::Back).as_button().style(ButtonStyle::Secondary)
+//             );
+//         }
+//
+//         // Help button placeholder - commented out until /help command is implemented
+//         // if self.show_help {
+//         //     buttons.push(
+//         //         CreateButton::new(SettingsNavAction::Help.custom_id())
+//         //             .label(SettingsNavAction::Help.label())
+//         //             .style(ButtonStyle::Secondary),
+//         //     );
+//         // }
+//
+//         buttons.push(
+//             self.register(SettingsNavigationAction::About).as_button().style(ButtonStyle::Secondary)
+//         );
+//
+//         vec![CreateComponent::ActionRow(CreateActionRow::Buttons(
+//             buttons.into(),
+//         ))]
+//         .into()
+//     }
+// }
+//
+//
+// #[async_trait::async_trait]
+// impl<'a> InteractiveView<'a, SettingsNavigationAction> for SettingsNavigationView<'a> {
+//     async fn handle(
+//         &mut self,
+//         action: &SettingsNavigationAction,
+//         _interaction: &ComponentInteraction,
+//     ) -> Option<SettingsNavigationAction> {
+//         Some(action.clone())
+//     }
+// }
