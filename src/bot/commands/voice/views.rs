@@ -289,7 +289,10 @@ impl<'a> VoiceLeaderboardView<'a> {
             ));
         }
 
-        let time_range_id = self.core_mut().registry.register(VoiceLeaderboardAction::TimeRange);
+        let time_range_id = self
+            .core_mut()
+            .registry
+            .register(VoiceLeaderboardAction::TimeRange);
         let time_range_menu = CreateSelectMenu::new(
             time_range_id,
             CreateSelectMenuKind::String {
@@ -348,7 +351,8 @@ impl<'a> ResponseView<'a> for VoiceLeaderboardView<'a> {
         let mut reply: poise::CreateReply<'b> = response.into();
 
         if let Some(ref bytes) = self.current_page_bytes {
-            let attachment = CreateAttachment::bytes(bytes.clone(), VOICE_LEADERBOARD_IMAGE_FILENAME);
+            let attachment =
+                CreateAttachment::bytes(bytes.clone(), VOICE_LEADERBOARD_IMAGE_FILENAME);
             reply = reply.attachment(attachment);
         }
 
@@ -380,7 +384,10 @@ impl<'a> InteractiveView<'a, VoiceLeaderboardAction> for VoiceLeaderboardView<'a
                 None
             }
             (VoiceLeaderboardAction::Base(pagination_action), _) => {
-                let action = self.pagination.handle(pagination_action, interaction).await?;
+                let action = self
+                    .pagination
+                    .handle(pagination_action, interaction)
+                    .await?;
                 Some(VoiceLeaderboardAction::Base(action))
             }
             _ => None,

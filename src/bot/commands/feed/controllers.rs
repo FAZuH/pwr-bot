@@ -323,11 +323,7 @@ async fn process_subscription_batch(
         let is_final = i + 1 == urls.len();
         if last_send.elapsed().as_secs() > UPDATE_INTERVAL_SECS || is_final {
             let mut batch_view = FeedSubscriptionBatchView::new(&ctx, states.clone(), is_final);
-            if view.is_none() {
-                batch_view.render().await?;
-            } else {
-                batch_view.render().await?;
-            }
+            batch_view.render().await?;
             if is_final {
                 view = Some(batch_view);
             }

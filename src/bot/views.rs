@@ -242,7 +242,10 @@ pub trait InteractiveView<'a, T: Action + 'a>: View<'a, T> + Sync {
         };
 
         interaction
-            .create_response(self.core().ctx.poise_ctx.http(), CreateInteractionResponse::Acknowledge)
+            .create_response(
+                self.core().ctx.poise_ctx.http(),
+                CreateInteractionResponse::Acknowledge,
+            )
             .await
             .ok();
 
@@ -265,15 +268,14 @@ pub trait InteractiveView<'a, T: Action + 'a>: View<'a, T> + Sync {
     async fn create_collector(&mut self) -> ComponentInteractionCollector<'a> {
         let filter_ids = self.collector_filter();
         let core = self.core();
-        let collector = ComponentInteractionCollector::new(core.ctx.poise_ctx.serenity_context())
-            .author_id(core.ctx.poise_ctx.author().id)
-            .timeout(core.ctx.timeout)
-            .filter(move |i| filter_ids.contains(&i.data.custom_id.to_string()));
 
         // if let Some(id) = core.ctx.message_id().await {
         //     collector = collector.message_id(id);
         // }
-        collector
+        ComponentInteractionCollector::new(core.ctx.poise_ctx.serenity_context())
+            .author_id(core.ctx.poise_ctx.author().id)
+            .timeout(core.ctx.timeout)
+            .filter(move |i| filter_ids.contains(&i.data.custom_id.to_string()))
     }
 
     fn children(&mut self) -> Vec<Box<dyn ChildViewResolver<T> + '_>> {
@@ -284,7 +286,7 @@ pub trait InteractiveView<'a, T: Action + 'a>: View<'a, T> + Sync {
     where
         S: View<'a, C>,
         C: Action + Clone + 'a,
-        'a: 'b
+        'a: 'b,
     {
         Box::new((&mut view.core_mut().registry, wrap))
     }
@@ -297,7 +299,13 @@ pub trait InteractiveView<'a, T: Action + 'a>: View<'a, T> + Sync {
     }
 
     fn collector_filter(&mut self) -> Vec<String> {
-        let mut ids: Vec<String> = self.core().registry.ids().into_iter().map(|s| s.to_string()).collect();
+        let mut ids: Vec<String> = self
+            .core()
+            .registry
+            .ids()
+            .into_iter()
+            .map(|s| s.to_string())
+            .collect();
         for child in self.children() {
             ids.extend(child.filter_ids());
         }

@@ -14,8 +14,8 @@ use crate::bot::commands::Context;
 use crate::bot::views::InteractiveView;
 use crate::bot::views::ResponseKind;
 use crate::bot::views::ResponseView;
-use crate::view_core;
 use crate::bot::views::View;
+use crate::view_core;
 
 /// Model for tracking pagination state.
 pub struct PaginationModel {
@@ -143,7 +143,11 @@ impl<'a> ResponseView<'a> for PaginationView<'a> {
 
 #[async_trait::async_trait]
 impl<'a> InteractiveView<'a, PaginationAction> for PaginationView<'a> {
-    async fn handle(&mut self, action: &PaginationAction, _interaction: &ComponentInteraction) -> Option<PaginationAction> {
+    async fn handle(
+        &mut self,
+        action: &PaginationAction,
+        _interaction: &ComponentInteraction,
+    ) -> Option<PaginationAction> {
         match action {
             PaginationAction::First => self.state.first_page(),
             PaginationAction::Prev => self.state.prev_page(),

@@ -92,7 +92,6 @@ action_enum! {
     }
 }
 
-
 view_core! {
     timeout = Duration::from_secs(120),
     /// View for displaying bot statistics and information.

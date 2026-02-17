@@ -130,7 +130,9 @@ impl<'a> ResponseView<'a> for SettingsFeedView<'a> {
             channel_id,
             CreateSelectMenuKind::Channel {
                 channel_types: Some(vec![ChannelType::Text, ChannelType::News].into()),
-                default_channels: Some(Self::parse_channel_id(self.settings.feeds.channel_id.as_ref()).into()),
+                default_channels: Some(
+                    Self::parse_channel_id(self.settings.feeds.channel_id.as_ref()).into(),
+                ),
             },
         )
         .placeholder(if self.settings.feeds.channel_id.is_some() {
@@ -349,7 +351,10 @@ impl<'a> InteractiveView<'a, FeedSubscriptionsListAction> for FeedSubscriptionsL
     ) -> Option<FeedSubscriptionsListAction> {
         match action {
             FeedSubscriptionsListAction::Base(pagination_action) => {
-                let action = self.pagination.handle(pagination_action, interaction).await?;
+                let action = self
+                    .pagination
+                    .handle(pagination_action, interaction)
+                    .await?;
                 Some(FeedSubscriptionsListAction::Base(action))
             }
             FeedSubscriptionsListAction::Exit => Some(action.clone()),
@@ -363,7 +368,10 @@ impl<'a> InteractiveView<'a, FeedSubscriptionsListAction> for FeedSubscriptionsL
     }
 
     fn children(&mut self) -> Vec<Box<dyn ChildViewResolver<FeedSubscriptionsListAction> + '_>> {
-        vec![Self::child(&mut self.pagination, FeedSubscriptionsListAction::Base)]
+        vec![Self::child(
+            &mut self.pagination,
+            FeedSubscriptionsListAction::Base,
+        )]
     }
 }
 
@@ -400,8 +408,7 @@ impl<'a> ResponseView<'a> for FeedSubscriptionBatchView<'a> {
         ))];
 
         if self.is_final {
-            let action_id = self
-                .register(FeedSubscriptionBatchAction::ViewSubscriptions);
+            let action_id = self.register(FeedSubscriptionBatchAction::ViewSubscriptions);
             let nav_button = CreateButton::new(action_id)
                 .label("View Subscriptions")
                 .style(ButtonStyle::Secondary);

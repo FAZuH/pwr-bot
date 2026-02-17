@@ -10,7 +10,6 @@ use serenity::all::CreateActionRow;
 use serenity::all::CreateButton;
 use serenity::all::CreateComponent;
 
-use crate::bot::views::View;
 use crate::action_enum;
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;
@@ -24,6 +23,7 @@ use crate::bot::navigation::NavigationResult;
 use crate::bot::views::Action;
 use crate::bot::views::ResponseKind;
 use crate::bot::views::ResponseView;
+use crate::bot::views::View;
 use crate::view_core;
 
 view_core! {
@@ -47,7 +47,7 @@ impl<'a> SettingsNavigationView<'a> {
         Self {
             show_back: false,
             show_help: false,
-            core: Self::create_core(ctx)
+            core: Self::create_core(ctx),
         }
     }
 }
