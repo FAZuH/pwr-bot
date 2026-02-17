@@ -235,8 +235,14 @@ impl<'a> ResponseView<'a> for VoiceLeaderboardView<'a> {
             ));
         }
 
+        let (since, until) = self.time_range.to_range();
         container.push(CreateContainerComponent::TextDisplay(
-            CreateTextDisplay::new(format!("\n-# Time Range: **{}**", self.time_range.name())),
+            CreateTextDisplay::new(format!(
+                "\n-# Time Range: **{}** — <t:{}:f> to <t:{}:R>",
+                self.time_range.name(),
+                since.timestamp(),
+                until.timestamp(),
+            )),
         ));
 
         container.push(CreateContainerComponent::Separator(CreateSeparator::new(
