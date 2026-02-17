@@ -12,7 +12,7 @@ use crate::bot::controller::Coordinator;
 use crate::bot::error::BotError;
 use crate::bot::navigation::NavigationResult;
 use crate::bot::views::InteractableComponentView;
-use crate::bot::views::ResponseComponentView;
+use crate::bot::views::ResponseProvider;
 use crate::bot::views::StatefulView;
 use crate::controller;
 use crate::database::model::ServerSettingsModel;

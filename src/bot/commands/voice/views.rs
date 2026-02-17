@@ -30,7 +30,8 @@ use crate::bot::commands::voice::image_builder::PageGenerationResult;
 use crate::bot::utils::format_duration;
 use crate::bot::views::Action;
 use crate::bot::views::InteractableComponentView;
-use crate::bot::views::ResponseComponentView;
+use crate::bot::views::ResponseKind;
+use crate::bot::views::ResponseProvider;
 use crate::bot::views::StatefulView;
 use crate::bot::views::ViewContext;
 use crate::bot::views::pagination::PaginationAction;
@@ -70,8 +71,8 @@ impl<'a> SettingsVoiceView<'a> {
     }
 }
 
-impl<'a> ResponseComponentView for SettingsVoiceView<'a> {
-    fn create_components<'b>(&self) -> Vec<CreateComponent<'b>> {
+impl<'a> ResponseProvider for SettingsVoiceView<'a> {
+    fn create_response<'b>(&self) -> ResponseKind<'b> {
         let is_enabled = self.settings.voice.enabled.unwrap_or(true);
 
         let status_text = format!(
@@ -110,7 +111,7 @@ impl<'a> ResponseComponentView for SettingsVoiceView<'a> {
             .into(),
         ));
 
-        vec![container, nav_buttons]
+        vec![container, nav_buttons].into()
     }
 }
 
@@ -206,11 +207,11 @@ impl<'a> VoiceLeaderboardView<'a> {
 
 #[async_trait::async_trait]
 impl<'a> StatefulView<'a, ()> for VoiceLeaderboardView<'a> {
-    fn view_context(&self) -> &crate::bot::views::ViewContext<'a, ()> {
+    fn view_context(&self) -> &ViewContext<'a, ()> {
         &self.ctx
     }
 
-    fn view_context_mut(&mut self) -> &mut crate::bot::views::ViewContext<'a, ()> {
+    fn view_context_mut(&mut self) -> &mut ViewContext<'a, ()> {
         &mut self.ctx
     }
 
@@ -229,8 +230,8 @@ impl<'a> StatefulView<'a, ()> for VoiceLeaderboardView<'a> {
     }
 }
 
-impl ResponseComponentView for VoiceLeaderboardView<'_> {
-    fn create_components<'a>(&self) -> Vec<CreateComponent<'a>> {
+impl ResponseProvider for VoiceLeaderboardView<'_> {
+    fn create_response<'a>(&self) -> ResponseKind<'a> {
         let mut container = vec![CreateContainerComponent::TextDisplay(
             CreateTextDisplay::new("### Voice Leaderboard"),
         )];
@@ -323,7 +324,7 @@ impl ResponseComponentView for VoiceLeaderboardView<'_> {
 
         self.pagination.attach_if_multipage(&mut components);
 
-        components
+        components.into()
     }
 }
 

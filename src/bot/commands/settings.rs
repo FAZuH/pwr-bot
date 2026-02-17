@@ -18,7 +18,8 @@ use crate::bot::controller::Controller;
 use crate::bot::controller::Coordinator;
 use crate::bot::navigation::NavigationResult;
 use crate::bot::views::Action;
-use crate::bot::views::ResponseComponentView;
+use crate::bot::views::ResponseKind;
+use crate::bot::views::ResponseProvider;
 use crate::custom_id_enum;
 
 /// Navigation bar for settings views.
@@ -75,8 +76,8 @@ custom_id_enum! {
     }
 }
 
-impl ResponseComponentView for SettingsNavigationView {
-    fn create_components<'a>(&self) -> Vec<CreateComponent<'a>> {
+impl ResponseProvider for SettingsNavigationView {
+    fn create_response<'a>(&self) -> ResponseKind<'a> {
         let mut buttons = Vec::new();
 
         if self.show_back {
@@ -105,6 +106,7 @@ impl ResponseComponentView for SettingsNavigationView {
         vec![CreateComponent::ActionRow(CreateActionRow::Buttons(
             buttons.into(),
         ))]
+        .into()
     }
 }
 

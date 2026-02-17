@@ -19,7 +19,8 @@ use serenity::all::CreateTextDisplay;
 use crate::bot::commands::Context;
 use crate::bot::views::Action;
 use crate::bot::views::InteractableComponentView;
-use crate::bot::views::ResponseComponentView;
+use crate::bot::views::ResponseKind;
+use crate::bot::views::ResponseProvider;
 use crate::custom_id_enum;
 use crate::database::model::ServerSettings;
 use crate::database::model::ServerSettingsModel;
@@ -120,8 +121,8 @@ impl<'a> SettingsMainView<'a> {
     }
 }
 
-impl ResponseComponentView for SettingsMainView<'_> {
-    fn create_components<'a>(&self) -> Vec<CreateComponent<'a>> {
+impl ResponseProvider for SettingsMainView<'_> {
+    fn create_response<'a>(&self) -> ResponseKind<'a> {
         let text_active_features_description = match &self.state {
             SettingsMainState::FeatureSettings => {
                 "You can **configure** a feature by clicking the buttons below"
@@ -231,7 +232,7 @@ impl ResponseComponentView for SettingsMainView<'_> {
             .into(),
         ));
 
-        vec![container, bottom_buttons]
+        vec![container, bottom_buttons].into()
     }
 }
 

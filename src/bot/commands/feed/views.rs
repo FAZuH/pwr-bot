@@ -28,7 +28,8 @@ use crate::bot::commands::Context;
 use crate::bot::commands::Error;
 use crate::bot::views::Action;
 use crate::bot::views::InteractableComponentView;
-use crate::bot::views::ResponseComponentView;
+use crate::bot::views::ResponseKind;
+use crate::bot::views::ResponseProvider;
 use crate::bot::views::StatefulView;
 use crate::bot::views::pagination::PaginationAction;
 use crate::bot::views::pagination::PaginationView;
@@ -86,8 +87,8 @@ impl<'a> SettingsFeedView<'a> {
     }
 }
 
-impl ResponseComponentView for SettingsFeedView<'_> {
-    fn create_components<'a>(&self) -> Vec<CreateComponent<'a>> {
+impl ResponseProvider for SettingsFeedView<'_> {
+    fn create_response<'a>(&self) -> ResponseKind<'a> {
         let settings = &self.settings.feeds;
         let is_enabled = settings.enabled.unwrap_or(true);
 
@@ -184,7 +185,7 @@ impl ResponseComponentView for SettingsFeedView<'_> {
             .into(),
         ));
 
-        vec![container, nav_buttons]
+        vec![container, nav_buttons].into()
     }
 }
 
@@ -290,10 +291,10 @@ impl<'a> FeedSubscriptionsListView<'a> {
     }
 }
 
-impl<'a> ResponseComponentView for FeedSubscriptionsListView<'a> {
-    fn create_components<'b>(&self) -> Vec<CreateComponent<'b>> {
+impl<'a> ResponseProvider for FeedSubscriptionsListView<'a> {
+    fn create_response<'b>(&self) -> ResponseKind<'b> {
         if self.subscriptions.is_empty() {
-            return Self::create_empty();
+            return Self::create_empty().into();
         }
 
         let sections: Vec<CreateContainerComponent<'b>> = self
@@ -308,7 +309,7 @@ impl<'a> ResponseComponentView for FeedSubscriptionsListView<'a> {
 
         self.pagination.attach_if_multipage(&mut components);
 
-        components
+        components.into()
     }
 }
 
@@ -360,8 +361,8 @@ impl<'a> FeedSubscriptionBatchView<'a> {
     }
 }
 
-impl<'a> ResponseComponentView for FeedSubscriptionBatchView<'a> {
-    fn create_components<'b>(&self) -> Vec<CreateComponent<'b>> {
+impl<'a> ResponseProvider for FeedSubscriptionBatchView<'a> {
+    fn create_response<'b>(&self) -> ResponseKind<'b> {
         let text_components: Vec<CreateContainerComponent> = self
             .states
             .iter()
@@ -383,7 +384,7 @@ impl<'a> ResponseComponentView for FeedSubscriptionBatchView<'a> {
             )));
         }
 
-        components
+        components.into()
     }
 }
 

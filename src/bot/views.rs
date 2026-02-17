@@ -11,8 +11,8 @@ use serenity::all::ComponentInteraction;
 use serenity::all::ComponentInteractionCollector;
 use serenity::all::CreateAttachment;
 use serenity::all::CreateComponent;
+use serenity::all::CreateEmbed;
 use serenity::all::CreateInteractionResponse;
-use serenity::all::CreateMessage;
 use serenity::all::MessageFlags;
 use serenity::all::MessageId;
 
@@ -64,41 +64,43 @@ impl<'a, D> ViewContext<'a, D> {
     }
 }
 
-/// Trait for types that can create Discord UI components.
-pub trait ViewProvider<'a, T = CreateComponent<'a>> {
-    /// Creates the components for this view.
-    fn create(&self) -> Vec<T>;
+/// Enum representing the type of response content.
+pub enum ResponseKind<'a> {
+    Component(Vec<CreateComponent<'a>>),
+    Embed(Box<CreateEmbed<'a>>),
 }
 
-/// Trait for views that can be sent as a response to a command.
-pub trait ResponseComponentView {
-    /// Creates the components for this view.
-    fn create_components<'a>(&self) -> Vec<CreateComponent<'a>>;
+impl<'a> From<Vec<CreateComponent<'a>>> for ResponseKind<'a> {
+    fn from(value: Vec<CreateComponent<'a>>) -> Self {
+        ResponseKind::Component(value)
+    }
+}
 
-    /// Creates a reply with this view's components.
+impl<'a> From<CreateEmbed<'a>> for ResponseKind<'a> {
+    fn from(value: CreateEmbed<'a>) -> Self {
+        ResponseKind::Embed(Box::new(value))
+    }
+}
+
+/// Trait for views that can provide response content.
+pub trait ResponseProvider {
+    /// Returns the response content for this view.
+    fn create_response<'a>(&self) -> ResponseKind<'a>;
+
+    /// Creates a reply based on the response kind.
     fn create_reply<'a>(&self) -> CreateReply<'a> {
-        CreateReply::new()
-            .flags(MessageFlags::IS_COMPONENTS_V2)
-            .components(self.create_components())
-    }
-
-    /// Creates a message with this view's components.
-    fn create_message<'a>(&self) -> CreateMessage<'a> {
-        CreateMessage::new()
-            .flags(MessageFlags::IS_COMPONENTS_V2)
-            .components(self.create_components())
-    }
-}
-
-impl<'a, T: ResponseComponentView> ViewProvider<'a> for T {
-    fn create(&self) -> Vec<CreateComponent<'a>> {
-        self.create_components()
+        match self.create_response() {
+            ResponseKind::Component(components) => CreateReply::new()
+                .flags(MessageFlags::IS_COMPONENTS_V2)
+                .components(components),
+            ResponseKind::Embed(embed) => CreateReply::new().embed(*embed),
+        }
     }
 }
 
 /// Trait for views with stored context and state.
 #[async_trait::async_trait]
-pub trait StatefulView<'a, D = ()>: ResponseComponentView + Send + Sync
+pub trait StatefulView<'a, D = ()>: ResponseProvider + Send + Sync
 where
     D: Send + Sync + 'static,
 {

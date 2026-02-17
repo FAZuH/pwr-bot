@@ -11,7 +11,8 @@ use crate::bot::Error;
 use crate::bot::commands::Context;
 use crate::bot::views::Action;
 use crate::bot::views::InteractableComponentView;
-use crate::bot::views::ResponseComponentView;
+use crate::bot::views::ResponseKind;
+use crate::bot::views::ResponseProvider;
 use crate::custom_id_enum;
 use crate::stateful_view;
 
@@ -132,16 +133,19 @@ impl<'a> PaginationView<'a> {
 
     /// Attaches pagination controls only if there are multiple pages and not disabled.
     pub fn attach_if_multipage<'b>(&self, components: &mut impl Extend<CreateComponent<'b>>) {
-        if !self.disabled && self.state.pages > 1 {
-            components.extend(self.create_components());
+        if !self.disabled
+            && self.state.pages > 1
+            && let ResponseKind::Component(create_components) = self.create_response()
+        {
+            components.extend(create_components)
         }
     }
 }
 
-impl<'a> ResponseComponentView for PaginationView<'a> {
-    fn create_components<'b>(&self) -> Vec<CreateComponent<'b>> {
+impl<'a> ResponseProvider for PaginationView<'a> {
+    fn create_response<'b>(&self) -> ResponseKind<'b> {
         if self.disabled {
-            return vec![];
+            return ResponseKind::Component(vec![]);
         }
 
         let page_label = format!("{}/{}", self.state.current_page, self.state.pages);
@@ -167,6 +171,7 @@ impl<'a> ResponseComponentView for PaginationView<'a> {
             ]
             .into(),
         ))]
+        .into()
     }
 }
 

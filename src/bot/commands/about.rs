@@ -29,7 +29,8 @@ use crate::bot::controller::Coordinator;
 use crate::bot::navigation::NavigationResult;
 use crate::bot::views::Action;
 use crate::bot::views::InteractableComponentView;
-use crate::bot::views::ResponseComponentView;
+use crate::bot::views::ResponseKind;
+use crate::bot::views::ResponseProvider;
 use crate::bot::views::StatefulView;
 use crate::controller;
 use crate::custom_id_enum;
@@ -137,8 +138,8 @@ impl AboutView<'_> {
     }
 }
 
-impl ResponseComponentView for AboutView<'_> {
-    fn create_components<'b>(&self) -> Vec<CreateComponent<'b>> {
+impl ResponseProvider for AboutView<'_> {
+    fn create_response<'b>(&self) -> ResponseKind<'b> {
         let content_text = format!(
             "-# **Settings > About**
 ## pwr-bot
@@ -197,7 +198,7 @@ Copyright © 2025-{} FAZuH  —  v{}",
             )),
         ]));
 
-        vec![container, back_button]
+        vec![container, back_button].into()
     }
 }
 

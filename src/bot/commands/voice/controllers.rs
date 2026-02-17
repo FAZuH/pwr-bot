@@ -21,7 +21,6 @@ use crate::bot::controller::Coordinator;
 use crate::bot::error::BotError;
 use crate::bot::navigation::NavigationResult;
 use crate::bot::views::InteractableComponentView;
-use crate::bot::views::ResponseComponentView;
 use crate::bot::views::StatefulView;
 use crate::controller;
 use crate::database::model::VoiceLeaderboardEntry;
@@ -169,8 +168,7 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceLeaderboardController<
         let mut view = VoiceLeaderboardView::new(&ctx, session_data, self.time_range);
 
         if view.leaderboard_data.is_empty() {
-            let reply = view.create_reply();
-            ctx.send(reply).await?;
+            view.send().await?;
             return Ok(NavigationResult::Exit);
         }
 
