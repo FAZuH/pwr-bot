@@ -5,6 +5,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use log::debug;
 use poise::CreateReply;
 use poise::ReplyHandle;
 use serenity::all::ComponentInteraction;
@@ -295,10 +296,6 @@ pub trait InteractiveView<'a, T: Action + 'a>: View<'a, T> + Sync {
     async fn create_collector(&mut self) -> ComponentInteractionCollector<'a> {
         let filter_ids = self.collector_filter();
         let core = self.core();
-
-        // if let Some(id) = core.ctx.message_id().await {
-        //     collector = collector.message_id(id);
-        // }
         ComponentInteractionCollector::new(core.ctx.poise_ctx.serenity_context())
             .author_id(core.ctx.poise_ctx.author().id)
             .timeout(core.ctx.timeout)

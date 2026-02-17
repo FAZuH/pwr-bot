@@ -9,6 +9,7 @@ use poise::ChoiceParameter;
 use crate::bot::commands::Cog;
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;
+use crate::bot::views::Action;
 
 pub mod controllers;
 pub mod image_builder;
@@ -65,7 +66,7 @@ impl Cog for VoiceCog {
 }
 
 /// Time range filter for voice activity leaderboard.
-#[derive(ChoiceParameter, Clone, Copy, Debug, PartialEq)]
+#[derive(ChoiceParameter, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VoiceLeaderboardTimeRange {
     /// From 00:00 today until now
     Today,
@@ -87,6 +88,12 @@ pub enum VoiceLeaderboardTimeRange {
     /// All recorded history
     #[name = "All time"]
     AllTime,
+}
+
+impl Action for VoiceLeaderboardTimeRange {
+    fn label(&self) -> &'static str {
+        self.name()
+    }
 }
 
 impl From<VoiceLeaderboardTimeRange> for DateTime<Utc> {

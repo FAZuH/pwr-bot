@@ -147,12 +147,6 @@ view_core! {
     }
 }
 
-action_extends! {
-    VoiceLeaderboardAction extends PaginationAction {
-        TimeRange,
-    }
-}
-
 impl<'a> VoiceLeaderboardView<'a> {
     /// Creates a new leaderboard view.
     pub fn new(
@@ -215,6 +209,9 @@ impl<'a> VoiceLeaderboardView<'a> {
 
 impl<'a> ResponseView<'a> for VoiceLeaderboardView<'a> {
     fn create_response<'b>(&mut self) -> ResponseKind<'b> {
+        use VoiceLeaderboardAction::*;
+        use VoiceLeaderboardTimeRange::*;
+
         let mut container = vec![CreateContainerComponent::TextDisplay(
             CreateTextDisplay::new("### Voice Leaderboard"),
         )];
@@ -263,35 +260,17 @@ impl<'a> ResponseView<'a> for VoiceLeaderboardView<'a> {
             ));
         }
 
-        let time_range_id = self.register(VoiceLeaderboardAction::TimeRange);
-        let time_range_menu = time_range_id
+        let time_range_menu = self
+            .register(TimeRange)
             .as_select(CreateSelectMenuKind::String {
                 options: vec![
-                    CreateSelectMenuOption::new("Today", VoiceLeaderboardTimeRange::Today.name()),
-                    CreateSelectMenuOption::new(
-                        "Past 3 days",
-                        VoiceLeaderboardTimeRange::Past3Days.name(),
-                    ),
-                    CreateSelectMenuOption::new(
-                        "This week",
-                        VoiceLeaderboardTimeRange::ThisWeek.name(),
-                    ),
-                    CreateSelectMenuOption::new(
-                        "Past 2 weeks",
-                        VoiceLeaderboardTimeRange::Past2Weeks.name(),
-                    ),
-                    CreateSelectMenuOption::new(
-                        "This month",
-                        VoiceLeaderboardTimeRange::ThisMonth.name(),
-                    ),
-                    CreateSelectMenuOption::new(
-                        "This year",
-                        VoiceLeaderboardTimeRange::ThisYear.name(),
-                    ),
-                    CreateSelectMenuOption::new(
-                        "All time",
-                        VoiceLeaderboardTimeRange::AllTime.name(),
-                    ),
+                    Today.into(),
+                    Past3Days.into(),
+                    ThisWeek.into(),
+                    Past2Weeks.into(),
+                    ThisMonth.into(),
+                    ThisYear.into(),
+                    AllTime.into(),
                 ]
                 .into(),
             })
@@ -323,6 +302,18 @@ impl<'a> ResponseView<'a> for VoiceLeaderboardView<'a> {
     }
 }
 
+impl From<VoiceLeaderboardTimeRange> for CreateSelectMenuOption<'static> {
+    fn from(range: VoiceLeaderboardTimeRange) -> Self {
+        CreateSelectMenuOption::new(range.name(), range.name())
+    }
+}
+
+action_extends! {
+    VoiceLeaderboardAction extends PaginationAction {
+        TimeRange,
+    }
+}
+
 #[async_trait::async_trait]
 impl<'a> InteractiveView<'a, VoiceLeaderboardAction> for VoiceLeaderboardView<'a> {
     async fn handle(
@@ -330,30 +321,24 @@ impl<'a> InteractiveView<'a, VoiceLeaderboardAction> for VoiceLeaderboardView<'a
         action: &VoiceLeaderboardAction,
         interaction: &ComponentInteraction,
     ) -> Option<VoiceLeaderboardAction> {
-        match (action, &interaction.data.kind) {
-            (
-                VoiceLeaderboardAction::TimeRange,
-                ComponentInteractionDataKind::StringSelect { values },
-            ) => {
-                if let Some(time_range) = values
-                    .iter()
-                    .flat_map(|val| VoiceLeaderboardTimeRange::from_name(val))
-                    .next()
-                    && self.time_range != time_range
-                {
-                    self.time_range = time_range;
-                    return Some(action.clone());
-                }
-                None
-            }
-            (VoiceLeaderboardAction::Base(pagination_action), _) => {
+        use VoiceLeaderboardAction::*;
+        match action {
+            Base(pagination_action) => {
                 let action = self
                     .pagination
                     .handle(pagination_action, interaction)
                     .await?;
                 Some(VoiceLeaderboardAction::Base(action))
             }
-            _ => None,
+            TimeRange => {
+                if let ComponentInteractionDataKind::StringSelect { values } = &interaction.data.kind
+                    && let Some(time_range) = values.first().and_then(|v| VoiceLeaderboardTimeRange::from_name(v))
+                    && self.time_range != time_range {
+                        self.time_range = time_range;
+                        return Some(action.clone());
+                    }
+                None
+            }
         }
     }
 
