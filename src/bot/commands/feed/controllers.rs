@@ -195,7 +195,7 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for FeedListController<'a> {
             let subscriptions = service
                 .list_paginated_subscriptions(
                     &subscriber,
-                    view.pagination.state.current_page,
+                    view.pagination.current_page(),
                     SUBSCRIPTIONS_PER_PAGE,
                 )
                 .await?;

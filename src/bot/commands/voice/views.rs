@@ -178,14 +178,14 @@ impl<'a> VoiceLeaderboardView<'a> {
         if self.leaderboard_data.is_empty() {
             return (0, 0);
         }
-        let offset = ((self.pagination.state.current_page - 1) * LEADERBOARD_PER_PAGE) as usize;
+        let offset = ((self.pagination.current_page() - 1) * LEADERBOARD_PER_PAGE) as usize;
         let end = (offset + LEADERBOARD_PER_PAGE as usize).min(self.leaderboard_data.len());
         (offset, end)
     }
 
     /// Returns the rank offset for the current page.
     fn current_page_rank_offset(&self) -> u32 {
-        (self.pagination.state.current_page - 1) * LEADERBOARD_PER_PAGE
+        (self.pagination.current_page() - 1) * LEADERBOARD_PER_PAGE
     }
 
     /// Generates the page image for the current page.
@@ -211,31 +211,10 @@ impl<'a> VoiceLeaderboardView<'a> {
     pub fn set_current_page_bytes(&mut self, bytes: Vec<u8>) {
         self.current_page_bytes = Some(bytes);
     }
+}
 
-    /// Sends the view with the given attachment.
-    pub async fn send_with_attachment(
-        &mut self,
-        attachment: CreateAttachment<'_>,
-    ) -> Result<(), Error> {
-        let reply = self.create_reply_with_attachment();
-        let mut create_reply: poise::CreateReply<'_> = reply.into();
-        create_reply = create_reply.attachment(attachment);
-        self.core_mut().send(create_reply).await
-    }
-
-    /// Edits the view with the given attachment.
-    pub async fn edit_with_attachment(
-        &mut self,
-        attachment: CreateAttachment<'_>,
-    ) -> Result<(), Error> {
-        let reply = self.create_reply_with_attachment();
-        let mut create_reply: poise::CreateReply<'_> = reply.into();
-        create_reply = create_reply.attachment(attachment);
-        self.core().edit(create_reply).await
-    }
-
-    /// Creates a reply with optional attachment.
-    fn create_reply_with_attachment<'b>(&mut self) -> ResponseKind<'b> {
+impl<'a> ResponseView<'a> for VoiceLeaderboardView<'a> {
+    fn create_response<'b>(&mut self) -> ResponseKind<'b> {
         let mut container = vec![CreateContainerComponent::TextDisplay(
             CreateTextDisplay::new("### Voice Leaderboard"),
         )];
@@ -328,12 +307,6 @@ impl<'a> VoiceLeaderboardView<'a> {
         self.pagination.attach_if_multipage(&mut components);
 
         components.into()
-    }
-}
-
-impl<'a> ResponseView<'a> for VoiceLeaderboardView<'a> {
-    fn create_response<'b>(&mut self) -> ResponseKind<'b> {
-        self.create_reply_with_attachment()
     }
 
     fn create_reply<'b>(&mut self) -> poise::CreateReply<'b> {

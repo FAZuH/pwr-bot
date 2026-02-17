@@ -4,7 +4,6 @@ use std::ops::Deref;
 use std::time::Instant;
 
 use log::trace;
-use serenity::all::CreateAttachment;
 
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;
@@ -13,7 +12,6 @@ use crate::bot::commands::settings::run_settings;
 use crate::bot::commands::voice::VoiceLeaderboardTimeRange;
 use crate::bot::commands::voice::views::SettingsVoiceAction;
 use crate::bot::commands::voice::views::SettingsVoiceView;
-use crate::bot::commands::voice::views::VOICE_LEADERBOARD_IMAGE_FILENAME;
 use crate::bot::commands::voice::views::VoiceLeaderboardAction;
 use crate::bot::commands::voice::views::VoiceLeaderboardView;
 use crate::bot::controller::Controller;
@@ -175,9 +173,7 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceLeaderboardController<
         // Generate and send initial page
         let page_result = view.generate_current_page().await?;
         view.set_current_page_bytes(page_result.image_bytes.clone());
-        let attachment =
-            CreateAttachment::bytes(page_result.image_bytes, VOICE_LEADERBOARD_IMAGE_FILENAME);
-        view.send_with_attachment(attachment).await?;
+        view.render().await?;
 
         trace!(
             "controller_initial_response {} ms",
@@ -191,9 +187,7 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceLeaderboardController<
             }
             let page_result = view.generate_current_page().await?;
             view.set_current_page_bytes(page_result.image_bytes.clone());
-            let attachment =
-                CreateAttachment::bytes(page_result.image_bytes, VOICE_LEADERBOARD_IMAGE_FILENAME);
-            view.edit_with_attachment(attachment).await?;
+            view.render().await?;
         }
 
         trace!(

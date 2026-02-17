@@ -18,9 +18,10 @@ use crate::view_core;
 
 /// Model for tracking pagination state.
 pub struct PaginationModel {
-    pub current_page: u32,
-    pub pages: u32,
-    pub per_page: u32,
+    current_page: u32,
+    pages: u32,
+    #[allow(dead_code)]
+    per_page: u32,
 }
 
 impl PaginationModel {
@@ -107,6 +108,10 @@ impl<'a> PaginationView<'a> {
         {
             components.extend(create_components)
         }
+    }
+
+    pub fn current_page(&self) -> u32 {
+        self.state.current_page
     }
 }
 
