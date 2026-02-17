@@ -321,13 +321,13 @@ impl<'a> FeedSubscriptionsListView<'a> {
             FeedSubscriptionsListState::Edit => {
                 let source_url = sub.feed.source_url;
                 let button = if self.marked_unsub.contains(&source_url) {
-                    self.register(Unsubscribe { source_url })
-                        .as_button()
-                        .style(ButtonStyle::Danger)
-                } else {
                     self.register(UndoUnsub { source_url })
                         .as_button()
                         .style(ButtonStyle::Secondary)
+                } else {
+                    self.register(Unsubscribe { source_url })
+                        .as_button()
+                        .style(ButtonStyle::Danger)
                 };
                 CreateSectionAccessory::Button(button)
             }
