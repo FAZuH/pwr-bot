@@ -188,6 +188,9 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for FeedSubscriptionsController
                 for url in &view.marked_unsub {
                     service.unsubscribe(url, &subscriber).await?;
                 }
+                let total_items = service.get_subscription_count(&subscriber).await?;
+                let pagination = PaginationView::new(&ctx, total_items, SUBSCRIPTIONS_PER_PAGE);
+                view.pagination = pagination
             }
             let subscriptions = service
                 .list_paginated_subscriptions(
