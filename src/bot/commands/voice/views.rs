@@ -134,7 +134,7 @@ impl<'a> InteractableComponentView<'a, SettingsVoiceAction> for SettingsVoiceVie
 
 /// View for displaying voice leaderboard with pagination.
 pub struct VoiceLeaderboardView<'a> {
-    ctx: ViewContext<'a, ()>,
+    ctx: ViewContext<'a>,
     pub leaderboard_data: LeaderboardSessionData,
     pub time_range: VoiceLeaderboardTimeRange,
     pub pagination: PaginationView<'a>,
@@ -206,12 +206,12 @@ impl<'a> VoiceLeaderboardView<'a> {
 }
 
 #[async_trait::async_trait]
-impl<'a> StatefulView<'a, ()> for VoiceLeaderboardView<'a> {
-    fn view_context(&self) -> &ViewContext<'a, ()> {
+impl<'a> StatefulView<'a> for VoiceLeaderboardView<'a> {
+    fn view_context(&self) -> &ViewContext<'a> {
         &self.ctx
     }
 
-    fn view_context_mut(&mut self) -> &mut ViewContext<'a, ()> {
+    fn view_context_mut(&mut self) -> &mut ViewContext<'a> {
         &mut self.ctx
     }
 

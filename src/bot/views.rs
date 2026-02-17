@@ -22,34 +22,28 @@ use crate::bot::commands::Error;
 pub mod pagination;
 
 /// Context data for stateful views.
-pub struct ViewContext<'a, D = ()> {
+pub struct ViewContext<'a> {
     pub poise_ctx: &'a Context<'a>,
     pub timeout: Duration,
     pub reply_handle: Option<ReplyHandle<'a>>,
-    pub data: D,
 }
 
-impl<'a, D> ViewContext<'a, D> {
+impl<'a> ViewContext<'a> {
     /// Creates a new view context with default data.
-    pub fn new(ctx: &'a Context<'a>, timeout: Duration) -> Self
-    where
-        D: Default,
-    {
+    pub fn new(ctx: &'a Context<'a>, timeout: Duration) -> Self {
         Self {
             poise_ctx: ctx,
             timeout,
             reply_handle: None,
-            data: D::default(),
         }
     }
 
     /// Creates a new view context with the provided data.
-    pub fn with_data(ctx: &'a Context<'a>, timeout: Duration, data: D) -> Self {
+    pub fn with_data(ctx: &'a Context<'a>, timeout: Duration) -> Self {
         Self {
             poise_ctx: ctx,
             timeout,
             reply_handle: None,
-            data,
         }
     }
 
@@ -100,15 +94,12 @@ pub trait ResponseProvider {
 
 /// Trait for views with stored context and state.
 #[async_trait::async_trait]
-pub trait StatefulView<'a, D = ()>: ResponseProvider + Send + Sync
-where
-    D: Send + Sync + 'static,
-{
+pub trait StatefulView<'a>: ResponseProvider + Send + Sync {
     /// Returns a reference to the view context.
-    fn view_context(&self) -> &ViewContext<'a, D>;
+    fn view_context(&self) -> &ViewContext<'a>;
 
     /// Returns a mutable reference to the view context.
-    fn view_context_mut(&mut self) -> &mut ViewContext<'a, D>;
+    fn view_context_mut(&mut self) -> &mut ViewContext<'a>;
 
     /// Sends this view as a new message and stores the reply handle.
     async fn send(&mut self) -> Result<(), Error> {
@@ -153,10 +144,9 @@ where
 
 /// Trait for views that handle component interactions.
 #[async_trait::async_trait]
-pub trait InteractableComponentView<'a, T, D = ()>: StatefulView<'a, D>
+pub trait InteractableComponentView<'a, T>: StatefulView<'a>
 where
     for<'async_trait> T: Action + 'async_trait,
-    D: Send + Sync + 'static,
 {
     /// Handles an action and returns the next action if any.
     #[allow(unused_variables)]
@@ -206,7 +196,7 @@ where
     }
 
     /// Create a collector to collect this interaction
-    async fn create_collector(ctx: &ViewContext<'a, D>) -> ComponentInteractionCollector<'a> {
+    async fn create_collector(ctx: &ViewContext<'a>) -> ComponentInteractionCollector<'a> {
         let filter_ids = Self::collector_custom_id_filter();
         let mut collector = ComponentInteractionCollector::new(ctx.poise_ctx.serenity_context())
             .author_id(ctx.poise_ctx.author().id)
