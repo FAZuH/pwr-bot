@@ -254,58 +254,32 @@ impl<'a> InteractiveView<'a, SettingsMainAction> for SettingsMainView<'a> {
         action: &SettingsMainAction,
         interaction: &ComponentInteraction,
     ) -> Option<SettingsMainAction> {
-        match (action, &interaction.data.kind) {
-            (SettingsMainAction::Feeds, _) => match self.state {
-                SettingsMainState::FeatureSettings => {
-                    let _ = crate::bot::commands::feed::controllers::settings(
-                        *self.core().ctx.poise_ctx,
-                    )
-                    .await;
-                    None
-                }
-                SettingsMainState::DeactivateFeatures => {
+        use SettingsMainAction::*;
+        use SettingsMainState::*;
+
+        match action {
+            Feeds | Voice => match self.state {
+                FeatureSettings => Some(action.clone()),
+                DeactivateFeatures => {
                     self.toggle_features(from_ref(action));
-                    Some(action.clone())
+                    Some(ToggleState)
                 }
             },
-            (SettingsMainAction::Voice, _) => match self.state {
-                SettingsMainState::FeatureSettings => {
-                    let _ = crate::bot::commands::voice::controllers::settings(
-                        *self.core().ctx.poise_ctx,
-                    )
-                    .await;
-                    None
+            AddFeatures => {
+                if let ComponentInteractionDataKind::StringSelect { values } = &interaction.data.kind {
+                    let features: Vec<_> = values
+                        .iter()
+                        .filter_map(|val| self.core().registry.get(val).cloned())
+                        .collect();
+                    self.toggle_features(features);
                 }
-                SettingsMainState::DeactivateFeatures => {
-                    self.toggle_features(from_ref(action));
-                    Some(action.clone())
-                }
-            },
-            (
-                SettingsMainAction::AddFeatures,
-                ComponentInteractionDataKind::StringSelect { values },
-            ) => {
-                let mut features = Vec::new();
-                for val in values {
-                    // Try to find the action in the registry by checking which registered action
-                    // matches this value. The values in the select menu are the registered IDs.
-                    if let Some(registered_action) = self.core().registry.get(val) {
-                        features.push(registered_action.clone());
-                    }
-                }
-                self.toggle_features(features);
                 Some(action.clone())
             }
-            (SettingsMainAction::ToggleState, _) => {
+            ToggleState => {
                 self.state.toggle();
                 Some(action.clone())
             }
-            (SettingsMainAction::About, _) => {
-                // About navigation is handled by returning NavigationResult::SettingsAbout
-                // from the controller, not by calling about directly
-                Some(action.clone())
-            }
-            _ => None,
+            About => Some(action.clone()),
         }
     }
 }

@@ -243,7 +243,7 @@ macro_rules! action_enum {
                 match self {
                     $(
                         action_enum!(@match_pattern inner, Self::$variant $(, tuple: $($tuple_field)*)? $(, struct: $($struct_field)*)?) => {
-                            action_enum!(@label inner, Self::$variant $(, literal: $label)? $(, tuple: $($tuple_field)*)?)
+                            action_enum!(@label inner, $variant $(, literal: $label)? $(, tuple: $($tuple_field)*)?)
                         },
                     )*
                 }
@@ -257,10 +257,10 @@ macro_rules! action_enum {
     (@match_pattern $inner:ident, $path:path, struct: $($field:tt)+) => { $path { .. } };
 
     // Label helpers
-    (@label $inner:ident, $path:path, literal: $label:literal) => { $label };
-    (@label $inner:ident, $path:path, literal: $label:literal, tuple: $($field:tt)+) => { $label };
-    (@label $inner:ident, $path:path, tuple: $($field:tt)+) => { $inner.label() };
-    (@label $inner:ident, $path:path) => { stringify!($path) };
+    (@label $inner:ident, $variant:ident) => { stringify!($variant) };
+    (@label $inner:ident, $variant:ident, literal: $label:literal) => { $label };
+    (@label $inner:ident, $variant:ident, literal: $label:literal, tuple: $($field:tt)+) => { $label };
+    (@label $inner:ident, $variant:ident, tuple: $($field:tt)+) => { $inner.label() };
 }
 
 /// Extends an existing Action enum with additional variants.
@@ -320,7 +320,7 @@ macro_rules! action_extends {
                     Self::Base(base) => base.label(),
                     $(
                         action_extends!(@match_pattern inner, Self::$variant $(, tuple: $($tuple_field)*)? $(, struct: $($struct_field)*)?) => {
-                            action_extends!(@label inner, Self::$variant $(, literal: $label)? $(, tuple: $($tuple_field)*)?)
+                            action_extends!(@label inner, $variant $(, literal: $label)? $(, tuple: $($tuple_field)*)?)
                         },
                     )*
                 }
@@ -334,8 +334,8 @@ macro_rules! action_extends {
     (@match_pattern $inner:ident, $path:path, struct: $($field:tt)+) => { $path { .. } };
 
     // Label helpers - using tt matchers to pass through the attribute as a token
-    (@label $inner:ident, $path:path, literal: $label:literal) => { $label };
-    (@label $inner:ident, $path:path, literal: $label:literal, tuple: $($field:tt)+) => { $label };
-    (@label $inner:ident, $path:path, tuple: $($field:tt)+) => { $inner.label() };
-    (@label $inner:ident, $path:path) => { stringify!($path) };
+    (@label $inner:ident, $variant:ident) => { stringify!($variant) };
+    (@label $inner:ident, $variant:ident, literal: $label:literal) => { $label };
+    (@label $inner:ident, $variant:ident, literal: $label:literal, tuple: $($field:tt)+) => { $label };
+    (@label $inner:ident, $variant:ident, tuple: $($field:tt)+) => { $inner.label() };
 }
