@@ -20,6 +20,7 @@ pub struct Config {
     pub data_path: PathBuf,
     pub logs_path: PathBuf,
     pub features: Features,
+    pub version: String,
 }
 
 /// Feature flags for optional bot components.
@@ -61,6 +62,8 @@ impl Config {
             voice_tracking: parse_bool_env("ENABLE_VOICE_TRACKING", true),
             feed_publisher: parse_bool_env("ENABLE_FEED_PUBLISHER", true),
         };
+
+        self.version = env!("CARGO_PKG_VERSION").to_string();
 
         Ok(())
     }

@@ -29,6 +29,7 @@ use poise::serenity_prelude::ClientBuilder;
 use poise::serenity_prelude::GatewayIntents;
 use poise::serenity_prelude::Http;
 use poise::serenity_prelude::UserId;
+use serenity::all::ActivityData;
 use serenity::all::FullEvent;
 use serenity::all::Token;
 
@@ -88,7 +89,8 @@ impl Bot {
         let client_builder = ClientBuilder::new(token.clone(), intents)
             .event_handler(event_handler)
             .framework(framework)
-            .data(data);
+            .data(data)
+            .activity(ActivityData::playing(config.version.clone()));
 
         Ok(Self {
             cache: Arc::new(Cache::default()),
