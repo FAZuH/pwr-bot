@@ -16,7 +16,6 @@ use crate::repository::table::TableBase;
 use crate::repository::table::VoiceSessionsTable;
 
 pub mod error;
-pub mod model;
 pub mod table;
 
 /// Main database struct containing all table handlers.

@@ -13,9 +13,9 @@ use serenity::all::CreateMessage;
 use crate::bot::Bot;
 use crate::event::Event;
 use crate::event::FeedUpdateEvent;
+use crate::model::SubscriberModel;
+use crate::model::SubscriberType;
 use crate::repository::Repository;
-use crate::repository::model::SubscriberModel;
-use crate::repository::model::SubscriberType;
 use crate::subscriber::Subscriber;
 
 /// Subscriber that sends feed updates to users via DM.

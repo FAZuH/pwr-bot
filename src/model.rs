@@ -181,8 +181,6 @@ pub struct VoiceSessionsModel {
 
 use derive_builder::Builder;
 
-use crate::error::AppError;
-
 #[derive(Builder, Clone)]
 #[builder(pattern = "immutable")]
 pub struct VoiceLeaderboardOpt {
@@ -195,12 +193,6 @@ pub struct VoiceLeaderboardOpt {
     pub since: Option<DateTime<Utc>>,
     #[builder(default)]
     pub until: Option<DateTime<Utc>>,
-}
-
-impl From<VoiceLeaderboardOptBuilderError> for AppError {
-    fn from(value: VoiceLeaderboardOptBuilderError) -> Self {
-        AppError::internal_with_ref(value)
-    }
 }
 
 /// Daily voice activity aggregation for a specific user.

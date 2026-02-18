@@ -9,6 +9,7 @@ pub mod event;
 pub mod feed;
 pub mod logging;
 pub mod macros;
+pub mod model;
 pub mod repository;
 pub mod service;
 pub mod subscriber;

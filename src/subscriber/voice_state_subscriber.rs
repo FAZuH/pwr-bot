@@ -11,7 +11,7 @@ use serenity::all::ChannelId;
 use tokio::sync::Mutex;
 
 use crate::event::VoiceStateEvent;
-use crate::repository::model::VoiceSessionsModel;
+use crate::model::VoiceSessionsModel;
 use crate::service::Services;
 use crate::subscriber::Subscriber;
 

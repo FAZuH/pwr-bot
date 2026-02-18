@@ -2,11 +2,11 @@
 
 use std::sync::Arc;
 
+use crate::model::FeedItemModel;
+use crate::model::FeedModel;
+use crate::model::FeedSubscriptionModel;
+use crate::model::SubscriberModel;
 use crate::repository::Repository;
-use crate::repository::model::FeedItemModel;
-use crate::repository::model::FeedModel;
-use crate::repository::model::FeedSubscriptionModel;
-use crate::repository::model::SubscriberModel;
 use crate::repository::table::Table;
 
 /// Service for administrative and maintenance tasks.

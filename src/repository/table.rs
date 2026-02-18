@@ -4,18 +4,18 @@ use sqlx::SqlitePool;
 use sqlx::sqlite::SqliteArguments;
 
 use crate::error::AppError;
+use crate::model::FeedItemModel;
+use crate::model::FeedModel;
+use crate::model::FeedSubscriptionModel;
+use crate::model::FeedWithLatestItemRow;
+use crate::model::ServerSettingsModel;
+use crate::model::SubscriberModel;
+use crate::model::SubscriberType;
+use crate::model::VoiceLeaderboardEntry;
+use crate::model::VoiceLeaderboardOpt;
+use crate::model::VoiceLeaderboardOptBuilder;
+use crate::model::VoiceSessionsModel;
 use crate::repository::error::DatabaseError;
-use crate::repository::model::FeedItemModel;
-use crate::repository::model::FeedModel;
-use crate::repository::model::FeedSubscriptionModel;
-use crate::repository::model::FeedWithLatestItemRow;
-use crate::repository::model::ServerSettingsModel;
-use crate::repository::model::SubscriberModel;
-use crate::repository::model::SubscriberType;
-use crate::repository::model::VoiceLeaderboardEntry;
-use crate::repository::model::VoiceLeaderboardOpt;
-use crate::repository::model::VoiceLeaderboardOptBuilder;
-use crate::repository::model::VoiceSessionsModel;
 
 /// Base table struct providing database pool access.
 pub struct BaseTable {
@@ -809,10 +809,9 @@ impl VoiceSessionsTable {
         guild_id: u64,
         since: &chrono::DateTime<chrono::Utc>,
         until: &chrono::DateTime<chrono::Utc>,
-    ) -> Result<Vec<crate::repository::model::VoiceDailyActivity>, DatabaseError> {
-        Ok(
-            sqlx::query_as::<_, crate::repository::model::VoiceDailyActivity>(
-                r#"
+    ) -> Result<Vec<crate::model::VoiceDailyActivity>, DatabaseError> {
+        Ok(sqlx::query_as::<_, crate::model::VoiceDailyActivity>(
+            r#"
             SELECT 
                 date(join_time) as day,
                 SUM(
@@ -827,14 +826,13 @@ impl VoiceSessionsTable {
             GROUP BY date(join_time)
             ORDER BY day
             "#,
-            )
-            .bind(user_id as i64)
-            .bind(guild_id as i64)
-            .bind(since)
-            .bind(until)
-            .fetch_all(&self.base.pool)
-            .await?,
         )
+        .bind(user_id as i64)
+        .bind(guild_id as i64)
+        .bind(since)
+        .bind(until)
+        .fetch_all(&self.base.pool)
+        .await?)
     }
 
     /// Get guild-wide daily statistics: average time per active user.
@@ -843,10 +841,9 @@ impl VoiceSessionsTable {
         guild_id: u64,
         since: &chrono::DateTime<chrono::Utc>,
         until: &chrono::DateTime<chrono::Utc>,
-    ) -> Result<Vec<crate::repository::model::GuildDailyStats>, DatabaseError> {
-        Ok(
-            sqlx::query_as::<_, crate::repository::model::GuildDailyStats>(
-                r#"
+    ) -> Result<Vec<crate::model::GuildDailyStats>, DatabaseError> {
+        Ok(sqlx::query_as::<_, crate::model::GuildDailyStats>(
+            r#"
             SELECT 
                 day,
                 CAST(AVG(user_daily_total) AS INTEGER) as value
@@ -868,13 +865,12 @@ impl VoiceSessionsTable {
             GROUP BY day
             ORDER BY day
             "#,
-            )
-            .bind(guild_id as i64)
-            .bind(since)
-            .bind(until)
-            .fetch_all(&self.base.pool)
-            .await?,
         )
+        .bind(guild_id as i64)
+        .bind(since)
+        .bind(until)
+        .fetch_all(&self.base.pool)
+        .await?)
     }
 
     /// Get guild-wide daily statistics: count of unique active users.
@@ -883,10 +879,9 @@ impl VoiceSessionsTable {
         guild_id: u64,
         since: &chrono::DateTime<chrono::Utc>,
         until: &chrono::DateTime<chrono::Utc>,
-    ) -> Result<Vec<crate::repository::model::GuildDailyStats>, DatabaseError> {
-        Ok(
-            sqlx::query_as::<_, crate::repository::model::GuildDailyStats>(
-                r#"
+    ) -> Result<Vec<crate::model::GuildDailyStats>, DatabaseError> {
+        Ok(sqlx::query_as::<_, crate::model::GuildDailyStats>(
+            r#"
             SELECT 
                 date(join_time) as day,
                 COUNT(DISTINCT user_id) as value
@@ -895,12 +890,17 @@ impl VoiceSessionsTable {
             GROUP BY date(join_time)
             ORDER BY day
             "#,
-            )
-            .bind(guild_id as i64)
-            .bind(since)
-            .bind(until)
-            .fetch_all(&self.base.pool)
-            .await?,
         )
+        .bind(guild_id as i64)
+        .bind(since)
+        .bind(until)
+        .fetch_all(&self.base.pool)
+        .await?)
+    }
+}
+
+impl From<crate::model::VoiceLeaderboardOptBuilderError> for AppError {
+    fn from(value: crate::model::VoiceLeaderboardOptBuilderError) -> Self {
+        AppError::internal_with_ref(value)
     }
 }

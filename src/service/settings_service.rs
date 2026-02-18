@@ -2,9 +2,9 @@
 
 use std::sync::Arc;
 
+use crate::model::ServerSettings;
+use crate::model::ServerSettingsModel;
 use crate::repository::Repository;
-use crate::repository::model::ServerSettings;
-use crate::repository::model::ServerSettingsModel;
 use crate::repository::table::Table;
 use crate::service::error::ServiceError;
 

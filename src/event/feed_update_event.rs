@@ -19,8 +19,8 @@ use serenity::all::MessageFlags;
 
 use crate::event::Event;
 use crate::feed::PlatformInfo;
-use crate::repository::model::FeedItemModel;
-use crate::repository::model::FeedModel;
+use crate::model::FeedItemModel;
+use crate::model::FeedModel;
 
 /// Event fired when a new version/episode of a feed is published.
 #[derive(Clone, Debug)]

@@ -2,14 +2,14 @@
 
 use chrono::Duration;
 use chrono::Utc;
-use pwr_bot::repository::model::FeedItemModel;
-use pwr_bot::repository::model::FeedModel;
-use pwr_bot::repository::model::FeedSubscriptionModel;
-use pwr_bot::repository::model::FeedsSettings;
-use pwr_bot::repository::model::ServerSettingsModel;
-use pwr_bot::repository::model::SubscriberModel;
-use pwr_bot::repository::model::SubscriberType;
-use pwr_bot::repository::model::VoiceSessionsModel;
+use pwr_bot::model::FeedItemModel;
+use pwr_bot::model::FeedModel;
+use pwr_bot::model::FeedSubscriptionModel;
+use pwr_bot::model::FeedsSettings;
+use pwr_bot::model::ServerSettingsModel;
+use pwr_bot::model::SubscriberModel;
+use pwr_bot::model::SubscriberType;
+use pwr_bot::model::VoiceSessionsModel;
 use pwr_bot::repository::table::Table;
 
 mod common;
@@ -414,8 +414,8 @@ mod feed_subscription_table_tests {
 }
 
 mod server_settings_table_tests {
-    use pwr_bot::repository::model::ServerSettings;
-    use pwr_bot::repository::model::VoiceSettings;
+    use pwr_bot::model::ServerSettings;
+    use pwr_bot::model::VoiceSettings;
 
     use super::*;
 

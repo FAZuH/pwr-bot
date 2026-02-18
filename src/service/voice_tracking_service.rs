@@ -8,13 +8,13 @@ use chrono::Utc;
 use tokio::sync::RwLock;
 
 use crate::bot::commands::voice::GuildStatType;
+use crate::model::GuildDailyStats;
+use crate::model::ServerSettings;
+use crate::model::VoiceDailyActivity;
+use crate::model::VoiceLeaderboardEntry;
+use crate::model::VoiceLeaderboardOpt;
+use crate::model::VoiceSessionsModel;
 use crate::repository::Repository;
-use crate::repository::model::GuildDailyStats;
-use crate::repository::model::ServerSettings;
-use crate::repository::model::VoiceDailyActivity;
-use crate::repository::model::VoiceLeaderboardEntry;
-use crate::repository::model::VoiceLeaderboardOpt;
-use crate::repository::model::VoiceSessionsModel;
 use crate::repository::table::Table;
 use crate::service::settings_service::SettingsService;
 
@@ -80,7 +80,9 @@ impl VoiceTrackingService {
             }
         }
 
-        self.settings.update_server_settings(guild_id, settings).await?;
+        self.settings
+            .update_server_settings(guild_id, settings)
+            .await?;
         Ok(())
     }
 

@@ -6,10 +6,10 @@ use chrono::Utc;
 use pwr_bot::feed::FeedItem;
 use pwr_bot::feed::FeedSource;
 use pwr_bot::feed::platforms::Platforms;
-use pwr_bot::repository::model::FeedItemModel;
-use pwr_bot::repository::model::FeedModel;
-use pwr_bot::repository::model::ServerSettings;
-use pwr_bot::repository::model::SubscriberType;
+use pwr_bot::model::FeedItemModel;
+use pwr_bot::model::FeedModel;
+use pwr_bot::model::ServerSettings;
+use pwr_bot::model::SubscriberType;
 use pwr_bot::repository::table::Table;
 use pwr_bot::service::feed_subscription_service::FeedSubscriptionService;
 use pwr_bot::service::feed_subscription_service::SubscriberTarget;
@@ -129,7 +129,7 @@ async fn test_server_settings_service() {
     let feeds = Arc::new(Platforms::new());
     let service = FeedSubscriptionService::new(db.clone(), feeds.clone());
 
-    use pwr_bot::repository::model::FeedsSettings;
+    use pwr_bot::model::FeedsSettings;
 
     let guild_id: u64 = 1234567890;
 
@@ -205,7 +205,7 @@ async fn test_list_paginated_subscriptions_optimization() {
         };
         let feed_id = db.feed.insert(&feed).await.unwrap();
 
-        let sub_model = pwr_bot::repository::model::FeedSubscriptionModel {
+        let sub_model = pwr_bot::model::FeedSubscriptionModel {
             feed_id,
             subscriber_id: subscriber.id,
             ..Default::default()

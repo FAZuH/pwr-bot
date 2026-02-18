@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use chrono::Duration;
 use chrono::Utc;
-use pwr_bot::repository::model::VoiceSessionsModel;
+use pwr_bot::model::VoiceSessionsModel;
 use pwr_bot::repository::table::Table;
 use pwr_bot::service::voice_tracking_service::VoiceTrackingService;
 use pwr_bot::task::voice_heartbeat::VoiceHeartbeatManager;

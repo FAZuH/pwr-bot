@@ -10,14 +10,14 @@ use crate::error::AppError;
 use crate::feed::PlatformInfo;
 use crate::feed::error::FeedError;
 use crate::feed::platforms::Platforms;
+use crate::model::FeedItemModel;
+use crate::model::FeedModel;
+use crate::model::FeedSubscriptionModel;
+use crate::model::ServerSettings;
+use crate::model::SubscriberModel;
+use crate::model::SubscriberType;
 use crate::repository::Repository;
 use crate::repository::error::DatabaseError;
-use crate::repository::model::FeedItemModel;
-use crate::repository::model::FeedModel;
-use crate::repository::model::FeedSubscriptionModel;
-use crate::repository::model::ServerSettings;
-use crate::repository::model::SubscriberModel;
-use crate::repository::model::SubscriberType;
 use crate::repository::table::Table;
 use crate::service::error::ServiceError;
 use crate::service::settings_service::SettingsService;
@@ -381,7 +381,9 @@ impl FeedSubscriptionService {
         guild_id: u64,
         settings: ServerSettings,
     ) -> Result<(), ServiceError> {
-        self.settings.update_server_settings(guild_id, settings).await
+        self.settings
+            .update_server_settings(guild_id, settings)
+            .await
     }
 
     /// # Performance

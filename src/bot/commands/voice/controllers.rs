@@ -49,10 +49,10 @@ use crate::bot::views::ResponseView;
 use crate::bot::views::View;
 use crate::controller;
 use crate::error::AppError;
-use crate::repository::model::GuildDailyStats;
-use crate::repository::model::VoiceDailyActivity;
-use crate::repository::model::VoiceLeaderboardEntry;
-use crate::repository::model::VoiceLeaderboardOptBuilder;
+use crate::model::GuildDailyStats;
+use crate::model::VoiceDailyActivity;
+use crate::model::VoiceLeaderboardEntry;
+use crate::model::VoiceLeaderboardOptBuilder;
 use crate::view_core;
 
 controller! { pub struct VoiceSettingsController<'a> {} }

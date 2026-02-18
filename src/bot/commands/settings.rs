@@ -38,8 +38,8 @@ use crate::bot::views::ResponseView;
 use crate::bot::views::View;
 use crate::controller;
 use crate::error::AppError;
-use crate::repository::model::ServerSettings;
-use crate::repository::model::ServerSettingsModel;
+use crate::model::ServerSettings;
+use crate::model::ServerSettingsModel;
 use crate::view_core;
 
 controller! { pub struct SettingsMainController<'a> {} }

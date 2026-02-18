@@ -9,7 +9,7 @@ use pwr_bot::event::event_bus::EventBus;
 use pwr_bot::feed::FeedItem;
 use pwr_bot::feed::FeedSource;
 use pwr_bot::feed::platforms::Platforms;
-use pwr_bot::repository::model::SubscriberType;
+use pwr_bot::model::SubscriberType;
 use pwr_bot::repository::table::Table;
 use pwr_bot::service::feed_subscription_service::FeedSubscriptionService;
 use pwr_bot::service::feed_subscription_service::SubscribeResult;
@@ -32,10 +32,7 @@ async fn test_subscription_and_publishing() {
     let feeds = Arc::new(feeds);
 
     // Setup Service
-    let service = Arc::new(FeedSubscriptionService::new(
-        db.clone(),
-        feeds.clone(),
-    ));
+    let service = Arc::new(FeedSubscriptionService::new(db.clone(), feeds.clone()));
 
     // 1. Prepare Mock Data
     let source_id = "123";
