@@ -849,8 +849,8 @@ impl VoiceSessionsTable {
             sqlx::query_as::<_, crate::database::model::GuildDailyStats>(
                 r#"
             SELECT 
-                date(join_time) as day,
-                AVG(user_daily_total) as value
+                day,
+                CAST(AVG(user_daily_total) AS INTEGER) as value
             FROM (
                 SELECT 
                     user_id,
@@ -865,7 +865,7 @@ impl VoiceSessionsTable {
                 FROM voice_sessions
                 WHERE guild_id = ? AND join_time >= ? AND join_time <= ?
                 GROUP BY user_id, date(join_time)
-            )
+            ) user_totals
             GROUP BY day
             ORDER BY day
             "#,

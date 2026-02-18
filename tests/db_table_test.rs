@@ -672,4 +672,248 @@ mod voice_sessions_table_tests {
             .expect("Failed to select sessions");
         assert!(sessions.is_empty());
     });
+
+    db_test!(get_user_daily_activity, |db| {
+        let now = Utc::now();
+        let today = now.date_naive();
+        let yesterday = today - Duration::days(1);
+
+        // Insert sessions for user 100 on different days
+        let session1 = VoiceSessionsModel {
+            id: 0,
+            user_id: 100,
+            guild_id: 200,
+            channel_id: 300,
+            join_time: now,
+            leave_time: now + Duration::hours(2), // 2 hours today
+        };
+        db.voice_sessions_table
+            .insert(&session1)
+            .await
+            .expect("Failed to insert session 1");
+
+        let session2 = VoiceSessionsModel {
+            id: 0,
+            user_id: 100,
+            guild_id: 200,
+            channel_id: 301,
+            join_time: now - Duration::days(1),
+            leave_time: now - Duration::days(1) + Duration::hours(1), // 1 hour yesterday
+        };
+        db.voice_sessions_table
+            .insert(&session2)
+            .await
+            .expect("Failed to insert session 2");
+
+        // Insert session for different user (should not appear in results)
+        let session3 = VoiceSessionsModel {
+            id: 0,
+            user_id: 101,
+            guild_id: 200,
+            channel_id: 302,
+            join_time: now,
+            leave_time: now + Duration::minutes(30),
+        };
+        db.voice_sessions_table
+            .insert(&session3)
+            .await
+            .expect("Failed to insert session 3");
+
+        // Get daily activity for user 100
+        let since = now - Duration::days(2);
+        let until = now + Duration::days(1);
+        let activity = db
+            .voice_sessions_table
+            .get_user_daily_activity(100, 200, &since, &until)
+            .await
+            .expect("Failed to get user daily activity");
+
+        // Should have 2 days of activity
+        assert_eq!(activity.len(), 2, "Should have 2 days of activity");
+
+        // Check today's activity (7200 seconds = 2 hours)
+        let today_activity = activity
+            .iter()
+            .find(|a| a.day == today)
+            .expect("Should have today's activity");
+        assert_eq!(
+            today_activity.total_seconds, 7200,
+            "Today should have 2 hours"
+        );
+
+        // Check yesterday's activity (3600 seconds = 1 hour)
+        let yesterday_activity = activity
+            .iter()
+            .find(|a| a.day == yesterday)
+            .expect("Should have yesterday's activity");
+        assert_eq!(
+            yesterday_activity.total_seconds, 3600,
+            "Yesterday should have 1 hour"
+        );
+    });
+
+    db_test!(get_user_daily_activity_empty, |db| {
+        let now = Utc::now();
+        let since = now - Duration::days(7);
+        let until = now;
+
+        // Get activity for user with no sessions
+        let activity = db
+            .voice_sessions_table
+            .get_user_daily_activity(999, 200, &since, &until)
+            .await
+            .expect("Failed to get user daily activity");
+
+        assert!(
+            activity.is_empty(),
+            "Should return empty for user with no activity"
+        );
+    });
+
+    db_test!(get_guild_daily_average_time, |db| {
+        let now = Utc::now();
+
+        // User 100: 2 hours today
+        let session1 = VoiceSessionsModel {
+            id: 0,
+            user_id: 100,
+            guild_id: 200,
+            channel_id: 300,
+            join_time: now,
+            leave_time: now + Duration::hours(2),
+        };
+        db.voice_sessions_table
+            .insert(&session1)
+            .await
+            .expect("Failed to insert session 1");
+
+        // User 101: 1 hour today (same guild)
+        let session2 = VoiceSessionsModel {
+            id: 0,
+            user_id: 101,
+            guild_id: 200,
+            channel_id: 301,
+            join_time: now,
+            leave_time: now + Duration::hours(1),
+        };
+        db.voice_sessions_table
+            .insert(&session2)
+            .await
+            .expect("Failed to insert session 2");
+
+        // User 102: 30 minutes today (different guild - should not appear)
+        let session3 = VoiceSessionsModel {
+            id: 0,
+            user_id: 102,
+            guild_id: 999,
+            channel_id: 302,
+            join_time: now,
+            leave_time: now + Duration::minutes(30),
+        };
+        db.voice_sessions_table
+            .insert(&session3)
+            .await
+            .expect("Failed to insert session 3");
+
+        // Get guild daily average time
+        let since = now - Duration::days(1);
+        let until = now + Duration::days(1);
+        let stats = db
+            .voice_sessions_table
+            .get_guild_daily_average_time(200, &since, &until)
+            .await
+            .expect("Failed to get guild daily average time");
+
+        assert_eq!(stats.len(), 1, "Should have 1 day of stats");
+        // Average of 2 hours (7200s) and 1 hour (3600s) = 1.5 hours (5400s)
+        assert_eq!(stats[0].value, 5400, "Average should be 1.5 hours");
+    });
+
+    db_test!(get_guild_daily_user_count, |db| {
+        let now = Utc::now();
+        let today = now.date_naive();
+
+        // User 100: active today
+        let session1 = VoiceSessionsModel {
+            id: 0,
+            user_id: 100,
+            guild_id: 200,
+            channel_id: 300,
+            join_time: now,
+            leave_time: now + Duration::hours(1),
+        };
+        db.voice_sessions_table
+            .insert(&session1)
+            .await
+            .expect("Failed to insert session 1");
+
+        // User 101: active today (same guild, different channel)
+        let session2 = VoiceSessionsModel {
+            id: 0,
+            user_id: 101,
+            guild_id: 200,
+            channel_id: 301,
+            join_time: now,
+            leave_time: now + Duration::hours(2),
+        };
+        db.voice_sessions_table
+            .insert(&session2)
+            .await
+            .expect("Failed to insert session 2");
+
+        // User 100: another session today (should not double count)
+        let session3 = VoiceSessionsModel {
+            id: 0,
+            user_id: 100,
+            guild_id: 200,
+            channel_id: 302,
+            join_time: now + Duration::minutes(30),
+            leave_time: now + Duration::minutes(90),
+        };
+        db.voice_sessions_table
+            .insert(&session3)
+            .await
+            .expect("Failed to insert session 3");
+
+        // Get guild daily user count
+        let since = now - Duration::days(1);
+        let until = now + Duration::days(1);
+        let stats = db
+            .voice_sessions_table
+            .get_guild_daily_user_count(200, &since, &until)
+            .await
+            .expect("Failed to get guild daily user count");
+
+        assert_eq!(stats.len(), 1, "Should have 1 day of stats");
+        assert_eq!(stats[0].day, today, "Day should be today");
+        assert_eq!(stats[0].value, 2, "Should have 2 unique users");
+    });
+
+    db_test!(get_guild_daily_stats_empty, |db| {
+        let now = Utc::now();
+        let since = now - Duration::days(7);
+        let until = now;
+
+        // Get average time for guild with no sessions
+        let avg_stats = db
+            .voice_sessions_table
+            .get_guild_daily_average_time(999, &since, &until)
+            .await
+            .expect("Failed to get guild daily average time");
+        assert!(
+            avg_stats.is_empty(),
+            "Should return empty for guild with no activity"
+        );
+
+        // Get user count for guild with no sessions
+        let count_stats = db
+            .voice_sessions_table
+            .get_guild_daily_user_count(999, &since, &until)
+            .await
+            .expect("Failed to get guild daily user count");
+        assert!(
+            count_stats.is_empty(),
+            "Should return empty for guild with no activity"
+        );
+    });
 }
