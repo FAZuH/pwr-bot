@@ -1,3 +1,10 @@
+## [0.2.7](https://github.com/FAZuH/pwr-bot/compare/v0.2.6...v0.2.7) (2026-02-18)
+
+
+### New Features
+
+* **bot:** Show package version to bot activity ([d63313b](https://github.com/FAZuH/pwr-bot/commit/d63313b3d41e4ddaf74379c9000f80db4ee782d8)), closes [#47](https://github.com/FAZuH/pwr-bot/issues/47)
+
 ## [0.2.6](https://github.com/FAZuH/pwr-bot/compare/v0.2.5...v0.2.6) (2026-02-18)
 
 
@@ -45,12 +52,4 @@
 ### Bug Fixes
 
 * **bot:** Fix command count in /about command ([62bfcf6](https://github.com/FAZuH/pwr-bot/commit/62bfcf6ca83a2f31c26f450188f6d1f8c516e907))
-
-## [0.2.2](https://github.com/FAZuH/pwr-bot/compare/v0.2.1...v0.2.2) (2026-02-14)
-
-
-### UI/UX Changes
-
-* **bot:** Add select menu to select time range in /vc leaderboard ([37f42ba](https://github.com/FAZuH/pwr-bot/commit/37f42ba3e5dc201a257fe0046f12d81c5b760cc7))
-* **bot:** Improve /vc leaderboard image ([b330ee6](https://github.com/FAZuH/pwr-bot/commit/b330ee684d577e7eef344b41cca6517f4091a579))
 
