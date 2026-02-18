@@ -48,37 +48,103 @@ impl Cog for MyCog {
 
 ## Creating UI Views (Components V2)
 
-Traits: `ViewProvider` -> `ResponseComponentView` -> `StatefulView` -> `InteractableComponentView`.
+Views use three traits:
+- **`View<'a, T>`**: Core trait providing access to `ViewCore` (via `view_core!` macro)
+- **`ResponseView<'a>`**: Creates Discord components/embeds via `create_response()`
+- **`InteractiveView<'a, T>`**: Handles user interactions via `handle()`
 
-### Static View
-Implement `ResponseComponentView` to return `Vec<CreateComponent>`.
-
-### Interactive View
-Use `stateful_view!` macro:
+### Basic View Structure
 
 ```rust
-stateful_view! {
-    timeout = Duration::from_secs(120),
-    pub struct MyView<'a> { confirmed: bool }
+use std::time::Duration;
+use crate::view_core;
+use crate::bot::views::{View, ResponseView, InteractiveView, ResponseKind};
+use crate::action_enum;
+
+// 1. Define your actions
+action_enum! {
+    MyAction {
+        #[label = "Click Me"]
+        ButtonClick,
+        #[label = "❮ Back"]
+        Back,
+    }
 }
 
-impl ResponseComponentView for MyView<'_> { /* create_components */ }
+// 2. Create view struct using view_core! macro
+view_core! {
+    timeout = Duration::from_secs(120),
+    /// Description of your view
+    pub struct MyView<'a, MyAction> {
+        pub counter: i32,
+    }
+}
 
-#[async_trait]
-impl<'a> InteractableComponentView<'a, MyAction> for MyView<'a> {
-    async fn handle(&mut self, interaction: &ComponentInteraction) -> Option<MyAction> { /* ... */ }
+// 3. Implement constructor
+impl<'a> MyView<'a> {
+    pub fn new(ctx: &'a Context<'a>, counter: i32) -> Self {
+        Self {
+            counter,
+            core: Self::create_core(ctx),
+        }
+    }
+}
+
+// 4. Implement ResponseView to create UI components
+impl<'a> ResponseView<'a> for MyView<'a> {
+    fn create_response<'b>(&mut self) -> ResponseKind<'b> {
+        let components = vec![
+            CreateComponent::TextDisplay(
+                CreateTextDisplay::new(format!("Counter: {}", self.counter))
+            ),
+            CreateComponent::ActionRow(CreateActionRow::Buttons(vec![
+                self.register(MyAction::ButtonClick)
+                    .as_button()
+                    .style(ButtonStyle::Primary),
+                self.register(MyAction::Back)
+                    .as_button()
+                    .style(ButtonStyle::Secondary),
+            ].into())),
+        ];
+        components.into()
+    }
+}
+
+// 5. Implement InteractiveView to handle user interactions
+#[async_trait::async_trait]
+impl<'a> InteractiveView<'a, MyAction> for MyView<'a> {
+    async fn handle(
+        &mut self,
+        action: &MyAction,
+        _interaction: &ComponentInteraction,
+    ) -> Option<MyAction> {
+        match action {
+            MyAction::ButtonClick => {
+                self.counter += 1;
+                Some(action.clone())
+            }
+            MyAction::Back => Some(action.clone()),
+        }
+    }
 }
 ```
 
 ### Key View Components
+
 - **Containers**: `CreateContainer` - Groups components.
 - **TextDisplay**: `CreateTextDisplay` - Markdown text.
 - **Sections**: `CreateSection` - Side-by-side layout.
-- **Buttons**: `CreateButton` - Interactive buttons.
-- **Select Menus**: `CreateSelectMenu` - Dropdowns.
+- **Buttons**: `CreateButton` - Interactive buttons (use `self.register(action).as_button()`).
+- **Select Menus**: `CreateSelectMenu` - Dropdowns (use `self.register(action).as_select(kind)`).
 
-### CI/CD
-- GitHub Actions: format, build, clippy, tests. All must pass.
+### View Utilities
+
+- **`RenderExt::render()`**: Send or edit the view automatically.
+- **`listen_once()`**: Wait for a single interaction (returns `Option<(Action, Interaction)>`).
+- **`register(action)`**: Registers an action and returns a `RegisteredAction` with methods:
+  - `.as_button()` - Convert to button
+  - `.as_select(kind)` - Convert to select menu
+  - `.as_select_option()` - Convert to select option
 
 ## Design Patterns
 
@@ -110,9 +176,68 @@ pub async fn run(ctx: Context<'_>) -> Result<(), Error> {
 ```
 
 **Guidelines**:
-- **Navigation**: Use `NavigationResult` unified enum.
+- **Navigation**: Use `NavigationResult` unified enum (`Exit`, `Back`, `SettingsAbout`, etc.).
 - **Context**: Clone context `let ctx = *coord.context()` to avoid borrows.
 - **Recursion**: Avoid it; use the loop.
+- **Entry Point**: Create a legacy function that wraps the controller:
+```rust
+pub async fn my_command(ctx: Context<'_>) -> Result<(), Error> {
+    let mut coordinator = Coordinator::new(ctx);
+    let mut controller = MyController::new(&ctx);
+    let _result = controller.run(&mut coordinator).await?;
+    Ok(())
+}
+```
+
+## Commit Conventions
+
+Follow **Conventional Commits** specification:
+
+```
+<type>(<scope>): <subject>
+
+<body>
+
+<footer>
+```
+
+### Types
+- `feat`: New feature
+- `fix`: Bug fix
+- `docs`: Documentation only changes
+- `style`: Code style changes (formatting, semicolons, etc.)
+- `refactor`: Code refactoring
+- `perf`: Performance improvements
+- `test`: Adding or updating tests
+- `chore`: Build process, dependencies, etc.
+
+### Guidelines
+- **Capitalize the first letter** of the subject line (unless it is strictly lowercase like a variable name)
+- Use present tense ("Add feature" not "Added feature")
+- Use imperative mood ("Move cursor to..." not "Moves cursor to...")
+- Keep subject line under 50 characters
+- Include motivation for change and contrast with previous behavior in body
+
+### Examples
+```
+feat(voice): Add /vc stats command with contribution grid
+
+Add voice activity statistics command that displays historical
+data using GitHub-style contribution heatmaps.
+
+- Support user and guild stats views
+- Add time range selection
+- Display total time, average, streak, and most active day
+
+fix(db): Correct SQL query for daily average calculation
+
+The subquery was not properly aliased, causing column reference
+errors in SQLite.
+```
+
+## CI/CD
+
+- GitHub Actions: format, build, clippy, tests. All must pass.
 
 ## Documentation
 
