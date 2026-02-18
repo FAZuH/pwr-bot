@@ -2,6 +2,7 @@
 
 use std::time::Duration;
 
+use poise::ChoiceParameter;
 use serenity::all::ButtonStyle;
 use serenity::all::ComponentInteraction;
 use serenity::all::ComponentInteractionDataKind;
@@ -22,7 +23,6 @@ use crate::action_enum;
 use crate::action_extends;
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;
-use poise::ChoiceParameter;
 use crate::bot::commands::voice::TimeRange;
 use crate::bot::commands::voice::VoiceLeaderboardTimeRange;
 use crate::bot::commands::voice::controllers::LeaderboardSessionData;

@@ -253,8 +253,6 @@ action_enum! {
     VoiceStatsAction {
         ToggleStatType,
         TimeRange,
-        #[label = "❮ Back"]
-        Back,
     }
 }
 
@@ -428,7 +426,7 @@ impl<'a> VoiceStatsView<'a> {
     fn format_stats_summary(&self) -> String {
         let (since, until) = self.data.time_range.to_range();
         let time_range_text = format!(
-            "\n-# Time Range: **{}** — <t:{}:f> to <t:{}:R>",
+            "-# Time Range: **{}** — <t:{}:f> to <t:{}:R>",
             self.data.time_range.display_name(),
             since.timestamp(),
             until.timestamp(),
@@ -439,78 +437,83 @@ impl<'a> VoiceStatsView<'a> {
             let avg = format_duration(self.data.average_daily_time());
             let streak = self.data.current_streak();
 
-            let most_active = self
-                .data
-                .most_active_day()
-                .map(|(day, secs)| {
-                    format!(
-                        "{} on <t:{}:d>",
-                        format_duration(secs),
-                        day.and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp()
-                    )
-                })
-                .unwrap_or_else(|| "None".to_string());
-
             format!(
-                "-# **Stats for {}**{}\n### Voice Activity Stats\n\n**Total Time:** {}\n**Average Daily:** {}\n**Most Active:** {}\n**Current Streak:** {} day(s)",
-                self.data.display_name(),
+                "### Voice Stats\n{}\n\n**User:** {}\n**Total Time:** {}\n**Average Daily:** {}\n**Current Streak:** {} day(s)",
                 time_range_text,
+                self.data.display_name(),
                 total,
                 avg,
-                most_active,
                 streak
             )
         } else {
-            let stat_label = match self.data.stat_type {
-                GuildStatType::AverageTime => "Average Daily Time",
-                GuildStatType::ActiveUserCount => "Active Users",
+            // Guild stats - calculate average daily time (same for both modes)
+            let avg_time = if self.data.guild_stats.is_empty() {
+                0
+            } else {
+                self.data.guild_stats.iter().map(|s| s.value).sum::<i64>()
+                    / self.data.guild_stats.len() as i64
             };
+            let _avg_time_str = format_duration(avg_time); // Reserved for future use
 
-            let stat_value = match self.data.stat_type {
+            // For guild stats, show different metrics based on stat_type
+            let (first_label, first_value, second_label, second_value) = match self.data.stat_type {
                 GuildStatType::AverageTime => {
-                    let avg = if self.data.guild_stats.is_empty() {
-                        0
-                    } else {
-                        self.data.guild_stats.iter().map(|s| s.value).sum::<i64>()
-                            / self.data.guild_stats.len() as i64
-                    };
-                    format_duration(avg)
+                    // Peak Time: highest average voice time per user
+                    let peak = self.data.guild_stats.iter().max_by_key(|s| s.value);
+                    let peak_str = peak
+                        .map(|s| format_duration(s.value))
+                        .unwrap_or_else(|| "None".to_string());
+                    let peak_day = peak
+                        .map(|s| s.day)
+                        .unwrap_or_else(|| chrono::Utc::now().date_naive());
+                    let peak_day_str = format!(
+                        " {} on <t:{}:d>",
+                        peak_str,
+                        peak_day.and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp()
+                    );
+
+                    ("Peak Time", peak_str, "Most Active", peak_day_str)
                 }
                 GuildStatType::ActiveUserCount => {
-                    let total_days = self.data.guild_stats.len().max(1) as i64;
-                    format!(
-                        "{:.1}",
-                        self.data.total_active_users() as f64 / total_days as f64
+                    // Avg Daily Users: average number of active users per day
+                    let active_users = if self.data.guild_stats.is_empty() {
+                        0
+                    } else {
+                        let total_days = self.data.guild_stats.len() as i64;
+                        (self.data.total_active_users() as f64 / total_days as f64).ceil() as i64
+                    };
+
+                    // Most Active: day with most users
+                    let peak = self.data.guild_stats.iter().max_by_key(|s| s.value);
+                    let peak_str = peak
+                        .map(|s| s.value.to_string())
+                        .unwrap_or_else(|| "None".to_string());
+                    let peak_day = peak
+                        .map(|s| s.day)
+                        .unwrap_or_else(|| chrono::Utc::now().date_naive());
+                    let peak_day_str = format!(
+                        " {} on <t:{}:d>",
+                        peak_str,
+                        peak_day.and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp()
+                    );
+
+                    (
+                        "Avg Daily Users",
+                        active_users.to_string(),
+                        "Most Active",
+                        peak_day_str,
                     )
                 }
             };
 
-            let max_day = self
-                .data
-                .guild_stats
-                .iter()
-                .max_by_key(|s| s.value)
-                .map(|s| {
-                    let val = if self.data.stat_type == GuildStatType::AverageTime {
-                        format_duration(s.value)
-                    } else {
-                        s.value.to_string()
-                    };
-                    format!(
-                        "{} on <t:{}:d>",
-                        val,
-                        s.day.and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp()
-                    )
-                })
-                .unwrap_or_else(|| "None".to_string());
-
             format!(
-                "-# **Server Stats**{}\n### {}\n\n**{}:** {}\n**Peak Day:** {}",
+                "### Voice Stats\n{}\n\n**Guild:** {}\n**{}:** {}\n**{}:**{}",
                 time_range_text,
                 self.data.guild_name,
-                stat_label,
-                stat_value,
-                max_day
+                first_label,
+                first_value,
+                second_label,
+                second_value
             )
         }
     }
@@ -558,33 +561,27 @@ impl<'a> ResponseView<'a> for VoiceStatsView<'a> {
             })
             .placeholder("Select time range");
 
-        let mut action_buttons = vec![];
+        let mut components = vec![
+            CreateComponent::Container(CreateContainer::new(container_components)),
+            CreateComponent::ActionRow(CreateActionRow::SelectMenu(time_range_menu)),
+        ];
 
-        // Only show toggle button for guild stats
+        // Only add button row if there are buttons (guild stats has toggle)
         if !self.data.is_user_stats() {
             let toggle_label = match self.data.stat_type {
                 GuildStatType::AverageTime => "Show User Count",
                 GuildStatType::ActiveUserCount => "Show Avg Time",
             };
-            action_buttons.push(
-                self.register(ToggleStatType)
-                    .as_button()
-                    .label(toggle_label)
-                    .style(ButtonStyle::Primary),
-            );
-        }
-
-        action_buttons.push(
-            self.register(Back)
+            let button = self
+                .register(VoiceStatsAction::ToggleStatType)
                 .as_button()
-                .style(ButtonStyle::Secondary),
-        );
+                .label(toggle_label)
+                .style(ButtonStyle::Primary);
 
-        let components = vec![
-            CreateComponent::Container(CreateContainer::new(container_components)),
-            CreateComponent::ActionRow(CreateActionRow::SelectMenu(time_range_menu)),
-            CreateComponent::ActionRow(CreateActionRow::Buttons(action_buttons.into())),
-        ];
+            components.push(CreateComponent::ActionRow(CreateActionRow::Buttons(
+                vec![button].into(),
+            )));
+        }
 
         components.into()
     }
@@ -633,7 +630,6 @@ impl<'a> InteractiveView<'a, VoiceStatsAction> for VoiceStatsView<'a> {
                 }
                 None
             }
-            Back => Some(action.clone()),
         }
     }
 }
@@ -661,30 +657,6 @@ impl<'a> VoiceStatsController<'a> {
             target_user,
             stat_type,
         }
-    }
-
-    /// Determines if the user can view stats for the target user.
-    async fn can_view_user_stats(
-        &self,
-        ctx: &Context<'_>,
-        target_user_id: u64,
-    ) -> Result<bool, Error> {
-        let author_id = ctx.author().id.get();
-
-        // Always allow viewing own stats
-        if target_user_id == author_id {
-            return Ok(true);
-        }
-
-        // For viewing other users, must be in a guild context
-        let _guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?;
-
-        // Check if target user is a member of the guild
-        let guild = ctx.guild().ok_or(BotError::GuildOnlyCommand)?;
-
-        Ok(guild
-            .members
-            .contains_key(&serenity::all::UserId::new(target_user_id)))
     }
 
     /// Fetches stats data based on current parameters.
@@ -753,15 +725,6 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceStatsController<'a> {
         let ctx = *coordinator.context();
         ctx.defer().await?;
 
-        // Check permissions if viewing another user
-        if let Some(ref target_user) = self.target_user
-            && !self.can_view_user_stats(&ctx, target_user.id.get()).await?
-        {
-            ctx.say("You can only view voice stats for users in the same server.")
-                .await?;
-            return Ok(NavigationResult::Exit);
-        }
-
         // Fetch initial data
         let data = self.fetch_data(&ctx).await?;
         let mut view = VoiceStatsView::new(&ctx, data);
@@ -787,7 +750,6 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceStatsController<'a> {
 
         while let Some((action, _interaction)) = view.listen_once().await? {
             match action {
-                VoiceStatsAction::Back => return Ok(NavigationResult::Back),
                 VoiceStatsAction::ToggleStatType | VoiceStatsAction::TimeRange => {
                     // Update controller state from view
                     self.time_range = view.data.time_range;
@@ -836,16 +798,20 @@ pub async fn stats(
     let target_user = if let Some(_guild_id) = ctx.guild_id() {
         // In guild context
         if let Some(ref target) = user {
-            // Check if target is in the guild
-            let is_member = ctx
-                .guild()
-                .map(|guild| guild.members.contains_key(&target.id))
-                .unwrap_or(false);
+            // Allow viewing own stats, otherwise check membership via Discord API
+            if target.id != ctx.author().id {
+                // Try to get member from cache first
+                let is_member = ctx
+                    .guild()
+                    .map(|guild| guild.members.contains_key(&target.id))
+                    .unwrap_or(false);
 
-            if !is_member {
-                ctx.say("The specified user is not a member of this server.")
-                    .await?;
-                return Ok(());
+                if !is_member {
+                    return Err(BotError::UserNotInGuild(
+                        "The specified user is not a member of this server.".to_string(),
+                    )
+                    .into());
+                }
             }
             Some(target.clone())
         } else {
@@ -856,9 +822,10 @@ pub async fn stats(
         // In DM context - can only view own stats
         if let Some(ref target) = user {
             if target.id != ctx.author().id {
-                ctx.say("In direct messages, you can only view your own voice stats.")
-                    .await?;
-                return Ok(());
+                return Err(BotError::UserNotInGuild(
+                    "In direct messages, you can only view your own voice stats.".to_string(),
+                )
+                .into());
             }
             Some(target.clone())
         } else {

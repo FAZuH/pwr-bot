@@ -69,8 +69,9 @@ impl VoiceCog {
     #[poise::command(slash_command)]
     pub async fn stats(
         ctx: Context<'_>,
-        #[description = "Time period to display. Defaults to \"This month\""]
-        time_range: Option<VoiceStatsTimeRange>,
+        #[description = "Time period to display. Defaults to \"This month\""] time_range: Option<
+            VoiceStatsTimeRange,
+        >,
         #[description = "User to show stats for (defaults to server stats in guild, yourself in DM)"]
         user: Option<serenity::all::User>,
         #[description = "Statistic to display for server view"] statistic: Option<GuildStatType>,
@@ -285,25 +286,23 @@ impl VoiceStatsTimeRange {
                     .and_utc()
             }
 
-            VoiceStatsTimeRange::ThisMonth => {
-                now.date_naive()
-                    .with_day(1)
-                    .unwrap()
-                    .and_hms_opt(0, 0, 0)
-                    .unwrap()
-                    .and_utc()
-            }
+            VoiceStatsTimeRange::ThisMonth => now
+                .date_naive()
+                .with_day(1)
+                .unwrap()
+                .and_hms_opt(0, 0, 0)
+                .unwrap()
+                .and_utc(),
 
-            VoiceStatsTimeRange::ThisYear => {
-                now.date_naive()
-                    .with_month(1)
-                    .unwrap()
-                    .with_day(1)
-                    .unwrap()
-                    .and_hms_opt(0, 0, 0)
-                    .unwrap()
-                    .and_utc()
-            }
+            VoiceStatsTimeRange::ThisYear => now
+                .date_naive()
+                .with_month(1)
+                .unwrap()
+                .with_day(1)
+                .unwrap()
+                .and_hms_opt(0, 0, 0)
+                .unwrap()
+                .and_utc(),
         }
     }
 }
