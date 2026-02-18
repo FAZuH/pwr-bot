@@ -13,39 +13,95 @@
   }
 }}%%
 classDiagram
-    %% Interfaces
-    class ViewProvider~T = CreateComponent~ {
-        <<interface>>
-        create() Vec~T~
+    %% Core Data Structures
+    class ResponseKind~'a~ {
+        <<enum>>
+        Component(Vec~CreateComponent~'a~)
+        Embed(Box~CreateEmbed~'a~)
     }
 
-    class ResponseComponentView {
-        <<interface>>
-        create_components() Vec~CreateComponent~
-        create_reply() CreateReply
-        create_message() CreateMessage
-        attach(&mut Vec~CreateComponent~)
+    class ViewContext~'a~ {
+        <<struct>>
+        poise_ctx: &Context~'a~
+        timeout: Duration
+        reply_handle: Option~ReplyHandle~'a~~
+        message_id() Option~MessageId~
     }
 
-    class StatefulView~D = ()~ {
-        <<interface>>
-        view_context() &ViewContext~D~
-        view_context_mut() &mut ViewContext~D~
-        send() Result~()~
-        edit() Result~()~
+    class ActionRegistry~T~ {
+        <<struct>>
+        actions: HashMap~String, T~
+        prefix: String
+        counter: usize
+        new() Self
+        register(action: T) String
+        get(id: &str) Option~&T~
+        ids() Vec~&str~
+        contains(id: &str) bool
+        clear()
     }
 
-    class InteractableComponentView~T = Action, D = ()~ {
+    class ViewCore~'a, T = ()~ {
+        <<struct>>
+        ctx: ViewContext~'a~
+        registry: ActionRegistry~T~
+        new(ctx, timeout) Self
+        send(reply) Result~(), Error~
+        edit(reply) Result~(), Error~
+    }
+
+    class RegisteredAction {
+        <<struct>>
+        id: String
+        label: &'static str
+        as_button() CreateButton
+        as_select(kind) CreateSelectMenu
+        as_select_option() CreateSelectMenuOption
+    }
+
+    %% Core Traits
+    class View~'a, T = ()~ {
         <<interface>>
-        handle(interaction) Option~T~
-        listen_once() Option~(T, ComponentInteraction)~
+        core() &ViewCore~'a, T~
+        core_mut() &mut ViewCore~'a, T~
+        create_core(poise_ctx) ViewCore~'a, T~
+    }
+
+    class ResponseView~'a~ {
+        <<interface>>
+        create_response() ResponseKind~'b~
+        create_reply() CreateReply~'b~
+    }
+
+    class RenderExt~'a, T~ {
+        <<interface>>
+        render() Result~(), Error~
+    }
+
+    class InteractiveView~'a, T: Action~ {
+        <<interface>>
+        handle(action, interaction) Option~T~
+        on_timeout() Result~(), Error~
+        listen_once() Result~Option~(T, ComponentInteraction)~
+        register(action) RegisteredAction
+        create_collector() ComponentInteractionCollector
+        children() Vec~Box~ChildViewResolver~T~~
+        child(view, wrap) Box~ChildViewResolver~T~~
+        clear_registry()
+        collector_filter() Vec~String~
+        resolve_action(custom_id) Option~T~
+    }
+
+    class ChildViewResolver~T~ {
+        <<interface>>
+        filter_ids() Vec~String~
+        resolve(custom_id) Option~T~
+        clear()
     }
 
     class Action {
         <<interface>>
-        ALL &[&str]
-        custom_id() &str
-        label() &str
+        label() &'static str
     }
 
     %% Controller Pattern
@@ -55,6 +111,7 @@ classDiagram
     }
 
     class Coordinator~S = ()~ {
+        <<struct>>
         ctx: Context
         state: S
         send(reply) Result~()~
@@ -76,33 +133,15 @@ classDiagram
         VoiceLeaderboard
     }
 
-    %% Interface Relationships
-    ViewProvider <-- ResponseComponentView : blanket impl
-    ResponseComponentView <|-- StatefulView
-    StatefulView <|-- InteractableComponentView
-
-    %% Classes
-    class AboutView
-    class FeedSubscriptionsListView
-    class FeedSubscriptionBatchView
-    class PaginationView
-    class SettingsFeedView
-    class SettingsMainView
-    class SettingsNavigationView
-    class SettingsVoiceView
-    class VoiceLeaderboardView
-
-    %% Class Relationships
-    InteractableComponentView <|.. FeedSubscriptionBatchView : T=FeedSubscriptionBatchAction
-    InteractableComponentView <|.. PaginationView : T=PaginationAction
-    InteractableComponentView <|.. SettingsFeedView : T=SettingsFeedAction
-    InteractableComponentView <|.. SettingsMainView : T=SettingsMainAction
-    InteractableComponentView <|.. SettingsVoiceView : T=SettingsVoiceAction
-    InteractableComponentView <|.. AboutView : T=AboutAction
-
-    ResponseComponentView <|.. FeedSubscriptionsListView
-    ResponseComponentView <|.. SettingsNavigationView
-    ResponseComponentView <|.. VoiceLeaderboardView
+    %% Trait Relationships
+    View <|-- ResponseView
+    ResponseView <|-- RenderExt : blanket impl
+    View <|-- InteractiveView
+    InteractiveView ..> Action : uses
+    InteractiveView ..> RegisteredAction : creates
+    ViewCore --> ViewContext : contains
+    ViewCore --> ActionRegistry : contains
+    InteractiveView ..> ChildViewResolver : uses
 
     %% Controller Pattern Relationships
     Controller <|.. SettingsMainController
@@ -116,3 +155,83 @@ classDiagram
 
     Coordinator ..> Controller : executes
     Controller ..> NavigationResult : returns
+
+    %% Concrete View Implementations - Interactive
+    class PaginationView~'a~ {
+        core: ViewCore~'a, PaginationAction~
+        state: PaginationModel
+        disabled: bool
+    }
+
+    class SettingsMainView~'a~ {
+        core: ViewCore~'a, SettingsMainAction~
+        guild_id: GuildId
+    }
+
+    class SettingsFeedView~'a~ {
+        core: ViewCore~'a, SettingsFeedAction~
+        guild_id: GuildId
+        feed: Option~FeedConfig~
+        form: FeedForm
+    }
+
+    class SettingsVoiceView~'a~ {
+        core: ViewCore~'a, SettingsVoiceAction~
+        guild_id: GuildId
+        config: VoiceConfig
+    }
+
+    class VoiceLeaderboardView~'a~ {
+        core: ViewCore~'a, VoiceLeaderboardAction~
+        guild_id: GuildId
+        data: Vec~VoiceStats~
+        pagination: PaginationView~'a~
+    }
+
+    class FeedListView~'a~ {
+        core: ViewCore~'a, FeedListAction~
+        guild_id: GuildId
+        feeds: Vec~Feed~
+        pagination: PaginationView~'a~
+    }
+
+    class FeedSubscriptionBatchView~'a~ {
+        core: ViewCore~'a, FeedSubscriptionBatchAction~
+        guild_id: GuildId
+        url: String
+        feeds: Vec~DetectedFeed~
+    }
+
+    class AboutView~'a~ {
+        core: ViewCore~'a, AboutAction~
+    }
+
+    %% Static Views (ResponseView only)
+    class SettingsNavigationView~'a~ {
+        core: ViewCore~'a, ()~
+        sections: Vec~SettingsSection~
+    }
+
+    %% Implementation Relationships
+    View <|.. PaginationView
+    InteractiveView <|.. PaginationView
+    View <|.. SettingsMainView
+    InteractiveView <|.. SettingsMainView
+    View <|.. SettingsFeedView
+    InteractiveView <|.. SettingsFeedView
+    View <|.. SettingsVoiceView
+    InteractiveView <|.. SettingsVoiceView
+    View <|.. VoiceLeaderboardView
+    InteractiveView <|.. VoiceLeaderboardView
+    View <|.. FeedListView
+    InteractiveView <|.. FeedListView
+    View <|.. FeedSubscriptionBatchView
+    InteractiveView <|.. FeedSubscriptionBatchView
+    View <|.. AboutView
+    InteractiveView <|.. AboutView
+    View <|.. SettingsNavigationView
+    ResponseView <|.. SettingsNavigationView
+
+    %% Macros
+    note for View "view_core! macro generates impl"
+    note for Action "action_enum! macro generates impl"

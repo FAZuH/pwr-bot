@@ -1,0 +1,69 @@
+%%{init: {
+  'theme': 'dark',
+  'themeVariables': {
+    'primaryColor': '#1e1e1e',
+    'primaryTextColor': '#ffffff',
+    'primaryBorderColor': '#ffffff',
+    'lineColor': '#ffffff',
+    'secondaryColor': '#2d2d2d',
+    'tertiaryColor': '#1e1e1e',
+    'noteBkgColor': '#2d2d2d',
+    'noteTextColor': '#ffffff',
+    'noteBorderColor': '#ffffff'
+  }
+}}%%
+graph TB
+    subgraph ViewLifecycle["Interactive View Lifecycle"]
+        direction TB
+        
+        Init["Initialize View"]
+        Create["Create Components<br/>+ Register Actions"]
+        Render["Render<br/>Send/Edit Message"]
+        Listen["Listen for Interactions"]
+        Collect["Collect Interaction"]
+        Resolve["Resolve Action"]
+        Handle["Handle Action"]
+        Update["Update State"]
+        Stop["Stop / Exit"]
+        Timeout["Timeout"]
+
+        Init --> Create
+        Create --> Render
+        Render --> Listen
+        Listen --> Collect
+        Collect -->|received| Resolve
+        Collect -->|timeout| Timeout
+        Resolve --> Handle
+        Handle -->|Some action| Update
+        Handle -->|None| Stop
+        Update --> Create
+        Timeout -->|on_timeout| Render
+        Render -.->|final| Stop
+    end
+    
+    subgraph Core["View Core"]
+        direction TB
+        ViewCore["ViewCore"]
+        ViewContext["ViewContext"]
+        ActionRegistry["ActionRegistry"]
+        
+        ViewCore --> ViewContext
+        ViewCore --> ActionRegistry
+    end
+    
+    subgraph Traits["View Traits"]
+        direction TB
+        View["View"]
+        ResponseView["ResponseView"]
+        InteractiveView["InteractiveView"]
+        
+        View --> ResponseView
+        View --> InteractiveView
+    end
+    
+    Core -->|powers| ViewLifecycle
+    Traits -->|implements| ViewLifecycle
+    
+    style Init fill:#2d2d2d,stroke:#ffffff,stroke-width:2px
+    style Stop fill:#2d2d2d,stroke:#ffffff,stroke-width:2px
+    style Create fill:#1e1e1e,stroke:#ffffff
