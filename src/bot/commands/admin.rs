@@ -9,7 +9,6 @@ use crate::bot::commands::Error;
 
 pub mod controllers;
 pub mod registration;
-pub mod views;
 
 /// Cog of server admin only commands.
 pub struct AdminCog;

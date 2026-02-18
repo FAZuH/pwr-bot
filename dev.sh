@@ -105,7 +105,7 @@ cmd_docs() {
         if [ -f "$file" ]; then
             filename=$(basename "$file" .mmd)
             print_info "Compiling $filename.mmd..."
-            mmdc -i "$file" -o "docs/diagrams/${filename}.png" -b transparent -s 3
+            mmdc -i "$file" -o "docs/diagrams/${filename}.png" -b transparent -s 4 --width 3840 --height 2160
         fi
     done
     

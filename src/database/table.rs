@@ -801,4 +801,107 @@ impl VoiceSessionsTable {
         .fetch_all(&self.base.pool)
         .await?)
     }
+
+    /// Get daily voice activity for a specific user in a guild.
+    /// Returns daily totals within the specified time range.
+    pub async fn get_user_daily_activity(
+        &self,
+        user_id: u64,
+        guild_id: u64,
+        since: &chrono::DateTime<chrono::Utc>,
+        until: &chrono::DateTime<chrono::Utc>,
+    ) -> Result<Vec<crate::database::model::VoiceDailyActivity>, DatabaseError> {
+        Ok(
+            sqlx::query_as::<_, crate::database::model::VoiceDailyActivity>(
+                r#"
+            SELECT 
+                date(join_time) as day,
+                SUM(
+                    CASE 
+                        WHEN leave_time = join_time 
+                        THEN strftime('%s', 'now') - strftime('%s', join_time)
+                        ELSE strftime('%s', leave_time) - strftime('%s', join_time)
+                    END
+                ) as total_seconds
+            FROM voice_sessions
+            WHERE user_id = ? AND guild_id = ? AND join_time >= ? AND join_time <= ?
+            GROUP BY date(join_time)
+            ORDER BY day
+            "#,
+            )
+            .bind(user_id as i64)
+            .bind(guild_id as i64)
+            .bind(since)
+            .bind(until)
+            .fetch_all(&self.base.pool)
+            .await?,
+        )
+    }
+
+    /// Get guild-wide daily statistics: average time per active user.
+    pub async fn get_guild_daily_average_time(
+        &self,
+        guild_id: u64,
+        since: &chrono::DateTime<chrono::Utc>,
+        until: &chrono::DateTime<chrono::Utc>,
+    ) -> Result<Vec<crate::database::model::GuildDailyStats>, DatabaseError> {
+        Ok(
+            sqlx::query_as::<_, crate::database::model::GuildDailyStats>(
+                r#"
+            SELECT 
+                day,
+                CAST(AVG(user_daily_total) AS INTEGER) as value
+            FROM (
+                SELECT 
+                    user_id,
+                    date(join_time) as day,
+                    SUM(
+                        CASE 
+                            WHEN leave_time = join_time 
+                            THEN strftime('%s', 'now') - strftime('%s', join_time)
+                            ELSE strftime('%s', leave_time) - strftime('%s', join_time)
+                        END
+                    ) as user_daily_total
+                FROM voice_sessions
+                WHERE guild_id = ? AND join_time >= ? AND join_time <= ?
+                GROUP BY user_id, date(join_time)
+            ) user_totals
+            GROUP BY day
+            ORDER BY day
+            "#,
+            )
+            .bind(guild_id as i64)
+            .bind(since)
+            .bind(until)
+            .fetch_all(&self.base.pool)
+            .await?,
+        )
+    }
+
+    /// Get guild-wide daily statistics: count of unique active users.
+    pub async fn get_guild_daily_user_count(
+        &self,
+        guild_id: u64,
+        since: &chrono::DateTime<chrono::Utc>,
+        until: &chrono::DateTime<chrono::Utc>,
+    ) -> Result<Vec<crate::database::model::GuildDailyStats>, DatabaseError> {
+        Ok(
+            sqlx::query_as::<_, crate::database::model::GuildDailyStats>(
+                r#"
+            SELECT 
+                date(join_time) as day,
+                COUNT(DISTINCT user_id) as value
+            FROM voice_sessions
+            WHERE guild_id = ? AND join_time >= ? AND join_time <= ?
+            GROUP BY date(join_time)
+            ORDER BY day
+            "#,
+            )
+            .bind(guild_id as i64)
+            .bind(since)
+            .bind(until)
+            .fetch_all(&self.base.pool)
+            .await?,
+        )
+    }
 }

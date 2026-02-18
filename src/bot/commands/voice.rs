@@ -5,6 +5,7 @@ use chrono::Datelike;
 use chrono::Duration;
 use chrono::Utc;
 use poise::ChoiceParameter;
+use serenity::all::CreateSelectMenuOption;
 
 use crate::bot::commands::Cog;
 use crate::bot::commands::Context;
@@ -24,7 +25,10 @@ impl VoiceCog {
     ///
     /// Track voice channel activity and view leaderboards.
     /// Use subcommands to configure settings or view the leaderboard.
-    #[poise::command(slash_command, subcommands("Self::settings", "Self::leaderboard"))]
+    #[poise::command(
+        slash_command,
+        subcommands("Self::settings", "Self::leaderboard", "Self::stats")
+    )]
     pub async fn vc(_ctx: Context<'_>) -> Result<(), Error> {
         Ok(())
     }
@@ -57,12 +61,51 @@ impl VoiceCog {
         )
         .await
     }
+
+    /// Display voice activity statistics with contribution graph
+    ///
+    /// Shows a GitHub-style contribution heatmap of voice activity over time.
+    /// Can display stats for yourself, another user, or the entire server.
+    #[poise::command(slash_command)]
+    pub async fn stats(
+        ctx: Context<'_>,
+        #[description = "Time period to display. Defaults to \"This month\""] time_range: Option<
+            VoiceStatsTimeRange,
+        >,
+        #[description = "User to show stats for (defaults to server stats in guild, yourself in DM)"]
+        user: Option<serenity::all::User>,
+        #[description = "Statistic to display for server view"] statistic: Option<GuildStatType>,
+    ) -> Result<(), Error> {
+        controllers::stats(ctx, time_range, user, statistic).await
+    }
 }
 
 impl Cog for VoiceCog {
     fn commands(&self) -> Vec<poise::Command<crate::bot::Data, crate::bot::commands::Error>> {
         vec![Self::vc()]
     }
+}
+
+/// Type of guild statistic to display.
+#[derive(ChoiceParameter, Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum GuildStatType {
+    /// Average voice time per active user
+    #[default]
+    #[name = "Average Time"]
+    AverageTime,
+    /// Number of unique active users
+    #[name = "Active Users"]
+    ActiveUserCount,
+}
+
+/// Common trait for time range enums.
+pub trait TimeRange: Copy {
+    /// Returns (since, until) where until is always now.
+    fn to_range(self) -> (DateTime<Utc>, DateTime<Utc>);
+    /// Returns the user-facing display name for this time range.
+    fn display_name(&self) -> &'static str;
+    /// Returns the enum variant from its display name.
+    fn from_display_name(name: &str) -> Option<Self>;
 }
 
 /// Time range filter for voice activity leaderboard.
@@ -165,13 +208,17 @@ impl From<VoiceLeaderboardTimeRange> for DateTime<Utc> {
 
 // Helper to get both since and until
 impl VoiceLeaderboardTimeRange {
-    /// Returns (since, until) where until is always now
-    pub fn to_range(self) -> (DateTime<Utc>, DateTime<Utc>) {
-        (self.into(), Utc::now())
+    fn to_date_time(self) -> DateTime<Utc> {
+        self.into()
+    }
+}
+
+impl TimeRange for VoiceLeaderboardTimeRange {
+    fn to_range(self) -> (DateTime<Utc>, DateTime<Utc>) {
+        (self.to_date_time(), Utc::now())
     }
 
-    /// Returns the user-facing name for this time range.
-    pub fn name(&self) -> &'static str {
+    fn display_name(&self) -> &'static str {
         match self {
             VoiceLeaderboardTimeRange::Today => "Today",
             VoiceLeaderboardTimeRange::Past3Days => "Past 3 days",
@@ -183,8 +230,7 @@ impl VoiceLeaderboardTimeRange {
         }
     }
 
-    /// Returns the user-facing name for this time range.
-    pub fn from_name(name: &str) -> Option<Self> {
+    fn from_display_name(name: &str) -> Option<Self> {
         match name {
             "Today" => Some(VoiceLeaderboardTimeRange::Today),
             "Past 3 days" => Some(VoiceLeaderboardTimeRange::Past3Days),
@@ -195,5 +241,100 @@ impl VoiceLeaderboardTimeRange {
             "All time" => Some(VoiceLeaderboardTimeRange::AllTime),
             _ => None,
         }
+    }
+}
+
+/// Time range filter for voice stats (excludes All Time to avoid empty graphs).
+#[derive(ChoiceParameter, Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum VoiceStatsTimeRange {
+    /// From Sunday 00:00 until now
+    #[default]
+    #[name = "This week"]
+    ThisWeek,
+    /// From Sunday 00:00 two weeks ago until now
+    #[name = "Past 2 weeks"]
+    Past2Weeks,
+    /// From 1st of this month 00:00 until now
+    #[name = "This month"]
+    ThisMonth,
+    /// From January 1st 00:00 until now
+    #[name = "This year"]
+    ThisYear,
+}
+
+impl VoiceStatsTimeRange {
+    fn to_date_time(self) -> DateTime<Utc> {
+        let now = Utc::now();
+
+        match self {
+            VoiceStatsTimeRange::ThisWeek => {
+                let days_since_sunday = now.weekday().num_days_from_sunday();
+                (now - Duration::days(days_since_sunday as i64))
+                    .date_naive()
+                    .and_hms_opt(0, 0, 0)
+                    .unwrap()
+                    .and_utc()
+            }
+
+            VoiceStatsTimeRange::Past2Weeks => {
+                let days_since_sunday = now.weekday().num_days_from_sunday();
+                let days_to_subtract = days_since_sunday as i64 + 7;
+                (now - Duration::days(days_to_subtract))
+                    .date_naive()
+                    .and_hms_opt(0, 0, 0)
+                    .unwrap()
+                    .and_utc()
+            }
+
+            VoiceStatsTimeRange::ThisMonth => now
+                .date_naive()
+                .with_day(1)
+                .unwrap()
+                .and_hms_opt(0, 0, 0)
+                .unwrap()
+                .and_utc(),
+
+            VoiceStatsTimeRange::ThisYear => now
+                .date_naive()
+                .with_month(1)
+                .unwrap()
+                .with_day(1)
+                .unwrap()
+                .and_hms_opt(0, 0, 0)
+                .unwrap()
+                .and_utc(),
+        }
+    }
+}
+
+impl TimeRange for VoiceStatsTimeRange {
+    fn to_range(self) -> (DateTime<Utc>, DateTime<Utc>) {
+        (self.to_date_time(), Utc::now())
+    }
+
+    fn display_name(&self) -> &'static str {
+        match self {
+            VoiceStatsTimeRange::ThisWeek => "This week",
+            VoiceStatsTimeRange::Past2Weeks => "Past 2 weeks",
+            VoiceStatsTimeRange::ThisMonth => "This month",
+            VoiceStatsTimeRange::ThisYear => "This year",
+        }
+    }
+
+    fn from_display_name(name: &str) -> Option<Self> {
+        match name {
+            "This week" => Some(VoiceStatsTimeRange::ThisWeek),
+            "Past 2 weeks" => Some(VoiceStatsTimeRange::Past2Weeks),
+            "This month" => Some(VoiceStatsTimeRange::ThisMonth),
+            "This year" => Some(VoiceStatsTimeRange::ThisYear),
+            _ => None,
+        }
+    }
+}
+
+impl From<VoiceStatsTimeRange> for CreateSelectMenuOption<'static> {
+    fn from(range: VoiceStatsTimeRange) -> Self {
+        let name = range.display_name();
+        CreateSelectMenuOption::new(name, name)
     }
 }

@@ -13,55 +13,38 @@
   }
 }}%%
 graph TB
-    subgraph Architecture
-        Coordinator["Coordinator<br/>(Manages Context & Message)"]
-        Controller["Controller<br/>(Business Logic)"]
-        View["View<br/>(UI Components)"]
-        NavigationResult["NavigationResult<br/>(Navigation Intent)"]
-    end
-
-    Coordinator -->|Runs| Controller
-    Controller -->|Creates| View
-    Coordinator -->|Sends/Edits| View
-    Controller -->|Returns| NavigationResult
-    NavigationResult -->|Directs| Coordinator
-
-    subgraph Navigation
-        direction LR
-        SettingsMain[SettingsMain]
-        SettingsFeeds[SettingsFeeds]
-        SettingsVoice[SettingsVoice]
-        SettingsAbout[SettingsAbout]
-        Back[Back]
-        Exit[Exit]
-    end
-
-    SettingsMain -->|Navigate| SettingsFeeds
-    SettingsMain -->|Navigate| SettingsVoice
-    SettingsMain -->|Navigate| SettingsAbout
-    SettingsFeeds -->|Back| SettingsMain
-    SettingsVoice -->|Back| SettingsMain
-    SettingsAbout -->|Back| SettingsMain
-
-    subgraph Views
-        subgraph Settings
-            SettingsMainView
-            SettingsFeedView
-            SettingsVoiceView
-            SettingsNavigationView
+    subgraph UIPaths["UI Navigation Paths"]
+        direction TB
+        
+        subgraph MainFlow["Settings Flow"]
+            direction TB
+            Main["SettingsMain"]
+            Feeds["SettingsFeeds"]
+            Voice["SettingsVoice"]
+            About["SettingsAbout"]
+            
+            Main <-->|Feeds| Feeds
+            Main <-->|Voice| Voice
+            Main <-->|About| About
         end
-
-        subgraph Feed
-            FeedSubscriptionBatchView
-            FeedSubscriptionListView
+        
+        subgraph Standalone["Standalone Views"]
+            direction TB
+            Leaderboard["VoiceLeaderboard"]
+            SubList["FeedSubscriptionList"]
         end
-
-        subgraph Voice
-            VoiceLeaderboardView
-        end
-
-        subgraph Common
-            AboutView
-            PaginationView
+        
+        subgraph BatchFlow["Subscription Batch Flow"]
+            direction TB
+            Batch["FeedSubscriptionBatch"]
+            Batch -->|View Subscriptions button| SubList
         end
     end
+    
+    style Main fill:#2d2d2d,stroke:#ffffff,stroke-width:3px
+    style Feeds fill:#1e1e1e,stroke:#ffffff
+    style Voice fill:#1e1e1e,stroke:#ffffff
+    style About fill:#1e1e1e,stroke:#ffffff
+    style Leaderboard fill:#1e1e1e,stroke:#ffffff
+    style SubList fill:#1e1e1e,stroke:#ffffff
+    style Batch fill:#1e1e1e,stroke:#ffffff
