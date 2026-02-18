@@ -231,6 +231,7 @@ impl AboutStats {
     /// Gathers bot statistics for the about command.
     async fn gather_stats(ctx: &Context<'_>) -> Result<AboutStats, Error> {
         let start_time = ctx.data().start_time;
+        let version = ctx.data().config.version.clone();
         let uptime = start_time.elapsed();
 
         let guild_count = ctx.cache().guilds().len();
@@ -258,7 +259,7 @@ impl AboutStats {
         let current_year = Utc::now().year();
 
         Ok(AboutStats {
-            version: env!("CARGO_PKG_VERSION").to_string(),
+            version,
             uptime,
             guild_count,
             user_count,

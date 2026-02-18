@@ -29,8 +29,11 @@ use poise::serenity_prelude::ClientBuilder;
 use poise::serenity_prelude::GatewayIntents;
 use poise::serenity_prelude::Http;
 use poise::serenity_prelude::UserId;
+use serenity::all::ActivityData;
 use serenity::all::FullEvent;
+use serenity::all::GuildId;
 use serenity::all::Token;
+use serenity::small_fixed_array::FixedString;
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
 
@@ -74,7 +77,9 @@ impl Bot {
     ) -> Result<Self> {
         info!("Initializing bot...");
 
+        let (token, intents) = Self::create_client_config(&config)?;
         let framework = Self::create_framework(&config)?;
+        let event_handler = Arc::new(BotEventHandler::new(event_bus, voice_subscriber));
         let data = Arc::new(Data {
             config: config.clone(),
             db,
@@ -82,13 +87,12 @@ impl Bot {
             service,
             start_time: Instant::now(),
         });
-        let (token, intents) = Self::create_client_config(&config)?;
-        let event_handler = Arc::new(BotEventHandler::new(event_bus, voice_subscriber));
 
         let client_builder = ClientBuilder::new(token.clone(), intents)
             .event_handler(event_handler)
             .framework(framework)
-            .data(data);
+            .data(data)
+            .activity(ActivityData::playing(config.version.clone()));
 
         Ok(Self {
             cache: Arc::new(Cache::default()),
@@ -106,6 +110,7 @@ impl Bot {
 
         tokio::spawn(async move {
             info!("Connecting bot to Discord...");
+
             let built_client = client_builder
                 .await
                 .expect("Failed to build Discord client");
@@ -128,9 +133,8 @@ impl Bot {
 
     /// Creates the Poise framework with commands and configuration.
     fn create_framework(config: &Config) -> Result<Box<Framework<Data, Error>>> {
-        let cogs = Cogs;
         let options = FrameworkOptions::<Data, Error> {
-            commands: cogs.commands(),
+            commands: Cogs.commands(),
             on_error: |error| Box::pin(Self::on_error(error)),
             prefix_options: poise::PrefixFrameworkOptions {
                 prefix: Some("!".into()),
@@ -156,7 +160,6 @@ impl Bot {
         Ok((token, intents))
     }
 
-    /// Handles framework errors by delegating to the error handler.
     async fn on_error(error: poise::FrameworkError<'_, Data, Error>) {
         ErrorHandler::handle(error).await;
     }
@@ -169,7 +172,6 @@ pub struct BotEventHandler {
 }
 
 impl BotEventHandler {
-    /// Creates a new event handler with the event bus and voice subscriber.
     pub fn new(event_bus: Arc<EventBus>, voice_subscriber: Arc<VoiceStateSubscriber>) -> Self {
         Self {
             event_bus,
@@ -177,15 +179,12 @@ impl BotEventHandler {
         }
     }
 
-    /// Scan all guilds for users currently in voice channels
+    /// Scans all guilds for users currently in voice channels.
     async fn scan_voice_channels(&self, ctx: &poise::serenity_prelude::Context) {
         let mut tracked = 0u32;
-
-        // Collect guild IDs first to avoid holding cache references across await
         let guild_ids: Vec<_> = ctx.cache.guilds().into_iter().collect();
 
         for guild_id in guild_ids {
-            // Check if voice tracking is enabled for this guild (before accessing cache)
             let is_enabled = self
                 .voice_subscriber
                 .services
@@ -197,50 +196,19 @@ impl BotEventHandler {
                 continue;
             }
 
-            // Collect voice state data from cache without holding reference across await
-            let voice_states_to_track: Vec<_> = {
-                let guild = match ctx.cache.guild(guild_id) {
-                    Some(g) => g,
-                    None => continue,
-                };
+            let voice_states = self.collect_voice_states(ctx, guild_id);
 
-                guild
-                    .voice_states
-                    .iter()
-                    .filter_map(|voice_state| {
-                        let channel_id = voice_state.channel_id?;
-                        let user_id = voice_state.user_id;
-
-                        // Skip bots
-                        if let Some(member) = guild.members.get(&user_id)
-                            && member.user.bot()
-                        {
-                            return None;
-                        }
-
-                        Some((
-                            user_id.get(),
-                            guild_id.get(),
-                            channel_id.get(),
-                            voice_state.session_id.clone(),
-                        ))
-                    })
-                    .collect()
-            };
-
-            // Process the collected data (can use await here)
-            for (user_id, guild_id, channel_id, session_id) in voice_states_to_track {
-                if let Err(e) = self
+            for (user_id, guild_id, channel_id, session_id) in voice_states {
+                match self
                     .voice_subscriber
                     .track_existing_user(user_id, guild_id, channel_id, &session_id)
                     .await
                 {
-                    debug!(
+                    Ok(_) => tracked += 1,
+                    Err(e) => debug!(
                         "Failed to track existing user {} in guild {}: {}",
                         user_id, guild_id, e
-                    );
-                } else {
-                    tracked += 1;
+                    ),
                 }
             }
         }
@@ -252,15 +220,54 @@ impl BotEventHandler {
             );
         }
     }
+
+    /// Collects voice state data from the cache for a guild.
+    /// Returns early with an empty vec if the guild is not cached.
+    fn collect_voice_states(
+        &self,
+        ctx: &poise::serenity_prelude::Context,
+        guild_id: GuildId,
+    ) -> Vec<(u64, u64, u64, FixedString)> {
+        let guild = match ctx.cache.guild(guild_id) {
+            Some(g) => g,
+            None => return vec![],
+        };
+
+        guild
+            .voice_states
+            .iter()
+            .filter_map(|voice_state| {
+                let channel_id = voice_state.channel_id?;
+                let user_id = voice_state.user_id;
+
+                let is_bot = guild
+                    .members
+                    .get(&user_id)
+                    .map(|m| m.user.bot())
+                    .unwrap_or(false);
+
+                if is_bot {
+                    return None;
+                }
+
+                Some((
+                    user_id.get(),
+                    guild_id.get(),
+                    channel_id.get(),
+                    voice_state.session_id.clone(),
+                ))
+            })
+            .collect()
+    }
 }
 
 #[async_trait]
 impl poise::serenity_prelude::EventHandler for BotEventHandler {
-    async fn dispatch(&self, _context: &poise::serenity_prelude::Context, _event: &FullEvent) {
-        match _event {
+    async fn dispatch(&self, ctx: &poise::serenity_prelude::Context, event: &FullEvent) {
+        match event {
             FullEvent::Ready { .. } => {
                 info!("Bot is ready, scanning voice channels...");
-                self.scan_voice_channels(_context).await;
+                self.scan_voice_channels(ctx).await;
             }
             FullEvent::VoiceStateUpdate { old, new, .. } => {
                 self.event_bus.publish(VoiceStateEvent {
@@ -269,6 +276,6 @@ impl poise::serenity_prelude::EventHandler for BotEventHandler {
                 });
             }
             _ => {}
-        };
+        }
     }
 }
