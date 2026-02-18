@@ -2,6 +2,8 @@
 
 use chrono::Datelike;
 use chrono::Utc;
+use poise::ChoiceParameter;
+use pwr_bot::bot::commands::voice::TimeRange;
 use pwr_bot::bot::commands::voice::VoiceLeaderboardTimeRange;
 use pwr_bot::bot::utils::format_duration;
 
@@ -73,8 +75,8 @@ fn test_voice_leaderboard_time_range_all_variants() {
             range
         );
 
-        // Verify round-trip through name
-        let name = range.name();
+        // Verify round-trip through ChoiceParameter name
+        let name = ChoiceParameter::name(&range);
         let recovered = VoiceLeaderboardTimeRange::from_name(name);
         assert!(
             recovered.is_some(),

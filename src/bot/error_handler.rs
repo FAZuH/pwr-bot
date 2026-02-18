@@ -12,6 +12,7 @@ use serenity::all::MessageFlags;
 use crate::bot::Data;
 use crate::bot::Error;
 use crate::bot::error::BotError;
+use crate::error::AppError;
 use crate::service::error::ServiceError;
 
 /// Handles framework errors and sends appropriate responses to users.
@@ -33,7 +34,7 @@ impl ErrorHandler {
             }
             FrameworkError::ArgumentParse { error, ctx, .. } => {
                 let message = format!(
-                    "## ⚠️ Invalid Arguments\n\n**Command:** `{}`\n**Issue:** {}\n\n> Use `/help {}` for usage information.",
+                    "## ⚠️ Invalid Arguments\n\n**Command:** `/{}`\n**Issue:** {}\n\n> Use `/help {}` for usage information.",
                     ctx.command().name,
                     error,
                     ctx.command().name
@@ -58,6 +59,7 @@ impl ErrorHandler {
         } else if let Some(service_error) = error.downcast_ref::<ServiceError>() {
             ("❌ Service Error", service_error.to_string())
         } else {
+            let ref_id = AppError::log_with_ref(error);
             error!(
                 "Unexpected error in command `{}`: {:?}",
                 ctx.command().name,
@@ -65,7 +67,10 @@ impl ErrorHandler {
             );
             (
                 "❌ Internal Error",
-                "An unexpected error occurred. Please contact the bot developer.".to_string(),
+                format!(
+                    "An unexpected error occurred. Please contact the bot developer.\n-# Reference ID: {}",
+                    ref_id
+                ),
             )
         }
     }

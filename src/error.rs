@@ -1,6 +1,6 @@
 //! Top-level application errors.
 
-use std::fmt::Display;
+use std::fmt::Debug;
 
 use log::error;
 use uuid::Uuid;
@@ -28,10 +28,16 @@ pub enum AppError {
 
 impl AppError {
     /// Log details internally, return generic error to user
-    pub fn internal_with_ref(msg: impl Display) -> Self {
+    pub fn internal_with_ref(msg: impl Debug) -> Self {
         let ref_id = Uuid::new_v4();
-        error!("Internal error ({ref_id}): {msg}");
+        error!("Internal error ({ref_id}): {msg:?}");
         Self::InternalWithRef { ref_id }
+    }
+
+    pub fn log_with_ref(msg: impl Debug) -> Uuid {
+        let ref_id = Uuid::new_v4();
+        error!("Internal error ({ref_id}): {msg:?}");
+        ref_id
     }
 }
 
