@@ -73,6 +73,73 @@ impl FeedSubscriptionService {
         Ok(self.db.feed.select_all_by_tag(tag).await?)
     }
 
+    pub async fn get_both_subscribers(
+        &self,
+        target_id: impl Into<String>,
+        guild_id: Option<impl Into<String>>,
+    ) -> (Option<SubscriberModel>, Option<SubscriberModel>) {
+        let user_target = SubscriberTarget {
+            target_id: target_id.into(),
+            subscriber_type: SubscriberType::Dm,
+        };
+
+        let user_subscriber = self.get_or_create_subscriber(&user_target).await.ok();
+
+        let guild_subscriber = match guild_id {
+            Some(guild_id) => {
+                let guild_target = SubscriberTarget {
+                    target_id: guild_id.into(),
+                    subscriber_type: SubscriberType::Guild,
+                };
+                self.get_or_create_subscriber(&guild_target).await.ok()
+            }
+            None => None,
+        };
+
+        (user_subscriber, guild_subscriber)
+    }
+
+    /// Gets both DM and guild subscribers for the current user.
+    /// Searches and combines feeds from both user and guild subscriptions.
+    pub async fn search_and_combine_feeds(
+        &self,
+        partial: &str,
+        user_subscriber: Option<SubscriberModel>,
+        guild_subscriber: Option<SubscriberModel>,
+    ) -> Vec<FeedModel> {
+        let mut user_feeds = match user_subscriber {
+            Some(sub) => self
+                .search_subcriptions(&sub, partial)
+                .await
+                .unwrap_or_default(),
+            None => vec![],
+        };
+
+        let mut guild_feeds = match guild_subscriber {
+            Some(sub) => self
+                .search_subcriptions(&sub, partial)
+                .await
+                .unwrap_or_default(),
+            None => vec![],
+        };
+
+        for f in &mut user_feeds {
+            Self::format_subscription_with_prefix(f, true);
+        }
+        for f in &mut guild_feeds {
+            Self::format_subscription_with_prefix(f, false);
+        }
+
+        user_feeds.append(&mut guild_feeds);
+        user_feeds
+    }
+
+    /// Adds a prefix to feed name indicating subscription type.
+    fn format_subscription_with_prefix(feed: &mut FeedModel, is_dm: bool) {
+        let prefix = if is_dm { "(DM) " } else { "(Server) " };
+        feed.name.insert_str(0, prefix);
+    }
+
     /// Check for updates on a specific feed
     pub async fn check_feed_update(
         &self,

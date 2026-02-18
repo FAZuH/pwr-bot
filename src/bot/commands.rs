@@ -1,12 +1,12 @@
 //! Bot command organization using the Cog pattern.
 
-use crate::bot::Data;
-
 pub mod about;
-pub mod admin;
+pub mod dump_db;
 pub mod feed;
-pub mod owner;
+pub mod register;
+pub mod register_owner;
 pub mod settings;
+pub mod unregister;
 pub mod voice;
 
 /// Error type used across bot commands.
@@ -15,12 +15,9 @@ pub type Error = Box<dyn std::error::Error + Send + Sync>;
 /// Context type passed to command handlers.
 pub type Context<'a> = poise::Context<'a, Data, Error>;
 
-pub use about::AboutCog;
-pub use admin::AdminCog;
-pub use feed::FeedCog;
-pub use owner::OwnerCog;
 use poise::Command;
-pub use voice::VoiceCog;
+
+use crate::bot::Data;
 
 /// Trait for command modules that provide Discord commands.
 pub trait Cog {
@@ -33,19 +30,15 @@ pub struct Cogs;
 
 impl Cog for Cogs {
     fn commands(&self) -> Vec<Command<Data, Error>> {
-        let feeds_cog = FeedCog;
-        let admin_cog = AdminCog;
-        let owner_cog = OwnerCog;
-        let voice_cog = VoiceCog;
-        let about_cog = AboutCog;
-
-        feeds_cog
-            .commands()
-            .into_iter()
-            .chain(admin_cog.commands())
-            .chain(owner_cog.commands())
-            .chain(voice_cog.commands())
-            .chain(about_cog.commands())
-            .collect()
+        vec![
+            about::about(),
+            dump_db::dump_db(),
+            feed::feed(),
+            register::register(),
+            register_owner::register_owner(),
+            settings::settings(),
+            unregister::unregister(),
+            voice::voice(),
+        ]
     }
 }

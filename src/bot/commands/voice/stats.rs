@@ -1,7 +1,6 @@
-//! Voice command implementations.
+//! Voice stats subcommand.
 
 use std::collections::HashMap;
-use std::ops::Deref;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -27,16 +26,9 @@ use serenity::all::User;
 use crate::action_enum;
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;
-use crate::bot::commands::settings::SettingsPage;
-use crate::bot::commands::settings::run_settings;
 use crate::bot::commands::voice::GuildStatType;
 use crate::bot::commands::voice::TimeRange;
-use crate::bot::commands::voice::VoiceLeaderboardTimeRange;
 use crate::bot::commands::voice::VoiceStatsTimeRange;
-use crate::bot::commands::voice::views::SettingsVoiceAction;
-use crate::bot::commands::voice::views::SettingsVoiceView;
-use crate::bot::commands::voice::views::VoiceLeaderboardAction;
-use crate::bot::commands::voice::views::VoiceLeaderboardView;
 use crate::bot::controller::Controller;
 use crate::bot::controller::Coordinator;
 use crate::bot::error::BotError;
@@ -47,204 +39,74 @@ use crate::bot::views::RenderExt;
 use crate::bot::views::ResponseKind;
 use crate::bot::views::ResponseView;
 use crate::bot::views::View;
-use crate::controller;
 use crate::error::AppError;
 use crate::model::GuildDailyStats;
 use crate::model::VoiceDailyActivity;
-use crate::model::VoiceLeaderboardEntry;
-use crate::model::VoiceLeaderboardOptBuilder;
 use crate::view_core;
 
-controller! { pub struct VoiceSettingsController<'a> {} }
-
-#[async_trait::async_trait]
-impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceSettingsController<'a> {
-    async fn run(
-        &mut self,
-        coordinator: &mut Coordinator<'_, S>,
-    ) -> Result<NavigationResult, Error> {
-        let ctx = *coordinator.context();
-        ctx.defer().await?;
-        let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?.get();
-
-        let settings = ctx
-            .data()
-            .service
-            .voice_tracking
-            .get_server_settings(guild_id)
-            .await
-            .map_err(Error::from)?;
-
-        let mut view = SettingsVoiceView::new(&ctx, settings);
-        view.render().await?;
-
-        while let Some((action, _interaction)) = view.listen_once().await? {
-            match action {
-                SettingsVoiceAction::Back => return Ok(NavigationResult::Back),
-                SettingsVoiceAction::About => {
-                    return Ok(NavigationResult::SettingsAbout);
-                }
-                SettingsVoiceAction::ToggleEnabled => {
-                    // Update the settings in the database
-                    ctx.data()
-                        .service
-                        .voice_tracking
-                        .update_server_settings(guild_id, view.settings.clone())
-                        .await
-                        .map_err(Error::from)?;
-
-                    view.render().await?;
-                }
-            }
-        }
-
-        Ok(NavigationResult::Exit)
-    }
-}
-
-/// Data for a leaderboard session.
-pub struct LeaderboardSessionData {
-    pub entries: Vec<VoiceLeaderboardEntry>,
-    pub user_rank: Option<u32>,
-    pub user_duration: Option<i64>,
-}
-
-impl LeaderboardSessionData {
-    /// Creates session data from entries and calculates user rank.
-    pub fn from_entries(entries: Vec<VoiceLeaderboardEntry>, author_id: u64) -> Self {
-        let user_rank = entries
-            .iter()
-            .position(|e| e.user_id == author_id)
-            .map(|p| p as u32 + 1);
-        let user_duration = entries
-            .iter()
-            .find(|e| e.user_id == author_id)
-            .map(|e| e.total_duration);
-
-        Self {
-            entries,
-            user_rank,
-            user_duration,
-        }
-    }
-}
-
-impl Deref for LeaderboardSessionData {
-    type Target = Vec<VoiceLeaderboardEntry>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.entries
-    }
-}
-
-/// Controller for voice leaderboard display and interaction.
-pub struct VoiceLeaderboardController<'a> {
-    #[allow(dead_code)]
-    ctx: &'a Context<'a>,
-    pub time_range: VoiceLeaderboardTimeRange,
-}
-
-impl<'a> VoiceLeaderboardController<'a> {
-    /// Creates a new leaderboard controller.
-    pub fn new(ctx: &'a Context<'a>, time_range: VoiceLeaderboardTimeRange) -> Self {
-        Self { ctx, time_range }
-    }
-
-    /// Fetches leaderboard entries for the current time range.
-    async fn fetch_entries(
-        ctx: &Context<'_>,
-        time_range: VoiceLeaderboardTimeRange,
-    ) -> Result<LeaderboardSessionData, Error> {
-        let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?.get();
-        let (since, until) = time_range.to_range();
-
-        let voice_lb_opts = VoiceLeaderboardOptBuilder::default()
-            .guild_id(guild_id)
-            .limit(Some(u32::MAX))
-            .since(Some(since))
-            .until(Some(until))
-            .build()
-            .map_err(AppError::from)?;
-
-        let new_entries = ctx
-            .data()
-            .service
-            .voice_tracking
-            .get_leaderboard_withopt(&voice_lb_opts)
-            .await
-            .map_err(Error::from)?;
-
-        let author_id = ctx.author().id.get();
-        Ok(LeaderboardSessionData::from_entries(new_entries, author_id))
-    }
-}
-
-#[async_trait::async_trait]
-impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceLeaderboardController<'a> {
-    async fn run(
-        &mut self,
-        coordinator: &mut Coordinator<'_, S>,
-    ) -> Result<NavigationResult, Error> {
-        let controller_start = Instant::now();
-
-        let ctx = *coordinator.context();
-        ctx.defer().await?;
-
-        // Fetch initial entries
-        let session_data = Self::fetch_entries(&ctx, self.time_range).await?;
-
-        let mut view = VoiceLeaderboardView::new(&ctx, session_data, self.time_range);
-
-        if view.leaderboard_data.is_empty() {
-            view.render().await?;
-            return Ok(NavigationResult::Exit);
-        }
-
-        // Generate and send initial page
-        let page_result = view.generate_current_page().await?;
-        view.set_current_page_bytes(page_result.image_bytes.clone());
-        view.render().await?;
-
-        trace!(
-            "controller_initial_response {} ms",
-            controller_start.elapsed().as_millis()
-        );
-
-        while let Some((action, _)) = view.listen_once().await? {
-            if matches!(action, VoiceLeaderboardAction::TimeRange) {
-                let new_data = Self::fetch_entries(&ctx, view.time_range).await?;
-                view.update_leaderboard_data(new_data);
-            }
-            let page_result = view.generate_current_page().await?;
-            view.set_current_page_bytes(page_result.image_bytes.clone());
-            view.render().await?;
-        }
-
-        trace!(
-            "controller_total {} ms",
-            controller_start.elapsed().as_millis()
-        );
-        Ok(NavigationResult::Exit)
-    }
-}
-
-/// Legacy function for voice settings command.
-pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
-    run_settings(ctx, Some(SettingsPage::Voice)).await
-}
-
-/// Legacy function for voice leaderboard command.
-pub async fn leaderboard(
+/// Display voice activity statistics with contribution graph
+///
+/// Shows a GitHub-style contribution heatmap of voice activity over time.
+/// Can display stats for yourself, another user, or the entire server.
+#[poise::command(slash_command)]
+pub async fn stats(
     ctx: Context<'_>,
-    time_range: VoiceLeaderboardTimeRange,
+    #[description = "Time period to display. Defaults to \"This month\""] time_range: Option<
+        VoiceStatsTimeRange,
+    >,
+    #[description = "User to show stats for (defaults to server stats in guild, yourself in DM)"]
+    user: Option<serenity::all::User>,
+    #[description = "Statistic to display for server view"] statistic: Option<GuildStatType>,
 ) -> Result<(), Error> {
+    command(ctx, time_range, user, statistic).await
+}
+
+/// Entry point for the stats command.
+pub async fn command(
+    ctx: Context<'_>,
+    time_range: Option<VoiceStatsTimeRange>,
+    user: Option<User>,
+    statistic: Option<GuildStatType>,
+) -> Result<(), Error> {
+    let time_range = time_range.unwrap_or(VoiceStatsTimeRange::ThisMonth);
+    let stat_type = statistic.unwrap_or_default();
+
+    let target_user = if let Some(_guild_id) = ctx.guild_id() {
+        if let Some(ref target) = user {
+            if target.id != ctx.author().id {
+                let is_member = ctx
+                    .guild()
+                    .map(|guild| guild.members.contains_key(&target.id))
+                    .unwrap_or(false);
+
+                if !is_member {
+                    return Err(crate::bot::error::BotError::UserNotInGuild(
+                        "The specified user is not a member of this server.".to_string(),
+                    )
+                    .into());
+                }
+            }
+            Some(target.clone())
+        } else {
+            None
+        }
+    } else if let Some(ref target) = user {
+        if target.id != ctx.author().id {
+            return Err(crate::bot::error::BotError::UserNotInGuild(
+                "In direct messages, you can only view your own voice stats.".to_string(),
+            )
+            .into());
+        }
+        Some(target.clone())
+    } else {
+        Some(ctx.author().clone())
+    };
+
     let mut coordinator = Coordinator::new(ctx);
-    let mut controller = VoiceLeaderboardController::new(&ctx, time_range);
+    let mut controller = VoiceStatsController::new(&ctx, time_range, target_user, stat_type);
     let _result = controller.run(&mut coordinator).await?;
     Ok(())
 }
-
-// ==================== STATS COMMAND ====================
 
 /// Filename for the voice stats image attachment.
 pub const VOICE_STATS_IMAGE_FILENAME: &str = "voice_stats.png";
@@ -661,6 +523,7 @@ impl<'a> VoiceStatsController<'a> {
 
     /// Fetches stats data based on current parameters.
     async fn fetch_data(&self, ctx: &Context<'_>) -> Result<VoiceStatsData, Error> {
+        let service = ctx.data().service.voice_tracking.clone();
         let (since, until) = self.time_range.to_range();
 
         // Get guild info
@@ -674,10 +537,7 @@ impl<'a> VoiceStatsController<'a> {
             // Fetch user-specific stats
             let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?.get();
 
-            let user_activity = ctx
-                .data()
-                .service
-                .voice_tracking
+            let user_activity = service
                 .get_user_daily_activity(target_user.id.get(), guild_id, &since, &until)
                 .await
                 .map_err(Error::from)?;
@@ -694,10 +554,7 @@ impl<'a> VoiceStatsController<'a> {
             // Fetch guild-wide stats
             let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?.get();
 
-            let guild_stats = ctx
-                .data()
-                .service
-                .voice_tracking
+            let guild_stats = service
                 .get_guild_daily_stats(guild_id, &since, &until, self.stat_type)
                 .await
                 .map_err(Error::from)?;
@@ -731,14 +588,8 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceStatsController<'a> {
 
         // Generate and send the image
         if !view.data.user_activity.is_empty() || !view.data.guild_stats.is_empty() {
-            match view.generate_image() {
-                Ok(bytes) => {
-                    view.set_image_bytes(bytes);
-                }
-                Err(e) => {
-                    log::error!("Failed to generate stats image: {}", e);
-                }
-            }
+            let bytes = view.generate_image().map_err(AppError::internal_with_ref)?;
+            view.set_image_bytes(bytes);
         }
 
         view.render().await?;
@@ -748,32 +599,28 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceStatsController<'a> {
             controller_start.elapsed().as_millis()
         );
 
-        while let Some((action, _interaction)) = view.listen_once().await? {
-            match action {
-                VoiceStatsAction::ToggleStatType | VoiceStatsAction::TimeRange => {
-                    // Update controller state from view
-                    self.time_range = view.data.time_range;
-                    self.stat_type = view.data.stat_type;
-
-                    // Re-fetch data with new parameters
-                    let new_data = self.fetch_data(&ctx).await?;
-                    view.data = new_data;
-
-                    // Regenerate image
-                    if !view.data.user_activity.is_empty() || !view.data.guild_stats.is_empty() {
-                        match view.generate_image() {
-                            Ok(bytes) => {
-                                view.set_image_bytes(bytes);
-                            }
-                            Err(e) => {
-                                log::error!("Failed to regenerate stats image: {}", e);
-                            }
-                        }
-                    }
-
-                    view.render().await?;
-                }
+        while let Some((action, _)) = view.listen_once().await? {
+            if !matches!(
+                action,
+                VoiceStatsAction::ToggleStatType | VoiceStatsAction::TimeRange
+            ) {
+                continue;
             }
+            // Update controller state from view
+            self.time_range = view.data.time_range;
+            self.stat_type = view.data.stat_type;
+
+            // Re-fetch data with new parameters
+            let new_data = self.fetch_data(&ctx).await?;
+            view.data = new_data;
+
+            // Regenerate image
+            if !view.data.user_activity.is_empty() || !view.data.guild_stats.is_empty() {
+                let bytes = view.generate_image().map_err(AppError::internal_with_ref)?;
+                view.set_image_bytes(bytes);
+            }
+
+            view.render().await?;
         }
 
         trace!(
@@ -781,94 +628,5 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceStatsController<'a> {
             controller_start.elapsed().as_millis()
         );
         Ok(NavigationResult::Exit)
-    }
-}
-
-/// Entry point for the stats command.
-pub async fn stats(
-    ctx: Context<'_>,
-    time_range: Option<VoiceStatsTimeRange>,
-    user: Option<User>,
-    statistic: Option<GuildStatType>,
-) -> Result<(), Error> {
-    let time_range = time_range.unwrap_or(VoiceStatsTimeRange::ThisMonth);
-    let stat_type = statistic.unwrap_or_default();
-
-    // Determine target user and context
-    let target_user = if let Some(_guild_id) = ctx.guild_id() {
-        // In guild context
-        if let Some(ref target) = user {
-            // Allow viewing own stats, otherwise check membership via Discord API
-            if target.id != ctx.author().id {
-                // Try to get member from cache first
-                let is_member = ctx
-                    .guild()
-                    .map(|guild| guild.members.contains_key(&target.id))
-                    .unwrap_or(false);
-
-                if !is_member {
-                    return Err(BotError::UserNotInGuild(
-                        "The specified user is not a member of this server.".to_string(),
-                    )
-                    .into());
-                }
-            }
-            Some(target.clone())
-        } else {
-            // No user specified - show guild stats
-            None
-        }
-    } else {
-        // In DM context - can only view own stats
-        if let Some(ref target) = user {
-            if target.id != ctx.author().id {
-                return Err(BotError::UserNotInGuild(
-                    "In direct messages, you can only view your own voice stats.".to_string(),
-                )
-                .into());
-            }
-            Some(target.clone())
-        } else {
-            // No user specified in DM - show own stats
-            Some(ctx.author().clone())
-        }
-    };
-
-    let mut coordinator = Coordinator::new(ctx);
-    let mut controller = VoiceStatsController::new(&ctx, time_range, target_user, stat_type);
-    let _result = controller.run(&mut coordinator).await?;
-    Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_leaderboard_session_data_from_entries() {
-        let entries = vec![
-            VoiceLeaderboardEntry {
-                user_id: 100,
-                total_duration: 3600,
-            },
-            VoiceLeaderboardEntry {
-                user_id: 200,
-                total_duration: 1800,
-            },
-            VoiceLeaderboardEntry {
-                user_id: 300,
-                total_duration: 900,
-            },
-        ];
-
-        // Test author is ranked #2
-        let session = LeaderboardSessionData::from_entries(entries.clone(), 200);
-        assert_eq!(session.user_rank, Some(2));
-        assert_eq!(session.user_duration, Some(1800));
-
-        // Test author not in list
-        let session = LeaderboardSessionData::from_entries(entries, 999);
-        assert_eq!(session.user_rank, None);
-        assert_eq!(session.user_duration, None);
     }
 }

@@ -1,7 +1,4 @@
-//! Settings-related views and coordinator shared across command modules.
-//!
-//! This module provides the settings coordinator and reusable view components
-//! for settings interfaces.
+//! Admin settings command.
 
 use std::borrow::Cow;
 use std::slice::from_ref;
@@ -25,8 +22,8 @@ use crate::bot::checks::is_author_guild_admin;
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;
 use crate::bot::commands::about::AboutController;
-use crate::bot::commands::feed::controllers::FeedSettingsController;
-use crate::bot::commands::voice::controllers::VoiceSettingsController;
+use crate::bot::commands::feed::settings::FeedSettingsController;
+use crate::bot::commands::voice::settings::VoiceSettingsController;
 use crate::bot::controller::Controller;
 use crate::bot::controller::Coordinator;
 use crate::bot::error::BotError;
@@ -41,6 +38,14 @@ use crate::error::AppError;
 use crate::model::ServerSettings;
 use crate::model::ServerSettingsModel;
 use crate::view_core;
+
+/// Opens main server settings
+///
+/// Requires server administrator permissions.
+#[poise::command(slash_command)]
+pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
+    run_settings(ctx, None).await
+}
 
 controller! { pub struct SettingsMainController<'a> {} }
 
