@@ -266,7 +266,9 @@ impl<'a> InteractiveView<'a, SettingsMainAction> for SettingsMainView<'a> {
                 }
             },
             AddFeatures => {
-                if let ComponentInteractionDataKind::StringSelect { values } = &interaction.data.kind {
+                if let ComponentInteractionDataKind::StringSelect { values } =
+                    &interaction.data.kind
+                {
                     let features: Vec<_> = values
                         .iter()
                         .filter_map(|val| self.core().registry.get(val).cloned())

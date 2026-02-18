@@ -5,7 +5,6 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use log::debug;
 use poise::CreateReply;
 use poise::ReplyHandle;
 use serenity::all::ComponentInteraction;

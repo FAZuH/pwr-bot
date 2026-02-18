@@ -337,12 +337,16 @@ impl<'a> InteractiveView<'a, VoiceLeaderboardAction> for VoiceLeaderboardView<'a
                 Some(VoiceLeaderboardAction::Base(action))
             }
             TimeRange => {
-                if let ComponentInteractionDataKind::StringSelect { values } = &interaction.data.kind
-                    && let Some(time_range) = values.first().and_then(|v| VoiceLeaderboardTimeRange::from_name(v))
-                    && self.time_range != time_range {
-                        self.time_range = time_range;
-                        return Some(action.clone());
-                    }
+                if let ComponentInteractionDataKind::StringSelect { values } =
+                    &interaction.data.kind
+                    && let Some(time_range) = values
+                        .first()
+                        .and_then(|v| VoiceLeaderboardTimeRange::from_name(v))
+                    && self.time_range != time_range
+                {
+                    self.time_range = time_range;
+                    return Some(action.clone());
+                }
                 None
             }
         }
