@@ -24,7 +24,10 @@ impl VoiceCog {
     ///
     /// Track voice channel activity and view leaderboards.
     /// Use subcommands to configure settings or view the leaderboard.
-    #[poise::command(slash_command, subcommands("Self::settings", "Self::leaderboard"))]
+    #[poise::command(
+        slash_command,
+        subcommands("Self::settings", "Self::leaderboard", "Self::stats")
+    )]
     pub async fn vc(_ctx: Context<'_>) -> Result<(), Error> {
         Ok(())
     }
@@ -57,12 +60,41 @@ impl VoiceCog {
         )
         .await
     }
+
+    /// Display voice activity statistics with contribution graph
+    ///
+    /// Shows a GitHub-style contribution heatmap of voice activity over time.
+    /// Can display stats for yourself, another user, or the entire server.
+    #[poise::command(slash_command)]
+    pub async fn stats(
+        ctx: Context<'_>,
+        #[description = "Time period to display. Defaults to \"This month\""] time_range: Option<
+            VoiceLeaderboardTimeRange,
+        >,
+        #[description = "User to show stats for (defaults to server stats in guild, yourself in DM)"]
+        user: Option<serenity::all::User>,
+        #[description = "Statistic to display for server view"] statistic: Option<GuildStatType>,
+    ) -> Result<(), Error> {
+        controllers::stats(ctx, time_range, user, statistic).await
+    }
 }
 
 impl Cog for VoiceCog {
     fn commands(&self) -> Vec<poise::Command<crate::bot::Data, crate::bot::commands::Error>> {
         vec![Self::vc()]
     }
+}
+
+/// Type of guild statistic to display.
+#[derive(ChoiceParameter, Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum GuildStatType {
+    /// Average voice time per active user
+    #[default]
+    #[name = "Average Time"]
+    AverageTime,
+    /// Number of unique active users
+    #[name = "Active Users"]
+    ActiveUserCount,
 }
 
 /// Time range filter for voice activity leaderboard.

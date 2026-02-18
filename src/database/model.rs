@@ -202,3 +202,22 @@ impl From<VoiceLeaderboardOptBuilderError> for AppError {
         AppError::internal_with_ref(value)
     }
 }
+
+/// Daily voice activity aggregation for a specific user.
+#[derive(FromRow, Serialize, Default, Clone, Debug)]
+pub struct VoiceDailyActivity {
+    /// The date (day) of the activity
+    pub day: chrono::NaiveDate,
+    /// Total duration in seconds for that day
+    pub total_seconds: i64,
+}
+
+/// Guild daily statistics aggregation.
+#[derive(FromRow, Serialize, Default, Clone, Debug)]
+pub struct GuildDailyStats {
+    /// The date (day) of the activity
+    pub day: chrono::NaiveDate,
+    /// For average time: average seconds per active user
+    /// For user count: number of unique active users
+    pub value: i64,
+}

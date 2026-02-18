@@ -7,9 +7,12 @@ use chrono::DateTime;
 use chrono::Utc;
 use tokio::sync::RwLock;
 
+use crate::bot::commands::voice::GuildStatType;
 use crate::database::Database;
+use crate::database::model::GuildDailyStats;
 use crate::database::model::ServerSettings;
 use crate::database::model::ServerSettingsModel;
+use crate::database::model::VoiceDailyActivity;
 use crate::database::model::VoiceLeaderboardEntry;
 use crate::database::model::VoiceLeaderboardOpt;
 use crate::database::model::VoiceSessionsModel;
@@ -148,6 +151,43 @@ impl VoiceTrackingService {
     /// Find all active sessions from database
     pub async fn find_active_sessions(&self) -> anyhow::Result<Vec<VoiceSessionsModel>> {
         Ok(self.db.voice_sessions_table.find_active_sessions().await?)
+    }
+
+    /// Get daily voice activity for a specific user in a guild.
+    pub async fn get_user_daily_activity(
+        &self,
+        user_id: u64,
+        guild_id: u64,
+        since: &DateTime<Utc>,
+        until: &DateTime<Utc>,
+    ) -> anyhow::Result<Vec<VoiceDailyActivity>> {
+        Ok(self
+            .db
+            .voice_sessions_table
+            .get_user_daily_activity(user_id, guild_id, since, until)
+            .await?)
+    }
+
+    /// Get guild-wide daily statistics.
+    pub async fn get_guild_daily_stats(
+        &self,
+        guild_id: u64,
+        since: &DateTime<Utc>,
+        until: &DateTime<Utc>,
+        stat_type: GuildStatType,
+    ) -> anyhow::Result<Vec<GuildDailyStats>> {
+        match stat_type {
+            GuildStatType::AverageTime => Ok(self
+                .db
+                .voice_sessions_table
+                .get_guild_daily_average_time(guild_id, since, until)
+                .await?),
+            GuildStatType::ActiveUserCount => Ok(self
+                .db
+                .voice_sessions_table
+                .get_guild_daily_user_count(guild_id, since, until)
+                .await?),
+        }
     }
 }
 
