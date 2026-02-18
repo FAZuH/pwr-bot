@@ -16,22 +16,28 @@ use crate::repository::model::FeedItemModel;
 use crate::repository::model::FeedModel;
 use crate::repository::model::FeedSubscriptionModel;
 use crate::repository::model::ServerSettings;
-use crate::repository::model::ServerSettingsModel;
 use crate::repository::model::SubscriberModel;
 use crate::repository::model::SubscriberType;
 use crate::repository::table::Table;
 use crate::service::error::ServiceError;
+use crate::service::settings_service::SettingsService;
 
 /// Service for managing feed subscriptions and updates.
 pub struct FeedSubscriptionService {
     pub db: Arc<Repository>,
     pub platforms: Arc<Platforms>,
+    settings: Arc<SettingsService>,
 }
 
 impl FeedSubscriptionService {
     /// Creates a new feed subscription service.
     pub fn new(db: Arc<Repository>, platforms: Arc<Platforms>) -> Self {
-        Self { db, platforms }
+        let settings = Arc::new(SettingsService::new(db.clone()));
+        Self {
+            db,
+            platforms,
+            settings,
+        }
     }
     /// Core subscription operations
     ///
@@ -365,11 +371,7 @@ impl FeedSubscriptionService {
     /// # Performance
     /// * DB calls: 1
     pub async fn get_server_settings(&self, guild_id: u64) -> Result<ServerSettings, ServiceError> {
-        // DB 1
-        match self.db.server_settings.select(&guild_id).await? {
-            Some(model) => Ok(model.settings.0),
-            None => Ok(ServerSettings::default()),
-        }
+        self.settings.get_server_settings(guild_id).await
     }
 
     /// # Performance
@@ -379,13 +381,7 @@ impl FeedSubscriptionService {
         guild_id: u64,
         settings: ServerSettings,
     ) -> Result<(), ServiceError> {
-        let model = ServerSettingsModel {
-            guild_id,
-            settings: sqlx::types::Json(settings),
-        };
-        // DB 1
-        self.db.server_settings.replace(&model).await?;
-        Ok(())
+        self.settings.update_server_settings(guild_id, settings).await
     }
 
     /// # Performance

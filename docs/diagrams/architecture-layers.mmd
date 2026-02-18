@@ -63,8 +63,11 @@ graph TB
     end
 
     subgraph Service["Service Layer  ·  src/service/"]
+        SettingsService["SettingsService<br/>get · update"]
         FeedService["FeedSubscriptionService"]
         VoiceService["VoiceTrackingService"]
+        MaintenanceService["MaintenanceService"]
+        SettingsService --> FeedService & VoiceService
     end
 
     subgraph Domain["Domain Layer  ·  src/feed/"]

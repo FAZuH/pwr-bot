@@ -59,11 +59,13 @@ graph LR
 
     subgraph RepoPat["Repository Pattern"]
         direction TB
-        ServiceLayer["Service Layer"]
+        Cogs["Cogs / Commands"]
+        Controllers["Controllers"]
+        ServiceLayer["Service Layer<br/>single access point"]
         RepTrait["Repository"]
         Tables["FeedTable<br/>VoiceTable<br/>SubscriberTable<br/>SettingsTable"]
         DB["SQLite / SQLx"]
-        ServiceLayer --> RepTrait --> Tables --> DB
+        Cogs --> Controllers --> ServiceLayer --> RepTrait --> Tables --> DB
     end
 
     style CogPattern fill:#3a2a1a,stroke:#fbbf24,stroke-width:2px

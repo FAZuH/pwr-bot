@@ -32,10 +32,10 @@ async fn test_subscription_and_publishing() {
     let feeds = Arc::new(feeds);
 
     // Setup Service
-    let service = Arc::new(FeedSubscriptionService {
-        db: db.clone(),
-        platforms: feeds.clone(),
-    });
+    let service = Arc::new(FeedSubscriptionService::new(
+        db.clone(),
+        feeds.clone(),
+    ));
 
     // 1. Prepare Mock Data
     let source_id = "123";

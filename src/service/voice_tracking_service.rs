@@ -11,24 +11,27 @@ use crate::bot::commands::voice::GuildStatType;
 use crate::repository::Repository;
 use crate::repository::model::GuildDailyStats;
 use crate::repository::model::ServerSettings;
-use crate::repository::model::ServerSettingsModel;
 use crate::repository::model::VoiceDailyActivity;
 use crate::repository::model::VoiceLeaderboardEntry;
 use crate::repository::model::VoiceLeaderboardOpt;
 use crate::repository::model::VoiceSessionsModel;
 use crate::repository::table::Table;
+use crate::service::settings_service::SettingsService;
 
 /// Service for tracking voice channel activity.
 pub struct VoiceTrackingService {
     db: Arc<Repository>,
+    settings: Arc<SettingsService>,
     disabled_guilds: Arc<RwLock<HashSet<u64>>>,
 }
 
 impl VoiceTrackingService {
     /// Creates a new voice tracking service and loads disabled guilds.
     pub async fn new(db: Arc<Repository>) -> anyhow::Result<Self> {
+        let settings = Arc::new(SettingsService::new(db.clone()));
         let _self = Self {
             db,
+            settings: settings.clone(),
             disabled_guilds: Arc::new(RwLock::new(HashSet::new())),
         };
         let all_settings = _self.db.server_settings.select_all().await?;
@@ -59,10 +62,7 @@ impl VoiceTrackingService {
     }
 
     pub async fn get_server_settings(&self, guild_id: u64) -> anyhow::Result<ServerSettings> {
-        match self.db.server_settings.select(&guild_id).await? {
-            Some(model) => Ok(model.settings.0),
-            None => Ok(ServerSettings::default()),
-        }
+        Ok(self.settings.get_server_settings(guild_id).await?)
     }
 
     pub async fn update_server_settings(
@@ -80,11 +80,7 @@ impl VoiceTrackingService {
             }
         }
 
-        let model = ServerSettingsModel {
-            guild_id,
-            settings: sqlx::types::Json(settings),
-        };
-        self.db.server_settings.replace(&model).await?;
+        self.settings.update_server_settings(guild_id, settings).await?;
         Ok(())
     }
 
