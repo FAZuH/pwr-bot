@@ -203,6 +203,7 @@ Follow **Conventional Commits** specification:
 
 ### Types
 - `feat`: New feature
+- `ui`: Changes to user interface
 - `fix`: Bug fix
 - `docs`: Documentation only changes
 - `style`: Code style changes (formatting, semicolons, etc.)
@@ -211,11 +212,14 @@ Follow **Conventional Commits** specification:
 - `test`: Adding or updating tests
 - `chore`: Build process, dependencies, etc.
 
+For user-facing commits, such as command addition, user bug fixes or UI change, insert `u_` prefix to the type, e.g., `u_feat`, `u_ui(bot)`, etc.
+
+Keep this in mind when making user-facing commits: these commits will be detected by the CI, and used to generate changelogs for the user to see.
+
 ### Guidelines
 - **Capitalize the first letter** of the subject line (unless it is strictly lowercase like a variable name)
 - Use present tense ("Add feature" not "Added feature")
 - Use imperative mood ("Move cursor to..." not "Moves cursor to...")
-- Keep subject line under 50 characters
 - Include motivation for change and contrast with previous behavior in body
 
 ### Examples
@@ -244,3 +248,10 @@ errors in SQLite.
 ### Architecture Diagrams
 
 Update `docs/diagrams/` (`.mmd` source) and export PNG.
+
+## Past Mistakes
+
+| Mistake | Solution |
+|---------|----------|
+| Stripping code documentation comments during refactoring | Preserve all `///` doc comments and `//!` module docs; never delete documentation when moving code |
+| Not using conventional commit | Strictly follow AGENTS.md's commit guideline |
