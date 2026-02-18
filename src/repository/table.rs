@@ -1,22 +1,21 @@
 //! Database table operations and implementations.
 
-use async_trait::async_trait;
 use sqlx::SqlitePool;
 use sqlx::sqlite::SqliteArguments;
 
-use crate::database::error::DatabaseError;
-use crate::database::model::FeedItemModel;
-use crate::database::model::FeedModel;
-use crate::database::model::FeedSubscriptionModel;
-use crate::database::model::FeedWithLatestItemRow;
-use crate::database::model::ServerSettingsModel;
-use crate::database::model::SubscriberModel;
-use crate::database::model::SubscriberType;
-use crate::database::model::VoiceLeaderboardEntry;
-use crate::database::model::VoiceLeaderboardOpt;
-use crate::database::model::VoiceLeaderboardOptBuilder;
-use crate::database::model::VoiceSessionsModel;
 use crate::error::AppError;
+use crate::repository::error::DatabaseError;
+use crate::repository::model::FeedItemModel;
+use crate::repository::model::FeedModel;
+use crate::repository::model::FeedSubscriptionModel;
+use crate::repository::model::FeedWithLatestItemRow;
+use crate::repository::model::ServerSettingsModel;
+use crate::repository::model::SubscriberModel;
+use crate::repository::model::SubscriberType;
+use crate::repository::model::VoiceLeaderboardEntry;
+use crate::repository::model::VoiceLeaderboardOpt;
+use crate::repository::model::VoiceLeaderboardOptBuilder;
+use crate::repository::model::VoiceSessionsModel;
 
 /// Base table struct providing database pool access.
 pub struct BaseTable {
@@ -31,7 +30,7 @@ impl BaseTable {
 }
 
 /// Base trait for table operations.
-#[async_trait]
+#[async_trait::async_trait]
 pub trait TableBase {
     /// Creates the table if it doesn't exist.
     async fn create_table(&self) -> Result<(), DatabaseError>;
@@ -42,7 +41,7 @@ pub trait TableBase {
 }
 
 /// Trait for tables with CRUD operations.
-#[async_trait]
+#[async_trait::async_trait]
 pub trait Table<T, ID>: TableBase {
     async fn select_all(&self) -> Result<Vec<T>, DatabaseError>;
     async fn insert(&self, model: &T) -> Result<ID, DatabaseError>;
@@ -151,7 +150,7 @@ macro_rules! impl_table {
             }
         }
 
-        #[async_trait]
+        #[async_trait::async_trait]
         impl TableBase for $struct_name {
             async fn create_table(&self) -> Result<(), DatabaseError> {
                 sqlx::query($create_sql)
@@ -175,7 +174,7 @@ macro_rules! impl_table {
             }
         }
 
-        #[async_trait]
+        #[async_trait::async_trait]
         impl Table<$model, $id_type> for $struct_name {
             async fn select_all(&self) -> Result<Vec<$model>, DatabaseError> {
                 Ok(sqlx::query_as::<_, $model>(concat!("SELECT * FROM ", $table))
@@ -810,9 +809,9 @@ impl VoiceSessionsTable {
         guild_id: u64,
         since: &chrono::DateTime<chrono::Utc>,
         until: &chrono::DateTime<chrono::Utc>,
-    ) -> Result<Vec<crate::database::model::VoiceDailyActivity>, DatabaseError> {
+    ) -> Result<Vec<crate::repository::model::VoiceDailyActivity>, DatabaseError> {
         Ok(
-            sqlx::query_as::<_, crate::database::model::VoiceDailyActivity>(
+            sqlx::query_as::<_, crate::repository::model::VoiceDailyActivity>(
                 r#"
             SELECT 
                 date(join_time) as day,
@@ -844,9 +843,9 @@ impl VoiceSessionsTable {
         guild_id: u64,
         since: &chrono::DateTime<chrono::Utc>,
         until: &chrono::DateTime<chrono::Utc>,
-    ) -> Result<Vec<crate::database::model::GuildDailyStats>, DatabaseError> {
+    ) -> Result<Vec<crate::repository::model::GuildDailyStats>, DatabaseError> {
         Ok(
-            sqlx::query_as::<_, crate::database::model::GuildDailyStats>(
+            sqlx::query_as::<_, crate::repository::model::GuildDailyStats>(
                 r#"
             SELECT 
                 day,
@@ -884,9 +883,9 @@ impl VoiceSessionsTable {
         guild_id: u64,
         since: &chrono::DateTime<chrono::Utc>,
         until: &chrono::DateTime<chrono::Utc>,
-    ) -> Result<Vec<crate::database::model::GuildDailyStats>, DatabaseError> {
+    ) -> Result<Vec<crate::repository::model::GuildDailyStats>, DatabaseError> {
         Ok(
-            sqlx::query_as::<_, crate::database::model::GuildDailyStats>(
+            sqlx::query_as::<_, crate::repository::model::GuildDailyStats>(
                 r#"
             SELECT 
                 date(join_time) as day,

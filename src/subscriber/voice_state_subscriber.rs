@@ -10,8 +10,8 @@ use log::debug;
 use serenity::all::ChannelId;
 use tokio::sync::Mutex;
 
-use crate::database::model::VoiceSessionsModel;
 use crate::event::VoiceStateEvent;
+use crate::repository::model::VoiceSessionsModel;
 use crate::service::Services;
 use crate::subscriber::Subscriber;
 
@@ -270,8 +270,8 @@ mod tests {
     use serenity::all::VoiceState;
 
     use super::*;
-    use crate::database::Database;
     use crate::feed::platforms::Platforms;
+    use crate::repository::Repository;
 
     async fn create_mock_subscriber() -> anyhow::Result<VoiceStateSubscriber> {
         let t = std::time::SystemTime::now()
@@ -281,7 +281,7 @@ mod tests {
         let db_path = format!("/tmp/pwr-bot-test-{t}.sqlite");
         let db_url = format!("sqlite://{db_path}");
 
-        let db = Database::new(&db_url, &db_path).await.unwrap();
+        let db = Repository::new(&db_url, &db_path).await.unwrap();
         db.run_migrations().await.unwrap();
         let services = Arc::new(Services::new(Arc::new(db), Arc::new(Platforms::new())).await?);
         Ok(VoiceStateSubscriber::new(services))

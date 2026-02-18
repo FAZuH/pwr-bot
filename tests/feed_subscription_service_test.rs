@@ -3,14 +3,14 @@
 use std::sync::Arc;
 
 use chrono::Utc;
-use pwr_bot::database::model::FeedItemModel;
-use pwr_bot::database::model::FeedModel;
-use pwr_bot::database::model::ServerSettings;
-use pwr_bot::database::model::SubscriberType;
-use pwr_bot::database::table::Table;
 use pwr_bot::feed::FeedItem;
 use pwr_bot::feed::FeedSource;
 use pwr_bot::feed::platforms::Platforms;
+use pwr_bot::repository::model::FeedItemModel;
+use pwr_bot::repository::model::FeedModel;
+use pwr_bot::repository::model::ServerSettings;
+use pwr_bot::repository::model::SubscriberType;
+use pwr_bot::repository::table::Table;
 use pwr_bot::service::feed_subscription_service::FeedSubscriptionService;
 use pwr_bot::service::feed_subscription_service::SubscriberTarget;
 
@@ -138,7 +138,7 @@ async fn test_server_settings_service() {
         platforms: feeds.clone(),
     };
 
-    use pwr_bot::database::model::FeedsSettings;
+    use pwr_bot::repository::model::FeedsSettings;
 
     let guild_id: u64 = 1234567890;
 
@@ -212,14 +212,14 @@ async fn test_list_paginated_subscriptions_optimization() {
             source_url: format!("http://mock/{}/{}", i, name),
             ..Default::default()
         };
-        let feed_id = db.feed_table.insert(&feed).await.unwrap();
+        let feed_id = db.feed.insert(&feed).await.unwrap();
 
-        let sub_model = pwr_bot::database::model::FeedSubscriptionModel {
+        let sub_model = pwr_bot::repository::model::FeedSubscriptionModel {
             feed_id,
             subscriber_id: subscriber.id,
             ..Default::default()
         };
-        db.feed_subscription_table.insert(&sub_model).await.unwrap();
+        db.feed_subscription.insert(&sub_model).await.unwrap();
 
         // Add item for some feeds
         if i % 2 == 0 {
@@ -229,7 +229,7 @@ async fn test_list_paginated_subscriptions_optimization() {
                 published: Utc::now(),
                 ..Default::default()
             };
-            db.feed_item_table.insert(&item).await.unwrap();
+            db.feed_item.insert(&item).await.unwrap();
         }
     }
 

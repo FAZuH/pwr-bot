@@ -48,11 +48,11 @@ use crate::bot::views::ResponseKind;
 use crate::bot::views::ResponseView;
 use crate::bot::views::View;
 use crate::controller;
-use crate::database::model::GuildDailyStats;
-use crate::database::model::VoiceDailyActivity;
-use crate::database::model::VoiceLeaderboardEntry;
-use crate::database::model::VoiceLeaderboardOptBuilder;
 use crate::error::AppError;
+use crate::repository::model::GuildDailyStats;
+use crate::repository::model::VoiceDailyActivity;
+use crate::repository::model::VoiceLeaderboardEntry;
+use crate::repository::model::VoiceLeaderboardOptBuilder;
 use crate::view_core;
 
 controller! { pub struct VoiceSettingsController<'a> {} }

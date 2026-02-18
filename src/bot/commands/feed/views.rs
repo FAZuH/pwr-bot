@@ -37,7 +37,7 @@ use crate::bot::views::ResponseView;
 use crate::bot::views::View;
 use crate::bot::views::pagination::PaginationAction;
 use crate::bot::views::pagination::PaginationView;
-use crate::database::model::ServerSettings;
+use crate::repository::model::ServerSettings;
 use crate::service::feed_subscription_service::Subscription;
 use crate::view_core;
 

@@ -6,31 +6,31 @@ use std::sync::Arc;
 // Especially with db results
 use sqlx::error::ErrorKind;
 
-use crate::database::Database;
-use crate::database::error::DatabaseError;
-use crate::database::model::FeedItemModel;
-use crate::database::model::FeedModel;
-use crate::database::model::FeedSubscriptionModel;
-use crate::database::model::ServerSettings;
-use crate::database::model::ServerSettingsModel;
-use crate::database::model::SubscriberModel;
-use crate::database::model::SubscriberType;
-use crate::database::table::Table;
 use crate::error::AppError;
 use crate::feed::PlatformInfo;
 use crate::feed::error::FeedError;
 use crate::feed::platforms::Platforms;
+use crate::repository::Repository;
+use crate::repository::error::DatabaseError;
+use crate::repository::model::FeedItemModel;
+use crate::repository::model::FeedModel;
+use crate::repository::model::FeedSubscriptionModel;
+use crate::repository::model::ServerSettings;
+use crate::repository::model::ServerSettingsModel;
+use crate::repository::model::SubscriberModel;
+use crate::repository::model::SubscriberType;
+use crate::repository::table::Table;
 use crate::service::error::ServiceError;
 
 /// Service for managing feed subscriptions and updates.
 pub struct FeedSubscriptionService {
-    pub db: Arc<Database>,
+    pub db: Arc<Repository>,
     pub platforms: Arc<Platforms>,
 }
 
 impl FeedSubscriptionService {
     /// Creates a new feed subscription service.
-    pub fn new(db: Arc<Database>, platforms: Arc<Platforms>) -> Self {
+    pub fn new(db: Arc<Repository>, platforms: Arc<Platforms>) -> Self {
         Self { db, platforms }
     }
     /// Core subscription operations
@@ -64,7 +64,7 @@ impl FeedSubscriptionService {
     /// # Performance
     /// * DB calls: 1
     pub async fn get_feeds_by_tag(&self, tag: &str) -> Result<Vec<FeedModel>, ServiceError> {
-        Ok(self.db.feed_table.select_all_by_tag(tag).await?)
+        Ok(self.db.feed.select_all_by_tag(tag).await?)
     }
 
     /// Check for updates on a specific feed
@@ -73,22 +73,14 @@ impl FeedSubscriptionService {
         feed: &FeedModel,
     ) -> Result<FeedUpdateResult, ServiceError> {
         // Skip feeds with no subscribers
-        let subs = self
-            .db
-            .feed_subscription_table
-            .exists_by_feed_id(feed.id)
-            .await?;
+        let subs = self.db.feed_subscription.exists_by_feed_id(feed.id).await?;
 
         if !subs {
             return Ok(FeedUpdateResult::NoUpdate);
         }
 
         // Get the latest known version for this feed
-        let old_latest = self
-            .db
-            .feed_item_table
-            .select_latest_by_feed_id(feed.id)
-            .await?;
+        let old_latest = self.db.feed_item.select_latest_by_feed_id(feed.id).await?;
 
         let platform = self
             .platforms
@@ -104,7 +96,7 @@ impl FeedSubscriptionService {
             Ok(series) => series,
             Err(e) => {
                 if matches!(e, FeedError::SourceFinished { .. }) {
-                    self.db.feed_table.delete(&feed.id).await?;
+                    self.db.feed.delete(&feed.id).await?;
                     return Ok(FeedUpdateResult::SourceFinished);
                 } else {
                     return Err(e.into());
@@ -127,7 +119,7 @@ impl FeedSubscriptionService {
             description: new_latest.title.clone(),
             published: new_latest.published,
         };
-        self.db.feed_item_table.replace(&new_feed_item).await?;
+        self.db.feed_item.replace(&new_feed_item).await?;
 
         Ok(FeedUpdateResult::Updated {
             feed: feed.clone(),
@@ -157,7 +149,7 @@ impl FeedSubscriptionService {
         // DB 1?
         match self
             .db
-            .feed_subscription_table
+            .feed_subscription
             .delete_subscription(feed.id, subscriber.id)
             .await
         {
@@ -189,7 +181,7 @@ impl FeedSubscriptionService {
         // DB 1
         let rows = self
             .db
-            .feed_subscription_table
+            .feed_subscription
             .select_paginated_with_latest_by_subscriber_id(subscriber.id, page, per_page)
             .await?;
 
@@ -237,7 +229,7 @@ impl FeedSubscriptionService {
         // DB 1
         Ok(self
             .db
-            .feed_subscription_table
+            .feed_subscription
             .count_by_subscriber_id(subscriber.id)
             .await?)
     }
@@ -252,7 +244,7 @@ impl FeedSubscriptionService {
         // DB 1
         Ok(self
             .db
-            .feed_table
+            .feed
             .select_by_name_and_subscriber_id(&subscriber.id, partial, 25)
             .await?)
     }
@@ -272,7 +264,7 @@ impl FeedSubscriptionService {
         // DB 1
         let feed = match self
             .db
-            .feed_table
+            .feed
             .select_by_source_id(platform.get_id(), source_id)
             .await?
         {
@@ -294,7 +286,7 @@ impl FeedSubscriptionService {
                     tags: platform.get_info().tags.clone(),
                 };
                 // DB 1?
-                feed.id = self.db.feed_table.insert(&feed).await?;
+                feed.id = self.db.feed.insert(&feed).await?;
 
                 // API 1?
                 if let Ok(feed_latest) = platform.fetch_latest(&feed.items_id).await {
@@ -306,7 +298,7 @@ impl FeedSubscriptionService {
                         published: feed_latest.published,
                     };
                     // DB 1??
-                    self.db.feed_item_table.insert(&version).await?;
+                    self.db.feed_item.insert(&version).await?;
                 }
 
                 feed
@@ -324,7 +316,7 @@ impl FeedSubscriptionService {
         // DB 1
         let subscriber = match self
             .db
-            .subscriber_table
+            .subscriber
             .select_by_type_and_target(&target.subscriber_type, &target.target_id)
             .await?
         {
@@ -337,7 +329,7 @@ impl FeedSubscriptionService {
                     ..Default::default()
                 };
                 // DB 1?
-                subscriber.id = self.db.subscriber_table.insert(&subscriber).await?;
+                subscriber.id = self.db.subscriber.insert(&subscriber).await?;
                 subscriber
             }
         };
@@ -365,7 +357,7 @@ impl FeedSubscriptionService {
         // DB 1
         Ok(self
             .db
-            .feed_table
+            .feed
             .select_by_source_id(platform.get_id(), source_id)
             .await?)
     }
@@ -374,7 +366,7 @@ impl FeedSubscriptionService {
     /// * DB calls: 1
     pub async fn get_server_settings(&self, guild_id: u64) -> Result<ServerSettings, ServiceError> {
         // DB 1
-        match self.db.server_settings_table.select(&guild_id).await? {
+        match self.db.server_settings.select(&guild_id).await? {
             Some(model) => Ok(model.settings.0),
             None => Ok(ServerSettings::default()),
         }
@@ -392,7 +384,7 @@ impl FeedSubscriptionService {
             settings: sqlx::types::Json(settings),
         };
         // DB 1
-        self.db.server_settings_table.replace(&model).await?;
+        self.db.server_settings.replace(&model).await?;
         Ok(())
     }
 
@@ -408,10 +400,7 @@ impl FeedSubscriptionService {
             subscriber_id,
             ..Default::default()
         };
-        self.db
-            .feed_subscription_table
-            .insert(&subscription)
-            .await?;
+        self.db.feed_subscription.insert(&subscription).await?;
         Ok(())
     }
 }

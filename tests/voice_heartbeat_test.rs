@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use chrono::Duration;
 use chrono::Utc;
-use pwr_bot::database::model::VoiceSessionsModel;
-use pwr_bot::database::table::Table;
+use pwr_bot::repository::model::VoiceSessionsModel;
+use pwr_bot::repository::table::Table;
 use pwr_bot::service::voice_tracking_service::VoiceTrackingService;
 use pwr_bot::task::voice_heartbeat::VoiceHeartbeatManager;
 
@@ -141,7 +141,7 @@ async fn test_heartbeat_crash_recovery_with_active_sessions() {
 
     // Verify sessions were closed with heartbeat timestamp
     let sessions: Vec<VoiceSessionsModel> = db
-        .voice_sessions_table
+        .voice_sessions
         .select_all()
         .await
         .expect("Failed to select sessions");
@@ -219,7 +219,7 @@ async fn test_heartbeat_crash_recovery_no_heartbeat_file() {
 
     // Verify session is still active (not closed)
     let sessions: Vec<VoiceSessionsModel> = db
-        .voice_sessions_table
+        .voice_sessions
         .select_all()
         .await
         .expect("Failed to select sessions");
@@ -326,7 +326,7 @@ async fn test_update_session_leave_time() {
 
     // Verify it's active
     let sessions: Vec<VoiceSessionsModel> = db
-        .voice_sessions_table
+        .voice_sessions
         .select_all()
         .await
         .expect("Failed to select sessions");
@@ -341,7 +341,7 @@ async fn test_update_session_leave_time() {
 
     // Verify it was updated
     let sessions: Vec<VoiceSessionsModel> = db
-        .voice_sessions_table
+        .voice_sessions
         .select_all()
         .await
         .expect("Failed to select sessions");

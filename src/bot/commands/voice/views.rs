@@ -36,7 +36,7 @@ use crate::bot::views::ResponseView;
 use crate::bot::views::View;
 use crate::bot::views::pagination::PaginationAction;
 use crate::bot::views::pagination::PaginationView;
-use crate::database::model::ServerSettings;
+use crate::repository::model::ServerSettings;
 use crate::view_core;
 
 /// Number of leaderboard entries per page.

@@ -12,23 +12,23 @@ use serenity::all::CreateMessage;
 use serenity::all::GuildId;
 
 use crate::bot::Bot;
-use crate::database::Database;
-use crate::database::model::SubscriberModel;
-use crate::database::model::SubscriberType;
-use crate::database::table::Table;
 use crate::event::Event;
 use crate::event::FeedUpdateEvent;
+use crate::repository::Repository;
+use crate::repository::model::SubscriberModel;
+use crate::repository::model::SubscriberType;
+use crate::repository::table::Table;
 use crate::subscriber::Subscriber;
 
 /// Subscriber that sends feed updates to guild channels.
 pub struct DiscordGuildSubscriber {
     bot: Arc<Bot>,
-    db: Arc<Database>,
+    db: Arc<Repository>,
 }
 
 impl DiscordGuildSubscriber {
     /// Creates a new guild subscriber.
-    pub fn new(bot: Arc<Bot>, db: Arc<Database>) -> Self {
+    pub fn new(bot: Arc<Bot>, db: Arc<Repository>) -> Self {
         debug!("Initializing DiscordGuildSubscriber.");
         Self { bot, db }
     }
@@ -39,7 +39,7 @@ impl DiscordGuildSubscriber {
 
         let subs = self
             .db
-            .subscriber_table
+            .subscriber
             .select_all_by_type_and_feed(SubscriberType::Guild, event.feed.id)
             .await?;
 
@@ -65,7 +65,7 @@ impl DiscordGuildSubscriber {
 
         let settings = self
             .db
-            .server_settings_table
+            .server_settings
             .select(&guild_id.get())
             .await?
             .ok_or_else(|| anyhow::anyhow!("Settings not found"))?;

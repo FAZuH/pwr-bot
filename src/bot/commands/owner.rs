@@ -8,7 +8,7 @@ use crate::bot::Data;
 use crate::bot::commands::Cog;
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;
-use crate::database::table::Table;
+use crate::repository::table::Table;
 
 /// Cog of bot owners-only commands.
 pub struct OwnerCog;
@@ -34,10 +34,10 @@ impl OwnerCog {
         ctx.defer().await?;
         let db = ctx.data().db.clone();
 
-        let feeds = db.feed_table.select_all().await?;
-        let versions = db.feed_item_table.select_all().await?;
-        let subscribers = db.subscriber_table.select_all().await?;
-        let subscriptions = db.feed_subscription_table.select_all().await?;
+        let feeds = db.feed.select_all().await?;
+        let versions = db.feed_item.select_all().await?;
+        let subscribers = db.subscriber.select_all().await?;
+        let subscriptions = db.feed_subscription.select_all().await?;
 
         let reply = CreateReply::default()
             .content("Database dump:")

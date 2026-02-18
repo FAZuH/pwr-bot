@@ -11,10 +11,10 @@ use log::info;
 use tokio::time::Sleep;
 use tokio::time::sleep;
 
-use crate::database::model::FeedModel;
 use crate::event::FeedUpdateData;
 use crate::event::FeedUpdateEvent;
 use crate::event::event_bus::EventBus;
+use crate::repository::model::FeedModel;
 use crate::service::feed_subscription_service::FeedSubscriptionService;
 use crate::service::feed_subscription_service::FeedUpdateResult;
 

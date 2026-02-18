@@ -37,10 +37,10 @@ use crate::bot::views::ResponseKind;
 use crate::bot::views::ResponseView;
 use crate::bot::views::View;
 use crate::controller;
-use crate::database::model::ServerSettings;
-use crate::database::model::ServerSettingsModel;
-use crate::database::table::Table;
 use crate::error::AppError;
+use crate::repository::model::ServerSettings;
+use crate::repository::model::ServerSettingsModel;
+use crate::repository::table::Table;
 use crate::view_core;
 
 controller! { pub struct SettingsMainController<'a> {} }
@@ -58,7 +58,7 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for SettingsMainController<'a> 
         let settings = ctx
             .data()
             .db
-            .server_settings_table
+            .server_settings
             .select(&guild_id.into())
             .await?
             .unwrap_or(ServerSettingsModel {
@@ -74,7 +74,7 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for SettingsMainController<'a> 
             if view.is_settings_modified {
                 ctx.data()
                     .db
-                    .server_settings_table
+                    .server_settings
                     .replace(&view.settings)
                     .await?;
                 view.done_update_settings()?;

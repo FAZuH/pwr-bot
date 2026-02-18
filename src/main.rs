@@ -4,12 +4,12 @@
 
 pub mod bot;
 pub mod config;
-pub mod database;
 pub mod error;
 pub mod event;
 pub mod feed;
 pub mod logging;
 pub mod macros;
+pub mod repository;
 pub mod service;
 pub mod subscriber;
 pub mod task;
@@ -24,12 +24,12 @@ use log::info;
 
 use crate::bot::Bot;
 use crate::config::Config;
-use crate::database::Database;
 use crate::event::FeedUpdateEvent;
 use crate::event::VoiceStateEvent;
 use crate::event::event_bus::EventBus;
 use crate::feed::platforms::Platforms;
 use crate::logging::setup_logging;
+use crate::repository::Repository;
 use crate::service::Services;
 use crate::subscriber::discord_dm_subscriber::DiscordDmSubscriber;
 use crate::subscriber::discord_guild_subscriber::DiscordGuildSubscriber;
@@ -79,9 +79,9 @@ async fn load_config() -> Result<Arc<Config>> {
     Ok(config)
 }
 
-async fn setup_database(config: &Config, init_start: Instant) -> Result<Arc<Database>> {
+async fn setup_database(config: &Config, init_start: Instant) -> Result<Arc<Repository>> {
     debug!("Setting up Database...");
-    let db = Arc::new(Database::new(&config.db_url, &config.db_path).await?);
+    let db = Arc::new(Repository::new(&config.db_url, &config.db_path).await?);
 
     info!("Running database migrations...");
     db.run_migrations().await?;
@@ -93,7 +93,7 @@ async fn setup_database(config: &Config, init_start: Instant) -> Result<Arc<Data
     Ok(db)
 }
 
-async fn setup_services(db: Arc<Database>, platforms: Arc<Platforms>) -> Result<Arc<Services>> {
+async fn setup_services(db: Arc<Repository>, platforms: Arc<Platforms>) -> Result<Arc<Services>> {
     debug!("Setting up Services...");
     Ok(Arc::new(Services::new(db, platforms).await?))
 }
@@ -126,7 +126,7 @@ async fn setup_voice_tracking(
 
 async fn setup_bot(
     config: &Arc<Config>,
-    db: Arc<Database>,
+    db: Arc<Repository>,
     event_bus: Arc<EventBus>,
     platforms: Arc<Platforms>,
     services: Arc<Services>,
@@ -157,7 +157,7 @@ async fn setup_bot(
 async fn setup_subscribers(
     event_bus: Arc<EventBus>,
     bot: Arc<Bot>,
-    db: Arc<Database>,
+    db: Arc<Repository>,
     voice_subscriber: Arc<VoiceStateSubscriber>,
 ) -> Result<()> {
     debug!("Setting up Subscribers...");
