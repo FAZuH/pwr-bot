@@ -22,6 +22,8 @@ use crate::action_enum;
 use crate::action_extends;
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;
+use poise::ChoiceParameter;
+use crate::bot::commands::voice::TimeRange;
 use crate::bot::commands::voice::VoiceLeaderboardTimeRange;
 use crate::bot::commands::voice::controllers::LeaderboardSessionData;
 use crate::bot::commands::voice::image_builder::LeaderboardPageBuilder;
@@ -341,7 +343,7 @@ impl<'a> InteractiveView<'a, VoiceLeaderboardAction> for VoiceLeaderboardView<'a
                     &interaction.data.kind
                     && let Some(time_range) = values
                         .first()
-                        .and_then(|v| VoiceLeaderboardTimeRange::from_name(v))
+                        .and_then(|v| VoiceLeaderboardTimeRange::from_display_name(v))
                     && self.time_range != time_range
                 {
                     self.time_range = time_range;

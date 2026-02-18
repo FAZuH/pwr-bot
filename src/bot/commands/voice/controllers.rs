@@ -30,7 +30,9 @@ use crate::bot::commands::Error;
 use crate::bot::commands::settings::SettingsPage;
 use crate::bot::commands::settings::run_settings;
 use crate::bot::commands::voice::GuildStatType;
+use crate::bot::commands::voice::TimeRange;
 use crate::bot::commands::voice::VoiceLeaderboardTimeRange;
+use crate::bot::commands::voice::VoiceStatsTimeRange;
 use crate::bot::commands::voice::views::SettingsVoiceAction;
 use crate::bot::commands::voice::views::SettingsVoiceView;
 use crate::bot::commands::voice::views::VoiceLeaderboardAction;
@@ -269,7 +271,7 @@ pub struct VoiceStatsData {
     /// Current stat type being displayed (for guild view)
     pub stat_type: GuildStatType,
     /// Time range for the data
-    pub time_range: VoiceLeaderboardTimeRange,
+    pub time_range: VoiceStatsTimeRange,
 }
 
 impl VoiceStatsData {
@@ -424,7 +426,13 @@ impl<'a> VoiceStatsView<'a> {
 
     /// Formats the stats summary text.
     fn format_stats_summary(&self) -> String {
-        let (_since, _until) = self.data.time_range.to_range();
+        let (since, until) = self.data.time_range.to_range();
+        let time_range_text = format!(
+            "\n-# Time Range: **{}** — <t:{}:f> to <t:{}:R>",
+            self.data.time_range.display_name(),
+            since.timestamp(),
+            until.timestamp(),
+        );
 
         if self.data.is_user_stats() {
             let total = format_duration(self.data.total_time());
@@ -444,8 +452,9 @@ impl<'a> VoiceStatsView<'a> {
                 .unwrap_or_else(|| "None".to_string());
 
             format!(
-                "-# **Stats for {}**\n## Voice Activity Stats\n\n**Total Time:** {}\n**Average Daily:** {}\n**Most Active:** {}\n**Current Streak:** {} day(s)",
+                "-# **Stats for {}**{}\n### Voice Activity Stats\n\n**Total Time:** {}\n**Average Daily:** {}\n**Most Active:** {}\n**Current Streak:** {} day(s)",
                 self.data.display_name(),
+                time_range_text,
                 total,
                 avg,
                 most_active,
@@ -496,8 +505,12 @@ impl<'a> VoiceStatsView<'a> {
                 .unwrap_or_else(|| "None".to_string());
 
             format!(
-                "-# **Server Stats**\n## {}\n\n**{}:** {}\n**Peak Day:** {}",
-                self.data.guild_name, stat_label, stat_value, max_day
+                "-# **Server Stats**{}\n### {}\n\n**{}:** {}\n**Peak Day:** {}",
+                time_range_text,
+                self.data.guild_name,
+                stat_label,
+                stat_value,
+                max_day
             )
         }
     }
@@ -536,13 +549,10 @@ impl<'a> ResponseView<'a> for VoiceStatsView<'a> {
             .register(TimeRange)
             .as_select(serenity::all::CreateSelectMenuKind::String {
                 options: vec![
-                    VoiceLeaderboardTimeRange::Today.into(),
-                    VoiceLeaderboardTimeRange::Past3Days.into(),
-                    VoiceLeaderboardTimeRange::ThisWeek.into(),
-                    VoiceLeaderboardTimeRange::Past2Weeks.into(),
-                    VoiceLeaderboardTimeRange::ThisMonth.into(),
-                    VoiceLeaderboardTimeRange::ThisYear.into(),
-                    VoiceLeaderboardTimeRange::AllTime.into(),
+                    VoiceStatsTimeRange::ThisWeek.into(),
+                    VoiceStatsTimeRange::Past2Weeks.into(),
+                    VoiceStatsTimeRange::ThisMonth.into(),
+                    VoiceStatsTimeRange::ThisYear.into(),
                 ]
                 .into(),
             })
@@ -615,7 +625,7 @@ impl<'a> InteractiveView<'a, VoiceStatsAction> for VoiceStatsView<'a> {
                     &interaction.data.kind
                     && let Some(time_range) = values
                         .first()
-                        .and_then(|v| VoiceLeaderboardTimeRange::from_name(v))
+                        .and_then(|v| VoiceStatsTimeRange::from_display_name(v))
                     && self.data.time_range != time_range
                 {
                     self.data.time_range = time_range;
@@ -632,7 +642,7 @@ impl<'a> InteractiveView<'a, VoiceStatsAction> for VoiceStatsView<'a> {
 pub struct VoiceStatsController<'a> {
     #[allow(dead_code)]
     ctx: &'a Context<'a>,
-    pub time_range: VoiceLeaderboardTimeRange,
+    pub time_range: VoiceStatsTimeRange,
     pub target_user: Option<User>,
     pub stat_type: GuildStatType,
 }
@@ -641,7 +651,7 @@ impl<'a> VoiceStatsController<'a> {
     /// Creates a new stats controller.
     pub fn new(
         ctx: &'a Context<'a>,
-        time_range: VoiceLeaderboardTimeRange,
+        time_range: VoiceStatsTimeRange,
         target_user: Option<User>,
         stat_type: GuildStatType,
     ) -> Self {
@@ -815,11 +825,11 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceStatsController<'a> {
 /// Entry point for the stats command.
 pub async fn stats(
     ctx: Context<'_>,
-    time_range: Option<VoiceLeaderboardTimeRange>,
+    time_range: Option<VoiceStatsTimeRange>,
     user: Option<User>,
     statistic: Option<GuildStatType>,
 ) -> Result<(), Error> {
-    let time_range = time_range.unwrap_or(VoiceLeaderboardTimeRange::ThisMonth);
+    let time_range = time_range.unwrap_or(VoiceStatsTimeRange::ThisMonth);
     let stat_type = statistic.unwrap_or_default();
 
     // Determine target user and context
