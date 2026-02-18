@@ -1,3 +1,10 @@
+## [0.2.6](https://github.com/FAZuH/pwr-bot/compare/v0.2.5...v0.2.6) (2026-02-18)
+
+
+### New Features
+
+* **bot:** Add /vc stats command ([fbe737b](https://github.com/FAZuH/pwr-bot/commit/fbe737bd0381294faa506a95a4b14ed222812218))
+
 ## [0.2.5](https://github.com/FAZuH/pwr-bot/compare/v0.2.4...v0.2.5) (2026-02-18)
 
 
@@ -46,16 +53,4 @@
 
 * **bot:** Add select menu to select time range in /vc leaderboard ([37f42ba](https://github.com/FAZuH/pwr-bot/commit/37f42ba3e5dc201a257fe0046f12d81c5b760cc7))
 * **bot:** Improve /vc leaderboard image ([b330ee6](https://github.com/FAZuH/pwr-bot/commit/b330ee684d577e7eef344b41cca6517f4091a579))
-
-## [0.2.1](https://github.com/FAZuH/pwr-bot/compare/v0.2.0...v0.2.1) (2026-02-12)
-
-
-### New Features
-
-* **bot:** Add time_range option to /vc leaderboard ([7ea27e4](https://github.com/FAZuH/pwr-bot/commit/7ea27e4cf4b80cc63b62ada98f17838069c3d24b)), closes [#35](https://github.com/FAZuH/pwr-bot/issues/35)
-
-
-### Performance Improvements
-
-* **bot:** Improve /vc leaderboard performance ([c913708](https://github.com/FAZuH/pwr-bot/commit/c9137084524e6475526232ca76e3c6d2ef0d4849))
 
