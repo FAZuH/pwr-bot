@@ -54,7 +54,6 @@ async fn main() -> Result<()> {
     let voice_subscriber = Arc::new(VoiceStateSubscriber::new(services.clone()));
     let bot = setup_bot(
         &config,
-        db.clone(),
         event_bus.clone(),
         platforms,
         services.clone(),
@@ -126,7 +125,6 @@ async fn setup_voice_tracking(
 
 async fn setup_bot(
     config: &Arc<Config>,
-    db: Arc<Repository>,
     event_bus: Arc<EventBus>,
     platforms: Arc<Platforms>,
     services: Arc<Services>,
@@ -136,7 +134,6 @@ async fn setup_bot(
     info!("Starting bot...");
     let mut bot = Bot::new(
         config.clone(),
-        db,
         event_bus,
         platforms,
         services,

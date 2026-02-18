@@ -8,7 +8,6 @@ use crate::bot::Data;
 use crate::bot::commands::Cog;
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;
-use crate::repository::table::Table;
 
 /// Cog of bot owners-only commands.
 pub struct OwnerCog;
@@ -32,29 +31,24 @@ impl OwnerCog {
     #[poise::command(prefix_command, owners_only, hide_in_help)]
     pub async fn dump_db(ctx: Context<'_>) -> Result<(), Error> {
         ctx.defer().await?;
-        let db = ctx.data().db.clone();
-
-        let feeds = db.feed.select_all().await?;
-        let versions = db.feed_item.select_all().await?;
-        let subscribers = db.subscriber.select_all().await?;
-        let subscriptions = db.feed_subscription.select_all().await?;
+        let dump = ctx.data().service.maintenance.dump_database().await?;
 
         let reply = CreateReply::default()
             .content("Database dump:")
             .attachment(CreateAttachment::bytes(
-                serde_json::to_string_pretty(&feeds)?,
+                serde_json::to_string_pretty(&dump.feeds)?,
                 "feeds.json",
             ))
             .attachment(CreateAttachment::bytes(
-                serde_json::to_string_pretty(&versions)?,
+                serde_json::to_string_pretty(&dump.feed_items)?,
                 "feed_versions.json",
             ))
             .attachment(CreateAttachment::bytes(
-                serde_json::to_string_pretty(&subscribers)?,
+                serde_json::to_string_pretty(&dump.subscribers)?,
                 "subscribers.json",
             ))
             .attachment(CreateAttachment::bytes(
-                serde_json::to_string_pretty(&subscriptions)?,
+                serde_json::to_string_pretty(&dump.subscriptions)?,
                 "subscriptions.json",
             ));
 

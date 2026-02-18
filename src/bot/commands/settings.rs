@@ -40,7 +40,6 @@ use crate::controller;
 use crate::error::AppError;
 use crate::repository::model::ServerSettings;
 use crate::repository::model::ServerSettingsModel;
-use crate::repository::table::Table;
 use crate::view_core;
 
 controller! { pub struct SettingsMainController<'a> {} }
@@ -57,14 +56,15 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for SettingsMainController<'a> 
 
         let settings = ctx
             .data()
-            .db
-            .server_settings
-            .select(&guild_id.into())
-            .await?
-            .unwrap_or(ServerSettingsModel {
-                guild_id: guild_id.into(),
-                ..Default::default()
-            });
+            .service
+            .feed_subscription
+            .get_server_settings(guild_id.into())
+            .await?;
+
+        let settings = ServerSettingsModel {
+            guild_id: guild_id.into(),
+            settings: sqlx::types::Json(settings),
+        };
 
         let mut view = SettingsMainView::new(&ctx, settings);
         view.render().await?;
@@ -72,10 +72,12 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for SettingsMainController<'a> 
         while let Some((action, _)) = view.listen_once().await? {
             view.render().await?;
             if view.is_settings_modified {
+                let guild_id = view.settings.guild_id;
+                let settings = view.settings.settings.0.clone();
                 ctx.data()
-                    .db
-                    .server_settings
-                    .replace(&view.settings)
+                    .service
+                    .feed_subscription
+                    .update_server_settings(guild_id, settings)
                     .await?;
                 view.done_update_settings()?;
             }
