@@ -5,7 +5,8 @@ use serenity::all::CreateContainer;
 use serenity::all::CreateContainerComponent;
 use serenity::all::CreateTextDisplay;
 
-use crate::bot::views::ResponseComponentView;
+use crate::bot::views::ResponseKind;
+use crate::bot::views::ResponseView;
 
 /// View for command registration status.
 pub struct CommandRegistrationView {
@@ -35,8 +36,8 @@ impl CommandRegistrationView {
     }
 }
 
-impl ResponseComponentView for CommandRegistrationView {
-    fn create_components<'a>(&self) -> Vec<CreateComponent<'a>> {
+impl<'a> ResponseView<'a> for CommandRegistrationView {
+    fn create_response<'b>(&mut self) -> ResponseKind<'b> {
         let title = if self.is_complete {
             "Command Registration Complete"
         } else {
@@ -61,7 +62,7 @@ impl ResponseComponentView for CommandRegistrationView {
             CreateContainerComponent::TextDisplay(CreateTextDisplay::new(status_text)),
         ]));
 
-        vec![container]
+        vec![container].into()
     }
 }
 
@@ -90,8 +91,8 @@ impl CommandUnregistrationView {
     }
 }
 
-impl ResponseComponentView for CommandUnregistrationView {
-    fn create_components<'a>(&self) -> Vec<CreateComponent<'a>> {
+impl<'a> ResponseView<'a> for CommandUnregistrationView {
+    fn create_response<'b>(&mut self) -> ResponseKind<'b> {
         let title = if self.is_complete {
             "Command Unregistration Complete"
         } else {
@@ -112,6 +113,6 @@ impl ResponseComponentView for CommandUnregistrationView {
             CreateContainerComponent::TextDisplay(CreateTextDisplay::new(status_text)),
         ]));
 
-        vec![container]
+        vec![container].into()
     }
 }

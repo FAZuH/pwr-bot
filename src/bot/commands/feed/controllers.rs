@@ -12,9 +12,10 @@ use serenity::all::UserId;
 use crate::bot::checks::check_author_roles;
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;
+use crate::bot::commands::feed::views::FeedListAction;
+use crate::bot::commands::feed::views::FeedListView;
 use crate::bot::commands::feed::views::FeedSubscriptionBatchAction;
 use crate::bot::commands::feed::views::FeedSubscriptionBatchView;
-use crate::bot::commands::feed::views::FeedSubscriptionsListView;
 use crate::bot::commands::feed::views::SettingsFeedAction;
 use crate::bot::commands::feed::views::SettingsFeedView;
 use crate::bot::commands::settings::SettingsPage;
@@ -24,8 +25,8 @@ use crate::bot::controller::Coordinator;
 use crate::bot::error::BotError;
 use crate::bot::navigation::NavigationResult;
 use crate::bot::utils::parse_and_validate_urls;
-use crate::bot::views::InteractableComponentView;
-use crate::bot::views::StatefulView;
+use crate::bot::views::InteractiveView;
+use crate::bot::views::RenderExt;
 use crate::bot::views::pagination::PaginationView;
 use crate::controller;
 use crate::database::model::FeedModel;
@@ -134,7 +135,7 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for FeedSettingsController<'a> 
         let mut settings = service.get_server_settings(guild_id).await?;
 
         let mut view = SettingsFeedView::new(&ctx, &mut settings);
-        view.send().await?;
+        view.render().await?;
 
         while let Some((action, _)) = view.listen_once().await? {
             if action == SettingsFeedAction::Back {
@@ -147,19 +148,19 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for FeedSettingsController<'a> 
                 .update_server_settings(guild_id, view.settings.clone())
                 .await?;
 
-            view.edit().await?;
+            view.render().await?;
         }
 
         Ok(NavigationResult::Exit)
     }
 }
 
-controller! { pub struct FeedSubscriptionsController<'a> {
+controller! { pub struct FeedListController<'a> {
     send_into: SendInto
 } }
 
 #[async_trait::async_trait]
-impl<'a, S: Send + Sync + 'static> Controller<S> for FeedSubscriptionsController<'a> {
+impl<'a, S: Send + Sync + 'static> Controller<S> for FeedListController<'a> {
     async fn run(
         &mut self,
         coordinator: &mut Coordinator<'_, S>,
@@ -178,22 +179,30 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for FeedSubscriptionsController
             .await?;
 
         let pagination = PaginationView::new(&ctx, total_items, SUBSCRIPTIONS_PER_PAGE);
-        let mut view = FeedSubscriptionsListView::new(&ctx, subscriptions, pagination);
+        let mut view = FeedListView::new(&ctx, subscriptions, pagination);
 
-        view.send().await?;
+        view.render().await?;
 
-        while view.listen_once().await?.is_some() {
+        while let Some((action, _)) = view.listen_once().await? {
+            if matches!(action, FeedListAction::Save) {
+                for url in &view.marked_unsub {
+                    service.unsubscribe(url, &subscriber).await?;
+                }
+                let total_items = service.get_subscription_count(&subscriber).await?;
+                let pagination = PaginationView::new(&ctx, total_items, SUBSCRIPTIONS_PER_PAGE);
+                view.pagination = pagination
+            }
             let subscriptions = service
                 .list_paginated_subscriptions(
                     &subscriber,
-                    view.pagination.state.current_page,
+                    view.pagination.current_page(),
                     SUBSCRIPTIONS_PER_PAGE,
                 )
                 .await?;
 
             view.set_subscriptions(subscriptions);
 
-            view.edit().await?;
+            view.render().await?;
         }
 
         Ok(NavigationResult::Exit)
@@ -282,10 +291,10 @@ pub async fn unsubscribe(
 }
 
 /// Legacy function for subscriptions list command.
-pub async fn subscriptions(ctx: Context<'_>, sent_into: Option<SendInto>) -> Result<(), Error> {
+pub async fn list(ctx: Context<'_>, sent_into: Option<SendInto>) -> Result<(), Error> {
     let sent_into = sent_into.unwrap_or(SendInto::DM);
     let mut coordinator = Coordinator::new(ctx);
-    let mut controller = FeedSubscriptionsController::new(&ctx, sent_into);
+    let mut controller = FeedListController::new(&ctx, sent_into);
     let _result = controller.run(&mut coordinator).await?;
     Ok(())
 }
@@ -323,11 +332,7 @@ async fn process_subscription_batch(
         let is_final = i + 1 == urls.len();
         if last_send.elapsed().as_secs() > UPDATE_INTERVAL_SECS || is_final {
             let mut batch_view = FeedSubscriptionBatchView::new(&ctx, states.clone(), is_final);
-            if view.is_none() {
-                batch_view.send().await?;
-            } else {
-                batch_view.edit().await?;
-            }
+            batch_view.render().await?;
             if is_final {
                 view = Some(batch_view);
             }
@@ -345,7 +350,7 @@ async fn process_subscription_batch(
             SubscriberType::Guild => SendInto::Server,
             SubscriberType::Dm => SendInto::DM,
         };
-        subscriptions(ctx, Some(send_into)).await?;
+        list(ctx, Some(send_into)).await?;
     }
 
     Ok(())

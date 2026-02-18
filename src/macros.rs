@@ -1,173 +1,3 @@
-/// Generates a struct that implements `StatefulView` for Discord UI components.
-///
-/// This macro wraps a struct definition and automatically adds a `ctx` field
-/// of type `ViewContext<'a, D>` and implements the `StatefulView` trait.
-///
-/// # Syntax
-///
-/// For views with `()` as the data type (most common case):
-/// ```rust,ignore
-/// stateful_view! {
-///     timeout = Duration::from_secs(120),
-///     pub struct MyView<'a> {
-///         pub public_field: Type1,
-///         private_field: Type2,
-///     }
-/// }
-/// ```
-///
-/// For views with a custom data type:
-/// ```rust,ignore
-/// stateful_view! {
-///     DataType = MyData,
-///     timeout = Duration::from_secs(120),
-///     pub struct MyView<'a> {
-///         pub public_field: Type1,
-///         private_field: Type2,
-///     }
-/// }
-/// ```
-///
-/// # Example
-///
-/// ```rust,ignore
-/// use std::time::Duration;
-/// use crate::bot::views::StatefulView;
-///
-/// stateful_view! {
-///     timeout = Duration::from_secs(120),
-///     pub struct SettingsFeedView<'a> {
-///         pub settings: &'a mut ServerSettings,
-///     }
-/// }
-///
-/// // The macro generates:
-/// // - A struct with an added `ctx: ViewContext<'a, ()>` field
-/// // - Implementation of `StatefulView<'a, ()>` with `view_context()` and `view_context_mut()`
-/// // - A `new()` constructor that initializes the context
-/// ```
-#[macro_export]
-macro_rules! stateful_view {
-    // Variant 1: Default data type ()
-    (
-        timeout = $timeout:expr,
-        $(#[$meta:meta])*
-        $vis:vis struct $name:ident<$lt:lifetime> {
-            $($visf:vis $field:ident : $field_type:ty),* $(,)?
-        }
-    ) => {
-        $(#[$meta])*
-        $vis struct $name<$lt> {
-            /// View context for managing the view lifecycle.
-            ///
-            /// This context stores the poise context, timeout duration, reply handle,
-            /// and optional data for the view. It provides methods for sending and
-            /// editing messages.
-            ctx: $crate::bot::views::ViewContext<$lt, ()>,
-            $(
-                #[doc = concat!("Field `", stringify!($field), "`.")]
-                $visf $field: $field_type,
-            )*
-        }
-
-        impl<$lt> $name<$lt> {
-            /// Creates a view context with the given poise context and configured timeout.
-            ///
-            /// This is a helper method used internally to create the view context.
-            /// The timeout determines how long the view will wait for interactions.
-            pub fn create_context(
-                ctx: &$lt $crate::bot::commands::Context<$lt>,
-            ) -> $crate::bot::views::ViewContext<$lt, ()> {
-                $crate::bot::views::ViewContext::new(ctx, $timeout)
-            }
-        }
-
-        #[async_trait::async_trait]
-        impl<$lt> $crate::bot::views::StatefulView<$lt, ()> for $name<$lt> {
-            fn view_context(&self) -> &$crate::bot::views::ViewContext<$lt, ()> {
-                &self.ctx
-            }
-
-            fn view_context_mut(&mut self) -> &mut $crate::bot::views::ViewContext<$lt, ()> {
-                &mut self.ctx
-            }
-        }
-    };
-
-    // Variant 2: Custom data type
-    (
-        DataType = $data_type:ty,
-        timeout = $timeout:expr,
-        $(#[$meta:meta])*
-        $vis:vis struct $name:ident<$lt:lifetime> {
-            $($field:ident : $field_type:ty),* $(,)?
-        }
-    ) => {
-        $(#[$meta])*
-        $vis struct $name<$lt> {
-            /// View context for managing the view lifecycle.
-            ///
-            /// This context stores the poise context, timeout duration, reply handle,
-            /// and custom data for the view. It provides methods for sending and
-            /// editing messages.
-            ctx: $crate::bot::views::ViewContext<$lt, $data_type>,
-            $(
-                #[doc = concat!("Field `", stringify!($field), "`.")]
-                $vis $field: $field_type,
-            )*
-        }
-
-        impl<$lt> $name<$lt> {
-            /// Creates a new view instance with the given context, custom data, and fields.
-            ///
-            /// # Arguments
-            ///
-            /// * `ctx` - The poise context for Discord interactions
-            /// * `data` - Custom data to store in the view context
-            /// * `$($field)` - The struct fields defined in the macro invocation
-            ///
-            /// # Example
-            ///
-            /// ```rust,ignore
-            /// let view = MyView::with_data(&ctx, my_data, field1_value, field2_value);
-            /// ```
-            pub fn with_data(
-                ctx: &$lt $crate::bot::commands::Context<$lt>,
-                data: $data_type,
-                $($field: $field_type),*
-            ) -> Self {
-                Self {
-                    ctx: Self::create_context(ctx, data),
-                    $($field,)*
-                }
-            }
-
-            /// Creates a view context with the given poise context, data, and configured timeout.
-            ///
-            /// This is a helper method used internally to create the view context
-            /// with custom data. The timeout determines how long the view will wait
-            /// for interactions.
-            pub fn create_context(
-                ctx: &$lt $crate::bot::commands::Context<$lt>,
-                data: $data_type,
-            ) -> $crate::bot::views::ViewContext<$lt, $data_type> {
-                $crate::bot::views::ViewContext::with_data(ctx, $timeout, data)
-            }
-        }
-
-        #[async_trait::async_trait]
-        impl<$lt> $crate::bot::views::StatefulView<$lt, $data_type> for $name<$lt> {
-            fn view_context(&self) -> &$crate::bot::views::ViewContext<$lt, $data_type> {
-                &self.ctx
-            }
-
-            fn view_context_mut(&mut self) -> &mut $crate::bot::views::ViewContext<$lt, $data_type> {
-                &mut self.ctx
-            }
-        }
-    };
-}
-
 /// Generates a struct with an internal `data` field and implements `WithData<T>`.
 ///
 /// # Syntax
@@ -278,7 +108,10 @@ macro_rules! controller {
     (
         $(#[$meta:meta])*
         $vis:vis struct $name:ident<$lt:lifetime> {
-            $($field:ident : $field_type:ty),* $(,)?
+            $(
+                $(#[$field_meta:meta])*
+                $field:ident : $field_type:ty
+            ),* $(,)?
         }
     ) => {
         $(#[$meta])*
@@ -286,7 +119,7 @@ macro_rules! controller {
             #[allow(dead_code)]
             ctx: &$lt $crate::bot::commands::Context<$lt>,
             $(
-                #[doc = concat!("Field `", stringify!($field), "`.")]
+                $(#[$field_meta])*
                 pub $field: $field_type,
             )*
         }
@@ -306,64 +139,93 @@ macro_rules! controller {
     };
 }
 
-/// Generates an enum that implements the `Action` trait for use in interactive Discord views.
+/// Generates a struct with an embedded [`ViewCore`] and implements the [`View`] trait.
 ///
 /// # Syntax
 ///
 /// ```rust,ignore
-/// # use pwr_bot::custom_id_enum;
-/// custom_id_enum! {
-///     EnumName {
-///         Variant1,
-///         Variant2 = "Custom Label",
-///         Variant3(Type1, Type2),
-///         Variant4 { field: Type } = "Label",
+/// view_core! {
+///     timeout = Duration::from_secs(120),
+///     /// Optional doc comment
+///     pub struct MyView<'a, MyAction> {
+///         pub field: FieldType,
 ///     }
 /// }
 /// ```
 ///
 /// # Generated Code
 ///
-/// - Derives: `Debug`, `Clone`, `PartialEq`, `Eq` (Copy only if all fields are Copy)
-/// - Implements `Action` trait with:
-///   - `custom_id()`: Returns `"EnumName_Variant"`
-///   - `label()`: Returns custom label or stringified variant name
-/// - Implements `FromStr` for parsing custom IDs back to enum variants (unit variants only)
+/// - A struct `MyView<'a>` with a `core: ViewCore<'a, MyAction>` field plus your fields
+/// - `impl View<'a, MyAction> for MyView<'a>` with `core()`, `core_mut()`, `create_core()`
 ///
-/// # Example
+/// # Notes
+///
+/// - The lifetime parameter must be named (e.g. `'a`)
+/// - `timeout` sets the interaction collector timeout via [`ViewCore::new`]
+/// - Access the core via `self.core()` / `self.core_mut()` from trait methods
+#[macro_export]
+macro_rules! view_core {
+    (
+        timeout = $timeout:expr,
+        $(#[$meta:meta])*
+        $vis:vis struct $name:ident<$lt:lifetime, $action:ty> {
+            $(
+                $(#[$field_meta:meta])*
+                $field_vis:vis $field:ident : $field_type:ty
+            ),* $(,)?
+        }
+    ) => {
+        $(#[$meta])*
+        $vis struct $name<$lt> {
+            #[allow(dead_code)]
+            core: $crate::bot::views::ViewCore<$lt, $action>,
+            $(
+                $(#[$field_meta])*
+                $field_vis $field: $field_type,
+            )*
+        }
+
+        impl<$lt> $crate::bot::views::View<$lt, $action> for $name<$lt> {
+            fn core(&self) -> &$crate::bot::views::ViewCore<$lt, $action> {
+                &self.core
+            }
+            fn core_mut(&mut self) -> &mut $crate::bot::views::ViewCore<$lt, $action> {
+                &mut self.core
+            }
+            fn create_core(poise_ctx: &$lt $crate::bot::commands::Context<$lt>) -> $crate::bot::views::ViewCore<$lt, $action> {
+                $crate::bot::views::ViewCore::new(poise_ctx, $timeout)
+            }
+        }
+    };
+}
+
+/// Generates an enum that implements the `Action` trait for use in interactive Discord views.
+///
+/// # Syntax
 ///
 /// ```rust,ignore
-/// use pwr_bot::custom_id_enum;
-/// use pwr_bot::bot::views::Action;
-///
-/// custom_id_enum! {
-///     SettingsAction {
-///         Enable = "Enable Feature",
-///         Disable = "Disable Feature",
-///         Configure,
-///         SetValue(u32),
-///         Update { name: String, value: i32 },
+/// action_enum! {
+///     EnumName {
+///         #[label = "Custom Label"]
+///         Variant1,
+///         Variant2,
+///         #[label = "Set Value"]
+///         Variant3(u32),
+///         Variant4 { field: Type },
 ///     }
 /// }
-///
-/// let action = SettingsAction::Enable;
-/// assert_eq!(action.custom_id(), "SettingsAction_Enable");
-/// assert_eq!(action.label(), "Enable Feature");
-///
-/// let action = SettingsAction::SetValue(42);
-/// assert_eq!(action.custom_id(), "SettingsAction_SetValue");
 /// ```
 #[macro_export]
-macro_rules! custom_id_enum {
+macro_rules! action_enum {
     (
         $(#[$meta:meta])*
         $name:ident {
             $(
-                $(#[$variant_meta:meta])*
+                $(#[doc = $doc:literal])*
+                $(#[label = $label:literal])?
                 $variant:ident
                 $( ( $($tuple_field:ty),* $(,)? ) )?
                 $( { $($struct_field:ident : $struct_type:ty),* $(,)? } )?
-                $(= $label:literal)?
             ),* $(,)?
         }
     ) => {
@@ -371,84 +233,34 @@ macro_rules! custom_id_enum {
         #[derive(Debug, Clone, PartialEq, Eq)]
         pub enum $name {
             $(
-                $(#[$variant_meta])*
+                $(#[doc = $doc])*
                 $variant $( ( $($tuple_field),* ) )? $( { $($struct_field : $struct_type),* } )?,
             )*
         }
 
         impl $crate::bot::views::Action for $name {
-            #[doc = "All possible custom_id strings for this action enum."]
-            fn all() -> &'static [&'static str] {
-                &[$(concat!(stringify!($name), "_", stringify!($variant)),)*]
-            }
-
-            #[doc = "Returns the Discord custom_id for this action."]
-            #[doc = ""]
-            #[doc = "Format: `EnumName_Variant`"]
-            fn custom_id(&self) -> &'static str {
-                match self {
-                    $(
-                        custom_id_enum!(@match_pattern Self::$variant $(, tuple: $($tuple_field)*)? $(, struct: $($struct_field)*)?) => {
-                            concat!(stringify!($name), "_", stringify!($variant))
-                        }
-                    )*
-                }
-            }
-
-            #[doc = "Returns the human-readable label for this action."]
-            #[doc = ""]
-            #[doc = "Uses custom label if provided, otherwise uses the variant name."]
             fn label(&self) -> &'static str {
                 match self {
                     $(
-                        custom_id_enum!(@match_pattern Self::$variant $(, tuple: $($tuple_field)*)? $(, struct: $($struct_field)*)?) => {
-                            custom_id_enum!(@label $variant $(, $label)?)
-                        }
+                        action_enum!(@match_pattern inner, Self::$variant $(, tuple: $($tuple_field)*)? $(, struct: $($struct_field)*)?) => {
+                            action_enum!(@label inner, $variant $(, literal: $label)? $(, tuple: $($tuple_field)*)?)
+                        },
                     )*
                 }
             }
         }
-
-        impl std::str::FromStr for $name {
-            type Err = ();
-
-            #[doc = "Parses a custom_id string into an action variant."]
-            #[doc = ""]
-            #[doc = "Only works for unit variants. Returns `Err(())` for variants with data or unrecognized strings."]
-            fn from_str(s: &str) -> Result<Self, Self::Err> {
-                match s {
-                    $(
-                        concat!(stringify!($name), "_", stringify!($variant)) => {
-                            custom_id_enum!(@from_str_result $variant $(, $($tuple_field)*)? $(, $($struct_field)*)?)
-                        }
-                    )*
-                    _ => Err(()),
-                }
-            }
-        }
     };
 
-    (@label $variant:ident, $label:literal) => { $label };
-    (@label $variant:ident) => { stringify!($variant) };
+    // Pattern helpers - now take $inner:ident to bind the captured value
+    (@match_pattern $inner:ident, $path:path) => { $path };
+    (@match_pattern $inner:ident, $path:path, tuple: $($field:tt)+) => { $path($inner, ..) };
+    (@match_pattern $inner:ident, $path:path, struct: $($field:tt)+) => { $path { .. } };
 
-    (@from_str_result $variant:ident) => {
-        Ok(Self::$variant)
-    };
-
-    (@from_str_result $variant:ident, $($field:tt)+) => {
-        Err(())
-    };
-    (@match_pattern $path:path) => {
-        $path
-    };
-
-    (@match_pattern $path:path, tuple: $($field:tt)+) => {
-        $path(..)
-    };
-
-    (@match_pattern $path:path, struct: $($field:tt)+) => {
-        $path { .. }
-    };
+    // Label helpers
+    (@label $inner:ident, $variant:ident) => { stringify!($variant) };
+    (@label $inner:ident, $variant:ident, literal: $label:literal) => { $label };
+    (@label $inner:ident, $variant:ident, literal: $label:literal, tuple: $($field:tt)+) => { $label };
+    (@label $inner:ident, $variant:ident, tuple: $($field:tt)+) => { $inner.label() };
 }
 
 /// Extends an existing Action enum with additional variants.
@@ -456,54 +268,31 @@ macro_rules! custom_id_enum {
 /// # Syntax
 ///
 /// ```rust,ignore
-/// custom_id_extends! {
+/// action_extends! {
 ///     NewEnumName extends BaseEnumName {
+///         #[label = "Custom Label"]
 ///         ExtraVariant1,
-///         ExtraVariant2 = "Custom Label",
-///         ExtraVariant3(Type),
-///         ExtraVariant4 { field: Type },
+///         ExtraVariant2,
+///         #[delegate_label]
+///         ExtraVariant3(SomeActionType),
 ///     }
 /// }
 /// ```
 ///
-/// # Generated Code
-///
-/// - Derives: `Debug`, `Clone`, `PartialEq`, `Eq`
-/// - Implements `Action` trait with `all()` returning combined IDs from base + new variants
-/// - Implements `FromStr` for parsing (base variants parse to their original enum, not this one)
-///
-/// # Example
-///
-/// ```rust,ignore
-/// use pwr_bot::{custom_id_enum, custom_id_extends};
-/// use pwr_bot::bot::views::Action;
-///
-/// custom_id_enum! {
-///     PaginationAction {
-///         Prev,
-///         Next,
-///     }
-/// }
-///
-/// custom_id_extends! {
-///     FeedListAction extends PaginationAction {
-///         Exit = "Close",
-///         Refresh,
-///         Filter(String),
-///     }
-/// }
-/// ```
+/// `#[delegate_label]` on a tuple variant calls `.label()` on the first field,
+/// useful when the inner type implements `Action`.
 #[macro_export]
-macro_rules! custom_id_extends {
+macro_rules! action_extends {
     (
         $(#[$meta:meta])*
         $name:ident extends $base:ty {
             $(
-                $(#[$variant_meta:meta])*
+                $(#[doc = $doc:literal])*
+                $(#[label = $label:literal])?
+                $(#[delegate_label])?
                 $variant:ident
                 $( ( $($tuple_field:ty),* $(,)? ) )?
                 $( { $($struct_field:ident : $struct_type:ty),* $(,)? } )?
-                $(= $label:literal)?
             ),* $(,)?
         }
     ) => {
@@ -513,7 +302,7 @@ macro_rules! custom_id_extends {
             #[doc = "Variants from the extended action"]
             Base($base),
             $(
-                $(#[$variant_meta])*
+                $(#[doc = $doc])*
                 $variant $( ( $($tuple_field),* ) )? $( { $($struct_field : $struct_type),* } )?,
             )*
         }
@@ -526,82 +315,27 @@ macro_rules! custom_id_extends {
         }
 
         impl $crate::bot::views::Action for $name {
-            fn all() -> &'static [&'static str] {
-                use std::sync::LazyLock;
-                static ALL: LazyLock<Box<[&'static str]>> = LazyLock::new(|| {
-                    <$base as $crate::bot::views::Action>::all()
-                        .iter()
-                        .copied()
-                        .chain([$(concat!(stringify!($name), "_", stringify!($variant))),*])
-                        .collect::<Vec<_>>()
-                        .into_boxed_slice()
-                });
-                &ALL
-            }
-
-            fn custom_id(&self) -> &'static str {
-                match self {
-                    Self::Base(base) => base.custom_id(),
-                    $(
-                        custom_id_extends!(@match_pattern Self::$variant $(, tuple: $($tuple_field)*)? $(, struct: $($struct_field)*)?) => {
-                            concat!(stringify!($name), "_", stringify!($variant))
-                        }
-                    )*
-                }
-            }
-
             fn label(&self) -> &'static str {
                 match self {
                     Self::Base(base) => base.label(),
                     $(
-                        custom_id_extends!(@match_pattern Self::$variant $(, tuple: $($tuple_field)*)? $(, struct: $($struct_field)*)?) => {
-                            $crate::custom_id_extends!(@label $variant $(, $label)?)
-                        }
+                        action_extends!(@match_pattern inner, Self::$variant $(, tuple: $($tuple_field)*)? $(, struct: $($struct_field)*)?) => {
+                            action_extends!(@label inner, $variant $(, literal: $label)? $(, tuple: $($tuple_field)*)?)
+                        },
                     )*
                 }
             }
         }
-
-        impl std::str::FromStr for $name {
-            type Err = ();
-
-            fn from_str(s: &str) -> Result<Self, Self::Err> {
-                // Try base first
-                if let Ok(base) = <$base as std::str::FromStr>::from_str(s) {
-                    return Ok(Self::Base(base));
-                }
-                // Then own variants (unit variants only)
-                match s {
-                    $(
-                        concat!(stringify!($name), "_", stringify!($variant)) => {
-                            custom_id_extends!(@from_str_result $variant $(, $($tuple_field)*)? $(, $($struct_field)*)?)
-                        }
-                    )*
-                    _ => Err(()),
-                }
-            }
-        }
     };
 
-    (@label $variant:ident, $label:literal) => { $label };
-    (@label $variant:ident) => { stringify!($variant) };
+    // Pattern helpers - now take $inner:ident to bind the captured value
+    (@match_pattern $inner:ident, $path:path) => { $path };
+    (@match_pattern $inner:ident, $path:path, tuple: $($field:tt)+) => { $path($inner, ..) };
+    (@match_pattern $inner:ident, $path:path, struct: $($field:tt)+) => { $path { .. } };
 
-    (@from_str_result $variant:ident) => {
-        Ok(Self::$variant)
-    };
-
-    (@from_str_result $variant:ident, $($field:tt)+) => {
-        Err(())
-    };
-    (@match_pattern $path:path) => {
-        $path
-    };
-
-    (@match_pattern $path:path, tuple: $($field:tt)+) => {
-        $path(..)
-    };
-
-    (@match_pattern $path:path, struct: $($field:tt)+) => {
-        $path { .. }
-    };
+    // Label helpers - using tt matchers to pass through the attribute as a token
+    (@label $inner:ident, $variant:ident) => { stringify!($variant) };
+    (@label $inner:ident, $variant:ident, literal: $label:literal) => { $label };
+    (@label $inner:ident, $variant:ident, literal: $label:literal, tuple: $($field:tt)+) => { $label };
+    (@label $inner:ident, $variant:ident, tuple: $($field:tt)+) => { $inner.label() };
 }

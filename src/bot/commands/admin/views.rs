@@ -1,6 +1,5 @@
 use std::borrow::Cow;
 use std::slice::from_ref;
-use std::str::FromStr;
 use std::time::Duration;
 
 use serenity::all::ButtonStyle;
@@ -16,15 +15,16 @@ use serenity::all::CreateSelectMenuKind;
 use serenity::all::CreateSelectMenuOption;
 use serenity::all::CreateTextDisplay;
 
+use crate::action_enum;
 use crate::bot::commands::Context;
-use crate::bot::views::Action;
-use crate::bot::views::InteractableComponentView;
-use crate::bot::views::ResponseComponentView;
-use crate::custom_id_enum;
+use crate::bot::views::InteractiveView;
+use crate::bot::views::ResponseKind;
+use crate::bot::views::ResponseView;
+use crate::bot::views::View;
 use crate::database::model::ServerSettings;
 use crate::database::model::ServerSettingsModel;
 use crate::error::AppError;
-use crate::stateful_view;
+use crate::view_core;
 
 pub enum SettingsMainState {
     FeatureSettings,
@@ -40,9 +40,10 @@ impl SettingsMainState {
     }
 }
 
-stateful_view! {
+view_core! {
     timeout = Duration::from_secs(120),
-    pub struct SettingsMainView<'a> {
+    /// Main settings view for managing server features.
+    pub struct SettingsMainView<'a, SettingsMainAction> {
         pub state: SettingsMainState,
         pub settings: ServerSettingsModel,
         pub is_settings_modified: bool,
@@ -52,8 +53,8 @@ stateful_view! {
 impl<'a> SettingsMainView<'a> {
     pub fn new(ctx: &'a Context<'a>, settings: ServerSettingsModel) -> Self {
         Self {
+            core: Self::create_core(ctx),
             state: SettingsMainState::FeatureSettings,
-            ctx: Self::create_context(ctx),
             settings,
             is_settings_modified: false,
         }
@@ -120,8 +121,8 @@ impl<'a> SettingsMainView<'a> {
     }
 }
 
-impl ResponseComponentView for SettingsMainView<'_> {
-    fn create_components<'a>(&self) -> Vec<CreateComponent<'a>> {
+impl<'a> ResponseView<'a> for SettingsMainView<'a> {
+    fn create_response<'b>(&mut self) -> ResponseKind<'b> {
         let text_active_features_description = match &self.state {
             SettingsMainState::FeatureSettings => {
                 "You can **configure** a feature by clicking the buttons below"
@@ -156,14 +157,12 @@ impl ResponseComponentView for SettingsMainView<'_> {
         } else {
             CreateActionRow::Buttons(
                 active_features
-                    .iter()
+                    .into_iter()
                     .map(|feat| {
-                        CreateButton::new(feat.custom_id())
-                            .label(feat.label())
-                            .style(match &self.state {
-                                SettingsMainState::FeatureSettings => ButtonStyle::Primary,
-                                SettingsMainState::DeactivateFeatures => ButtonStyle::Danger,
-                            })
+                        self.register(feat).as_button().style(match &self.state {
+                            SettingsMainState::FeatureSettings => ButtonStyle::Primary,
+                            SettingsMainState::DeactivateFeatures => ButtonStyle::Danger,
+                        })
                     })
                     .collect(),
             )
@@ -172,7 +171,8 @@ impl ResponseComponentView for SettingsMainView<'_> {
 
         let button_toggle_state = CreateActionRow::Buttons(
             vec![
-                CreateButton::new(SettingsMainAction::ToggleState.custom_id())
+                self.register(SettingsMainAction::ToggleState)
+                    .as_button()
                     .label(match &self.state {
                         SettingsMainState::FeatureSettings => "Deactivate Features",
                         SettingsMainState::DeactivateFeatures => "Feature Settings",
@@ -208,15 +208,16 @@ impl ResponseComponentView for SettingsMainView<'_> {
                 .disabled(true),
             )
         } else {
-            CreateActionRow::SelectMenu(CreateSelectMenu::new(
-                SettingsMainAction::AddFeatures.custom_id(),
-                CreateSelectMenuKind::String {
-                    options: inactive_features
-                        .iter()
-                        .map(|feat| CreateSelectMenuOption::new(feat.label(), feat.custom_id()))
-                        .collect(),
-                },
-            ))
+            CreateActionRow::SelectMenu(
+                self.register(SettingsMainAction::AddFeatures).as_select(
+                    CreateSelectMenuKind::String {
+                        options: inactive_features
+                            .into_iter()
+                            .map(|feat| self.register(feat).as_select_option())
+                            .collect(),
+                    },
+                ),
+            )
         };
         components.push(CreateContainerComponent::ActionRow(selectmenu_add_features));
 
@@ -224,76 +225,63 @@ impl ResponseComponentView for SettingsMainView<'_> {
 
         let bottom_buttons = CreateComponent::ActionRow(CreateActionRow::Buttons(
             vec![
-                CreateButton::new(SettingsMainAction::About.custom_id())
-                    .label(SettingsMainAction::About.label())
+                self.register(SettingsMainAction::About)
+                    .as_button()
                     .style(ButtonStyle::Secondary),
             ]
             .into(),
         ));
 
-        vec![container, bottom_buttons]
+        vec![container, bottom_buttons].into()
     }
 }
 
-custom_id_enum!(SettingsMainAction {
-    Feeds,
-    Voice,
-    AddFeatures,
-    ToggleState,
-    About = "🛈 About"
-});
+action_enum! {
+    SettingsMainAction {
+        Feeds,
+        Voice,
+        AddFeatures,
+        ToggleState,
+        #[label = "🛈 About"]
+        About,
+    }
+}
 
 #[async_trait::async_trait]
-impl<'a> InteractableComponentView<'a, SettingsMainAction> for SettingsMainView<'a> {
-    async fn handle(&mut self, interaction: &ComponentInteraction) -> Option<SettingsMainAction> {
-        let action = SettingsMainAction::from_str(&interaction.data.custom_id).ok()?;
+impl<'a> InteractiveView<'a, SettingsMainAction> for SettingsMainView<'a> {
+    async fn handle(
+        &mut self,
+        action: &SettingsMainAction,
+        interaction: &ComponentInteraction,
+    ) -> Option<SettingsMainAction> {
+        use SettingsMainAction::*;
+        use SettingsMainState::*;
 
-        match (&action, &interaction.data.kind) {
-            (SettingsMainAction::Feeds, _) => match self.state {
-                SettingsMainState::FeatureSettings => {
-                    let _ = crate::bot::commands::feed::controllers::settings(*self.ctx.poise_ctx)
-                        .await;
-                    None
-                }
-                SettingsMainState::DeactivateFeatures => {
-                    self.toggle_features(from_ref(&action));
-                    Some(action)
+        match action {
+            Feeds | Voice => match self.state {
+                FeatureSettings => Some(action.clone()),
+                DeactivateFeatures => {
+                    self.toggle_features(from_ref(action));
+                    Some(ToggleState)
                 }
             },
-            (SettingsMainAction::Voice, _) => match self.state {
-                SettingsMainState::FeatureSettings => {
-                    let _ = crate::bot::commands::voice::controllers::settings(*self.ctx.poise_ctx)
-                        .await;
-                    None
+            AddFeatures => {
+                if let ComponentInteractionDataKind::StringSelect { values } =
+                    &interaction.data.kind
+                {
+                    let features: Vec<_> = values
+                        .iter()
+                        .filter_map(|val| self.core().registry.get(val).cloned())
+                        .collect();
+                    self.toggle_features(features);
                 }
-                SettingsMainState::DeactivateFeatures => {
-                    self.toggle_features(from_ref(&action));
-                    Some(action)
-                }
-            },
-            (
-                SettingsMainAction::AddFeatures,
-                ComponentInteractionDataKind::StringSelect { values },
-            ) => {
-                let mut features = Vec::new();
-                for val in values {
-                    if let Ok(feat) = SettingsMainAction::from_str(val) {
-                        features.push(feat);
-                    }
-                }
-                self.toggle_features(features);
-                Some(action)
+                Some(action.clone())
             }
-            (SettingsMainAction::ToggleState, _) => {
+            ToggleState => {
                 self.state.toggle();
-                Some(action)
+                Some(action.clone())
             }
-            (SettingsMainAction::About, _) => {
-                // About navigation is handled by returning NavigationResult::SettingsAbout
-                // from the controller, not by calling about directly
-                Some(action)
-            }
-            _ => None,
+            About => Some(action.clone()),
         }
     }
 }

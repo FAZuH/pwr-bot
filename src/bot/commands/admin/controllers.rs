@@ -11,9 +11,9 @@ use crate::bot::controller::Controller;
 use crate::bot::controller::Coordinator;
 use crate::bot::error::BotError;
 use crate::bot::navigation::NavigationResult;
-use crate::bot::views::InteractableComponentView;
-use crate::bot::views::ResponseComponentView;
-use crate::bot::views::StatefulView;
+use crate::bot::views::InteractiveView;
+use crate::bot::views::RenderExt;
+use crate::bot::views::ResponseView;
 use crate::controller;
 use crate::database::model::ServerSettingsModel;
 use crate::database::table::Table;
@@ -42,10 +42,10 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for SettingsMainController<'a> 
             });
 
         let mut view = SettingsMainView::new(&ctx, settings);
-        view.send().await?;
+        view.render().await?;
 
         while let Some((action, _)) = view.listen_once().await? {
-            view.edit().await?;
+            view.render().await?;
             if view.is_settings_modified {
                 ctx.data()
                     .db
@@ -85,7 +85,7 @@ pub async fn register(ctx: Context<'_>) -> Result<(), Error> {
     let start_time = std::time::Instant::now();
 
     // Send initial view
-    let initial_view = CommandRegistrationView::new(num_commands);
+    let mut initial_view = CommandRegistrationView::new(num_commands);
     let msg = ctx.send(initial_view.create_reply()).await?;
 
     // Register commands
@@ -93,7 +93,7 @@ pub async fn register(ctx: Context<'_>) -> Result<(), Error> {
 
     // Update with completion view
     let duration_ms = start_time.elapsed().as_millis() as u64;
-    let complete_view = CommandRegistrationView::new(num_commands).complete(duration_ms);
+    let mut complete_view = CommandRegistrationView::new(num_commands).complete(duration_ms);
     msg.edit(ctx, complete_view.create_reply()).await?;
 
     Ok(())
@@ -107,7 +107,7 @@ pub async fn unregister(ctx: Context<'_>) -> Result<(), Error> {
     let start_time = std::time::Instant::now();
 
     // Send initial view
-    let initial_view = CommandUnregistrationView::new();
+    let mut initial_view = CommandUnregistrationView::new();
     let msg = ctx.send(initial_view.create_reply()).await?;
 
     // Unregister commands
@@ -115,7 +115,7 @@ pub async fn unregister(ctx: Context<'_>) -> Result<(), Error> {
 
     // Update with completion view
     let duration_ms = start_time.elapsed().as_millis() as u64;
-    let complete_view = CommandUnregistrationView::new().complete(duration_ms);
+    let mut complete_view = CommandUnregistrationView::new().complete(duration_ms);
     msg.edit(ctx, complete_view.create_reply()).await?;
 
     Ok(())

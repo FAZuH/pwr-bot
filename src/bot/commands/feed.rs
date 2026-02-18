@@ -21,12 +21,7 @@ impl FeedCog {
     /// - Configure server feed settings (admin only)
     #[poise::command(
         slash_command,
-        subcommands(
-            "Self::settings",
-            "Self::subscribe",
-            "Self::unsubscribe",
-            "Self::subscriptions"
-        )
+        subcommands("Self::settings", "Self::subscribe", "Self::unsubscribe", "Self::list")
     )]
     pub async fn feed(_ctx: Context<'_>) -> Result<(), Error> {
         Ok(())
@@ -82,13 +77,13 @@ impl FeedCog {
     ///
     /// View all feeds you are subscribed to, with pagination support.
     #[poise::command(slash_command)]
-    pub async fn subscriptions(
+    pub async fn list(
         ctx: Context<'_>,
         #[description = "Where the notifications are being sent. Default to DM"] sent_into: Option<
             SendInto,
         >,
     ) -> Result<(), Error> {
-        controllers::subscriptions(ctx, sent_into).await
+        controllers::list(ctx, sent_into).await
     }
 
     async fn autocomplete_subscriptions<'a>(
