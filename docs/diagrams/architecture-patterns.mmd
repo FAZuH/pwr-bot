@@ -10,16 +10,15 @@
   }
 }}%%
 graph LR
-    subgraph CogPattern["Cog Pattern"]
+    subgraph CommandAggregation["Command Registration"]
         direction TB
         CogTrait["Cog trait<br/>commands()"]
-        Cogs2["Cogs<br/>aggregate"]
-        FC["FeedCog"]
-        VC["VoiceCog"]
-        AC["AdminCog"]
-        OC["OwnerCog & AboutCog"]
-        CogTrait -.->|impl| FC & VC & AC & OC
-        Cogs2 -->|chains| FC & VC & AC & OC
+        Cogs2["Cogs<br/>struct aggregator"]
+        FeedCmd["Feed Command"]
+        VoiceCmd["Voice Command"]
+        OtherCmds["Other Commands<br/>about · settings · register · ..."]
+        CogTrait -.->|impl| Cogs2
+        Cogs2 -->|collects| FeedCmd & VoiceCmd & OtherCmds
     end
 
     subgraph MVCC["MVC-C Pattern"]
@@ -61,14 +60,13 @@ graph LR
         direction TB
         Cogs["Cogs / Commands"]
         Controllers["Controllers"]
-        ServiceLayer["Service Layer<br/>single access point"]
+        BusinessLogic["Business Logic Layer<br/>single access point"]
         RepTrait["Repository"]
         Tables["FeedTable<br/>VoiceTable<br/>SubscriberTable<br/>SettingsTable"]
         DB["SQLite / SQLx"]
-        Cogs --> Controllers --> ServiceLayer --> RepTrait --> Tables --> DB
+        Cogs --> Controllers --> BusinessLogic --> RepTrait --> Tables --> DB
     end
 
-    style CogPattern fill:#3a2a1a,stroke:#fbbf24,stroke-width:2px
     style MVCC fill:#1a2a3a,stroke:#818cf8,stroke-width:2px
     style PubSub2 fill:#1a3a3a,stroke:#2dd4bf,stroke-width:2px
     style Strategy fill:#1a3a1a,stroke:#4ade80,stroke-width:2px

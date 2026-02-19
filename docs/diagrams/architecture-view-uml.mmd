@@ -59,10 +59,11 @@ classDiagram
         SettingsAbout
         Back
         Exit
-        FeedSubscriptions
+        FeedList
         FeedSubscribe
         FeedUnsubscribe
         VoiceLeaderboard
+        VoiceStats
     }
 
     %% ── Traits ────────────────────────────────────────────────────
@@ -145,6 +146,13 @@ classDiagram
         pagination: PaginationView
     }
 
+    class VoiceStatsView {
+        core: ViewCore~VoiceStatsAction~
+        user_id: UserId
+        guild_id: GuildId
+        range: VoiceStatsTimeRange
+    }
+
     class FeedListView {
         core: ViewCore~FeedListAction~
         guild_id: GuildId
@@ -169,6 +177,7 @@ classDiagram
     InteractiveView <|.. SettingsFeedView
     InteractiveView <|.. SettingsVoiceView
     InteractiveView <|.. VoiceLeaderboardView
+    InteractiveView <|.. VoiceStatsView
     InteractiveView <|.. FeedListView
     InteractiveView <|.. FeedSubscriptionBatchView
     ResponseView <|.. SettingsNavigationView
@@ -177,10 +186,11 @@ classDiagram
     Controller <|.. SettingsMainController
     Controller <|.. FeedSettingsController
     Controller <|.. VoiceSettingsController
-    Controller <|.. FeedSubscriptionsController
+    Controller <|.. FeedListController
     Controller <|.. FeedSubscribeController
     Controller <|.. FeedUnsubscribeController
     Controller <|.. VoiceLeaderboardController
+    Controller <|.. VoiceStatsController
     Controller <|.. AboutController
 
     note for View "view_core! macro generates impl"

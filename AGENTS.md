@@ -31,19 +31,38 @@ Standard `cargo` commands work as expected. Tests require `SQLX_OFFLINE=true` (h
 
 ## Adding Commands
 
-Commands use the **Cog pattern**:
-1. Create a Cog struct implementing `Cog` trait.
-2. Implement commands with `#[poise::command]`.
+Commands follow the **Command Pattern** using Poise. Top-level commands are aggregated in `src/bot/commands.rs`.
+
+1. Create a command module or function.
+2. Implement the command with `#[poise::command]`.
+3. Add the command function call to the `Cogs` implementation in `src/bot/commands.rs`.
 
 ```rust
-pub struct MyCog;
-impl MyCog {
-    #[poise::command(slash_command)]
-    pub async fn cmd(ctx: Context<'_>) -> Result<(), Error> { /* ... */ }
+#[poise::command(slash_command)]
+pub async fn my_command(ctx: Context<'_>) -> Result<(), Error> { /* ... */ }
+```
+
+In `src/bot/commands.rs`:
+```rust
+impl Cog for Cogs {
+    fn commands(&self) -> Vec<Command<Data, Error>> {
+        vec![
+            // ...
+            my_command(),
+        ]
+    }
 }
-impl Cog for MyCog {
-    fn commands(&self) -> Vec<Command<Data, Error>> { vec![Self::cmd()] }
-}
+```
+
+### Command Groups
+For commands with subcommands, use the `subcommands` attribute:
+
+```rust
+#[poise::command(
+    slash_command,
+    subcommands("subcommand_a", "subcommand_b")
+)]
+pub async fn parent_command(_ctx: Context<'_>) -> Result<(), Error> { Ok(()) }
 ```
 
 ## Creating UI Views (Components V2)
