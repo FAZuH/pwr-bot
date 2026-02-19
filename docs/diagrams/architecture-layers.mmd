@@ -1,0 +1,119 @@
+%%{init: {
+  'theme': 'dark',
+  'themeVariables': {
+    'primaryColor': '#1e1e1e',
+    'primaryTextColor': '#ffffff',
+    'primaryBorderColor': '#ffffff',
+    'lineColor': '#888888',
+    'secondaryColor': '#2d2d2d',
+    'tertiaryColor': '#1e1e1e'
+  }
+}}%%
+graph TB
+    subgraph Presentation["Presentation Layer  ·  src/bot/"]
+        direction TB
+        Bot["Bot<br/>Serenity + Poise"]
+        EventHandler["BotEventHandler<br/>Gateway events"]
+
+        subgraph Commands["Commands  ·  Cog Pattern"]
+            Cogs["Cogs"]
+            FeedCog["FeedCog"]
+            VoiceCog["VoiceCog"]
+            AdminCog["AdminCog"]
+            AboutCog["AboutCog"]
+            OwnerCog["OwnerCog"]
+            Cogs --> FeedCog & VoiceCog & AdminCog & AboutCog & OwnerCog
+        end
+
+        subgraph MVC["MVC-C Pattern"]
+            Coordinator["Coordinator<br/>context + state"]
+            Controllers["Controllers<br/>run() → NavigationResult"]
+            Views["Views<br/>ResponseView / InteractiveView"]
+            Coordinator --> Controllers --> Views
+        end
+
+        Bot --> EventHandler & Cogs
+        FeedCog & VoiceCog --> Coordinator
+    end
+
+    subgraph Application["Application Layer  ·  src/event/  src/subscriber/  src/task/"]
+        direction TB
+
+        subgraph EventSystem["Event System  ·  Pub/Sub"]
+            EventBus["EventBus"]
+            FeedEvent["FeedUpdateEvent"]
+            VoiceEvent["VoiceStateEvent"]
+            EventBus --> FeedEvent & VoiceEvent
+        end
+
+        subgraph Subscribers["Subscribers"]
+            GuildSub["DiscordGuildSubscriber"]
+            DmSub["DiscordDmSubscriber"]
+            VoiceSub["VoiceStateSubscriber"]
+        end
+
+        subgraph Tasks["Background Tasks"]
+            FeedPublisher["SeriesFeedPublisher"]
+            VoiceHeartbeat["VoiceHeartbeatManager"]
+        end
+
+        FeedEvent --> GuildSub & DmSub
+        VoiceEvent --> VoiceSub
+        Tasks --> EventBus
+    end
+
+    subgraph Service["Service Layer  ·  src/service/"]
+        SettingsService["SettingsService<br/>get · update"]
+        FeedService["FeedSubscriptionService"]
+        VoiceService["VoiceTrackingService"]
+        MaintenanceService["MaintenanceService"]
+        SettingsService --> FeedService & VoiceService
+    end
+
+    subgraph Domain["Domain Layer  ·  src/feed/"]
+        subgraph Platforms["Platforms  ·  Strategy Pattern"]
+            PlatformTrait["Platform trait<br/>fetch_latest · fetch_source"]
+            MangaDex["MangaDexPlatform"]
+            AniList["AniListPlatform"]
+            Comick["ComickPlatform"]
+            PlatformTrait -.->|impl| MangaDex & AniList & Comick
+        end
+        Models["Domain Models<br/>FeedSource · FeedItem · VoiceSession"]
+    end
+
+    subgraph Infrastructure["Infrastructure Layer  ·  src/repository/"]
+        subgraph Repository["Repository Pattern"]
+            Repo["Repository<br/>connection pool"]
+            FeedTable["FeedTable"]
+            FeedItemTable["FeedItemTable"]
+            SubscriberTable["SubscriberTable"]
+            VoiceTable["VoiceSessionsTable"]
+            SettingsTable["ServerSettingsTable"]
+            Repo --> FeedTable & FeedItemTable & SubscriberTable & VoiceTable & SettingsTable
+        end
+        SQLite["SQLite  ·  SQLx async"]
+        FeedTable & FeedItemTable & SubscriberTable & VoiceTable & SettingsTable --> SQLite
+    end
+
+    Config["Config<br/>env vars + feature flags"]
+
+    %% Cross-layer
+    Controllers --> Service
+    Subscribers --> Service
+    Tasks --> Service
+    FeedService --> PlatformTrait
+    FeedService & VoiceService --> Repository
+    Bot --> Service & EventBus
+    Config --> Bot & Tasks
+
+    style Presentation fill:#1a3a1a,stroke:#4ade80,stroke-width:2px
+    style Application fill:#1a2a3a,stroke:#60a5fa,stroke-width:2px
+    style Service fill:#3a1a3a,stroke:#c084fc,stroke-width:2px
+    style Domain fill:#3a2a1a,stroke:#fbbf24,stroke-width:2px
+    style Infrastructure fill:#2a1a1a,stroke:#f87171,stroke-width:2px
+    style Config fill:#1a1a2a,stroke:#a78bfa,stroke-width:2px
+
+    style Bot fill:#2d2d2d,stroke:#4ade80
+    style EventBus fill:#2d2d2d,stroke:#60a5fa
+    style PlatformTrait fill:#2d2d2d,stroke:#fbbf24
+    style Repo fill:#2d2d2d,stroke:#f87171

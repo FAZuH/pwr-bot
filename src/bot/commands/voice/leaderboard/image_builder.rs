@@ -6,9 +6,9 @@ use serenity::all::UserId;
 
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;
-use crate::bot::commands::voice::image_generator::LeaderboardImageGenerator;
-use crate::database::model::VoiceLeaderboardEntry;
+use crate::bot::commands::voice::leaderboard::image_generator::LeaderboardImageGenerator;
 use crate::error::AppError;
+use crate::model::VoiceLeaderboardEntry;
 
 /// A single entry in the voice leaderboard.
 #[derive(Clone)]

@@ -41,7 +41,6 @@ use crate::bot::commands::Cog;
 use crate::bot::commands::Cogs;
 use crate::bot::error_handler::ErrorHandler;
 use crate::config::Config;
-use crate::database::Database;
 use crate::event::VoiceStateEvent;
 use crate::event::event_bus::EventBus;
 use crate::feed::platforms::Platforms;
@@ -51,7 +50,6 @@ use crate::subscriber::voice_state_subscriber::VoiceStateSubscriber;
 /// Data shared across bot commands and contexts.
 pub struct Data {
     pub config: Arc<Config>,
-    pub db: Arc<Database>,
     pub platforms: Arc<Platforms>,
     pub service: Arc<Services>,
     pub start_time: Instant,
@@ -69,7 +67,6 @@ impl Bot {
     /// Creates a new bot instance with all required components.
     pub async fn new(
         config: Arc<Config>,
-        db: Arc<Database>,
         event_bus: Arc<EventBus>,
         platforms: Arc<Platforms>,
         service: Arc<Services>,
@@ -82,7 +79,6 @@ impl Bot {
         let event_handler = Arc::new(BotEventHandler::new(event_bus, voice_subscriber));
         let data = Arc::new(Data {
             config: config.clone(),
-            db,
             platforms,
             service,
             start_time: Instant::now(),

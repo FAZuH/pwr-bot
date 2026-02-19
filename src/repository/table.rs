@@ -1,22 +1,21 @@
 //! Database table operations and implementations.
 
-use async_trait::async_trait;
 use sqlx::SqlitePool;
 use sqlx::sqlite::SqliteArguments;
 
-use crate::database::error::DatabaseError;
-use crate::database::model::FeedItemModel;
-use crate::database::model::FeedModel;
-use crate::database::model::FeedSubscriptionModel;
-use crate::database::model::FeedWithLatestItemRow;
-use crate::database::model::ServerSettingsModel;
-use crate::database::model::SubscriberModel;
-use crate::database::model::SubscriberType;
-use crate::database::model::VoiceLeaderboardEntry;
-use crate::database::model::VoiceLeaderboardOpt;
-use crate::database::model::VoiceLeaderboardOptBuilder;
-use crate::database::model::VoiceSessionsModel;
 use crate::error::AppError;
+use crate::model::FeedItemModel;
+use crate::model::FeedModel;
+use crate::model::FeedSubscriptionModel;
+use crate::model::FeedWithLatestItemRow;
+use crate::model::ServerSettingsModel;
+use crate::model::SubscriberModel;
+use crate::model::SubscriberType;
+use crate::model::VoiceLeaderboardEntry;
+use crate::model::VoiceLeaderboardOpt;
+use crate::model::VoiceLeaderboardOptBuilder;
+use crate::model::VoiceSessionsModel;
+use crate::repository::error::DatabaseError;
 
 /// Base table struct providing database pool access.
 pub struct BaseTable {
@@ -31,7 +30,7 @@ impl BaseTable {
 }
 
 /// Base trait for table operations.
-#[async_trait]
+#[async_trait::async_trait]
 pub trait TableBase {
     /// Creates the table if it doesn't exist.
     async fn create_table(&self) -> Result<(), DatabaseError>;
@@ -42,7 +41,7 @@ pub trait TableBase {
 }
 
 /// Trait for tables with CRUD operations.
-#[async_trait]
+#[async_trait::async_trait]
 pub trait Table<T, ID>: TableBase {
     async fn select_all(&self) -> Result<Vec<T>, DatabaseError>;
     async fn insert(&self, model: &T) -> Result<ID, DatabaseError>;
@@ -151,7 +150,7 @@ macro_rules! impl_table {
             }
         }
 
-        #[async_trait]
+        #[async_trait::async_trait]
         impl TableBase for $struct_name {
             async fn create_table(&self) -> Result<(), DatabaseError> {
                 sqlx::query($create_sql)
@@ -175,7 +174,7 @@ macro_rules! impl_table {
             }
         }
 
-        #[async_trait]
+        #[async_trait::async_trait]
         impl Table<$model, $id_type> for $struct_name {
             async fn select_all(&self) -> Result<Vec<$model>, DatabaseError> {
                 Ok(sqlx::query_as::<_, $model>(concat!("SELECT * FROM ", $table))
@@ -810,10 +809,9 @@ impl VoiceSessionsTable {
         guild_id: u64,
         since: &chrono::DateTime<chrono::Utc>,
         until: &chrono::DateTime<chrono::Utc>,
-    ) -> Result<Vec<crate::database::model::VoiceDailyActivity>, DatabaseError> {
-        Ok(
-            sqlx::query_as::<_, crate::database::model::VoiceDailyActivity>(
-                r#"
+    ) -> Result<Vec<crate::model::VoiceDailyActivity>, DatabaseError> {
+        Ok(sqlx::query_as::<_, crate::model::VoiceDailyActivity>(
+            r#"
             SELECT 
                 date(join_time) as day,
                 SUM(
@@ -828,14 +826,13 @@ impl VoiceSessionsTable {
             GROUP BY date(join_time)
             ORDER BY day
             "#,
-            )
-            .bind(user_id as i64)
-            .bind(guild_id as i64)
-            .bind(since)
-            .bind(until)
-            .fetch_all(&self.base.pool)
-            .await?,
         )
+        .bind(user_id as i64)
+        .bind(guild_id as i64)
+        .bind(since)
+        .bind(until)
+        .fetch_all(&self.base.pool)
+        .await?)
     }
 
     /// Get guild-wide daily statistics: average time per active user.
@@ -844,10 +841,9 @@ impl VoiceSessionsTable {
         guild_id: u64,
         since: &chrono::DateTime<chrono::Utc>,
         until: &chrono::DateTime<chrono::Utc>,
-    ) -> Result<Vec<crate::database::model::GuildDailyStats>, DatabaseError> {
-        Ok(
-            sqlx::query_as::<_, crate::database::model::GuildDailyStats>(
-                r#"
+    ) -> Result<Vec<crate::model::GuildDailyStats>, DatabaseError> {
+        Ok(sqlx::query_as::<_, crate::model::GuildDailyStats>(
+            r#"
             SELECT 
                 day,
                 CAST(AVG(user_daily_total) AS INTEGER) as value
@@ -869,13 +865,12 @@ impl VoiceSessionsTable {
             GROUP BY day
             ORDER BY day
             "#,
-            )
-            .bind(guild_id as i64)
-            .bind(since)
-            .bind(until)
-            .fetch_all(&self.base.pool)
-            .await?,
         )
+        .bind(guild_id as i64)
+        .bind(since)
+        .bind(until)
+        .fetch_all(&self.base.pool)
+        .await?)
     }
 
     /// Get guild-wide daily statistics: count of unique active users.
@@ -884,10 +879,9 @@ impl VoiceSessionsTable {
         guild_id: u64,
         since: &chrono::DateTime<chrono::Utc>,
         until: &chrono::DateTime<chrono::Utc>,
-    ) -> Result<Vec<crate::database::model::GuildDailyStats>, DatabaseError> {
-        Ok(
-            sqlx::query_as::<_, crate::database::model::GuildDailyStats>(
-                r#"
+    ) -> Result<Vec<crate::model::GuildDailyStats>, DatabaseError> {
+        Ok(sqlx::query_as::<_, crate::model::GuildDailyStats>(
+            r#"
             SELECT 
                 date(join_time) as day,
                 COUNT(DISTINCT user_id) as value
@@ -896,12 +890,17 @@ impl VoiceSessionsTable {
             GROUP BY date(join_time)
             ORDER BY day
             "#,
-            )
-            .bind(guild_id as i64)
-            .bind(since)
-            .bind(until)
-            .fetch_all(&self.base.pool)
-            .await?,
         )
+        .bind(guild_id as i64)
+        .bind(since)
+        .bind(until)
+        .fetch_all(&self.base.pool)
+        .await?)
+    }
+}
+
+impl From<crate::model::VoiceLeaderboardOptBuilderError> for AppError {
+    fn from(value: crate::model::VoiceLeaderboardOptBuilderError) -> Self {
+        AppError::internal_with_ref(value)
     }
 }

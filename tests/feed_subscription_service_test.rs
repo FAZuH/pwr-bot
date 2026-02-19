@@ -3,14 +3,14 @@
 use std::sync::Arc;
 
 use chrono::Utc;
-use pwr_bot::database::model::FeedItemModel;
-use pwr_bot::database::model::FeedModel;
-use pwr_bot::database::model::ServerSettings;
-use pwr_bot::database::model::SubscriberType;
-use pwr_bot::database::table::Table;
 use pwr_bot::feed::FeedItem;
 use pwr_bot::feed::FeedSource;
 use pwr_bot::feed::platforms::Platforms;
+use pwr_bot::model::FeedItemModel;
+use pwr_bot::model::FeedModel;
+use pwr_bot::model::ServerSettings;
+use pwr_bot::model::SubscriberType;
+use pwr_bot::repository::table::Table;
 use pwr_bot::service::feed_subscription_service::FeedSubscriptionService;
 use pwr_bot::service::feed_subscription_service::SubscriberTarget;
 
@@ -20,10 +20,7 @@ mod common;
 async fn test_get_or_create_subscriber() {
     let (db, db_path) = common::setup_db().await;
     let feeds = Arc::new(Platforms::new());
-    let service = FeedSubscriptionService {
-        db: db.clone(),
-        platforms: feeds.clone(),
-    };
+    let service = FeedSubscriptionService::new(db.clone(), feeds.clone());
 
     let target = SubscriberTarget {
         subscriber_type: SubscriberType::Dm,
@@ -60,10 +57,7 @@ async fn test_get_or_create_feed() {
     feeds.add_platform(mock_feed.clone());
     let feeds = Arc::new(feeds);
 
-    let service = FeedSubscriptionService {
-        db: db.clone(),
-        platforms: feeds.clone(),
-    };
+    let service = FeedSubscriptionService::new(db.clone(), feeds.clone());
 
     let source_id = "manga-1";
     let url = format!("https://{}/title/{}", mock_domain, source_id);
@@ -133,12 +127,9 @@ async fn test_get_or_create_feed() {
 async fn test_server_settings_service() {
     let (db, db_path) = common::setup_db().await;
     let feeds = Arc::new(Platforms::new());
-    let service = FeedSubscriptionService {
-        db: db.clone(),
-        platforms: feeds.clone(),
-    };
+    let service = FeedSubscriptionService::new(db.clone(), feeds.clone());
 
-    use pwr_bot::database::model::FeedsSettings;
+    use pwr_bot::model::FeedsSettings;
 
     let guild_id: u64 = 1234567890;
 
@@ -188,10 +179,10 @@ async fn test_list_paginated_subscriptions_optimization() {
     let (db, db_path) = common::setup_db().await;
     let feeds_platform = Arc::new(Platforms::new());
 
-    let service = Arc::new(FeedSubscriptionService {
-        db: db.clone(),
-        platforms: feeds_platform.clone(),
-    });
+    let service = Arc::new(FeedSubscriptionService::new(
+        db.clone(),
+        feeds_platform.clone(),
+    ));
 
     // 1. Create Subscriber
     let target = SubscriberTarget {
@@ -212,14 +203,14 @@ async fn test_list_paginated_subscriptions_optimization() {
             source_url: format!("http://mock/{}/{}", i, name),
             ..Default::default()
         };
-        let feed_id = db.feed_table.insert(&feed).await.unwrap();
+        let feed_id = db.feed.insert(&feed).await.unwrap();
 
-        let sub_model = pwr_bot::database::model::FeedSubscriptionModel {
+        let sub_model = pwr_bot::model::FeedSubscriptionModel {
             feed_id,
             subscriber_id: subscriber.id,
             ..Default::default()
         };
-        db.feed_subscription_table.insert(&sub_model).await.unwrap();
+        db.feed_subscription.insert(&sub_model).await.unwrap();
 
         // Add item for some feeds
         if i % 2 == 0 {
@@ -229,7 +220,7 @@ async fn test_list_paginated_subscriptions_optimization() {
                 published: Utc::now(),
                 ..Default::default()
             };
-            db.feed_item_table.insert(&item).await.unwrap();
+            db.feed_item.insert(&item).await.unwrap();
         }
     }
 

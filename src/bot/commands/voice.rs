@@ -7,83 +7,25 @@ use chrono::Utc;
 use poise::ChoiceParameter;
 use serenity::all::CreateSelectMenuOption;
 
-use crate::bot::commands::Cog;
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;
 use crate::bot::views::Action;
 
-pub mod controllers;
-pub mod image_builder;
-pub mod image_generator;
-pub mod views;
+pub mod leaderboard;
+pub mod settings;
+pub mod stats;
 
-/// Cog for voice tracking commands.
-pub struct VoiceCog;
-
-impl VoiceCog {
-    /// Voice channel tracking and leaderboard commands
-    ///
-    /// Track voice channel activity and view leaderboards.
-    /// Use subcommands to configure settings or view the leaderboard.
-    #[poise::command(
-        slash_command,
-        subcommands("Self::settings", "Self::leaderboard", "Self::stats")
-    )]
-    pub async fn vc(_ctx: Context<'_>) -> Result<(), Error> {
-        Ok(())
-    }
-
-    /// Configure voice tracking settings for this server
-    ///
-    /// Enable or disable voice channel activity tracking.
-    /// Only server administrators can use this command.
-    #[poise::command(
-        slash_command,
-        default_member_permissions = "ADMINISTRATOR | MANAGE_GUILD"
-    )]
-    pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
-        controllers::settings(ctx).await
-    }
-
-    /// Display the voice activity leaderboard
-    ///
-    /// Shows a ranked list of users by total time spent in voice channels.
-    /// Includes your current rank position.
-    #[poise::command(slash_command)]
-    pub async fn leaderboard(
-        ctx: Context<'_>,
-        #[description = "Time period to filter voice activity. Defaults to \"This month\""]
-        time_range: Option<VoiceLeaderboardTimeRange>,
-    ) -> Result<(), Error> {
-        controllers::leaderboard(
-            ctx,
-            time_range.unwrap_or(VoiceLeaderboardTimeRange::ThisMonth),
-        )
-        .await
-    }
-
-    /// Display voice activity statistics with contribution graph
-    ///
-    /// Shows a GitHub-style contribution heatmap of voice activity over time.
-    /// Can display stats for yourself, another user, or the entire server.
-    #[poise::command(slash_command)]
-    pub async fn stats(
-        ctx: Context<'_>,
-        #[description = "Time period to display. Defaults to \"This month\""] time_range: Option<
-            VoiceStatsTimeRange,
-        >,
-        #[description = "User to show stats for (defaults to server stats in guild, yourself in DM)"]
-        user: Option<serenity::all::User>,
-        #[description = "Statistic to display for server view"] statistic: Option<GuildStatType>,
-    ) -> Result<(), Error> {
-        controllers::stats(ctx, time_range, user, statistic).await
-    }
-}
-
-impl Cog for VoiceCog {
-    fn commands(&self) -> Vec<poise::Command<crate::bot::Data, crate::bot::commands::Error>> {
-        vec![Self::vc()]
-    }
+/// Voice channel tracking and leaderboard commands
+///
+/// Track voice channel activity and view leaderboards.
+/// Use subcommands to configure settings or view the leaderboard.
+#[poise::command(
+    slash_command,
+    rename = "vc",
+    subcommands("settings::settings", "leaderboard::leaderboard", "stats::stats")
+)]
+pub async fn voice(_ctx: Context<'_>) -> Result<(), Error> {
+    Ok(())
 }
 
 /// Type of guild statistic to display.

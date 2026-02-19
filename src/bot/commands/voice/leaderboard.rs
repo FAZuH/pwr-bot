@@ -1,9 +1,11 @@
-//! Views for voice tracking commands.
+//! Voice leaderboard subcommand.
 
+use std::ops::Deref;
 use std::time::Duration;
+use std::time::Instant;
 
+use log::trace;
 use poise::ChoiceParameter;
-use serenity::all::ButtonStyle;
 use serenity::all::ComponentInteraction;
 use serenity::all::ComponentInteractionDataKind;
 use serenity::all::CreateActionRow;
@@ -19,122 +21,195 @@ use serenity::all::CreateSeparator;
 use serenity::all::CreateTextDisplay;
 use serenity::all::CreateUnfurledMediaItem;
 
-use crate::action_enum;
 use crate::action_extends;
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;
+use crate::bot::commands::settings::SettingsPage;
+use crate::bot::commands::settings::run_settings;
 use crate::bot::commands::voice::TimeRange;
 use crate::bot::commands::voice::VoiceLeaderboardTimeRange;
-use crate::bot::commands::voice::controllers::LeaderboardSessionData;
-use crate::bot::commands::voice::image_builder::LeaderboardPageBuilder;
-use crate::bot::commands::voice::image_builder::PageGenerationResult;
+use crate::bot::commands::voice::leaderboard::image_builder::LeaderboardPageBuilder;
+use crate::bot::commands::voice::leaderboard::image_builder::PageGenerationResult;
+use crate::bot::controller::Controller;
+use crate::bot::controller::Coordinator;
+use crate::bot::error::BotError;
+use crate::bot::navigation::NavigationResult;
 use crate::bot::utils::format_duration;
 use crate::bot::views::ChildViewResolver;
 use crate::bot::views::InteractiveView;
+use crate::bot::views::RenderExt;
 use crate::bot::views::ResponseKind;
 use crate::bot::views::ResponseView;
 use crate::bot::views::View;
 use crate::bot::views::pagination::PaginationAction;
 use crate::bot::views::pagination::PaginationView;
-use crate::database::model::ServerSettings;
+use crate::error::AppError;
+use crate::model::VoiceLeaderboardEntry;
+use crate::model::VoiceLeaderboardOptBuilder;
 use crate::view_core;
 
-/// Number of leaderboard entries per page.
-const LEADERBOARD_PER_PAGE: u32 = 10;
-
-action_enum! {
-    SettingsVoiceAction {
-        ToggleEnabled,
-        #[label = "❮ Back"]
-        Back,
-        #[label = "🛈 About"]
-        About,
-    }
-}
+pub mod image_builder;
+pub mod image_generator;
 
 /// Filename for the voice leaderboard image attachment.
 pub const VOICE_LEADERBOARD_IMAGE_FILENAME: &str = "voice_leaderboard.jpg";
 
-view_core! {
-    timeout = Duration::from_secs(120),
-    /// View for voice tracking settings.
-    pub struct SettingsVoiceView<'a, SettingsVoiceAction> {
-        pub settings: ServerSettings,
-    }
+/// Number of leaderboard entries per page.
+const LEADERBOARD_PER_PAGE: u32 = 10;
+
+/// Display the voice activity leaderboard
+///
+/// Shows a ranked list of users by total time spent in voice channels.
+/// Includes your current rank position.
+#[poise::command(slash_command)]
+pub async fn leaderboard(
+    ctx: Context<'_>,
+    #[description = "Time period to filter voice activity. Defaults to \"This month\""]
+    time_range: Option<VoiceLeaderboardTimeRange>,
+) -> Result<(), Error> {
+    command(
+        ctx,
+        time_range.unwrap_or(VoiceLeaderboardTimeRange::ThisMonth),
+    )
+    .await
 }
 
-impl<'a> SettingsVoiceView<'a> {
-    /// Creates a new voice settings view.
-    pub fn new(ctx: &'a Context<'a>, settings: ServerSettings) -> Self {
+pub async fn command(ctx: Context<'_>, time_range: VoiceLeaderboardTimeRange) -> Result<(), Error> {
+    let mut coordinator = Coordinator::new(ctx);
+    let mut controller = VoiceLeaderboardController::new(&ctx, time_range);
+    let _result = controller.run(&mut coordinator).await?;
+    Ok(())
+}
+
+/// Data for a leaderboard session.
+pub struct LeaderboardSessionData {
+    pub entries: Vec<VoiceLeaderboardEntry>,
+    pub user_rank: Option<u32>,
+    pub user_duration: Option<i64>,
+}
+
+impl LeaderboardSessionData {
+    /// Creates session data from entries and calculates user rank.
+    pub fn from_entries(entries: Vec<VoiceLeaderboardEntry>, author_id: u64) -> Self {
+        let user_rank = entries
+            .iter()
+            .position(|e| e.user_id == author_id)
+            .map(|p| p as u32 + 1);
+        let user_duration = entries
+            .iter()
+            .find(|e| e.user_id == author_id)
+            .map(|e| e.total_duration);
+
         Self {
-            settings,
-            core: Self::create_core(ctx),
+            entries,
+            user_rank,
+            user_duration,
         }
     }
 }
 
-impl<'a> ResponseView<'a> for SettingsVoiceView<'a> {
-    fn create_response<'b>(&mut self) -> ResponseKind<'b> {
-        let is_enabled = self.settings.voice.enabled.unwrap_or(true);
+impl Deref for LeaderboardSessionData {
+    type Target = Vec<VoiceLeaderboardEntry>;
 
-        let status_text = format!(
-            "-# **Settings > Voice**\n## Voice Tracking Settings\n\n> 🛈  {}",
-            if is_enabled {
-                "Voice tracking is **active**."
-            } else {
-                "Voice tracking is **paused**."
-            }
-        );
+    fn deref(&self) -> &Self::Target {
+        &self.entries
+    }
+}
 
-        let enabled_button = self
-            .register(SettingsVoiceAction::ToggleEnabled)
-            .as_button()
-            .label(if is_enabled { "Disable" } else { "Enable" })
-            .style(if is_enabled {
-                ButtonStyle::Danger
-            } else {
-                ButtonStyle::Success
-            });
+/// Controller for voice leaderboard display and interaction.
+pub struct VoiceLeaderboardController<'a> {
+    #[allow(dead_code)]
+    ctx: &'a Context<'a>,
+    pub time_range: VoiceLeaderboardTimeRange,
+}
 
-        let container = CreateComponent::Container(CreateContainer::new(vec![
-            CreateContainerComponent::TextDisplay(CreateTextDisplay::new(status_text)),
-            CreateContainerComponent::ActionRow(CreateActionRow::Buttons(
-                vec![enabled_button].into(),
-            )),
-        ]));
+impl<'a> VoiceLeaderboardController<'a> {
+    /// Creates a new leaderboard controller.
+    pub fn new(ctx: &'a Context<'a>, time_range: VoiceLeaderboardTimeRange) -> Self {
+        Self { ctx, time_range }
+    }
 
-        let nav_buttons = CreateComponent::ActionRow(CreateActionRow::Buttons(
-            vec![
-                self.register(SettingsVoiceAction::Back)
-                    .as_button()
-                    .style(ButtonStyle::Secondary),
-                self.register(SettingsVoiceAction::About)
-                    .as_button()
-                    .style(ButtonStyle::Secondary),
-            ]
-            .into(),
-        ));
+    /// Fetches leaderboard entries for the current time range.
+    async fn fetch_entries(
+        ctx: &Context<'_>,
+        time_range: VoiceLeaderboardTimeRange,
+    ) -> Result<LeaderboardSessionData, Error> {
+        let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?.get();
+        let (since, until) = time_range.to_range();
 
-        vec![container, nav_buttons].into()
+        let voice_lb_opts = VoiceLeaderboardOptBuilder::default()
+            .guild_id(guild_id)
+            .limit(Some(u32::MAX))
+            .since(Some(since))
+            .until(Some(until))
+            .build()
+            .map_err(AppError::from)?;
+
+        let new_entries = ctx
+            .data()
+            .service
+            .voice_tracking
+            .get_leaderboard_withopt(&voice_lb_opts)
+            .await
+            .map_err(Error::from)?;
+
+        let author_id = ctx.author().id.get();
+        Ok(LeaderboardSessionData::from_entries(new_entries, author_id))
     }
 }
 
 #[async_trait::async_trait]
-impl<'a> InteractiveView<'a, SettingsVoiceAction> for SettingsVoiceView<'a> {
-    async fn handle(
+impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceLeaderboardController<'a> {
+    async fn run(
         &mut self,
-        action: &SettingsVoiceAction,
-        _interaction: &ComponentInteraction,
-    ) -> Option<SettingsVoiceAction> {
-        match action {
-            SettingsVoiceAction::ToggleEnabled => {
-                let current = self.settings.voice.enabled.unwrap_or(true);
-                self.settings.voice.enabled = Some(!current);
-                Some(action.clone())
-            }
-            SettingsVoiceAction::Back | SettingsVoiceAction::About => Some(action.clone()),
+        coordinator: &mut Coordinator<'_, S>,
+    ) -> Result<NavigationResult, Error> {
+        let controller_start = Instant::now();
+
+        let ctx = *coordinator.context();
+        ctx.defer().await?;
+
+        // Fetch initial entries
+        let session_data = Self::fetch_entries(&ctx, self.time_range).await?;
+
+        let mut view = VoiceLeaderboardView::new(&ctx, session_data, self.time_range);
+
+        if view.leaderboard_data.is_empty() {
+            view.render().await?;
+            return Ok(NavigationResult::Exit);
         }
+
+        // Generate and send initial page
+        let page_result = view.generate_current_page().await?;
+        view.set_current_page_bytes(page_result.image_bytes.clone());
+        view.render().await?;
+
+        trace!(
+            "controller_initial_response {} ms",
+            controller_start.elapsed().as_millis()
+        );
+
+        while let Some((action, _)) = view.listen_once().await? {
+            if matches!(action, VoiceLeaderboardAction::TimeRange) {
+                let new_data = Self::fetch_entries(&ctx, view.time_range).await?;
+                view.update_leaderboard_data(new_data);
+            }
+            let page_result = view.generate_current_page().await?;
+            view.set_current_page_bytes(page_result.image_bytes.clone());
+            view.render().await?;
+        }
+
+        trace!(
+            "controller_total {} ms",
+            controller_start.elapsed().as_millis()
+        );
+        Ok(NavigationResult::Exit)
     }
+}
+
+/// Legacy function for voice settings command.
+pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
+    run_settings(ctx, Some(SettingsPage::Voice)).await
 }
 
 view_core! {
@@ -369,6 +444,34 @@ impl<'a> InteractiveView<'a, VoiceLeaderboardAction> for VoiceLeaderboardView<'a
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_leaderboard_session_data_from_entries() {
+        let entries = vec![
+            VoiceLeaderboardEntry {
+                user_id: 100,
+                total_duration: 3600,
+            },
+            VoiceLeaderboardEntry {
+                user_id: 200,
+                total_duration: 1800,
+            },
+            VoiceLeaderboardEntry {
+                user_id: 300,
+                total_duration: 900,
+            },
+        ];
+
+        // Test author is ranked #2
+        let session = LeaderboardSessionData::from_entries(entries.clone(), 200);
+        assert_eq!(session.user_rank, Some(2));
+        assert_eq!(session.user_duration, Some(1800));
+
+        // Test author not in list
+        let session = LeaderboardSessionData::from_entries(entries, 999);
+        assert_eq!(session.user_rank, None);
+        assert_eq!(session.user_duration, None);
+    }
 
     #[test]
     fn test_voice_leaderboard_time_range_to_range() {

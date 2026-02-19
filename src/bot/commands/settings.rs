@@ -1,7 +1,4 @@
-//! Settings-related views and coordinator shared across command modules.
-//!
-//! This module provides the settings coordinator and reusable view components
-//! for settings interfaces.
+//! Admin settings command.
 
 use std::borrow::Cow;
 use std::slice::from_ref;
@@ -25,8 +22,8 @@ use crate::bot::checks::is_author_guild_admin;
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;
 use crate::bot::commands::about::AboutController;
-use crate::bot::commands::feed::controllers::FeedSettingsController;
-use crate::bot::commands::voice::controllers::VoiceSettingsController;
+use crate::bot::commands::feed::settings::FeedSettingsController;
+use crate::bot::commands::voice::settings::VoiceSettingsController;
 use crate::bot::controller::Controller;
 use crate::bot::controller::Coordinator;
 use crate::bot::error::BotError;
@@ -37,11 +34,18 @@ use crate::bot::views::ResponseKind;
 use crate::bot::views::ResponseView;
 use crate::bot::views::View;
 use crate::controller;
-use crate::database::model::ServerSettings;
-use crate::database::model::ServerSettingsModel;
-use crate::database::table::Table;
 use crate::error::AppError;
+use crate::model::ServerSettings;
+use crate::model::ServerSettingsModel;
 use crate::view_core;
+
+/// Opens main server settings
+///
+/// Requires server administrator permissions.
+#[poise::command(slash_command)]
+pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
+    run_settings(ctx, None).await
+}
 
 controller! { pub struct SettingsMainController<'a> {} }
 
@@ -57,14 +61,15 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for SettingsMainController<'a> 
 
         let settings = ctx
             .data()
-            .db
-            .server_settings_table
-            .select(&guild_id.into())
-            .await?
-            .unwrap_or(ServerSettingsModel {
-                guild_id: guild_id.into(),
-                ..Default::default()
-            });
+            .service
+            .feed_subscription
+            .get_server_settings(guild_id.into())
+            .await?;
+
+        let settings = ServerSettingsModel {
+            guild_id: guild_id.into(),
+            settings: sqlx::types::Json(settings),
+        };
 
         let mut view = SettingsMainView::new(&ctx, settings);
         view.render().await?;
@@ -72,10 +77,12 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for SettingsMainController<'a> 
         while let Some((action, _)) = view.listen_once().await? {
             view.render().await?;
             if view.is_settings_modified {
+                let guild_id = view.settings.guild_id;
+                let settings = view.settings.settings.0.clone();
                 ctx.data()
-                    .db
-                    .server_settings_table
-                    .replace(&view.settings)
+                    .service
+                    .feed_subscription
+                    .update_server_settings(guild_id, settings)
                     .await?;
                 view.done_update_settings()?;
             }

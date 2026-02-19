@@ -17,10 +17,10 @@ use serenity::all::CreateThumbnail;
 use serenity::all::CreateUnfurledMediaItem;
 use serenity::all::MessageFlags;
 
-use crate::database::model::FeedItemModel;
-use crate::database::model::FeedModel;
 use crate::event::Event;
 use crate::feed::PlatformInfo;
+use crate::model::FeedItemModel;
+use crate::model::FeedModel;
 
 /// Event fired when a new version/episode of a feed is published.
 #[derive(Clone, Debug)]

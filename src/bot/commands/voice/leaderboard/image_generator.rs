@@ -16,7 +16,7 @@ use image::imageops::FilterType;
 use image::imageops::overlay;
 use log::trace;
 
-use crate::bot::commands::voice::image_builder::LeaderboardEntry;
+use crate::bot::commands::voice::leaderboard::image_builder::LeaderboardEntry;
 use crate::bot::utils::format_duration;
 
 /// Dark gray background (Discord dark mode).
@@ -85,7 +85,7 @@ impl LeaderboardImageGenerator {
     /// Creates a new image generator with embedded Roboto font.
     pub fn new() -> Self {
         // Load the Roboto font from embedded bytes
-        let font_data = include_bytes!("../../../../assets/fonts/Roboto-Regular.ttf");
+        let font_data = include_bytes!("../../../../../assets/fonts/Roboto-Regular.ttf");
         // NOTE: If the code below doesn't work there's something seriously wrong and we should just unwrap
         let font = FontArc::try_from_slice(font_data).unwrap();
 

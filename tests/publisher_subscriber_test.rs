@@ -4,13 +4,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::Utc;
-use pwr_bot::database::model::SubscriberType;
-use pwr_bot::database::table::Table;
 use pwr_bot::event::FeedUpdateEvent;
 use pwr_bot::event::event_bus::EventBus;
 use pwr_bot::feed::FeedItem;
 use pwr_bot::feed::FeedSource;
 use pwr_bot::feed::platforms::Platforms;
+use pwr_bot::model::SubscriberType;
+use pwr_bot::repository::table::Table;
 use pwr_bot::service::feed_subscription_service::FeedSubscriptionService;
 use pwr_bot::service::feed_subscription_service::SubscribeResult;
 use pwr_bot::service::feed_subscription_service::SubscriberTarget;
@@ -32,10 +32,7 @@ async fn test_subscription_and_publishing() {
     let feeds = Arc::new(feeds);
 
     // Setup Service
-    let service = Arc::new(FeedSubscriptionService {
-        db: db.clone(),
-        platforms: feeds.clone(),
-    });
+    let service = Arc::new(FeedSubscriptionService::new(db.clone(), feeds.clone()));
 
     // 1. Prepare Mock Data
     let source_id = "123";
@@ -81,7 +78,7 @@ async fn test_subscription_and_publishing() {
     }
 
     // Verify DB
-    let subs = db.feed_subscription_table.select_all().await.unwrap();
+    let subs = db.feed_subscription.select_all().await.unwrap();
     assert_eq!(subs.len(), 1);
 
     // 3. Test Publisher
@@ -127,7 +124,7 @@ async fn test_subscription_and_publishing() {
 
     // Verify DB update
     let db_latest = db
-        .feed_item_table
+        .feed_item
         .select_latest_by_feed_id(1)
         .await
         .unwrap()

@@ -2,15 +2,15 @@
 
 use chrono::Duration;
 use chrono::Utc;
-use pwr_bot::database::model::FeedItemModel;
-use pwr_bot::database::model::FeedModel;
-use pwr_bot::database::model::FeedSubscriptionModel;
-use pwr_bot::database::model::FeedsSettings;
-use pwr_bot::database::model::ServerSettingsModel;
-use pwr_bot::database::model::SubscriberModel;
-use pwr_bot::database::model::SubscriberType;
-use pwr_bot::database::model::VoiceSessionsModel;
-use pwr_bot::database::table::Table;
+use pwr_bot::model::FeedItemModel;
+use pwr_bot::model::FeedModel;
+use pwr_bot::model::FeedSubscriptionModel;
+use pwr_bot::model::FeedsSettings;
+use pwr_bot::model::ServerSettingsModel;
+use pwr_bot::model::SubscriberModel;
+use pwr_bot::model::SubscriberType;
+use pwr_bot::model::VoiceSessionsModel;
+use pwr_bot::repository::table::Table;
 
 mod common;
 
@@ -47,14 +47,14 @@ macro_rules! create_feed {
                 ..Default::default()
             };
             $(feed.$field = $val.into();)*
-            $db.feed_table.insert(&feed).await.expect("Failed to insert feed")
+            $db.feed.insert(&feed).await.expect("Failed to insert feed")
         }
     };
 }
 
 macro_rules! create_sub {
     ($db:expr, $target:expr) => {
-        $db.subscriber_table
+        $db.subscriber
             .insert(&SubscriberModel {
                 r#type: SubscriberType::Dm,
                 target_id: $target.to_string(),
@@ -67,7 +67,7 @@ macro_rules! create_sub {
 
 macro_rules! create_subscription {
     ($db:expr, $feed_id:expr, $sub_id:expr) => {
-        $db.feed_subscription_table
+        $db.feed_subscription
             .insert(&FeedSubscriptionModel {
                 feed_id: $feed_id,
                 subscriber_id: $sub_id,
@@ -83,7 +83,7 @@ macro_rules! create_item {
         create_item!($db, $feed_id, $desc, Utc::now())
     };
     ($db:expr, $feed_id:expr, $desc:expr, $date:expr) => {
-        $db.feed_item_table
+        $db.feed_item
             .insert(&FeedItemModel {
                 feed_id: $feed_id,
                 description: $desc.to_string(),
@@ -97,7 +97,7 @@ macro_rules! create_item {
 
 macro_rules! create_voice_session {
     ($db:expr, $user:expr, $guild:expr, $chan:expr) => {
-        $db.voice_sessions_table
+        $db.voice_sessions
             .insert(&VoiceSessionsModel {
                 user_id: $user,
                 guild_id: $guild,
@@ -120,46 +120,42 @@ mod feed_table_tests {
         let id = create_feed!(db, "Test Feed", { description: "Test Description" });
         assert!(id > 0);
 
-        let fetched = db.feed_table.select(&id).await.unwrap().unwrap();
+        let fetched = db.feed.select(&id).await.unwrap().unwrap();
         assert_eq!(fetched.name, "Test Feed");
     });
 
     db_test!(update, |db| {
         let id = create_feed!(db, "Original");
-        let mut data = db.feed_table.select(&id).await.unwrap().unwrap();
+        let mut data = db.feed.select(&id).await.unwrap().unwrap();
 
         data.name = "Updated".to_string();
-        db.feed_table.update(&data).await.expect("Failed to update");
+        db.feed.update(&data).await.expect("Failed to update");
 
-        let fetched = db.feed_table.select(&id).await.unwrap().unwrap();
+        let fetched = db.feed.select(&id).await.unwrap().unwrap();
         assert_eq!(fetched.name, "Updated");
     });
 
     db_test!(replace, |db| {
         let id = create_feed!(db, "Original", { description: "Old" });
-        let mut data = db.feed_table.select(&id).await.unwrap().unwrap();
+        let mut data = db.feed.select(&id).await.unwrap().unwrap();
 
         data.description = "Replaced".to_string();
-        let new_id = db
-            .feed_table
-            .replace(&data)
-            .await
-            .expect("Failed to replace");
+        let new_id = db.feed.replace(&data).await.expect("Failed to replace");
 
-        let fetched = db.feed_table.select(&new_id).await.unwrap().unwrap();
+        let fetched = db.feed.select(&new_id).await.unwrap().unwrap();
         assert_eq!(fetched.description, "Replaced");
     });
 
     db_test!(delete, |db| {
         let id = create_feed!(db, "Test");
-        db.feed_table.delete(&id).await.expect("Failed to delete");
-        assert!(db.feed_table.select(&id).await.unwrap().is_none());
+        db.feed.delete(&id).await.expect("Failed to delete");
+        assert!(db.feed.select(&id).await.unwrap().is_none());
     });
 
     db_test!(select_by_source_id, |db| {
         create_feed!(db, "Feed", { platform_id: "anilist", source_id: "frieren" });
         let fetched = db
-            .feed_table
+            .feed
             .select_by_source_id("anilist", "frieren")
             .await
             .unwrap()
@@ -171,10 +167,10 @@ mod feed_table_tests {
         create_feed!(db, "Feed 1", { tags: "manga,shonen" });
         create_feed!(db, "Feed 2", { tags: "anime,shonen" });
 
-        let shonen = db.feed_table.select_all_by_tag("shonen").await.unwrap();
+        let shonen = db.feed.select_all_by_tag("shonen").await.unwrap();
         assert_eq!(shonen.len(), 2);
 
-        let anime = db.feed_table.select_all_by_tag("anime").await.unwrap();
+        let anime = db.feed.select_all_by_tag("anime").await.unwrap();
         assert_eq!(anime.len(), 1);
         assert_eq!(anime[0].name, "Feed 2");
     });
@@ -190,7 +186,7 @@ mod feed_table_tests {
 
         // Search "one" (should match 2)
         let res = db
-            .feed_table
+            .feed
             .select_by_name_and_subscriber_id(&sub_id, "one", None)
             .await
             .unwrap();
@@ -198,7 +194,7 @@ mod feed_table_tests {
 
         // Search "Naruto" (should match 0 as not subscribed)
         let res = db
-            .feed_table
+            .feed
             .select_by_name_and_subscriber_id(&sub_id, "Naruto", None)
             .await
             .unwrap();
@@ -206,7 +202,7 @@ mod feed_table_tests {
 
         // Test limit
         let res = db
-            .feed_table
+            .feed
             .select_by_name_and_subscriber_id(&sub_id, "One", 1u32)
             .await
             .unwrap();
@@ -223,7 +219,7 @@ mod feed_item_table_tests {
         create_item!(db, feed_id, "Chapter 2", Utc::now() + Duration::hours(1));
 
         let latest = db
-            .feed_item_table
+            .feed_item
             .select_latest_by_feed_id(feed_id)
             .await
             .unwrap()
@@ -236,11 +232,7 @@ mod feed_item_table_tests {
         create_item!(db, feed_id, "Chapter 1", Utc::now());
         create_item!(db, feed_id, "Chapter 2", Utc::now() + Duration::hours(1));
 
-        let all = db
-            .feed_item_table
-            .select_all_by_feed_id(feed_id)
-            .await
-            .unwrap();
+        let all = db.feed_item.select_all_by_feed_id(feed_id).await.unwrap();
         assert_eq!(all.len(), 2);
         assert_eq!(all[0].description, "Chapter 2"); // Ordered by published desc
     });
@@ -249,11 +241,11 @@ mod feed_item_table_tests {
         let feed_id = create_feed!(db, "Feed");
         let item_id = create_item!(db, feed_id, "Original");
 
-        let mut item = db.feed_item_table.select(&item_id).await.unwrap().unwrap();
+        let mut item = db.feed_item.select(&item_id).await.unwrap().unwrap();
         item.description = "Updated".to_string();
-        db.feed_item_table.update(&item).await.unwrap();
+        db.feed_item.update(&item).await.unwrap();
 
-        let fetched = db.feed_item_table.select(&item_id).await.unwrap().unwrap();
+        let fetched = db.feed_item.select(&item_id).await.unwrap().unwrap();
         assert_eq!(fetched.description, "Updated");
     });
 
@@ -262,16 +254,9 @@ mod feed_item_table_tests {
         create_item!(db, feed_id, "Item 1");
         create_item!(db, feed_id, "Item 2");
 
-        db.feed_item_table
-            .delete_all_by_feed_id(feed_id)
-            .await
-            .unwrap();
+        db.feed_item.delete_all_by_feed_id(feed_id).await.unwrap();
 
-        let all = db
-            .feed_item_table
-            .select_all_by_feed_id(feed_id)
-            .await
-            .unwrap();
+        let all = db.feed_item.select_all_by_feed_id(feed_id).await.unwrap();
         assert!(all.is_empty());
     });
 }
@@ -282,7 +267,7 @@ mod subscriber_table_tests {
     db_test!(insert_and_select_by_type_and_target, |db| {
         let id = create_sub!(db, "user1");
         let fetched = db
-            .subscriber_table
+            .subscriber
             .select_by_type_and_target(&SubscriberType::Dm, "user1")
             .await
             .unwrap()
@@ -296,7 +281,7 @@ mod subscriber_table_tests {
         create_subscription!(db, feed_id, sub_id);
 
         let subs = db
-            .subscriber_table
+            .subscriber
             .select_all_by_type_and_feed(SubscriberType::Dm, feed_id)
             .await
             .unwrap();
@@ -314,12 +299,7 @@ mod feed_subscription_table_tests {
         let s_id = create_sub!(db, "u1");
         create_subscription!(db, f_id, s_id);
 
-        assert!(
-            db.feed_subscription_table
-                .exists_by_feed_id(f_id)
-                .await
-                .unwrap()
-        );
+        assert!(db.feed_subscription.exists_by_feed_id(f_id).await.unwrap());
     });
 
     db_test!(count_by_subscriber_id, |db| {
@@ -328,7 +308,7 @@ mod feed_subscription_table_tests {
         create_subscription!(db, f_id, s_id);
 
         let count = db
-            .feed_subscription_table
+            .feed_subscription
             .count_by_subscriber_id(s_id)
             .await
             .unwrap();
@@ -341,7 +321,7 @@ mod feed_subscription_table_tests {
         create_subscription!(db, f_id, s_id);
 
         let subs = db
-            .feed_subscription_table
+            .feed_subscription
             .select_all_by_feed_id(f_id)
             .await
             .unwrap();
@@ -354,7 +334,7 @@ mod feed_subscription_table_tests {
         create_subscription!(db, f_id, s_id);
 
         let subs = db
-            .feed_subscription_table
+            .feed_subscription
             .select_all_by_subscriber_id(s_id)
             .await
             .unwrap();
@@ -367,7 +347,7 @@ mod feed_subscription_table_tests {
         create_subscription!(db, f_id, s_id);
 
         let page = db
-            .feed_subscription_table
+            .feed_subscription
             .select_paginated_by_subscriber_id(s_id, 0u32, 10u32)
             .await
             .unwrap();
@@ -381,7 +361,7 @@ mod feed_subscription_table_tests {
         create_item!(db, f_id, "Latest Item");
 
         let page = db
-            .feed_subscription_table
+            .feed_subscription
             .select_paginated_with_latest_by_subscriber_id(s_id, 0u32, 10u32)
             .await
             .unwrap();
@@ -395,16 +375,11 @@ mod feed_subscription_table_tests {
         let s_id = create_sub!(db, "u1");
         create_subscription!(db, f_id, s_id);
 
-        db.feed_subscription_table
+        db.feed_subscription
             .delete_subscription(f_id, s_id)
             .await
             .unwrap();
-        assert!(
-            !db.feed_subscription_table
-                .exists_by_feed_id(f_id)
-                .await
-                .unwrap()
-        );
+        assert!(!db.feed_subscription.exists_by_feed_id(f_id).await.unwrap());
     });
 
     db_test!(delete_all_by_subscriber_id, |db| {
@@ -412,13 +387,13 @@ mod feed_subscription_table_tests {
         let s_id = create_sub!(db, "u1");
         create_subscription!(db, f_id, s_id);
 
-        db.feed_subscription_table
+        db.feed_subscription
             .delete_all_by_subscriber_id(s_id)
             .await
             .unwrap();
 
         let count = db
-            .feed_subscription_table
+            .feed_subscription
             .count_by_subscriber_id(s_id)
             .await
             .unwrap();
@@ -430,22 +405,17 @@ mod feed_subscription_table_tests {
         let s_id = create_sub!(db, "u1");
         create_subscription!(db, f_id, s_id);
 
-        db.feed_subscription_table
+        db.feed_subscription
             .delete_all_by_feed_id(f_id)
             .await
             .unwrap();
-        assert!(
-            !db.feed_subscription_table
-                .exists_by_feed_id(f_id)
-                .await
-                .unwrap()
-        );
+        assert!(!db.feed_subscription.exists_by_feed_id(f_id).await.unwrap());
     });
 }
 
 mod server_settings_table_tests {
-    use pwr_bot::database::model::ServerSettings;
-    use pwr_bot::database::model::VoiceSettings;
+    use pwr_bot::model::ServerSettings;
+    use pwr_bot::model::VoiceSettings;
 
     use super::*;
 
@@ -466,53 +436,37 @@ mod server_settings_table_tests {
 
     db_test!(insert_and_select, |db| {
         let id = db
-            .server_settings_table
+            .server_settings
             .insert(&create_settings(123, "c1"))
             .await
             .unwrap();
         assert_eq!(id, 123);
 
-        let fetched = db
-            .server_settings_table
-            .select(&123)
-            .await
-            .unwrap()
-            .unwrap();
+        let fetched = db.server_settings.select(&123).await.unwrap().unwrap();
         assert_eq!(fetched.settings.0.feeds.channel_id, Some("c1".to_string()));
     });
 
     db_test!(update, |db| {
-        db.server_settings_table
+        db.server_settings
             .insert(&create_settings(123, "c1"))
             .await
             .unwrap();
 
         let updated = create_settings(123, "c2");
-        db.server_settings_table.update(&updated).await.unwrap();
+        db.server_settings.update(&updated).await.unwrap();
 
-        let fetched = db
-            .server_settings_table
-            .select(&123)
-            .await
-            .unwrap()
-            .unwrap();
+        let fetched = db.server_settings.select(&123).await.unwrap().unwrap();
         assert_eq!(fetched.settings.0.feeds.channel_id, Some("c2".to_string()));
     });
 
     db_test!(delete, |db| {
-        db.server_settings_table
+        db.server_settings
             .insert(&create_settings(123, "c1"))
             .await
             .unwrap();
 
-        db.server_settings_table.delete(&123).await.unwrap();
-        assert!(
-            db.server_settings_table
-                .select(&123)
-                .await
-                .unwrap()
-                .is_none()
-        );
+        db.server_settings.delete(&123).await.unwrap();
+        assert!(db.server_settings.select(&123).await.unwrap().is_none());
     });
 }
 
@@ -523,7 +477,7 @@ mod voice_sessions_table_tests {
         let id = create_voice_session!(db, 1, 2, 3);
         assert!(id > 0);
 
-        let fetched = db.voice_sessions_table.select(&id).await.unwrap().unwrap();
+        let fetched = db.voice_sessions.select(&id).await.unwrap().unwrap();
         assert_eq!(fetched.user_id, 1);
         assert_eq!(fetched.guild_id, 2);
         assert_eq!(fetched.channel_id, 3);
@@ -531,19 +485,19 @@ mod voice_sessions_table_tests {
 
     db_test!(update, |db| {
         let id = create_voice_session!(db, 1, 2, 3);
-        let mut session = db.voice_sessions_table.select(&id).await.unwrap().unwrap();
+        let mut session = db.voice_sessions.select(&id).await.unwrap().unwrap();
 
         session.channel_id = 4;
-        db.voice_sessions_table.update(&session).await.unwrap();
+        db.voice_sessions.update(&session).await.unwrap();
 
-        let fetched = db.voice_sessions_table.select(&id).await.unwrap().unwrap();
+        let fetched = db.voice_sessions.select(&id).await.unwrap().unwrap();
         assert_eq!(fetched.channel_id, 4);
     });
 
     db_test!(delete, |db| {
         let id = create_voice_session!(db, 1, 2, 3);
-        db.voice_sessions_table.delete(&id).await.unwrap();
-        assert!(db.voice_sessions_table.select(&id).await.unwrap().is_none());
+        db.voice_sessions.delete(&id).await.unwrap();
+        assert!(db.voice_sessions.select(&id).await.unwrap().is_none());
     });
 
     db_test!(update_leave_time, |db| {
@@ -556,21 +510,21 @@ mod voice_sessions_table_tests {
             join_time,
             leave_time: join_time, // Active session
         };
-        db.voice_sessions_table
+        db.voice_sessions
             .insert(&session)
             .await
             .expect("Failed to insert session");
 
         // Update leave_time
         let new_leave_time = join_time + Duration::hours(1);
-        db.voice_sessions_table
+        db.voice_sessions
             .update_leave_time(100, 300, &join_time, &new_leave_time)
             .await
             .expect("Failed to update leave time");
 
         // Verify the update
         let sessions: Vec<VoiceSessionsModel> = db
-            .voice_sessions_table
+            .voice_sessions
             .select_all()
             .await
             .expect("Failed to select sessions");
@@ -591,7 +545,7 @@ mod voice_sessions_table_tests {
             join_time: now - Duration::hours(1),
             leave_time: now - Duration::hours(1), // Active
         };
-        db.voice_sessions_table
+        db.voice_sessions
             .insert(&active_session)
             .await
             .expect("Failed to insert active session");
@@ -604,7 +558,7 @@ mod voice_sessions_table_tests {
             join_time: now - Duration::hours(2),
             leave_time: now - Duration::hours(1), // Completed
         };
-        db.voice_sessions_table
+        db.voice_sessions
             .insert(&completed_session)
             .await
             .expect("Failed to insert completed session");
@@ -617,14 +571,14 @@ mod voice_sessions_table_tests {
             join_time: now - Duration::minutes(30),
             leave_time: now - Duration::minutes(30), // Active
         };
-        db.voice_sessions_table
+        db.voice_sessions
             .insert(&another_active)
             .await
             .expect("Failed to insert another active session");
 
         // Find active sessions
         let active = db
-            .voice_sessions_table
+            .voice_sessions
             .find_active_sessions()
             .await
             .expect("Failed to find active sessions");
@@ -642,7 +596,7 @@ mod voice_sessions_table_tests {
     db_test!(find_active_sessions_empty, |db| {
         // No sessions inserted
         let active = db
-            .voice_sessions_table
+            .voice_sessions
             .find_active_sessions()
             .await
             .expect("Failed to find active sessions");
@@ -657,7 +611,7 @@ mod voice_sessions_table_tests {
         // Try to update a session that doesn't exist
         let new_leave_time = join_time + Duration::hours(1);
         let result = db
-            .voice_sessions_table
+            .voice_sessions
             .update_leave_time(999, 999, &join_time, &new_leave_time)
             .await;
 
@@ -666,7 +620,7 @@ mod voice_sessions_table_tests {
 
         // Verify no sessions exist
         let sessions: Vec<VoiceSessionsModel> = db
-            .voice_sessions_table
+            .voice_sessions
             .select_all()
             .await
             .expect("Failed to select sessions");
@@ -687,7 +641,7 @@ mod voice_sessions_table_tests {
             join_time: now,
             leave_time: now + Duration::hours(2), // 2 hours today
         };
-        db.voice_sessions_table
+        db.voice_sessions
             .insert(&session1)
             .await
             .expect("Failed to insert session 1");
@@ -700,7 +654,7 @@ mod voice_sessions_table_tests {
             join_time: now - Duration::days(1),
             leave_time: now - Duration::days(1) + Duration::hours(1), // 1 hour yesterday
         };
-        db.voice_sessions_table
+        db.voice_sessions
             .insert(&session2)
             .await
             .expect("Failed to insert session 2");
@@ -714,7 +668,7 @@ mod voice_sessions_table_tests {
             join_time: now,
             leave_time: now + Duration::minutes(30),
         };
-        db.voice_sessions_table
+        db.voice_sessions
             .insert(&session3)
             .await
             .expect("Failed to insert session 3");
@@ -723,7 +677,7 @@ mod voice_sessions_table_tests {
         let since = now - Duration::days(2);
         let until = now + Duration::days(1);
         let activity = db
-            .voice_sessions_table
+            .voice_sessions
             .get_user_daily_activity(100, 200, &since, &until)
             .await
             .expect("Failed to get user daily activity");
@@ -759,7 +713,7 @@ mod voice_sessions_table_tests {
 
         // Get activity for user with no sessions
         let activity = db
-            .voice_sessions_table
+            .voice_sessions
             .get_user_daily_activity(999, 200, &since, &until)
             .await
             .expect("Failed to get user daily activity");
@@ -782,7 +736,7 @@ mod voice_sessions_table_tests {
             join_time: now,
             leave_time: now + Duration::hours(2),
         };
-        db.voice_sessions_table
+        db.voice_sessions
             .insert(&session1)
             .await
             .expect("Failed to insert session 1");
@@ -796,7 +750,7 @@ mod voice_sessions_table_tests {
             join_time: now,
             leave_time: now + Duration::hours(1),
         };
-        db.voice_sessions_table
+        db.voice_sessions
             .insert(&session2)
             .await
             .expect("Failed to insert session 2");
@@ -810,7 +764,7 @@ mod voice_sessions_table_tests {
             join_time: now,
             leave_time: now + Duration::minutes(30),
         };
-        db.voice_sessions_table
+        db.voice_sessions
             .insert(&session3)
             .await
             .expect("Failed to insert session 3");
@@ -819,7 +773,7 @@ mod voice_sessions_table_tests {
         let since = now - Duration::days(1);
         let until = now + Duration::days(1);
         let stats = db
-            .voice_sessions_table
+            .voice_sessions
             .get_guild_daily_average_time(200, &since, &until)
             .await
             .expect("Failed to get guild daily average time");
@@ -842,7 +796,7 @@ mod voice_sessions_table_tests {
             join_time: now,
             leave_time: now + Duration::hours(1),
         };
-        db.voice_sessions_table
+        db.voice_sessions
             .insert(&session1)
             .await
             .expect("Failed to insert session 1");
@@ -856,7 +810,7 @@ mod voice_sessions_table_tests {
             join_time: now,
             leave_time: now + Duration::hours(2),
         };
-        db.voice_sessions_table
+        db.voice_sessions
             .insert(&session2)
             .await
             .expect("Failed to insert session 2");
@@ -870,7 +824,7 @@ mod voice_sessions_table_tests {
             join_time: now + Duration::minutes(30),
             leave_time: now + Duration::minutes(90),
         };
-        db.voice_sessions_table
+        db.voice_sessions
             .insert(&session3)
             .await
             .expect("Failed to insert session 3");
@@ -879,7 +833,7 @@ mod voice_sessions_table_tests {
         let since = now - Duration::days(1);
         let until = now + Duration::days(1);
         let stats = db
-            .voice_sessions_table
+            .voice_sessions
             .get_guild_daily_user_count(200, &since, &until)
             .await
             .expect("Failed to get guild daily user count");
@@ -896,7 +850,7 @@ mod voice_sessions_table_tests {
 
         // Get average time for guild with no sessions
         let avg_stats = db
-            .voice_sessions_table
+            .voice_sessions
             .get_guild_daily_average_time(999, &since, &until)
             .await
             .expect("Failed to get guild daily average time");
@@ -907,7 +861,7 @@ mod voice_sessions_table_tests {
 
         // Get user count for guild with no sessions
         let count_stats = db
-            .voice_sessions_table
+            .voice_sessions
             .get_guild_daily_user_count(999, &since, &until)
             .await
             .expect("Failed to get guild daily user count");
