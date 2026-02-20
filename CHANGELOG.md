@@ -1,3 +1,10 @@
+## [0.2.8](https://github.com/FAZuH/pwr-bot/compare/v0.2.7...v0.2.8) (2026-02-20)
+
+
+### New Features
+
+* **bot:** Automatically register commands on version change ([d7f7367](https://github.com/FAZuH/pwr-bot/commit/d7f73673354ad4a077cc5b0593ecd5a16005e11a))
+
 ## [0.2.7](https://github.com/FAZuH/pwr-bot/compare/v0.2.6...v0.2.7) (2026-02-18)
 
 
@@ -45,11 +52,4 @@
 ### UI/UX Changes
 
 * **bot:** Remove page navigation buttons on timeout ([ad28e23](https://github.com/FAZuH/pwr-bot/commit/ad28e231df2f1f68eb6fe3daa7575367b8d3d823))
-
-## [0.2.3](https://github.com/FAZuH/pwr-bot/compare/v0.2.2...v0.2.3) (2026-02-14)
-
-
-### Bug Fixes
-
-* **bot:** Fix command count in /about command ([62bfcf6](https://github.com/FAZuH/pwr-bot/commit/62bfcf6ca83a2f31c26f450188f6d1f8c516e907))
 
