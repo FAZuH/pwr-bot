@@ -1,3 +1,5 @@
+## [0.2.12](https://github.com/FAZuH/pwr-bot/compare/v0.2.11...v0.2.12) (2026-02-20)
+
 ## [0.2.11](https://github.com/FAZuH/pwr-bot/compare/v0.2.10...v0.2.11) (2026-02-20)
 
 ## [0.2.10](https://github.com/FAZuH/pwr-bot/compare/v0.2.9...v0.2.10) (2026-02-20)
@@ -21,11 +23,4 @@
 ### New Features
 
 * **bot:** Automatically register commands on version change ([d7f7367](https://github.com/FAZuH/pwr-bot/commit/d7f73673354ad4a077cc5b0593ecd5a16005e11a))
-
-## [0.2.7](https://github.com/FAZuH/pwr-bot/compare/v0.2.6...v0.2.7) (2026-02-18)
-
-
-### New Features
-
-* **bot:** Show package version to bot activity ([d63313b](https://github.com/FAZuH/pwr-bot/commit/d63313b3d41e4ddaf74379c9000f80db4ee782d8)), closes [#47](https://github.com/FAZuH/pwr-bot/issues/47)
 
