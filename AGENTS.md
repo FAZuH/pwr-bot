@@ -65,198 +65,71 @@ For commands with subcommands, use the `subcommands` attribute:
 pub async fn parent_command(_ctx: Context<'_>) -> Result<(), Error> { Ok(()) }
 ```
 
-## Creating UI Views (Components V2)
+## Creating UI Views (MVC-C pattern)
 
-Views use three traits:
-- **`View<'a, T>`**: Core trait providing access to `ViewCore` (via `view_core!` macro)
-- **`ResponseView<'a>`**: Creates Discord components/embeds via `create_response()`
-- **`InteractiveView<'a, T>`**: Handles user interactions via `handle()`
+See [`.opencode/skills/ui-views/SKILL.md`](.opencode/skills/ui-views/SKILL.md) for 
+- Detailed documentation on creating interactive Discord UI components using Components V2.
+- Controller Pattern (Coordinator -> Controller -> View -> NavigationResult) architecture.
 
-### Basic View Structure
+## Database Schema Changes
 
-```rust
-use std::time::Duration;
-use crate::view_core;
-use crate::bot::views::{View, ResponseView, InteractiveView, ResponseKind};
-use crate::action_enum;
+See [`.opencode/skills/db-schema/SKILL.md`](.opencode/skills/db-schema/SKILL.md) for guidelines on:
+- Creating migrations with `cargo sqlx migrate add`
+- Writing safe UP/DOWN migration scripts
+- Modifying models and repository code
 
-// 1. Define your actions
-action_enum! {
-    MyAction {
-        #[label = "Click Me"]
-        ButtonClick,
-        #[label = "❮ Back"]
-        Back,
-    }
-}
+## Creating and Modifying Skills
 
-// 2. Create view struct using view_core! macro
-view_core! {
-    timeout = Duration::from_secs(120),
-    /// Description of your view
-    pub struct MyView<'a, MyAction> {
-        pub counter: i32,
-    }
-}
+When certain types of documentation or patterns become repetitive, create a skill in `.opencode/skills/<skill-name>/SKILL.md`.
 
-// 3. Implement constructor
-impl<'a> MyView<'a> {
-    pub fn new(ctx: &'a Context<'a>, counter: i32) -> Self {
-        Self {
-            counter,
-            core: Self::create_core(ctx),
-        }
-    }
-}
+### When to Create a Skill
 
-// 4. Implement ResponseView to create UI components
-impl<'a> ResponseView<'a> for MyView<'a> {
-    fn create_response<'b>(&mut self) -> ResponseKind<'b> {
-        let components = vec![
-            CreateComponent::TextDisplay(
-                CreateTextDisplay::new(format!("Counter: {}", self.counter))
-            ),
-            CreateComponent::ActionRow(CreateActionRow::Buttons(vec![
-                self.register(MyAction::ButtonClick)
-                    .as_button()
-                    .style(ButtonStyle::Primary),
-                self.register(MyAction::Back)
-                    .as_button()
-                    .style(ButtonStyle::Secondary),
-            ].into())),
-        ];
-        components.into()
-    }
-}
+Create a new skill when:
+1. A complex workflow requires multiple sequential steps that are repeated across the codebase
+2. Documentation in AGENTS.md exceeds ~50 lines for a single topic
+3. A pattern has multiple components that need to be configured together
+4. The same instructions are needed by multiple developers/sub-agents
 
-// 5. Implement InteractiveView to handle user interactions
-#[async_trait::async_trait]
-impl<'a> InteractiveView<'a, MyAction> for MyView<'a> {
-    async fn handle(
-        &mut self,
-        action: &MyAction,
-        _interaction: &ComponentInteraction,
-    ) -> Option<MyAction> {
-        match action {
-            MyAction::ButtonClick => {
-                self.counter += 1;
-                Some(action.clone())
-            }
-            MyAction::Back => Some(action.clone()),
-        }
-    }
-}
+### Skill Structure
+
+```
+.opencode/skills/<skill-name>/
+├── SKILL.md          # Main skill documentation (required)
+├── README.md         # Quick overview (optional)
+├── router.sh         # CLI entry point if skill has commands (optional)
+└── scripts/         # Script files if needed (optional)
 ```
 
-### Key View Components
+### SKILL.md Frontmatter
 
-- **Containers**: `CreateContainer` - Groups components.
-- **TextDisplay**: `CreateTextDisplay` - Markdown text.
-- **Sections**: `CreateSection` - Side-by-side layout.
-- **Buttons**: `CreateButton` - Interactive buttons (use `self.register(action).as_button()`).
-- **Select Menus**: `CreateSelectMenu` - Dropdowns (use `self.register(action).as_select(kind)`).
+Each skill must include YAML frontmatter:
 
-### View Utilities
-
-- **`RenderExt::render()`**: Send or edit the view automatically.
-- **`listen_once()`**: Wait for a single interaction (returns `Option<(Action, Interaction)>`).
-- **`register(action)`**: Registers an action and returns a `RegisteredAction` with methods:
-  - `.as_button()` - Convert to button
-  - `.as_select(kind)` - Convert to select menu
-  - `.as_select_option()` - Convert to select option
-
-## Design Patterns
-
-### Controller Pattern (MVC-C)
-
-Coordinator manages `Context` and message lifecycle. Controllers implement logic and return `NavigationResult`.
-
-**Architecture**: `Coordinator` -> `Controller` -> `View` -> `NavigationResult`
-
-```rust
-// 1. Controller
-controller! { pub struct MyController<'a> {} }
-
-#[async_trait]
-impl<S: Send + Sync + 'static> Controller<S> for MyController<'_> {
-    async fn run(&mut self, coord: &mut Coordinator<'_, S>) -> Result<NavigationResult, Error> {
-        let ctx = *coord.context();
-        // logic ...
-        coord.send(view.create_reply()).await?;
-        Ok(NavigationResult::Exit)
-    }
-}
-
-// 2. Coordinator Loop
-pub async fn run(ctx: Context<'_>) -> Result<(), Error> {
-    let mut coord = Coordinator::new(ctx);
-    // ... loop calling controller.run(&mut coord) ...
-}
+```yaml
+---
+name: <skill-name>
+description: Brief description of what this skill does and when to use it
+---
 ```
 
-**Guidelines**:
-- **Navigation**: Use `NavigationResult` unified enum (`Exit`, `Back`, `SettingsAbout`, etc.).
-- **Context**: Clone context `let ctx = *coord.context()` to avoid borrows.
-- **Recursion**: Avoid it; use the loop.
-- **Entry Point**: Create a legacy function that wraps the controller:
-```rust
-pub async fn my_command(ctx: Context<'_>) -> Result<(), Error> {
-    let mut coordinator = Coordinator::new(ctx);
-    let mut controller = MyController::new(&ctx);
-    let _result = controller.run(&mut coordinator).await?;
-    Ok(())
-}
-```
+### Guidelines for Writing Skills
+
+1. **Keep it practical** - Focus on actionable steps, not theory
+2. **Use examples** - Show real code patterns from the codebase
+3. **Include prerequisites** - What must be done before using the skill
+4. **Provide validation** - How to verify the result is correct
+5. **Reference related skills** - Link to other relevant skills
+
+### Modifying Existing Skills
+
+Update a skill when:
+- The codebase patterns change (e.g., new framework version)
+- New best practices are discovered
+- Common errors indicate the documentation needs clarification
+- The skill needs to cover additional use cases
 
 ## Commit Conventions
 
-Follow **Conventional Commits** specification:
-
-```
-<type>(<scope>): <subject>
-
-<body>
-
-<footer>
-```
-
-### Types
-- `feat`: New feature
-- `ui`: Changes to user interface
-- `fix`: Bug fix
-- `docs`: Documentation only changes
-- `style`: Code style changes (formatting, semicolons, etc.)
-- `refactor`: Code refactoring
-- `perf`: Performance improvements
-- `test`: Adding or updating tests
-- `chore`: Build process, dependencies, etc.
-
-For user-facing commits, such as command addition, user bug fixes or UI change, insert `u_` prefix to the type, e.g., `u_feat`, `u_ui(bot)`, etc.
-
-Keep this in mind when making user-facing commits: these commits will be detected by the CI, and used to generate changelogs for the user to see.
-
-### Guidelines
-- **Capitalize the first letter** of the subject line (unless it is strictly lowercase like a variable name)
-- Use present tense ("Add feature" not "Added feature")
-- Use imperative mood ("Move cursor to..." not "Moves cursor to...")
-- Include motivation for change and contrast with previous behavior in body
-
-### Examples
-```
-feat(voice): Add /vc stats command with contribution grid
-
-Add voice activity statistics command that displays historical
-data using GitHub-style contribution heatmaps.
-
-- Support user and guild stats views
-- Add time range selection
-- Display total time, average, streak, and most active day
-
-fix(db): Correct SQL query for daily average calculation
-
-The subquery was not properly aliased, causing column reference
-errors in SQLite.
-```
+See [`.opencode/skills/commit/SKILL.md`](.opencode/skills/commit/SKILL.md) for detailed commit conventions, types, user-facing commit rules (`u_` prefix), and examples.
 
 ## CI/CD
 
