@@ -102,7 +102,10 @@ impl Bot {
             .event_handler(event_handler)
             .framework(framework)
             .data(data)
-            .activity(ActivityData::playing(config.version.clone()));
+            .activity(ActivityData::playing(format!(
+                "v{}",
+                config.version.clone()
+            )));
 
         Ok(Self {
             cache: Arc::new(Cache::default()),
@@ -312,7 +315,10 @@ impl BotEventHandler {
                         info!("Commands registered globally successfully");
 
                         // Update stored version
-                        if let Err(e) = service.set_meta("bot_version", current_version).await {
+                        if let Err(e) = service
+                            .set_meta(BotMetaKey::BotVersion, current_version)
+                            .await
+                        {
                             error!("Failed to update bot version in database: {}", e);
                         }
                     }

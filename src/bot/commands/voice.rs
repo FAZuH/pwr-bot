@@ -14,6 +14,7 @@ use crate::bot::views::Action;
 pub mod leaderboard;
 pub mod settings;
 pub mod stats;
+pub mod stats_chart;
 
 /// Voice channel tracking and leaderboard commands
 ///
@@ -38,6 +39,9 @@ pub enum GuildStatType {
     /// Number of unique active users
     #[name = "Active Users"]
     ActiveUserCount,
+    /// Total voice time
+    #[name = "Total Time"]
+    TotalTime,
 }
 
 /// Common trait for time range enums.
@@ -186,22 +190,22 @@ impl TimeRange for VoiceLeaderboardTimeRange {
     }
 }
 
-/// Time range filter for voice stats (excludes All Time to avoid empty graphs).
+/// Time range filter for voice stats.
 #[derive(ChoiceParameter, Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum VoiceStatsTimeRange {
-    /// From Sunday 00:00 until now
+    /// From 1 year ago until now
     #[default]
-    #[name = "This week"]
-    ThisWeek,
-    /// From Sunday 00:00 two weeks ago until now
-    #[name = "Past 2 weeks"]
-    Past2Weeks,
-    /// From 1st of this month 00:00 until now
-    #[name = "This month"]
-    ThisMonth,
-    /// From January 1st 00:00 until now
-    #[name = "This year"]
-    ThisYear,
+    #[name = "Yearly"]
+    Yearly,
+    /// From 4 months ago until now
+    #[name = "Monthly"]
+    Monthly,
+    /// From 4 weeks ago until now
+    #[name = "Weekly"]
+    Weekly,
+    /// From 4 days ago until now
+    #[name = "Hourly"]
+    Hourly,
 }
 
 impl VoiceStatsTimeRange {
@@ -209,42 +213,16 @@ impl VoiceStatsTimeRange {
         let now = Utc::now();
 
         match self {
-            VoiceStatsTimeRange::ThisWeek => {
-                let days_since_sunday = now.weekday().num_days_from_sunday();
-                (now - Duration::days(days_since_sunday as i64))
-                    .date_naive()
-                    .and_hms_opt(0, 0, 0)
-                    .unwrap()
-                    .and_utc()
+            VoiceStatsTimeRange::Yearly => now - Duration::days(365),
+            VoiceStatsTimeRange::Monthly => {
+                now - Duration::days(30 * 4) // approx 4 months
             }
-
-            VoiceStatsTimeRange::Past2Weeks => {
-                let days_since_sunday = now.weekday().num_days_from_sunday();
-                let days_to_subtract = days_since_sunday as i64 + 7;
-                (now - Duration::days(days_to_subtract))
-                    .date_naive()
-                    .and_hms_opt(0, 0, 0)
-                    .unwrap()
-                    .and_utc()
+            VoiceStatsTimeRange::Weekly => {
+                now - Duration::days(7 * 4) // 4 weeks
             }
-
-            VoiceStatsTimeRange::ThisMonth => now
-                .date_naive()
-                .with_day(1)
-                .unwrap()
-                .and_hms_opt(0, 0, 0)
-                .unwrap()
-                .and_utc(),
-
-            VoiceStatsTimeRange::ThisYear => now
-                .date_naive()
-                .with_month(1)
-                .unwrap()
-                .with_day(1)
-                .unwrap()
-                .and_hms_opt(0, 0, 0)
-                .unwrap()
-                .and_utc(),
+            VoiceStatsTimeRange::Hourly => {
+                now - Duration::days(4) // 4 days
+            }
         }
     }
 }
@@ -256,19 +234,19 @@ impl TimeRange for VoiceStatsTimeRange {
 
     fn display_name(&self) -> &'static str {
         match self {
-            VoiceStatsTimeRange::ThisWeek => "This week",
-            VoiceStatsTimeRange::Past2Weeks => "Past 2 weeks",
-            VoiceStatsTimeRange::ThisMonth => "This month",
-            VoiceStatsTimeRange::ThisYear => "This year",
+            VoiceStatsTimeRange::Yearly => "Yearly",
+            VoiceStatsTimeRange::Monthly => "Monthly",
+            VoiceStatsTimeRange::Weekly => "Weekly",
+            VoiceStatsTimeRange::Hourly => "Hourly",
         }
     }
 
     fn from_display_name(name: &str) -> Option<Self> {
         match name {
-            "This week" => Some(VoiceStatsTimeRange::ThisWeek),
-            "Past 2 weeks" => Some(VoiceStatsTimeRange::Past2Weeks),
-            "This month" => Some(VoiceStatsTimeRange::ThisMonth),
-            "This year" => Some(VoiceStatsTimeRange::ThisYear),
+            "Yearly" => Some(VoiceStatsTimeRange::Yearly),
+            "Monthly" => Some(VoiceStatsTimeRange::Monthly),
+            "Weekly" => Some(VoiceStatsTimeRange::Weekly),
+            "Hourly" => Some(VoiceStatsTimeRange::Hourly),
             _ => None,
         }
     }
