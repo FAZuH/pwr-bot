@@ -22,6 +22,7 @@ Standard `cargo` commands work as expected. Tests require `SQLX_OFFLINE=true` (h
 ## Code Style Guidelines
 
 - **Imports**: Group `std`, external, then crate-local (see `rustfmt.toml`). No `use crate::module::*;`.
+- **Explicit Imports**: Always import items explicitly at the top of the file. Do not use `use crate::*;` anywhere in the code.
 - **Formatting**: Standard Rust (4 spaces, trailing commas). 100 char line length.
 - **Naming**: `PascalCase` types, `snake_case` functions/vars, `SCREAMING_SNAKE` consts.
 - **Errors**: Use `anyhow` for app errors, `thiserror` for custom types. Suffix with `Error`.
