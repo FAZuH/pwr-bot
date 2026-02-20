@@ -23,8 +23,8 @@ COPY ./migrations ./migrations
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo build --release
 
-# Includes glibc, libssl.so.3 and libcrypto.so.3, required by app
-FROM gcr.io/distroless/cc-debian12:latest AS app
+FROM debian:bookworm-slim AS app
+RUN apt-get update && apt-get install -y libfontconfig1 && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /app/migrations /app/migrations
 COPY --from=build /app/target/release/pwr-bot /app/pwr-bot
