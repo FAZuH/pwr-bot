@@ -213,3 +213,38 @@ pub struct GuildDailyStats {
     /// For user count: number of unique active users
     pub value: i64,
 }
+
+/// Key-value store for bot metadata (version, heartbeat timestamp, etc.)
+#[derive(FromRow, Serialize, Deserialize, Default, Clone, Debug)]
+pub struct BotMetaModel {
+    #[serde(default)]
+    pub key: String,
+    #[serde(default)]
+    pub value: String,
+}
+
+pub enum BotMetaKey {
+    VoiceHeartbeat,
+    BotVersion,
+}
+
+impl From<&BotMetaKey> for String {
+    fn from(value: &BotMetaKey) -> Self {
+        match value {
+            BotMetaKey::VoiceHeartbeat => "voice_hearbeat".to_string(),
+            BotMetaKey::BotVersion => "bot_version".to_string(),
+        }
+    }
+}
+
+impl From<BotMetaKey> for String {
+    fn from(value: BotMetaKey) -> Self {
+        String::from(&value)
+    }
+}
+
+impl ToString for BotMetaKey {
+    fn to_string(&self) -> String {
+        String::from(self)
+    }
+}

@@ -4,6 +4,7 @@ use sqlx::SqlitePool;
 use sqlx::sqlite::SqliteArguments;
 
 use crate::error::AppError;
+use crate::model::BotMetaModel;
 use crate::model::FeedItemModel;
 use crate::model::FeedModel;
 use crate::model::FeedSubscriptionModel;
@@ -18,6 +19,7 @@ use crate::model::VoiceSessionsModel;
 use crate::repository::error::DatabaseError;
 
 /// Base table struct providing database pool access.
+#[derive(Clone)]
 pub struct BaseTable {
     pub pool: SqlitePool,
 }
@@ -138,6 +140,7 @@ macro_rules! impl_table {
         $update_set:expr,
         [ $( $field:ident ),+ ]
     ) => {
+        #[derive(Clone)]
         pub struct $struct_name {
             base: BaseTable,
         }
@@ -902,5 +905,37 @@ impl VoiceSessionsTable {
 impl From<crate::model::VoiceLeaderboardOptBuilderError> for AppError {
     fn from(value: crate::model::VoiceLeaderboardOptBuilderError) -> Self {
         AppError::internal_with_ref(value)
+    }
+}
+
+// ============================================================================
+// BotMetaTable
+// ============================================================================
+
+impl_table!(
+    BotMetaTable,
+    BotMetaModel,
+    "bot_meta",
+    key,
+    String,
+    String,
+    r#"CREATE TABLE IF NOT EXISTS bot_meta (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+    )"#,
+    "key, value",
+    "?, ?",
+    "key = ?, value = ?",
+    [key, value]
+);
+
+impl BotMetaTable {
+    /// Check if the bot_meta table exists
+    pub async fn table_exists(&self) -> bool {
+        sqlx::query("SELECT name FROM sqlite_master WHERE type='table' AND name='bot_meta'")
+            .fetch_optional(&self.base.pool)
+            .await
+            .map(|opt| opt.is_some())
+            .unwrap_or(false)
     }
 }
