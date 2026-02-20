@@ -93,6 +93,18 @@ impl VoiceTrackingService {
         Ok(self.db.voice_sessions.get_leaderboard_opt(options).await?)
     }
 
+    pub async fn get_partner_leaderboard(
+        &self,
+        options: &VoiceLeaderboardOpt,
+        target_user_id: u64,
+    ) -> anyhow::Result<Vec<VoiceLeaderboardEntry>> {
+        Ok(self
+            .db
+            .voice_sessions
+            .get_partner_leaderboard(options, target_user_id)
+            .await?)
+    }
+
     pub async fn get_leaderboard(
         &self,
         guild_id: u64,
