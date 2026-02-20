@@ -24,6 +24,7 @@ use crate::bot::commands::Error;
 use crate::bot::commands::about::AboutController;
 use crate::bot::commands::feed::settings::FeedSettingsController;
 use crate::bot::commands::voice::settings::VoiceSettingsController;
+use crate::bot::commands::welcome::settings::WelcomeSettingsController;
 use crate::bot::controller::Controller;
 use crate::bot::controller::Coordinator;
 use crate::bot::error::BotError;
@@ -95,6 +96,9 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for SettingsMainController<'a> 
                 SettingsMainAction::Voice => {
                     return Ok(NavigationResult::SettingsVoice);
                 }
+                SettingsMainAction::Welcome => {
+                    return Ok(NavigationResult::SettingsWelcome);
+                }
                 SettingsMainAction::About => {
                     return Ok(NavigationResult::SettingsAbout);
                 }
@@ -114,6 +118,8 @@ pub enum SettingsPage {
     Feeds,
     /// Voice settings page
     Voice,
+    /// Welcome settings page
+    Welcome,
     /// About page
     About,
 }
@@ -151,6 +157,10 @@ pub async fn run_settings(
                 let mut controller = VoiceSettingsController::new(&ctx_clone);
                 controller.run(&mut coordinator).await?
             }
+            SettingsPage::Welcome => {
+                let mut controller = WelcomeSettingsController::new(&ctx_clone);
+                controller.run(&mut coordinator).await?
+            }
             SettingsPage::About => {
                 let mut controller = AboutController::new(&ctx_clone);
                 controller.run(&mut coordinator).await?
@@ -162,6 +172,7 @@ pub async fn run_settings(
             NavigationResult::SettingsMain => current_page = SettingsPage::Main,
             NavigationResult::SettingsFeeds => current_page = SettingsPage::Feeds,
             NavigationResult::SettingsVoice => current_page = SettingsPage::Voice,
+            NavigationResult::SettingsWelcome => current_page = SettingsPage::Welcome,
             NavigationResult::SettingsAbout => current_page = SettingsPage::About,
             NavigationResult::Back => {
                 // Go back to main from any sub-page
@@ -243,6 +254,11 @@ impl<'a> SettingsMainView<'a> {
                         Some(!self.settings_mut().voice.enabled.unwrap_or(false));
                     self.is_settings_modified = true;
                 }
+                SettingsMainAction::Welcome => {
+                    self.settings_mut().welcome.enabled =
+                        Some(!self.settings_mut().welcome.enabled.unwrap_or(false));
+                    self.is_settings_modified = true;
+                }
                 _ => {}
             }
         }
@@ -256,6 +272,9 @@ impl<'a> SettingsMainView<'a> {
         if self.settings().feeds.enabled.unwrap_or(false) {
             features.push(SettingsMainAction::Feeds);
         }
+        if self.settings().welcome.enabled.unwrap_or(false) {
+            features.push(SettingsMainAction::Welcome);
+        }
         features
     }
 
@@ -266,6 +285,9 @@ impl<'a> SettingsMainView<'a> {
         }
         if !self.settings().feeds.enabled.unwrap_or(false) {
             features.push(SettingsMainAction::Feeds);
+        }
+        if !self.settings().welcome.enabled.unwrap_or(false) {
+            features.push(SettingsMainAction::Welcome);
         }
         features
     }
@@ -390,6 +412,7 @@ action_enum! {
     SettingsMainAction {
         Feeds,
         Voice,
+        Welcome,
         AddFeatures,
         ToggleState,
         #[label = "🛈 About"]
@@ -408,7 +431,7 @@ impl<'a> InteractiveView<'a, SettingsMainAction> for SettingsMainView<'a> {
         use SettingsMainState::*;
 
         match action {
-            Feeds | Voice => match self.state {
+            Feeds | Voice | Welcome => match self.state {
                 FeatureSettings => Some(action.clone()),
                 DeactivateFeatures => {
                     self.toggle_features(from_ref(action));

@@ -115,6 +115,22 @@ pub struct ServerSettings {
     pub feeds: FeedsSettings,
     #[serde(default)]
     pub voice: VoiceSettings,
+    #[serde(default)]
+    pub welcome: WelcomeSettings,
+}
+
+#[derive(Serialize, Deserialize, Default, Clone, Debug)]
+pub struct WelcomeSettings {
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(default)]
+    pub channel_id: Option<String>,
+    #[serde(default)]
+    pub primary_color: Option<String>,
+    #[serde(default)]
+    pub template_id: Option<String>,
+    #[serde(default)]
+    pub messages: Option<Vec<String>>,
 }
 
 #[derive(Serialize, Deserialize, Default, Clone, Debug)]

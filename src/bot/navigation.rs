@@ -17,6 +17,8 @@ pub enum NavigationResult {
     SettingsFeeds,
     /// Navigate to voice settings page
     SettingsVoice,
+    /// Navigate to welcome settings page
+    SettingsWelcome,
     /// Navigate to about page (within settings context)
     SettingsAbout,
 

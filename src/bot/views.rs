@@ -262,13 +262,15 @@ pub trait InteractiveView<'a, T: Action + 'a>: View<'a, T> + Sync {
             None => return Ok(None),
         };
 
-        interaction
-            .create_response(
-                self.core().ctx.poise_ctx.http(),
-                CreateInteractionResponse::Acknowledge,
-            )
-            .await
-            .ok();
+        if Self::should_acknowledge() {
+            interaction
+                .create_response(
+                    self.core().ctx.poise_ctx.http(),
+                    CreateInteractionResponse::Acknowledge,
+                )
+                .await
+                .ok();
+        }
 
         let action = match self.resolve_action(&interaction.data.custom_id) {
             Some(action) => action,
@@ -303,6 +305,10 @@ pub trait InteractiveView<'a, T: Action + 'a>: View<'a, T> + Sync {
 
     fn children(&mut self) -> Vec<Box<dyn ChildViewResolver<T> + '_>> {
         vec![]
+    }
+
+    fn should_acknowledge() -> bool {
+        true
     }
 
     fn child<'b, C, S>(view: &'b mut S, wrap: fn(C) -> T) -> Box<dyn ChildViewResolver<T> + 'b>
