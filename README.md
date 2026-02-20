@@ -41,6 +41,8 @@ Before running the bot, you need to create a Discord application:
         - `Embed Links`
         - `Read Message History` (Required for the `!register` command)
 5.  Use the generated URL to invite the bot to your server.
+6.  Navigate to **General Information** tab:
+    - Copy the **Application ID** - needed for `ENABLE_AUTOREGISTER_CMD` feature.
 
 ## Installation & Usage
 
@@ -139,6 +141,8 @@ See `.env-example` for available configuration options.
 | `DATA_PATH` | Directory for data files | `./data` |
 | `ENABLE_VOICE_TRACKING` | Enable voice channel tracking and heartbeat | `true` |
 | `ENABLE_FEED_PUBLISHER` | Enable feed polling and publishing | `true` |
+| `ENABLE_AUTOREGISTER_CMD` | Enable autorregister command | `true` |
+| `DISCORD_APPLICATION_ID` | Discord Application ID. Required for command autoregistration feature | `1234567890` |
 | `RUST_LOG` | Log level (e.g., `info`, `debug`. Read [here](https://rust-lang-nursery.github.io/rust-cookbook/development_tools/debugging/config_log.html) for more info) | `pwr_bot=info` |
 
 ## Command Registration

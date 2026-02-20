@@ -7,6 +7,7 @@ use log::info;
 use sqlx::SqlitePool;
 use sqlx::sqlite::SqliteConnectOptions;
 
+use crate::repository::table::BotMetaTable;
 use crate::repository::table::FeedItemTable;
 use crate::repository::table::FeedSubscriptionTable;
 use crate::repository::table::FeedTable;
@@ -27,6 +28,7 @@ pub struct Repository {
     pub feed_subscription: FeedSubscriptionTable,
     pub server_settings: ServerSettingsTable,
     pub voice_sessions: VoiceSessionsTable,
+    pub bot_meta: BotMetaTable,
 }
 
 impl Repository {
@@ -53,6 +55,7 @@ impl Repository {
         let feed_subscription = FeedSubscriptionTable::new(pool.clone());
         let server_settings = ServerSettingsTable::new(pool.clone());
         let voice_sessions = VoiceSessionsTable::new(pool.clone());
+        let bot_meta = BotMetaTable::new(pool.clone());
 
         Ok(Self {
             pool,
@@ -62,6 +65,7 @@ impl Repository {
             feed_subscription,
             server_settings,
             voice_sessions,
+            bot_meta,
         })
     }
 

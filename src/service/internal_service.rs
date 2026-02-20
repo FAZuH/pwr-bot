@@ -1,23 +1,45 @@
-//! Administrative and maintenance service.
+//! Internal service for bot metadata and maintenance operations.
 
 use std::sync::Arc;
 
+use crate::model::BotMetaModel;
 use crate::model::FeedItemModel;
 use crate::model::FeedModel;
 use crate::model::FeedSubscriptionModel;
 use crate::model::SubscriberModel;
 use crate::repository::Repository;
+use crate::repository::error::DatabaseError;
 use crate::repository::table::Table;
 
-/// Service for administrative and maintenance tasks.
-pub struct MaintenanceService {
+/// Internal service for metadata and maintenance operations.
+pub struct InternalService {
     db: Arc<Repository>,
 }
 
-impl MaintenanceService {
-    /// Creates a new maintenance service.
+impl InternalService {
+    /// Creates a new internal service.
     pub fn new(db: Arc<Repository>) -> Self {
         Self { db }
+    }
+
+    /// Get a metadata value by key.
+    pub async fn get_meta(&self, key: impl Into<String>) -> Result<Option<String>, DatabaseError> {
+        let result = self.db.bot_meta.select(&key.into()).await?;
+        Ok(result.map(|m| m.value))
+    }
+
+    /// Set a metadata value by key (upsert).
+    pub async fn set_meta(
+        &self,
+        key: impl Into<String>,
+        value: impl Into<String>,
+    ) -> Result<(), DatabaseError> {
+        let model = BotMetaModel {
+            key: key.into(),
+            value: value.into(),
+        };
+        self.db.bot_meta.replace(&model).await?;
+        Ok(())
     }
 
     /// Dumps all database tables for inspection.
