@@ -1,3 +1,11 @@
+## [0.2.9](https://github.com/FAZuH/pwr-bot/compare/v0.2.8...v0.2.9) (2026-02-20)
+
+
+### UI/UX Changes
+
+* Improve /vc stats results ([624a186](https://github.com/FAZuH/pwr-bot/commit/624a186787918447c1ff26a7f0ea6db1bd0f31cb))
+* Small improvement to bot activity ([840ac93](https://github.com/FAZuH/pwr-bot/commit/840ac9369cc91048de4aef813785842216c5b026))
+
 ## [0.2.8](https://github.com/FAZuH/pwr-bot/compare/v0.2.7...v0.2.8) (2026-02-20)
 
 
@@ -40,16 +48,4 @@
 * **bot:** Make link "no version found" of /feed subscriptions a markdown link ([661c661](https://github.com/FAZuH/pwr-bot/commit/661c6618a87a07dc6926f2815ee0dfcd5fa13e85))
 * **bot:** Rename /feed subscriptions to /feed list ([1bf0008](https://github.com/FAZuH/pwr-bot/commit/1bf00087c0343e5ad9c4120ba89c6dae6711213e))
 * **bot:** Show time range as relative timestamps in /vc leaderboard ([72a6a2d](https://github.com/FAZuH/pwr-bot/commit/72a6a2de9f8bd235c09b3d326500b9f783b87a63)), closes [#55](https://github.com/FAZuH/pwr-bot/issues/55)
-
-## [0.2.4](https://github.com/FAZuH/pwr-bot/compare/v0.2.3...v0.2.4) (2026-02-14)
-
-
-### New Features
-
-* **bot:** Add options to disable app features ([27b6038](https://github.com/FAZuH/pwr-bot/commit/27b60386d4d061d589ae2ae770b7f10758af58d9))
-
-
-### UI/UX Changes
-
-* **bot:** Remove page navigation buttons on timeout ([ad28e23](https://github.com/FAZuH/pwr-bot/commit/ad28e231df2f1f68eb6fe3daa7575367b8d3d823))
 
