@@ -312,7 +312,10 @@ impl BotEventHandler {
                         info!("Commands registered globally successfully");
 
                         // Update stored version
-                        if let Err(e) = service.set_meta("bot_version", current_version).await {
+                        if let Err(e) = service
+                            .set_meta(BotMetaKey::BotVersion, current_version)
+                            .await
+                        {
                             error!("Failed to update bot version in database: {}", e);
                         }
                     }

@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use crate::model::BotMetaKey;
 use crate::model::BotMetaModel;
 use crate::model::FeedItemModel;
 use crate::model::FeedModel;
@@ -23,7 +24,7 @@ impl InternalService {
     }
 
     /// Get a metadata value by key.
-    pub async fn get_meta(&self, key: impl Into<String>) -> Result<Option<String>, DatabaseError> {
+    pub async fn get_meta(&self, key: BotMetaKey) -> Result<Option<String>, DatabaseError> {
         let result = self.db.bot_meta.select(&key.into()).await?;
         Ok(result.map(|m| m.value))
     }
@@ -31,7 +32,7 @@ impl InternalService {
     /// Set a metadata value by key (upsert).
     pub async fn set_meta(
         &self,
-        key: impl Into<String>,
+        key: BotMetaKey,
         value: impl Into<String>,
     ) -> Result<(), DatabaseError> {
         let model = BotMetaModel {
