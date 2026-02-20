@@ -122,14 +122,14 @@ action_enum! {
         TimeWeekly,
         #[label = "Hourly"]
         TimeHourly,
-        
+
         #[label = "Unique Users"]
         StatUniqueUsers,
         #[label = "Total Time"]
         StatTotalTime,
         #[label = "Average Time"]
         StatAverageTime,
-        
+
         ToggleDataMode,
         SelectUser,
     }
@@ -285,7 +285,9 @@ impl<'a> VoiceStatsView<'a> {
         } else {
             // Guild stats: map day -> value (minutes for time, count for users)
             for stat in &self.data.guild_stats {
-                let value = if self.data.stat_type == GuildStatType::AverageTime || self.data.stat_type == GuildStatType::TotalTime {
+                let value = if self.data.stat_type == GuildStatType::AverageTime
+                    || self.data.stat_type == GuildStatType::TotalTime
+                {
                     (stat.value / 60).max(1) as u32
                 } else {
                     stat.value as u32
@@ -461,46 +463,98 @@ impl<'a> ResponseView<'a> for VoiceStatsView<'a> {
         } else {
             "Show stats for users".to_string()
         };
-        
+
         let toggle_button = self
             .register(ToggleDataMode)
             .as_button()
             .label(toggle_label)
             .style(ButtonStyle::Primary);
-            
+
         container_components.push(CreateContainerComponent::ActionRow(
-            CreateActionRow::Buttons(vec![toggle_button].into())
+            CreateActionRow::Buttons(vec![toggle_button].into()),
         ));
 
-        let mut components = vec![
-            CreateComponent::Container(CreateContainer::new(container_components)),
-        ];
+        let mut components = vec![CreateComponent::Container(CreateContainer::new(
+            container_components,
+        ))];
 
         // 1. Time Range Row
         let time_buttons = vec![
-            self.register(TimeYearly).as_button().style(if self.data.time_range == VoiceStatsTimeRange::Yearly { ButtonStyle::Primary } else { ButtonStyle::Secondary }),
-            self.register(TimeMonthly).as_button().style(if self.data.time_range == VoiceStatsTimeRange::Monthly { ButtonStyle::Primary } else { ButtonStyle::Secondary }),
-            self.register(TimeWeekly).as_button().style(if self.data.time_range == VoiceStatsTimeRange::Weekly { ButtonStyle::Primary } else { ButtonStyle::Secondary }),
-            self.register(TimeHourly).as_button().style(if self.data.time_range == VoiceStatsTimeRange::Hourly { ButtonStyle::Primary } else { ButtonStyle::Secondary }),
+            self.register(TimeYearly).as_button().style(
+                if self.data.time_range == VoiceStatsTimeRange::Yearly {
+                    ButtonStyle::Primary
+                } else {
+                    ButtonStyle::Secondary
+                },
+            ),
+            self.register(TimeMonthly).as_button().style(
+                if self.data.time_range == VoiceStatsTimeRange::Monthly {
+                    ButtonStyle::Primary
+                } else {
+                    ButtonStyle::Secondary
+                },
+            ),
+            self.register(TimeWeekly).as_button().style(
+                if self.data.time_range == VoiceStatsTimeRange::Weekly {
+                    ButtonStyle::Primary
+                } else {
+                    ButtonStyle::Secondary
+                },
+            ),
+            self.register(TimeHourly).as_button().style(
+                if self.data.time_range == VoiceStatsTimeRange::Hourly {
+                    ButtonStyle::Primary
+                } else {
+                    ButtonStyle::Secondary
+                },
+            ),
         ];
-        components.push(CreateComponent::ActionRow(CreateActionRow::Buttons(time_buttons.into())));
+        components.push(CreateComponent::ActionRow(CreateActionRow::Buttons(
+            time_buttons.into(),
+        )));
 
         // 2. Aggregation Row (Only for Guild)
         let mut stat_buttons = vec![];
         if !self.data.is_user_stats() {
-            stat_buttons.push(self.register(StatUniqueUsers).as_button().style(if self.data.stat_type == GuildStatType::ActiveUserCount { ButtonStyle::Primary } else { ButtonStyle::Secondary }));
+            stat_buttons.push(self.register(StatUniqueUsers).as_button().style(
+                if self.data.stat_type == GuildStatType::ActiveUserCount {
+                    ButtonStyle::Primary
+                } else {
+                    ButtonStyle::Secondary
+                },
+            ));
         }
-        stat_buttons.push(self.register(StatTotalTime).as_button().style(if self.data.stat_type == GuildStatType::TotalTime { ButtonStyle::Primary } else { ButtonStyle::Secondary }));
-        stat_buttons.push(self.register(StatAverageTime).as_button().style(if self.data.stat_type == GuildStatType::AverageTime { ButtonStyle::Primary } else { ButtonStyle::Secondary }));
-        components.push(CreateComponent::ActionRow(CreateActionRow::Buttons(stat_buttons.into())));
+        stat_buttons.push(self.register(StatTotalTime).as_button().style(
+            if self.data.stat_type == GuildStatType::TotalTime {
+                ButtonStyle::Primary
+            } else {
+                ButtonStyle::Secondary
+            },
+        ));
+        stat_buttons.push(self.register(StatAverageTime).as_button().style(
+            if self.data.stat_type == GuildStatType::AverageTime {
+                ButtonStyle::Primary
+            } else {
+                ButtonStyle::Secondary
+            },
+        ));
+        components.push(CreateComponent::ActionRow(CreateActionRow::Buttons(
+            stat_buttons.into(),
+        )));
 
         // 3. User Select Menu (Only for User)
         if self.data.is_user_stats() {
-            let default_users = self.data.user.clone().map(|u| std::borrow::Cow::Owned(vec![u.id]));
+            let default_users = self
+                .data
+                .user
+                .clone()
+                .map(|u| std::borrow::Cow::Owned(vec![u.id]));
             let user_select = self
                 .register(SelectUser)
-                .as_select(serenity::all::CreateSelectMenuKind::User { default_users }) ;
-            components.push(CreateComponent::ActionRow(CreateActionRow::SelectMenu(user_select)));
+                .as_select(serenity::all::CreateSelectMenuKind::User { default_users });
+            components.push(CreateComponent::ActionRow(CreateActionRow::SelectMenu(
+                user_select,
+            )));
         }
 
         components.into()
@@ -529,15 +583,36 @@ impl<'a> InteractiveView<'a, VoiceStatsAction> for VoiceStatsView<'a> {
         use VoiceStatsAction::*;
 
         match action {
-            TimeYearly => { self.data.time_range = VoiceStatsTimeRange::Yearly; Some(action.clone()) }
-            TimeMonthly => { self.data.time_range = VoiceStatsTimeRange::Monthly; Some(action.clone()) }
-            TimeWeekly => { self.data.time_range = VoiceStatsTimeRange::Weekly; Some(action.clone()) }
-            TimeHourly => { self.data.time_range = VoiceStatsTimeRange::Hourly; Some(action.clone()) }
-            
-            StatUniqueUsers => { self.data.stat_type = GuildStatType::ActiveUserCount; Some(action.clone()) }
-            StatTotalTime => { self.data.stat_type = GuildStatType::TotalTime; Some(action.clone()) }
-            StatAverageTime => { self.data.stat_type = GuildStatType::AverageTime; Some(action.clone()) }
-            
+            TimeYearly => {
+                self.data.time_range = VoiceStatsTimeRange::Yearly;
+                Some(action.clone())
+            }
+            TimeMonthly => {
+                self.data.time_range = VoiceStatsTimeRange::Monthly;
+                Some(action.clone())
+            }
+            TimeWeekly => {
+                self.data.time_range = VoiceStatsTimeRange::Weekly;
+                Some(action.clone())
+            }
+            TimeHourly => {
+                self.data.time_range = VoiceStatsTimeRange::Hourly;
+                Some(action.clone())
+            }
+
+            StatUniqueUsers => {
+                self.data.stat_type = GuildStatType::ActiveUserCount;
+                Some(action.clone())
+            }
+            StatTotalTime => {
+                self.data.stat_type = GuildStatType::TotalTime;
+                Some(action.clone())
+            }
+            StatAverageTime => {
+                self.data.stat_type = GuildStatType::AverageTime;
+                Some(action.clone())
+            }
+
             ToggleDataMode => {
                 // Controller will handle this by returning from wait loop
                 Some(action.clone())
@@ -655,7 +730,10 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceStatsController<'a> {
         let mut view = VoiceStatsView::new(&ctx, data);
 
         // Generate and send the image
-        if !view.data.user_activity.is_empty() || !view.data.guild_stats.is_empty() || !view.data.raw_sessions.is_empty() {
+        if !view.data.user_activity.is_empty()
+            || !view.data.guild_stats.is_empty()
+            || !view.data.raw_sessions.is_empty()
+        {
             let bytes = view.generate_image().map_err(AppError::internal_with_ref)?;
             view.set_image_bytes(bytes);
         }
@@ -681,12 +759,12 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceStatsController<'a> {
                     }
                 }
                 VoiceStatsAction::SelectUser => {
-                    if let serenity::all::ComponentInteractionDataKind::UserSelect { values } = &interaction.data.kind {
-                        if let Some(_user_id) = values.first() {
-                            if let Ok(user) = _user_id.to_user(ctx.http()).await {
-                                self.target_user = Some(user);
-                            }
-                        }
+                    if let serenity::all::ComponentInteractionDataKind::UserSelect { values } =
+                        &interaction.data.kind
+                        && let Some(_user_id) = values.first()
+                        && let Ok(user) = _user_id.to_user(ctx.http()).await
+                    {
+                        self.target_user = Some(user);
                     }
                 }
                 _ => {
@@ -701,7 +779,10 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceStatsController<'a> {
             view.data = new_data;
 
             // Regenerate image
-            if !view.data.user_activity.is_empty() || !view.data.guild_stats.is_empty() || !view.data.raw_sessions.is_empty() {
+            if !view.data.user_activity.is_empty()
+                || !view.data.guild_stats.is_empty()
+                || !view.data.raw_sessions.is_empty()
+            {
                 let bytes = view.generate_image().map_err(AppError::internal_with_ref)?;
                 view.set_image_bytes(bytes);
             } else {

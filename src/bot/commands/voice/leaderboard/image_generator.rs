@@ -108,10 +108,11 @@ impl LeaderboardImageGenerator {
         // 1. Ensure all avatars are cached
         for entry in entries {
             if let Some(img) = &entry.avatar_image
-                && !self.avatar_cache.contains_key(&entry.avatar_url) {
-                    let b64 = self.process_avatar_to_b64(img);
-                    self.avatar_cache.insert(entry.avatar_url.clone(), b64);
-                }
+                && !self.avatar_cache.contains_key(&entry.avatar_url)
+            {
+                let b64 = self.process_avatar_to_b64(img);
+                self.avatar_cache.insert(entry.avatar_url.clone(), b64);
+            }
         }
 
         // 2. Pre-calculate metrics to keep the template logic-less

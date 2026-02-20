@@ -213,9 +213,7 @@ impl VoiceStatsTimeRange {
         let now = Utc::now();
 
         match self {
-            VoiceStatsTimeRange::Yearly => {
-                now - Duration::days(365)
-            }
+            VoiceStatsTimeRange::Yearly => now - Duration::days(365),
             VoiceStatsTimeRange::Monthly => {
                 now - Duration::days(30 * 4) // approx 4 months
             }

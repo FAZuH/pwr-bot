@@ -1,8 +1,12 @@
 //! Chart generation for voice stats.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use std::collections::HashSet;
 
-use chrono::{DateTime, Datelike, Duration, Local, NaiveDate, Timelike, Utc, Weekday};
+use chrono::DateTime;
+use chrono::Datelike;
+use chrono::Timelike;
+use chrono::Utc;
 use image::ImageEncoder;
 use plotters::prelude::*;
 
@@ -17,7 +21,7 @@ fn duration_secs(session: &VoiceSessionsModel, now: DateTime<Utc>) -> i64 {
     } else {
         session.leave_time
     };
-    (leave - session.join_time).num_seconds().max(0).min(86400)
+    (leave - session.join_time).num_seconds().clamp(0, 86400)
 }
 
 /// Generate a line chart for the given time range and aggregation
@@ -80,7 +84,7 @@ pub fn generate_line_chart(
                 let diff_days = (now.date_naive() - session.join_time.date_naive()).num_days();
                 // week offset
                 let weeks_ago = (diff_days + now.weekday().num_days_from_monday() as i64) / 7;
-                if weeks_ago > 3 || weeks_ago < 0 {
+                if !(0..=3).contains(&weeks_ago) {
                     continue;
                 }
                 (
@@ -91,7 +95,7 @@ pub fn generate_line_chart(
             VoiceStatsTimeRange::Monthly => {
                 let months_ago = (now.year() - session.join_time.year()) * 12
                     + (now.month() as i32 - session.join_time.month() as i32);
-                if months_ago > 3 || months_ago < 0 {
+                if !(0..=3).contains(&months_ago) {
                     continue;
                 }
                 (months_ago as u32, session.join_time.day())
@@ -148,7 +152,9 @@ pub fn generate_line_chart(
             count += 1.0;
         }
         let mean = sum / f64::max(count, 1.0);
-        if mean > max_y { max_y = mean; }
+        if mean > max_y {
+            max_y = mean;
+        }
         mean_data.push((x_val, mean));
     }
     series_data.push(mean_data);
@@ -171,8 +177,17 @@ pub fn generate_line_chart(
             .configure_mesh()
             .disable_x_mesh()
             .disable_y_mesh()
-            .x_desc(match time_range { VoiceStatsTimeRange::Hourly => "Hour of Day", VoiceStatsTimeRange::Weekly => "Day of Week", VoiceStatsTimeRange::Monthly => "Day of Month", _ => "" })
-            .y_desc(if stat_type == GuildStatType::ActiveUserCount && !is_user { "Users" } else { "Hours" })
+            .x_desc(match time_range {
+                VoiceStatsTimeRange::Hourly => "Hour of Day",
+                VoiceStatsTimeRange::Weekly => "Day of Week",
+                VoiceStatsTimeRange::Monthly => "Day of Month",
+                _ => "",
+            })
+            .y_desc(if stat_type == GuildStatType::ActiveUserCount && !is_user {
+                "Users"
+            } else {
+                "Hours"
+            })
             .label_style(("sans-serif", 15).into_font().color(&WHITE))
             .x_label_formatter(&|x| {
                 if *x >= x_min && *x <= x_max {
@@ -181,10 +196,10 @@ pub fn generate_line_chart(
                     "".to_string()
                 }
             })
-            .axis_style(&WHITE)
+            .axis_style(WHITE)
             .draw()?;
 
-        let colors = vec![
+        let colors = [
             &RGBColor(128, 128, 128), // 3 periods ago (grey)
             &RGBColor(180, 180, 180), // 2 periods ago (light grey)
             &RGBColor(152, 195, 121), // 1 period ago (greenish)
@@ -233,17 +248,14 @@ pub fn generate_line_chart(
                 ))?
                 .label(labels[i])
                 .legend(move |(x, y)| {
-                    PathElement::new(
-                        vec![(x, y), (x + 20, y)],
-                        c.stroke_width(stroke_width),
-                    )
+                    PathElement::new(vec![(x, y), (x + 20, y)], c.stroke_width(stroke_width))
                 });
         }
 
         chart
             .configure_series_labels()
-            .background_style(&RGBColor(30, 31, 34))
-            .border_style(&BLACK)
+            .background_style(RGBColor(30, 31, 34))
+            .border_style(BLACK)
             .label_font(("sans-serif", 15).into_font().color(&WHITE))
             .position(SeriesLabelPosition::UpperLeft)
             .draw()?;
@@ -265,8 +277,11 @@ pub fn generate_line_chart(
 
 #[cfg(test)]
 mod tests {
+
+    use chrono::Duration;
+    use chrono::Utc;
+
     use super::*;
-    use chrono::{TimeZone, Utc, Duration, Datelike};
 
     #[test]
     fn test_duration_capping() {
