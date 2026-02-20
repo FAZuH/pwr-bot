@@ -57,11 +57,12 @@ pub trait TimeRange: Copy {
 /// Time range filter for voice activity leaderboard.
 #[derive(ChoiceParameter, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VoiceLeaderboardTimeRange {
-    /// From 00:00 today until now
-    Today,
-    /// From 00:00 3 days ago until now
-    #[name = "Past 3 days"]
-    Past3Days,
+    /// From 24 hours ago until now
+    #[name = "Past 24 hours"]
+    Past24Hours,
+    /// From 72 hours ago until now
+    #[name = "Past 72 hours"]
+    Past72Hours,
     /// From Sunday 00:00 until now
     #[name = "This week"]
     ThisWeek,
@@ -90,19 +91,9 @@ impl From<VoiceLeaderboardTimeRange> for DateTime<Utc> {
         let now = Utc::now();
 
         match range {
-            VoiceLeaderboardTimeRange::Today => {
-                // From 00:00 today
-                now.date_naive().and_hms_opt(0, 0, 0).unwrap().and_utc()
-            }
+            VoiceLeaderboardTimeRange::Past24Hours => now - Duration::hours(24),
 
-            VoiceLeaderboardTimeRange::Past3Days => {
-                // From 00:00 3 days ago (today + 2 days ago = 3 days total)
-                (now - Duration::days(2))
-                    .date_naive()
-                    .and_hms_opt(0, 0, 0)
-                    .unwrap()
-                    .and_utc()
-            }
+            VoiceLeaderboardTimeRange::Past72Hours => now - Duration::hours(72),
 
             VoiceLeaderboardTimeRange::ThisWeek => {
                 // From Sunday 00:00 of this week
@@ -166,8 +157,8 @@ impl TimeRange for VoiceLeaderboardTimeRange {
 
     fn display_name(&self) -> &'static str {
         match self {
-            VoiceLeaderboardTimeRange::Today => "Today",
-            VoiceLeaderboardTimeRange::Past3Days => "Past 3 days",
+            VoiceLeaderboardTimeRange::Past24Hours => "Past 24 hours",
+            VoiceLeaderboardTimeRange::Past72Hours => "Past 72 hours",
             VoiceLeaderboardTimeRange::ThisWeek => "This week",
             VoiceLeaderboardTimeRange::Past2Weeks => "Past 2 weeks",
             VoiceLeaderboardTimeRange::ThisMonth => "This month",
@@ -178,8 +169,8 @@ impl TimeRange for VoiceLeaderboardTimeRange {
 
     fn from_display_name(name: &str) -> Option<Self> {
         match name {
-            "Today" => Some(VoiceLeaderboardTimeRange::Today),
-            "Past 3 days" => Some(VoiceLeaderboardTimeRange::Past3Days),
+            "Past 24 hours" => Some(VoiceLeaderboardTimeRange::Past24Hours),
+            "Past 72 hours" => Some(VoiceLeaderboardTimeRange::Past72Hours),
             "This week" => Some(VoiceLeaderboardTimeRange::ThisWeek),
             "Past 2 weeks" => Some(VoiceLeaderboardTimeRange::Past2Weeks),
             "This month" => Some(VoiceLeaderboardTimeRange::ThisMonth),

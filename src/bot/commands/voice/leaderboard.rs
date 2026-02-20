@@ -409,8 +409,8 @@ impl<'a> ResponseView<'a> for VoiceLeaderboardView<'a> {
             .register(TimeRange)
             .as_select(CreateSelectMenuKind::String {
                 options: vec![
-                    Today.into(),
-                    Past3Days.into(),
+                    Past24Hours.into(),
+                    Past72Hours.into(),
                     ThisWeek.into(),
                     Past2Weeks.into(),
                     ThisMonth.into(),
@@ -556,7 +556,7 @@ mod tests {
     #[test]
     fn test_voice_leaderboard_time_range_to_range() {
         // Test that to_range returns valid datetime range
-        let (since, until) = VoiceLeaderboardTimeRange::Today.to_range();
+        let (since, until) = VoiceLeaderboardTimeRange::Past24Hours.to_range();
         assert!(since <= until);
 
         let (since, until) = VoiceLeaderboardTimeRange::AllTime.to_range();
@@ -567,8 +567,9 @@ mod tests {
     #[test]
     fn test_voice_leaderboard_time_range_into_datetime() {
         let now = chrono::Utc::now();
-        let today_start: chrono::DateTime<chrono::Utc> = VoiceLeaderboardTimeRange::Today.into();
-        assert!(today_start <= now);
+        let past_24h_start: chrono::DateTime<chrono::Utc> =
+            VoiceLeaderboardTimeRange::Past24Hours.into();
+        assert!(past_24h_start <= now);
 
         let all_time_start: chrono::DateTime<chrono::Utc> =
             VoiceLeaderboardTimeRange::AllTime.into();
@@ -577,8 +578,30 @@ mod tests {
 
     #[test]
     fn test_voice_leaderboard_time_range_equality() {
-        let range1 = VoiceLeaderboardTimeRange::Today;
-        let range2 = VoiceLeaderboardTimeRange::Today;
+        let range1 = VoiceLeaderboardTimeRange::Past24Hours;
+        let range2 = VoiceLeaderboardTimeRange::Past24Hours;
+        let range3 = VoiceLeaderboardTimeRange::ThisMonth;
+
+        assert_eq!(range1, range2);
+        assert_ne!(range1, range3);
+    }
+
+    #[test]
+    fn test_voice_leaderboard_time_range_into_datetime() {
+        let now = chrono::Utc::now();
+        let past_24h_start: chrono::DateTime<chrono::Utc> =
+            VoiceLeaderboardTimeRange::Past24Hours.into();
+        assert!(past_24h_start <= now);
+
+        let all_time_start: chrono::DateTime<chrono::Utc> =
+            VoiceLeaderboardTimeRange::AllTime.into();
+        assert_eq!(all_time_start, chrono::DateTime::UNIX_EPOCH);
+    }
+
+    #[test]
+    fn test_voice_leaderboard_time_range_equality() {
+        let range1 = VoiceLeaderboardTimeRange::Past24Hours;
+        let range2 = VoiceLeaderboardTimeRange::Past24Hours;
         let range3 = VoiceLeaderboardTimeRange::ThisMonth;
 
         assert_eq!(range1, range2);
