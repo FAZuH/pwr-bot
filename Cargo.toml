@@ -41,6 +41,7 @@ contribution-grid = "2.0.1"
 minijinja = "2.15.1"
 base64 = "0.22.1"
 resvg = "0.47.0"
+plotters = "0.3.7"
 
 [dev-dependencies]
 httpmock = "0.7.0"

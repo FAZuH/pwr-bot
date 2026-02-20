@@ -804,6 +804,46 @@ impl VoiceSessionsTable {
         .await?)
     }
 
+    /// Get all sessions for a specific user (if given) or guild within a time range
+    pub async fn get_sessions_in_range(
+        &self,
+        guild_id: u64,
+        user_id: Option<u64>,
+        since: &chrono::DateTime<chrono::Utc>,
+        until: &chrono::DateTime<chrono::Utc>,
+    ) -> Result<Vec<VoiceSessionsModel>, DatabaseError> {
+        if let Some(uid) = user_id {
+            Ok(sqlx::query_as::<_, VoiceSessionsModel>(
+                r#"
+                SELECT *
+                FROM voice_sessions
+                WHERE user_id = ? AND guild_id = ? AND join_time >= ? AND join_time <= ?
+                ORDER BY join_time ASC
+                "#,
+            )
+            .bind(uid as i64)
+            .bind(guild_id as i64)
+            .bind(since)
+            .bind(until)
+            .fetch_all(&self.base.pool)
+            .await?)
+        } else {
+            Ok(sqlx::query_as::<_, VoiceSessionsModel>(
+                r#"
+                SELECT *
+                FROM voice_sessions
+                WHERE guild_id = ? AND join_time >= ? AND join_time <= ?
+                ORDER BY join_time ASC
+                "#,
+            )
+            .bind(guild_id as i64)
+            .bind(since)
+            .bind(until)
+            .fetch_all(&self.base.pool)
+            .await?)
+        }
+    }
+
     /// Get daily voice activity for a specific user in a guild.
     /// Returns daily totals within the specified time range.
     pub async fn get_user_daily_activity(
@@ -831,6 +871,44 @@ impl VoiceSessionsTable {
             "#,
         )
         .bind(user_id as i64)
+        .bind(guild_id as i64)
+        .bind(since)
+        .bind(until)
+        .fetch_all(&self.base.pool)
+        .await?)
+    }
+
+    /// Get guild-wide daily statistics: total time.
+    pub async fn get_guild_daily_total_time(
+        &self,
+        guild_id: u64,
+        since: &chrono::DateTime<chrono::Utc>,
+        until: &chrono::DateTime<chrono::Utc>,
+    ) -> Result<Vec<crate::model::GuildDailyStats>, DatabaseError> {
+        Ok(sqlx::query_as::<_, crate::model::GuildDailyStats>(
+            r#"
+            SELECT 
+                day,
+                SUM(user_daily_total) as value
+            FROM (
+                SELECT 
+                    user_id,
+                    date(join_time) as day,
+                    SUM(
+                        CASE 
+                            WHEN leave_time = join_time 
+                            THEN strftime('%s', 'now') - strftime('%s', join_time)
+                            ELSE strftime('%s', leave_time) - strftime('%s', join_time)
+                        END
+                    ) as user_daily_total
+                FROM voice_sessions
+                WHERE guild_id = ? AND join_time >= ? AND join_time <= ?
+                GROUP BY user_id, date(join_time)
+            ) user_totals
+            GROUP BY day
+            ORDER BY day
+            "#,
+        )
         .bind(guild_id as i64)
         .bind(since)
         .bind(until)

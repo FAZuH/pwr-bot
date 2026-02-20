@@ -147,6 +147,20 @@ impl VoiceTrackingService {
         Ok(self.db.voice_sessions.find_active_sessions().await?)
     }
 
+    pub async fn get_sessions_in_range(
+        &self,
+        guild_id: u64,
+        user_id: Option<u64>,
+        since: &DateTime<Utc>,
+        until: &DateTime<Utc>,
+    ) -> anyhow::Result<Vec<VoiceSessionsModel>> {
+        Ok(self
+            .db
+            .voice_sessions
+            .get_sessions_in_range(guild_id, user_id, since, until)
+            .await?)
+    }
+
     /// Get daily voice activity for a specific user in a guild.
     pub async fn get_user_daily_activity(
         &self,
@@ -180,6 +194,11 @@ impl VoiceTrackingService {
                 .db
                 .voice_sessions
                 .get_guild_daily_user_count(guild_id, since, until)
+                .await?),
+            GuildStatType::TotalTime => Ok(self
+                .db
+                .voice_sessions
+                .get_guild_daily_total_time(guild_id, since, until)
                 .await?),
         }
     }
