@@ -102,7 +102,7 @@ impl Bot {
             .event_handler(event_handler)
             .framework(framework)
             .data(data)
-            .activity(ActivityData::playing(config.version.clone()));
+            .activity(ActivityData::playing(format!("v{}", config.version.clone())));
 
         Ok(Self {
             cache: Arc::new(Cache::default()),
