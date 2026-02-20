@@ -65,7 +65,7 @@ graph TB
         SettingsService["SettingsService<br/>get · update"]
         FeedService["FeedSubscriptionService"]
         VoiceService["VoiceTrackingService"]
-        MaintenanceService["MaintenanceService"]
+        InternalService["InternalService"]
         SettingsService --> FeedService & VoiceService
     end
 
@@ -88,7 +88,8 @@ graph TB
             SubscriberTable["SubscriberTable"]
             VoiceTable["VoiceSessionsTable"]
             SettingsTable["ServerSettingsTable"]
-            Repo --> FeedTable & FeedItemTable & SubscriberTable & VoiceTable & SettingsTable
+            BotMetaTable["BotMetaTable"]
+            Repo --> FeedTable & FeedItemTable & SubscriberTable & VoiceTable & SettingsTable & BotMetaTable
         end
         SQLite["SQLite  ·  SQLx async"]
         FeedTable & FeedItemTable & SubscriberTable & VoiceTable & SettingsTable --> SQLite

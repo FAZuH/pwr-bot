@@ -186,6 +186,7 @@ pub struct Repository {
     pub feed_subscription: FeedSubscriptionTable,
     pub server_settings: ServerSettingsTable,
     pub voice_sessions: VoiceSessionsTable,
+    pub bot_meta: BotMetaTable,
     // Add new table here
     pub user_preferences: UserPreferencesTable,
 }
@@ -195,6 +196,7 @@ impl Repository {
         // ... existing code ...
         
         // Initialize new table
+        let bot_meta = BotMetaTable::new(pool.clone());
         let user_preferences = UserPreferencesTable::new(pool.clone());
         
         Ok(Self {
@@ -205,6 +207,7 @@ impl Repository {
             feed_subscription,
             server_settings,
             voice_sessions,
+            bot_meta,
             // Add to struct
             user_preferences,
         })
