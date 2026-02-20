@@ -1,0 +1,24 @@
+<svg width="600" height="250" viewBox="0 0 600 250" xmlns="http://www.w3.org/2000/svg" style="background-color: #1E1F22; font-family: sans-serif; border-radius: 20px;">
+    <!-- Abstract pattern -->
+    <path d="M0 0 L200 250 L0 250 Z" fill="{{ primary_color }}" opacity="0.15"/>
+    <path d="M600 0 L400 0 L600 250 Z" fill="{{ primary_color }}" opacity="0.05"/>
+    
+    <defs>
+        <clipPath id="avatar-clip"><circle cx="125" cy="125" r="70"/></clipPath>
+        <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="{{ primary_color }}"/>
+            <stop offset="100%" stop-color="#2B2D31"/>
+        </linearGradient>
+    </defs>
+    
+    <!-- Avatar -->
+    <circle cx="125" cy="125" r="76" fill="url(#grad)"/>
+    <circle cx="125" cy="125" r="72" fill="#1E1F22"/>
+    <image x="55" y="55" width="140" height="140" href="data:image/png;base64,{{ avatar_b64 }}" clip-path="url(#avatar-clip)"/>
+    
+    <!-- Text Content -->
+    <text x="240" y="100" fill="#B5BAC1" font-size="20" font-weight="600" text-transform="uppercase">Welcome to {{ server_name }}</text>
+    <text x="240" y="145" fill="#F2F3F5" font-size="42" font-weight="800">{{ username }}</text>
+    <text x="240" y="180" fill="{{ primary_color }}" font-size="22" font-weight="500">{{ welcome_message }}</text>
+    <rect x="240" y="200" width="100" height="3" fill="{{ primary_color }}" rx="1.5"/>
+</svg>
