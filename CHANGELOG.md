@@ -1,3 +1,5 @@
+## [0.2.11](https://github.com/FAZuH/pwr-bot/compare/v0.2.10...v0.2.11) (2026-02-20)
+
 ## [0.2.10](https://github.com/FAZuH/pwr-bot/compare/v0.2.9...v0.2.10) (2026-02-20)
 
 
@@ -26,11 +28,4 @@
 ### New Features
 
 * **bot:** Show package version to bot activity ([d63313b](https://github.com/FAZuH/pwr-bot/commit/d63313b3d41e4ddaf74379c9000f80db4ee782d8)), closes [#47](https://github.com/FAZuH/pwr-bot/issues/47)
-
-## [0.2.6](https://github.com/FAZuH/pwr-bot/compare/v0.2.5...v0.2.6) (2026-02-18)
-
-
-### New Features
-
-* **bot:** Add /vc stats command ([fbe737b](https://github.com/FAZuH/pwr-bot/commit/fbe737bd0381294faa506a95a4b14ed222812218))
 
