@@ -31,6 +31,7 @@ use poise::serenity_prelude::GatewayIntents;
 use poise::serenity_prelude::Http;
 use poise::serenity_prelude::UserId;
 use serenity::all::ActivityData;
+use serenity::all::ApplicationId;
 use serenity::all::FullEvent;
 use serenity::all::GuildId;
 use serenity::all::Token;
@@ -78,7 +79,11 @@ impl Bot {
 
         let (token, intents) = Self::create_client_config(&config)?;
         let framework = Self::create_framework(&config)?;
-        let http = Arc::new(Http::new(token.clone()));
+        let http = Http::new(token.clone());
+        if let Some(application_id) = config.discord_application_id {
+            http.set_application_id(ApplicationId::new(application_id));
+        }
+        let http = Arc::new(http);
         let data = Arc::new(Data {
             config: config.clone(),
             platforms,
@@ -277,7 +282,8 @@ impl BotEventHandler {
     /// Registers commands globally if the bot version has changed.
     async fn register_commands_if_needed(&self) {
         if !self.data.config.features.autoregister_cmds {
-            info!("Autoregister command feature is disabled. Commands will not be registered globally.")
+            info!("Autoregister command feature is disabled. Commands will not be registered globally.");
+            return
         }
 
         let current_version = self.data.config.version.clone();

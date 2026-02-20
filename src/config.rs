@@ -16,6 +16,7 @@ pub struct Config {
     pub db_url: String,
     pub db_path: String,
     pub discord_token: String,
+    pub discord_application_id: Option<u64>,
     pub admin_id: String,
     pub data_path: PathBuf,
     pub logs_path: PathBuf,
@@ -51,6 +52,14 @@ impl Config {
             std::env::var("DISCORD_TOKEN").map_err(|_| AppError::MissingConfig {
                 config: "DISCORD_TOKEN".to_string(),
             })?;
+        self.discord_application_id = std::env::var("DISCORD_APPLICATION_ID")
+            .ok()
+            .map(|v| {
+                v.parse::<u64>().map_err(|_| AppError::ConfigurationError {
+                    msg: format!("DISCORD_APPLICATION_ID '{}' is not a valid number", v),
+                })
+            })
+            .transpose()?;
 
         self.admin_id = std::env::var("ADMIN_ID").map_err(|_| AppError::MissingConfig {
             config: "ADMIN_ID".to_string(),
