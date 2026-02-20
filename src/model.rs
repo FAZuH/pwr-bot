@@ -242,9 +242,3 @@ impl From<BotMetaKey> for String {
         String::from(&value)
     }
 }
-
-impl ToString for BotMetaKey {
-    fn to_string(&self) -> String {
-        String::from(self)
-    }
-}
