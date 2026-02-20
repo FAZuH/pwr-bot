@@ -60,6 +60,9 @@ jobs:
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
 
+      - name: Install system dependencies
+        run: sudo apt-get install -y libfontconfig1-dev
+
       - name: Build Package
         run: cargo build --release
 
