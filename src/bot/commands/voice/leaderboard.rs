@@ -133,6 +133,8 @@ impl<'a> VoiceLeaderboardController<'a> {
     async fn fetch_entries(
         ctx: &Context<'_>,
         time_range: VoiceLeaderboardTimeRange,
+        is_partner_mode: bool,
+        target_user: Option<serenity::all::UserId>,
     ) -> Result<LeaderboardSessionData, Error> {
         let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?.get();
         let (since, until) = time_range.to_range();
@@ -145,13 +147,22 @@ impl<'a> VoiceLeaderboardController<'a> {
             .build()
             .map_err(AppError::from)?;
 
-        let new_entries = ctx
-            .data()
-            .service
-            .voice_tracking
-            .get_leaderboard_withopt(&voice_lb_opts)
-            .await
-            .map_err(Error::from)?;
+        let new_entries = if is_partner_mode {
+            let target_id = target_user.unwrap_or(ctx.author().id).get();
+            ctx.data()
+                .service
+                .voice_tracking
+                .get_partner_leaderboard(&voice_lb_opts, target_id)
+                .await
+                .map_err(Error::from)?
+        } else {
+            ctx.data()
+                .service
+                .voice_tracking
+                .get_leaderboard_withopt(&voice_lb_opts)
+                .await
+                .map_err(Error::from)?
+        };
 
         let author_id = ctx.author().id.get();
         Ok(LeaderboardSessionData::from_entries(new_entries, author_id))
@@ -170,7 +181,7 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceLeaderboardController<
         ctx.defer().await?;
 
         // Fetch initial entries
-        let session_data = Self::fetch_entries(&ctx, self.time_range).await?;
+        let session_data = Self::fetch_entries(&ctx, self.time_range, false, None).await?;
 
         let mut view = VoiceLeaderboardView::new(&ctx, session_data, self.time_range);
 
@@ -189,9 +200,32 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceLeaderboardController<
             controller_start.elapsed().as_millis()
         );
 
-        while let Some((action, _)) = view.listen_once().await? {
-            if matches!(action, VoiceLeaderboardAction::TimeRange) {
-                let new_data = Self::fetch_entries(&ctx, view.time_range).await?;
+        while let Some((action, interaction)) = view.listen_once().await? {
+            if matches!(action, VoiceLeaderboardAction::TimeRange)
+                || matches!(action, VoiceLeaderboardAction::ToggleMode)
+                || matches!(action, VoiceLeaderboardAction::SelectUser)
+            {
+                if matches!(action, VoiceLeaderboardAction::ToggleMode) {
+                    view.is_partner_mode = !view.is_partner_mode;
+                    if view.is_partner_mode && view.target_user.is_none() {
+                        view.target_user = Some(ctx.author().clone());
+                    }
+                } else if matches!(action, VoiceLeaderboardAction::SelectUser)
+                    && let ComponentInteractionDataKind::UserSelect { values } =
+                        &interaction.data.kind
+                    && let Some(user_id) = values.first()
+                    && let Ok(user) = user_id.to_user(ctx.http()).await
+                {
+                    view.target_user = Some(user);
+                }
+
+                let new_data = Self::fetch_entries(
+                    &ctx,
+                    view.time_range,
+                    view.is_partner_mode,
+                    view.target_user.as_ref().map(|u| u.id),
+                )
+                .await?;
                 view.update_leaderboard_data(new_data);
             }
             let page_result = view.generate_current_page().await?;
@@ -221,6 +255,8 @@ view_core! {
         pub pagination: PaginationView<'a>,
         pub page_builder: LeaderboardPageBuilder<'a>,
         current_page_bytes: Option<Vec<u8>>,
+        pub is_partner_mode: bool,
+        pub target_user: Option<serenity::all::User>,
     }
 }
 
@@ -240,6 +276,8 @@ impl<'a> VoiceLeaderboardView<'a> {
             pagination,
             page_builder,
             current_page_bytes: None,
+            is_partner_mode: false,
+            target_user: None,
             core: Self::create_core(ctx),
         }
     }
@@ -290,7 +328,16 @@ impl<'a> ResponseView<'a> for VoiceLeaderboardView<'a> {
         use VoiceLeaderboardTimeRange::*;
 
         let mut container = vec![CreateContainerComponent::TextDisplay(
-            CreateTextDisplay::new("### Voice Leaderboard"),
+            CreateTextDisplay::new(if self.is_partner_mode {
+                let display_name = self
+                    .target_user
+                    .as_ref()
+                    .map(|u| u.name.to_string())
+                    .unwrap_or_else(|| "Your".to_string());
+                format!("### {} Voice Partners", display_name)
+            } else {
+                "### Voice Leaderboard".to_string()
+            }),
         )];
 
         if let Some(rank) = self.leaderboard_data.user_rank {
@@ -343,6 +390,21 @@ impl<'a> ResponseView<'a> for VoiceLeaderboardView<'a> {
             ));
         }
 
+        let toggle_label = if self.is_partner_mode {
+            "Show Server Leaderboard"
+        } else {
+            "Show Voice Partners"
+        };
+        let toggle_button = self
+            .register(ToggleMode)
+            .as_button()
+            .label(toggle_label)
+            .style(serenity::all::ButtonStyle::Primary);
+
+        container.push(CreateContainerComponent::ActionRow(
+            CreateActionRow::Buttons(vec![toggle_button].into()),
+        ));
+
         let time_range_menu = self
             .register(TimeRange)
             .as_select(CreateSelectMenuKind::String {
@@ -365,6 +427,20 @@ impl<'a> ResponseView<'a> for VoiceLeaderboardView<'a> {
             CreateComponent::Container(CreateContainer::new(container)),
             CreateComponent::ActionRow(action_row),
         ];
+
+        if self.is_partner_mode {
+            let default_users = self
+                .target_user
+                .clone()
+                .map(|u| std::borrow::Cow::Owned(vec![u.id]));
+            let user_select = self
+                .register(SelectUser)
+                .as_select(CreateSelectMenuKind::User { default_users })
+                .placeholder("Select a user to view their voice partners");
+            components.push(CreateComponent::ActionRow(CreateActionRow::SelectMenu(
+                user_select,
+            )));
+        }
 
         self.pagination.attach_if_multipage(&mut components);
 
@@ -394,6 +470,8 @@ impl From<VoiceLeaderboardTimeRange> for CreateSelectMenuOption<'static> {
 action_extends! {
     VoiceLeaderboardAction extends PaginationAction {
         TimeRange,
+        ToggleMode,
+        SelectUser,
     }
 }
 
@@ -426,6 +504,8 @@ impl<'a> InteractiveView<'a, VoiceLeaderboardAction> for VoiceLeaderboardView<'a
                 }
                 None
             }
+            ToggleMode => Some(action.clone()),
+            SelectUser => Some(action.clone()),
         }
     }
 

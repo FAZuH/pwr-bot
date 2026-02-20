@@ -768,6 +768,63 @@ impl VoiceSessionsTable {
         self.get_leaderboard_opt(&opts).await
     }
 
+    pub async fn get_partner_leaderboard(
+        &self,
+        opts: &VoiceLeaderboardOpt,
+        target_user_id: u64,
+    ) -> Result<Vec<VoiceLeaderboardEntry>, DatabaseError> {
+        let limit = opts.limit.unwrap_or(10) as i64;
+        let offset = opts.offset.unwrap_or(0) as i64;
+
+        let mut query = String::from(
+            r#"
+            SELECT 
+                v2.user_id, 
+                SUM(
+                    strftime('%s', MIN(
+                        CASE WHEN v1.leave_time = v1.join_time THEN CURRENT_TIMESTAMP ELSE v1.leave_time END, 
+                        CASE WHEN v2.leave_time = v2.join_time THEN CURRENT_TIMESTAMP ELSE v2.leave_time END
+                    )) - 
+                    strftime('%s', MAX(v1.join_time, v2.join_time))
+                ) as total_duration
+            FROM voice_sessions v1 
+            JOIN voice_sessions v2 
+                ON v1.guild_id = v2.guild_id 
+                AND v1.channel_id = v2.channel_id 
+                AND v1.user_id != v2.user_id 
+                AND MAX(v1.join_time, v2.join_time) < MIN(
+                    CASE WHEN v1.leave_time = v1.join_time THEN CURRENT_TIMESTAMP ELSE v1.leave_time END, 
+                    CASE WHEN v2.leave_time = v2.join_time THEN CURRENT_TIMESTAMP ELSE v2.leave_time END
+                )
+            WHERE v1.user_id = ? AND v1.guild_id = ?
+            "#,
+        );
+
+        if opts.since.is_some() {
+            query.push_str(" AND v1.join_time >= ? AND v2.join_time >= ?");
+        }
+        if opts.until.is_some() {
+            query.push_str(" AND v1.join_time <= ? AND v2.join_time <= ?");
+        }
+
+        query.push_str(" GROUP BY v2.user_id ORDER BY total_duration DESC LIMIT ? OFFSET ?");
+
+        let mut q = sqlx::query_as::<_, VoiceLeaderboardEntry>(&query)
+            .bind(target_user_id as i64)
+            .bind(opts.guild_id as i64);
+
+        if let Some(since) = opts.since {
+            q = q.bind(since).bind(since);
+        }
+        if let Some(until) = opts.until {
+            q = q.bind(until).bind(until);
+        }
+
+        q = q.bind(limit).bind(offset);
+
+        Ok(q.fetch_all(&self.base.pool).await?)
+    }
+
     /// Update leave_time for a specific session (user, channel, join_time combination)
     pub async fn update_leave_time(
         &self,
