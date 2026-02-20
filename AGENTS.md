@@ -22,6 +22,7 @@ Standard `cargo` commands work as expected. Tests require `SQLX_OFFLINE=true` (h
 ## Code Style Guidelines
 
 - **Imports**: Group `std`, external, then crate-local (see `rustfmt.toml`). No `use crate::module::*;`.
+- **Explicit Imports**: Always import items explicitly at the top of the file. Do not use `use crate::*;` anywhere in the code.
 - **Formatting**: Standard Rust (4 spaces, trailing commas). 100 char line length.
 - **Naming**: `PascalCase` types, `snake_case` functions/vars, `SCREAMING_SNAKE` consts.
 - **Errors**: Use `anyhow` for app errors, `thiserror` for custom types. Suffix with `Error`.
@@ -31,213 +32,105 @@ Standard `cargo` commands work as expected. Tests require `SQLX_OFFLINE=true` (h
 
 ## Adding Commands
 
-Commands use the **Cog pattern**:
-1. Create a Cog struct implementing `Cog` trait.
-2. Implement commands with `#[poise::command]`.
+Commands follow the **Command Pattern** using Poise. Top-level commands are aggregated in `src/bot/commands.rs`.
+
+1. Create a command module or function.
+2. Implement the command with `#[poise::command]`.
+3. Add the command function call to the `Cogs` implementation in `src/bot/commands.rs`.
 
 ```rust
-pub struct MyCog;
-impl MyCog {
-    #[poise::command(slash_command)]
-    pub async fn cmd(ctx: Context<'_>) -> Result<(), Error> { /* ... */ }
-}
-impl Cog for MyCog {
-    fn commands(&self) -> Vec<Command<Data, Error>> { vec![Self::cmd()] }
-}
+#[poise::command(slash_command)]
+pub async fn my_command(ctx: Context<'_>) -> Result<(), Error> { /* ... */ }
 ```
 
-## Creating UI Views (Components V2)
-
-Views use three traits:
-- **`View<'a, T>`**: Core trait providing access to `ViewCore` (via `view_core!` macro)
-- **`ResponseView<'a>`**: Creates Discord components/embeds via `create_response()`
-- **`InteractiveView<'a, T>`**: Handles user interactions via `handle()`
-
-### Basic View Structure
-
+In `src/bot/commands.rs`:
 ```rust
-use std::time::Duration;
-use crate::view_core;
-use crate::bot::views::{View, ResponseView, InteractiveView, ResponseKind};
-use crate::action_enum;
-
-// 1. Define your actions
-action_enum! {
-    MyAction {
-        #[label = "Click Me"]
-        ButtonClick,
-        #[label = "❮ Back"]
-        Back,
-    }
-}
-
-// 2. Create view struct using view_core! macro
-view_core! {
-    timeout = Duration::from_secs(120),
-    /// Description of your view
-    pub struct MyView<'a, MyAction> {
-        pub counter: i32,
-    }
-}
-
-// 3. Implement constructor
-impl<'a> MyView<'a> {
-    pub fn new(ctx: &'a Context<'a>, counter: i32) -> Self {
-        Self {
-            counter,
-            core: Self::create_core(ctx),
-        }
-    }
-}
-
-// 4. Implement ResponseView to create UI components
-impl<'a> ResponseView<'a> for MyView<'a> {
-    fn create_response<'b>(&mut self) -> ResponseKind<'b> {
-        let components = vec![
-            CreateComponent::TextDisplay(
-                CreateTextDisplay::new(format!("Counter: {}", self.counter))
-            ),
-            CreateComponent::ActionRow(CreateActionRow::Buttons(vec![
-                self.register(MyAction::ButtonClick)
-                    .as_button()
-                    .style(ButtonStyle::Primary),
-                self.register(MyAction::Back)
-                    .as_button()
-                    .style(ButtonStyle::Secondary),
-            ].into())),
-        ];
-        components.into()
-    }
-}
-
-// 5. Implement InteractiveView to handle user interactions
-#[async_trait::async_trait]
-impl<'a> InteractiveView<'a, MyAction> for MyView<'a> {
-    async fn handle(
-        &mut self,
-        action: &MyAction,
-        _interaction: &ComponentInteraction,
-    ) -> Option<MyAction> {
-        match action {
-            MyAction::ButtonClick => {
-                self.counter += 1;
-                Some(action.clone())
-            }
-            MyAction::Back => Some(action.clone()),
-        }
+impl Cog for Cogs {
+    fn commands(&self) -> Vec<Command<Data, Error>> {
+        vec![
+            // ...
+            my_command(),
+        ]
     }
 }
 ```
 
-### Key View Components
-
-- **Containers**: `CreateContainer` - Groups components.
-- **TextDisplay**: `CreateTextDisplay` - Markdown text.
-- **Sections**: `CreateSection` - Side-by-side layout.
-- **Buttons**: `CreateButton` - Interactive buttons (use `self.register(action).as_button()`).
-- **Select Menus**: `CreateSelectMenu` - Dropdowns (use `self.register(action).as_select(kind)`).
-
-### View Utilities
-
-- **`RenderExt::render()`**: Send or edit the view automatically.
-- **`listen_once()`**: Wait for a single interaction (returns `Option<(Action, Interaction)>`).
-- **`register(action)`**: Registers an action and returns a `RegisteredAction` with methods:
-  - `.as_button()` - Convert to button
-  - `.as_select(kind)` - Convert to select menu
-  - `.as_select_option()` - Convert to select option
-
-## Design Patterns
-
-### Controller Pattern (MVC-C)
-
-Coordinator manages `Context` and message lifecycle. Controllers implement logic and return `NavigationResult`.
-
-**Architecture**: `Coordinator` -> `Controller` -> `View` -> `NavigationResult`
+### Command Groups
+For commands with subcommands, use the `subcommands` attribute:
 
 ```rust
-// 1. Controller
-controller! { pub struct MyController<'a> {} }
-
-#[async_trait]
-impl<S: Send + Sync + 'static> Controller<S> for MyController<'_> {
-    async fn run(&mut self, coord: &mut Coordinator<'_, S>) -> Result<NavigationResult, Error> {
-        let ctx = *coord.context();
-        // logic ...
-        coord.send(view.create_reply()).await?;
-        Ok(NavigationResult::Exit)
-    }
-}
-
-// 2. Coordinator Loop
-pub async fn run(ctx: Context<'_>) -> Result<(), Error> {
-    let mut coord = Coordinator::new(ctx);
-    // ... loop calling controller.run(&mut coord) ...
-}
+#[poise::command(
+    slash_command,
+    subcommands("subcommand_a", "subcommand_b")
+)]
+pub async fn parent_command(_ctx: Context<'_>) -> Result<(), Error> { Ok(()) }
 ```
 
-**Guidelines**:
-- **Navigation**: Use `NavigationResult` unified enum (`Exit`, `Back`, `SettingsAbout`, etc.).
-- **Context**: Clone context `let ctx = *coord.context()` to avoid borrows.
-- **Recursion**: Avoid it; use the loop.
-- **Entry Point**: Create a legacy function that wraps the controller:
-```rust
-pub async fn my_command(ctx: Context<'_>) -> Result<(), Error> {
-    let mut coordinator = Coordinator::new(ctx);
-    let mut controller = MyController::new(&ctx);
-    let _result = controller.run(&mut coordinator).await?;
-    Ok(())
-}
+## Creating UI Views (MVC-C pattern)
+
+See [`.opencode/skills/ui-views/SKILL.md`](.opencode/skills/ui-views/SKILL.md) for 
+- Detailed documentation on creating interactive Discord UI components using Components V2.
+- Controller Pattern (Coordinator -> Controller -> View -> NavigationResult) architecture.
+
+## Database Schema Changes
+
+See [`.opencode/skills/db-schema/SKILL.md`](.opencode/skills/db-schema/SKILL.md) for guidelines on:
+- Creating migrations with `cargo sqlx migrate add`
+- Writing safe UP/DOWN migration scripts
+- Modifying models and repository code
+
+## Creating and Modifying Skills
+
+When certain types of documentation or patterns become repetitive, create a skill in `.opencode/skills/<skill-name>/SKILL.md`.
+
+### When to Create a Skill
+
+Create a new skill when:
+1. A complex workflow requires multiple sequential steps that are repeated across the codebase
+2. Documentation in AGENTS.md exceeds ~50 lines for a single topic
+3. A pattern has multiple components that need to be configured together
+4. The same instructions are needed by multiple developers/sub-agents
+
+### Skill Structure
+
 ```
+.opencode/skills/<skill-name>/
+├── SKILL.md          # Main skill documentation (required)
+├── README.md         # Quick overview (optional)
+├── router.sh         # CLI entry point if skill has commands (optional)
+└── scripts/         # Script files if needed (optional)
+```
+
+### SKILL.md Frontmatter
+
+Each skill must include YAML frontmatter:
+
+```yaml
+---
+name: <skill-name>
+description: Brief description of what this skill does and when to use it
+---
+```
+
+### Guidelines for Writing Skills
+
+1. **Keep it practical** - Focus on actionable steps, not theory
+2. **Use examples** - Show real code patterns from the codebase
+3. **Include prerequisites** - What must be done before using the skill
+4. **Provide validation** - How to verify the result is correct
+5. **Reference related skills** - Link to other relevant skills
+
+### Modifying Existing Skills
+
+Update a skill when:
+- The codebase patterns change (e.g., new framework version)
+- New best practices are discovered
+- Common errors indicate the documentation needs clarification
+- The skill needs to cover additional use cases
 
 ## Commit Conventions
 
-Follow **Conventional Commits** specification:
-
-```
-<type>(<scope>): <subject>
-
-<body>
-
-<footer>
-```
-
-### Types
-- `feat`: New feature
-- `ui`: Changes to user interface
-- `fix`: Bug fix
-- `docs`: Documentation only changes
-- `style`: Code style changes (formatting, semicolons, etc.)
-- `refactor`: Code refactoring
-- `perf`: Performance improvements
-- `test`: Adding or updating tests
-- `chore`: Build process, dependencies, etc.
-
-For user-facing commits, such as command addition, user bug fixes or UI change, insert `u_` prefix to the type, e.g., `u_feat`, `u_ui(bot)`, etc.
-
-Keep this in mind when making user-facing commits: these commits will be detected by the CI, and used to generate changelogs for the user to see.
-
-### Guidelines
-- **Capitalize the first letter** of the subject line (unless it is strictly lowercase like a variable name)
-- Use present tense ("Add feature" not "Added feature")
-- Use imperative mood ("Move cursor to..." not "Moves cursor to...")
-- Include motivation for change and contrast with previous behavior in body
-
-### Examples
-```
-feat(voice): Add /vc stats command with contribution grid
-
-Add voice activity statistics command that displays historical
-data using GitHub-style contribution heatmaps.
-
-- Support user and guild stats views
-- Add time range selection
-- Display total time, average, streak, and most active day
-
-fix(db): Correct SQL query for daily average calculation
-
-The subquery was not properly aliased, causing column reference
-errors in SQLite.
-```
+See [`.opencode/skills/commit/SKILL.md`](.opencode/skills/commit/SKILL.md) for detailed commit conventions, types, user-facing commit rules (`u_` prefix), and examples.
 
 ## CI/CD
 

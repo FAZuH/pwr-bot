@@ -8,30 +8,33 @@ use chrono::Utc;
 use tokio::sync::RwLock;
 
 use crate::bot::commands::voice::GuildStatType;
-use crate::database::Database;
-use crate::database::model::GuildDailyStats;
-use crate::database::model::ServerSettings;
-use crate::database::model::ServerSettingsModel;
-use crate::database::model::VoiceDailyActivity;
-use crate::database::model::VoiceLeaderboardEntry;
-use crate::database::model::VoiceLeaderboardOpt;
-use crate::database::model::VoiceSessionsModel;
-use crate::database::table::Table;
+use crate::model::GuildDailyStats;
+use crate::model::ServerSettings;
+use crate::model::VoiceDailyActivity;
+use crate::model::VoiceLeaderboardEntry;
+use crate::model::VoiceLeaderboardOpt;
+use crate::model::VoiceSessionsModel;
+use crate::repository::Repository;
+use crate::repository::table::Table;
+use crate::service::settings_service::SettingsService;
 
 /// Service for tracking voice channel activity.
 pub struct VoiceTrackingService {
-    db: Arc<Database>,
+    db: Arc<Repository>,
+    settings: Arc<SettingsService>,
     disabled_guilds: Arc<RwLock<HashSet<u64>>>,
 }
 
 impl VoiceTrackingService {
     /// Creates a new voice tracking service and loads disabled guilds.
-    pub async fn new(db: Arc<Database>) -> anyhow::Result<Self> {
+    pub async fn new(db: Arc<Repository>) -> anyhow::Result<Self> {
+        let settings = Arc::new(SettingsService::new(db.clone()));
         let _self = Self {
             db,
+            settings: settings.clone(),
             disabled_guilds: Arc::new(RwLock::new(HashSet::new())),
         };
-        let all_settings = _self.db.server_settings_table.select_all().await?;
+        let all_settings = _self.db.server_settings.select_all().await?;
         let mut disabled = _self.disabled_guilds.write().await;
 
         for model in all_settings {
@@ -50,19 +53,16 @@ impl VoiceTrackingService {
     }
 
     pub async fn insert(&self, model: &VoiceSessionsModel) -> anyhow::Result<()> {
-        self.db.voice_sessions_table.insert(model).await?;
+        self.db.voice_sessions.insert(model).await?;
         Ok(())
     }
     pub async fn replace(&self, model: &VoiceSessionsModel) -> anyhow::Result<()> {
-        self.db.voice_sessions_table.replace(model).await?;
+        self.db.voice_sessions.replace(model).await?;
         Ok(())
     }
 
     pub async fn get_server_settings(&self, guild_id: u64) -> anyhow::Result<ServerSettings> {
-        match self.db.server_settings_table.select(&guild_id).await? {
-            Some(model) => Ok(model.settings.0),
-            None => Ok(ServerSettings::default()),
-        }
+        Ok(self.settings.get_server_settings(guild_id).await?)
     }
 
     pub async fn update_server_settings(
@@ -80,11 +80,9 @@ impl VoiceTrackingService {
             }
         }
 
-        let model = ServerSettingsModel {
-            guild_id,
-            settings: sqlx::types::Json(settings),
-        };
-        self.db.server_settings_table.replace(&model).await?;
+        self.settings
+            .update_server_settings(guild_id, settings)
+            .await?;
         Ok(())
     }
 
@@ -92,11 +90,7 @@ impl VoiceTrackingService {
         &self,
         options: &VoiceLeaderboardOpt,
     ) -> anyhow::Result<Vec<VoiceLeaderboardEntry>> {
-        Ok(self
-            .db
-            .voice_sessions_table
-            .get_leaderboard_opt(options)
-            .await?)
+        Ok(self.db.voice_sessions.get_leaderboard_opt(options).await?)
     }
 
     pub async fn get_leaderboard(
@@ -106,7 +100,7 @@ impl VoiceTrackingService {
     ) -> anyhow::Result<Vec<VoiceLeaderboardEntry>> {
         Ok(self
             .db
-            .voice_sessions_table
+            .voice_sessions
             .get_leaderboard(guild_id, limit)
             .await?)
     }
@@ -119,7 +113,7 @@ impl VoiceTrackingService {
     ) -> anyhow::Result<Vec<VoiceLeaderboardEntry>> {
         Ok(self
             .db
-            .voice_sessions_table
+            .voice_sessions
             .get_leaderboard_with_offset(guild_id, offset, limit)
             .await?)
     }
@@ -142,7 +136,7 @@ impl VoiceTrackingService {
         leave_time: &DateTime<Utc>,
     ) -> anyhow::Result<()> {
         self.db
-            .voice_sessions_table
+            .voice_sessions
             .update_leave_time(user_id, channel_id, join_time, leave_time)
             .await?;
         Ok(())
@@ -150,7 +144,7 @@ impl VoiceTrackingService {
 
     /// Find all active sessions from database
     pub async fn find_active_sessions(&self) -> anyhow::Result<Vec<VoiceSessionsModel>> {
-        Ok(self.db.voice_sessions_table.find_active_sessions().await?)
+        Ok(self.db.voice_sessions.find_active_sessions().await?)
     }
 
     /// Get daily voice activity for a specific user in a guild.
@@ -163,7 +157,7 @@ impl VoiceTrackingService {
     ) -> anyhow::Result<Vec<VoiceDailyActivity>> {
         Ok(self
             .db
-            .voice_sessions_table
+            .voice_sessions
             .get_user_daily_activity(user_id, guild_id, since, until)
             .await?)
     }
@@ -179,12 +173,12 @@ impl VoiceTrackingService {
         match stat_type {
             GuildStatType::AverageTime => Ok(self
                 .db
-                .voice_sessions_table
+                .voice_sessions
                 .get_guild_daily_average_time(guild_id, since, until)
                 .await?),
             GuildStatType::ActiveUserCount => Ok(self
                 .db
-                .voice_sessions_table
+                .voice_sessions
                 .get_guild_daily_user_count(guild_id, since, until)
                 .await?),
         }

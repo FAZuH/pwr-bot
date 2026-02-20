@@ -33,6 +33,8 @@ pub enum NavigationResult {
         links: String,
         send_into: Option<SendInto>,
     },
+    /// Start subscription list flow
+    FeedList(Option<SendInto>),
 
     // Voice commands section
     /// Show voice leaderboard

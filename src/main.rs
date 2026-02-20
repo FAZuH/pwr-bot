@@ -4,12 +4,13 @@
 
 pub mod bot;
 pub mod config;
-pub mod database;
 pub mod error;
 pub mod event;
 pub mod feed;
 pub mod logging;
 pub mod macros;
+pub mod model;
+pub mod repository;
 pub mod service;
 pub mod subscriber;
 pub mod task;
@@ -24,12 +25,12 @@ use log::info;
 
 use crate::bot::Bot;
 use crate::config::Config;
-use crate::database::Database;
 use crate::event::FeedUpdateEvent;
 use crate::event::VoiceStateEvent;
 use crate::event::event_bus::EventBus;
 use crate::feed::platforms::Platforms;
 use crate::logging::setup_logging;
+use crate::repository::Repository;
 use crate::service::Services;
 use crate::subscriber::discord_dm_subscriber::DiscordDmSubscriber;
 use crate::subscriber::discord_guild_subscriber::DiscordGuildSubscriber;
@@ -49,12 +50,11 @@ async fn main() -> Result<()> {
     let platforms = Arc::new(Platforms::new());
     let services = setup_services(db.clone(), platforms.clone()).await?;
 
-    setup_voice_tracking(&config, &services, init_start).await?;
+    setup_voice_tracking(&services, init_start).await?;
 
     let voice_subscriber = Arc::new(VoiceStateSubscriber::new(services.clone()));
     let bot = setup_bot(
         &config,
-        db.clone(),
         event_bus.clone(),
         platforms,
         services.clone(),
@@ -79,9 +79,9 @@ async fn load_config() -> Result<Arc<Config>> {
     Ok(config)
 }
 
-async fn setup_database(config: &Config, init_start: Instant) -> Result<Arc<Database>> {
+async fn setup_database(config: &Config, init_start: Instant) -> Result<Arc<Repository>> {
     debug!("Setting up Database...");
-    let db = Arc::new(Database::new(&config.db_url, &config.db_path).await?);
+    let db = Arc::new(Repository::new(&config.db_url, &config.db_path).await?);
 
     info!("Running database migrations...");
     db.run_migrations().await?;
@@ -93,21 +93,14 @@ async fn setup_database(config: &Config, init_start: Instant) -> Result<Arc<Data
     Ok(db)
 }
 
-async fn setup_services(db: Arc<Database>, platforms: Arc<Platforms>) -> Result<Arc<Services>> {
+async fn setup_services(db: Arc<Repository>, platforms: Arc<Platforms>) -> Result<Arc<Services>> {
     debug!("Setting up Services...");
     Ok(Arc::new(Services::new(db, platforms).await?))
 }
 
-async fn setup_voice_tracking(
-    config: &Config,
-    services: &Services,
-    init_start: Instant,
-) -> Result<()> {
-    if !config.features.voice_tracking {
-        return Ok(());
-    }
+async fn setup_voice_tracking(services: &Services, init_start: Instant) -> Result<()> {
     let voice_heartbeat =
-        VoiceHeartbeatManager::new(&config.data_path, services.voice_tracking.clone());
+        VoiceHeartbeatManager::new(services.internal.clone(), services.voice_tracking.clone());
 
     info!("Performing voice tracking crash recovery...");
     let recovered = voice_heartbeat.recover_from_crash().await?;
@@ -126,7 +119,6 @@ async fn setup_voice_tracking(
 
 async fn setup_bot(
     config: &Arc<Config>,
-    db: Arc<Database>,
     event_bus: Arc<EventBus>,
     platforms: Arc<Platforms>,
     services: Arc<Services>,
@@ -136,7 +128,6 @@ async fn setup_bot(
     info!("Starting bot...");
     let mut bot = Bot::new(
         config.clone(),
-        db,
         event_bus,
         platforms,
         services,
@@ -157,7 +148,7 @@ async fn setup_bot(
 async fn setup_subscribers(
     event_bus: Arc<EventBus>,
     bot: Arc<Bot>,
-    db: Arc<Database>,
+    db: Arc<Repository>,
     voice_subscriber: Arc<VoiceStateSubscriber>,
 ) -> Result<()> {
     debug!("Setting up Subscribers...");

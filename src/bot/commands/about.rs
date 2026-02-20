@@ -20,7 +20,6 @@ use poise::serenity_prelude::CreateUnfurledMediaItem;
 use serenity::all::ComponentInteraction;
 
 use crate::action_enum;
-use crate::bot::commands::Cog;
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;
 use crate::bot::commands::settings::SettingsPage;
@@ -36,21 +35,10 @@ use crate::bot::views::View;
 use crate::controller;
 use crate::view_core;
 
-/// Cog for the about command.
-pub struct AboutCog;
-
-impl AboutCog {
-    /// Show information about the bot
-    #[poise::command(slash_command)]
-    pub async fn about(ctx: Context<'_>) -> Result<(), Error> {
-        run_settings(ctx, Some(SettingsPage::About)).await
-    }
-}
-
-impl Cog for AboutCog {
-    fn commands(&self) -> Vec<Command<crate::bot::Data, Error>> {
-        vec![Self::about()]
-    }
+/// Show information about the bot
+#[poise::command(slash_command)]
+pub async fn about(ctx: Context<'_>) -> Result<(), Error> {
+    run_settings(ctx, Some(SettingsPage::About)).await
 }
 
 controller! { pub struct AboutController<'a> {} }

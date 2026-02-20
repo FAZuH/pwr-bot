@@ -5,22 +5,22 @@ use std::sync::Arc;
 use std::sync::RwLock;
 
 use async_trait::async_trait;
-use pwr_bot::database::Database;
 use pwr_bot::feed::BasePlatform;
 use pwr_bot::feed::FeedItem;
 use pwr_bot::feed::FeedSource;
 use pwr_bot::feed::Platform;
 use pwr_bot::feed::PlatformInfo;
 use pwr_bot::feed::error::FeedError;
+use pwr_bot::repository::Repository;
 use uuid::Uuid;
 
 /// Sets up a temporary test database.
-pub async fn setup_db() -> (Arc<Database>, PathBuf) {
+pub async fn setup_db() -> (Arc<Repository>, PathBuf) {
     let uuid = Uuid::new_v4();
     let db_path = std::env::temp_dir().join(format!("pwr-bot-test-{}.db", uuid));
     let db_url = format!("sqlite://{}", db_path.to_str().unwrap());
 
-    let db = Database::new(&db_url, db_path.to_str().unwrap())
+    let db = Repository::new(&db_url, db_path.to_str().unwrap())
         .await
         .expect("Failed to create database");
 

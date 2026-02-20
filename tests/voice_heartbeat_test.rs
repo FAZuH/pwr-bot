@@ -4,8 +4,10 @@ use std::sync::Arc;
 
 use chrono::Duration;
 use chrono::Utc;
-use pwr_bot::database::model::VoiceSessionsModel;
-use pwr_bot::database::table::Table;
+use pwr_bot::model::BotMetaKey;
+use pwr_bot::model::VoiceSessionsModel;
+use pwr_bot::repository::table::Table;
+use pwr_bot::service::internal_service::InternalService;
 use pwr_bot::service::voice_tracking_service::VoiceTrackingService;
 use pwr_bot::task::voice_heartbeat::VoiceHeartbeatManager;
 
@@ -19,23 +21,15 @@ async fn test_heartbeat_read_write() {
             .await
             .expect("Failed to create service"),
     );
+    let internal = Arc::new(InternalService::new(db.clone()));
+    let heartbeat_manager = VoiceHeartbeatManager::new(internal, service);
 
-    // Create temp directory for heartbeat file
-    let temp_dir = std::env::temp_dir();
-    let heartbeat_manager = VoiceHeartbeatManager::new(&temp_dir, service);
-
-    // Initially there should be no heartbeat file
+    // Initially there should be no heartbeat
     let last_heartbeat = heartbeat_manager
         .read_last_heartbeat()
         .await
         .expect("Failed to read heartbeat");
     assert!(last_heartbeat.is_none(), "Should be no heartbeat initially");
-
-    // Cleanup
-    let heartbeat_path = temp_dir.join("voice_heartbeat.json");
-    if heartbeat_path.exists() {
-        let _ = std::fs::remove_file(&heartbeat_path);
-    }
 
     common::teardown_db(db_path).await;
 }
@@ -48,22 +42,16 @@ async fn test_heartbeat_crash_recovery_no_sessions() {
             .await
             .expect("Failed to create service"),
     );
+    let internal = Arc::new(InternalService::new(db.clone()));
 
-    // Create a unique temp directory for this test
-    let temp_dir =
-        std::env::temp_dir().join(format!("pwr-bot-test-no-sessions-{}", std::process::id()));
-    std::fs::create_dir_all(&temp_dir).expect("Failed to create temp directory");
-    let heartbeat_manager = VoiceHeartbeatManager::new(&temp_dir, service.clone());
-
-    // Write a heartbeat timestamp
+    // Write a heartbeat timestamp directly to database
     let heartbeat_time = Utc::now() - Duration::minutes(5);
-    let heartbeat_data = serde_json::json!({
-        "timestamp": heartbeat_time,
-        "version": 1
-    });
-    let heartbeat_path = temp_dir.join("voice_heartbeat.json");
-    std::fs::write(&heartbeat_path, heartbeat_data.to_string())
-        .expect("Failed to write heartbeat file");
+    internal
+        .set_meta(BotMetaKey::VoiceHeartbeat, &heartbeat_time.to_rfc3339())
+        .await
+        .expect("Failed to set heartbeat");
+
+    let heartbeat_manager = VoiceHeartbeatManager::new(internal.clone(), service.clone());
 
     // Recover from crash - should close 0 sessions since there are none
     let recovered = heartbeat_manager
@@ -71,11 +59,6 @@ async fn test_heartbeat_crash_recovery_no_sessions() {
         .await
         .expect("Failed to recover");
     assert_eq!(recovered, 0, "Should recover 0 sessions when none exist");
-
-    // Cleanup
-    if temp_dir.exists() {
-        let _ = std::fs::remove_dir_all(&temp_dir);
-    }
 
     common::teardown_db(db_path).await;
 }
@@ -88,11 +71,7 @@ async fn test_heartbeat_crash_recovery_with_active_sessions() {
             .await
             .expect("Failed to create service"),
     );
-
-    // Create a unique temp directory for this test
-    let temp_dir = std::env::temp_dir().join(format!("pwr-bot-test-active-{}", std::process::id()));
-    std::fs::create_dir_all(&temp_dir).expect("Failed to create temp directory");
-    let heartbeat_manager = VoiceHeartbeatManager::new(&temp_dir, service.clone());
+    let internal = Arc::new(InternalService::new(db.clone()));
 
     // Create active sessions (leave_time == join_time)
     let now = Utc::now();
@@ -122,15 +101,14 @@ async fn test_heartbeat_crash_recovery_with_active_sessions() {
             .expect("Failed to insert session");
     }
 
-    // Write a heartbeat timestamp from 5 minutes ago
+    // Write a heartbeat timestamp from 5 minutes ago directly to database
     let heartbeat_time = now - Duration::minutes(5);
-    let heartbeat_data = serde_json::json!({
-        "timestamp": heartbeat_time,
-        "version": 1
-    });
-    let heartbeat_path = temp_dir.join("voice_heartbeat.json");
-    std::fs::write(&heartbeat_path, heartbeat_data.to_string())
-        .expect("Failed to write heartbeat file");
+    internal
+        .set_meta(BotMetaKey::VoiceHeartbeat, &heartbeat_time.to_rfc3339())
+        .await
+        .expect("Failed to set heartbeat");
+
+    let heartbeat_manager = VoiceHeartbeatManager::new(internal.clone(), service.clone());
 
     // Recover from crash
     let recovered = heartbeat_manager
@@ -141,7 +119,7 @@ async fn test_heartbeat_crash_recovery_with_active_sessions() {
 
     // Verify sessions were closed with heartbeat timestamp
     let sessions: Vec<VoiceSessionsModel> = db
-        .voice_sessions_table
+        .voice_sessions
         .select_all()
         .await
         .expect("Failed to select sessions");
@@ -162,34 +140,20 @@ async fn test_heartbeat_crash_recovery_with_active_sessions() {
         );
     }
 
-    // Cleanup
-    if temp_dir.exists() {
-        let _ = std::fs::remove_dir_all(&temp_dir);
-    }
-
     common::teardown_db(db_path).await;
 }
 
 #[tokio::test]
-async fn test_heartbeat_crash_recovery_no_heartbeat_file() {
+async fn test_heartbeat_crash_recovery_no_heartbeat() {
     let (db, db_path) = common::setup_db().await;
     let service = Arc::new(
         VoiceTrackingService::new(db.clone())
             .await
             .expect("Failed to create service"),
     );
+    let internal = Arc::new(InternalService::new(db.clone()));
 
-    // Create a unique temp directory for this test
-    let temp_dir = std::env::temp_dir().join(format!("pwr-bot-test-no-hb-{}", std::process::id()));
-    std::fs::create_dir_all(&temp_dir).expect("Failed to create temp directory");
-    let heartbeat_path = temp_dir.join("voice_heartbeat.json");
-
-    // Make sure heartbeat file doesn't exist
-    if heartbeat_path.exists() {
-        let _ = std::fs::remove_file(&heartbeat_path);
-    }
-
-    let heartbeat_manager = VoiceHeartbeatManager::new(&temp_dir, service.clone());
+    let heartbeat_manager = VoiceHeartbeatManager::new(internal.clone(), service.clone());
 
     // Create active sessions
     let now = Utc::now();
@@ -207,19 +171,19 @@ async fn test_heartbeat_crash_recovery_no_heartbeat_file() {
         .await
         .expect("Failed to insert session");
 
-    // Recover from crash without heartbeat file
+    // Recover from crash without heartbeat
     let recovered = heartbeat_manager
         .recover_from_crash()
         .await
         .expect("Failed to recover");
     assert_eq!(
         recovered, 0,
-        "Should not recover sessions without heartbeat file"
+        "Should not recover sessions without heartbeat"
     );
 
     // Verify session is still active (not closed)
     let sessions: Vec<VoiceSessionsModel> = db
-        .voice_sessions_table
+        .voice_sessions
         .select_all()
         .await
         .expect("Failed to select sessions");
@@ -229,11 +193,6 @@ async fn test_heartbeat_crash_recovery_no_heartbeat_file() {
         sessions[0].leave_time, sessions[0].join_time,
         "Session should still be active"
     );
-
-    // Cleanup temp directory
-    if temp_dir.exists() {
-        let _ = std::fs::remove_dir_all(&temp_dir);
-    }
 
     common::teardown_db(db_path).await;
 }
@@ -326,7 +285,7 @@ async fn test_update_session_leave_time() {
 
     // Verify it's active
     let sessions: Vec<VoiceSessionsModel> = db
-        .voice_sessions_table
+        .voice_sessions
         .select_all()
         .await
         .expect("Failed to select sessions");
@@ -341,7 +300,7 @@ async fn test_update_session_leave_time() {
 
     // Verify it was updated
     let sessions: Vec<VoiceSessionsModel> = db
-        .voice_sessions_table
+        .voice_sessions
         .select_all()
         .await
         .expect("Failed to select sessions");

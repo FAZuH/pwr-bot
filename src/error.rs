@@ -5,8 +5,8 @@ use std::fmt::Debug;
 use log::error;
 use uuid::Uuid;
 
-use crate::database::error::DatabaseError;
 use crate::feed::error::FeedError;
+use crate::repository::error::DatabaseError;
 use crate::service::error::ServiceError;
 
 /// Application-level errors.

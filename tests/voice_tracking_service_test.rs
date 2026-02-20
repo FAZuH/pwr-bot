@@ -2,11 +2,11 @@
 
 use chrono::Duration;
 use chrono::Utc;
-use pwr_bot::database::model::ServerSettings;
-use pwr_bot::database::model::ServerSettingsModel;
-use pwr_bot::database::model::VoiceSessionsModel;
-use pwr_bot::database::model::VoiceSettings;
-use pwr_bot::database::table::Table;
+use pwr_bot::model::ServerSettings;
+use pwr_bot::model::ServerSettingsModel;
+use pwr_bot::model::VoiceSessionsModel;
+use pwr_bot::model::VoiceSettings;
+use pwr_bot::repository::table::Table;
 use pwr_bot::service::voice_tracking_service::VoiceTrackingService;
 
 mod common;
@@ -134,7 +134,7 @@ async fn test_insert_and_replace_voice_session() {
 
     // Verify it was inserted by querying the database directly
     let sessions: Vec<VoiceSessionsModel> = db
-        .voice_sessions_table
+        .voice_sessions
         .select_all()
         .await
         .expect("Failed to select sessions");
@@ -157,7 +157,7 @@ async fn test_insert_and_replace_voice_session() {
         .expect("Failed to replace voice session");
 
     let sessions: Vec<VoiceSessionsModel> = db
-        .voice_sessions_table
+        .voice_sessions
         .select_all()
         .await
         .expect("Failed to select sessions");
@@ -420,7 +420,7 @@ async fn test_disabled_guilds_cache_on_init() {
             ..Default::default()
         }),
     };
-    db.server_settings_table
+    db.server_settings
         .replace(&settings)
         .await
         .expect("Failed to insert settings");

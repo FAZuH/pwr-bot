@@ -11,22 +11,22 @@ use poise::serenity_prelude::UserId;
 use serenity::all::CreateMessage;
 
 use crate::bot::Bot;
-use crate::database::Database;
-use crate::database::model::SubscriberModel;
-use crate::database::model::SubscriberType;
 use crate::event::Event;
 use crate::event::FeedUpdateEvent;
+use crate::model::SubscriberModel;
+use crate::model::SubscriberType;
+use crate::repository::Repository;
 use crate::subscriber::Subscriber;
 
 /// Subscriber that sends feed updates to users via DM.
 pub struct DiscordDmSubscriber {
     bot: Arc<Bot>,
-    db: Arc<Database>,
+    db: Arc<Repository>,
 }
 
 impl DiscordDmSubscriber {
     /// Creates a new DM subscriber.
-    pub fn new(bot: Arc<Bot>, db: Arc<Database>) -> Self {
+    pub fn new(bot: Arc<Bot>, db: Arc<Repository>) -> Self {
         debug!("Initializing DiscordDmSubscriber.");
         Self { bot, db }
     }
@@ -38,7 +38,7 @@ impl DiscordDmSubscriber {
         // Get all subscriptions for this feed
         let subs = self
             .db
-            .subscriber_table
+            .subscriber
             .select_all_by_type_and_feed(SubscriberType::Dm, event.feed.id)
             .await?;
 

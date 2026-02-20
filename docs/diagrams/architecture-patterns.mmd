@@ -1,0 +1,79 @@
+%%{init: {
+  'theme': 'dark',
+  'themeVariables': {
+    'primaryColor': '#1e1e1e',
+    'primaryTextColor': '#ffffff',
+    'primaryBorderColor': '#ffffff',
+    'lineColor': '#888888',
+    'secondaryColor': '#2d2d2d',
+    'tertiaryColor': '#1e1e1e'
+  }
+}}%%
+graph LR
+    subgraph CommandAggregation["Command Registration"]
+        direction TB
+        CogTrait["Cog trait<br/>commands()"]
+        Cogs2["Cogs<br/>struct aggregator"]
+        FeedCmd["Feed Command"]
+        VoiceCmd["Voice Command"]
+        OtherCmds["Other Commands<br/>about · settings · register · ..."]
+        CogTrait -.->|impl| Cogs2
+        Cogs2 -->|collects| FeedCmd & VoiceCmd & OtherCmds
+    end
+
+    subgraph MVCC["MVC-C Pattern"]
+        direction TB
+        Entry["Entry fn<br/>command handler"]
+        Coord["Coordinator<br/>context + state"]
+        Ctrl["Controller<br/>run()"]
+        View2["View<br/>create_response"]
+        Nav["NavigationResult<br/>Back · Exit · Settings*"]
+        Entry --> Coord --> Ctrl
+        Ctrl --> View2
+        Ctrl --> Nav
+        Nav -.->|next controller| Coord
+    end
+
+    subgraph PubSub2["Pub/Sub"]
+        direction TB
+        Pub["Publisher<br/>Tasks · EventHandler"]
+        Bus["EventBus"]
+        S1["GuildSubscriber"]
+        S2["DmSubscriber"]
+        S3["VoiceSubscriber"]
+        Pub -->|publish| Bus
+        Bus -->|dispatch| S1 & S2 & S3
+    end
+
+    subgraph Strategy["Strategy Pattern"]
+        direction TB
+        Svc["FeedSubscriptionService"]
+        PT["Platform trait"]
+        MD["MangaDex"]
+        AL["AniList"]
+        CK["Comick"]
+        Svc -->|dyn Platform| PT
+        PT -.->|impl| MD & AL & CK
+    end
+
+    subgraph RepoPat["Repository Pattern"]
+        direction TB
+        Cogs["Cogs / Commands"]
+        Controllers["Controllers"]
+        BusinessLogic["Business Logic Layer<br/>single access point"]
+        RepTrait["Repository"]
+        Tables["FeedTable<br/>VoiceTable<br/>SubscriberTable<br/>SettingsTable"]
+        DB["SQLite / SQLx"]
+        Cogs --> Controllers --> BusinessLogic --> RepTrait --> Tables --> DB
+    end
+
+    style MVCC fill:#1a2a3a,stroke:#818cf8,stroke-width:2px
+    style PubSub2 fill:#1a3a3a,stroke:#2dd4bf,stroke-width:2px
+    style Strategy fill:#1a3a1a,stroke:#4ade80,stroke-width:2px
+    style RepoPat fill:#2a1a1a,stroke:#f87171,stroke-width:2px
+
+    style Bus fill:#2d2d2d,stroke:#2dd4bf
+    style PT fill:#2d2d2d,stroke:#4ade80
+    style RepTrait fill:#2d2d2d,stroke:#f87171
+    style Ctrl fill:#2d2d2d,stroke:#818cf8
+    style CogTrait fill:#2d2d2d,stroke:#fbbf24
