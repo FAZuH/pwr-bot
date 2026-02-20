@@ -61,7 +61,9 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Install system dependencies
-        run: sudo apt-get install -y libfontconfig1-dev
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --fix-missing libfontconfig1-dev
 
       - name: Build Package
         run: cargo build --release
