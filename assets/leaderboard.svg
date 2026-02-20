@@ -1,0 +1,30 @@
+<svg width="{{ image_width }}" height="{{ total_height }}" viewBox="0 0 {{ image_width }} {{ total_height }}" xmlns="http://www.w3.org/2000/svg" style="background-color: #2B2D31; font-family: Roboto, sans-serif;">
+    <defs>
+        {% for entry in entries %}
+        <clipPath id="clip-{{ loop.index0 }}">
+            <circle cx="{{ entry.avatar_cx }}" cy="{{ entry.avatar_cy }}" r="20"/>
+        </clipPath>
+        {% endfor %}
+    </defs>
+
+    {% for entry in entries %}
+    <rect x="12" y="{{ entry.card_y }}" width="{{ card_w }}" height="{{ card_h }}" rx="8" fill="#313338" stroke="#202225" stroke-width="1"/>
+    
+    {% if entry.progress_width > 0 %}
+    <rect x="12" y="{{ entry.card_y }}" width="{{ entry.progress_width }}" height="{{ card_h }}" rx="8" fill="{{ entry.progress_color }}"/>
+    {% endif %}
+
+    <text x="27" y="{{ entry.text_baseline }}" fill="{{ entry.rank_color }}" font-size="22" font-weight="bold">#{{ entry.rank }}</text>
+
+    {% if entry.avatar_b64 %}
+    <image x="72" y="{{ entry.avatar_y }}" width="40" height="40" href="data:image/png;base64,{{ entry.avatar_b64 }}" clip-path="url(#clip-{{ loop.index0 }})"/>
+    <circle cx="{{ entry.avatar_cx }}" cy="{{ entry.avatar_cy }}" r="20" fill="none" stroke="#202225" stroke-width="1"/>
+    {% else %}
+    <circle cx="{{ entry.avatar_cx }}" cy="{{ entry.avatar_cy }}" r="20" fill="#646464"/>
+    {% endif %}
+
+    <text x="124" y="{{ entry.text_baseline }}" fill="#F2F3F5" font-size="22">{{ entry.name }}</text>
+
+    <text x="{{ time_x }}" y="{{ entry.text_baseline }}" fill="#F2F3F5" font-size="22" text-anchor="end">{{ entry.duration }}</text>
+    {% endfor %}
+</svg>

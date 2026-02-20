@@ -148,10 +148,21 @@ classDiagram
 
     class VoiceStatsView {
         core: ViewCore~VoiceStatsAction~
-        user_id: UserId
-        guild_id: GuildId
-        range: VoiceStatsTimeRange
+        data: VoiceStatsData
+        image_bytes: Option~Vec~u8~~
     }
+
+    class VoiceStatsData {
+        user: Option~User~
+        guild_name: String
+        user_activity: Vec~VoiceDailyActivity~
+        guild_stats: Vec~GuildDailyStats~
+        stat_type: GuildStatType
+        time_range: VoiceStatsTimeRange
+        raw_sessions: Vec~VoiceSessionsModel~
+    }
+
+    VoiceStatsView *-- VoiceStatsData
 
     class FeedListView {
         core: ViewCore~FeedListAction~
