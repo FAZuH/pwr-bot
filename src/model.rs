@@ -231,7 +231,7 @@ pub enum BotMetaKey {
 impl From<&BotMetaKey> for String {
     fn from(value: &BotMetaKey) -> Self {
         match value {
-            BotMetaKey::VoiceHeartbeat => "voice_hearbeat".to_string(),
+            BotMetaKey::VoiceHeartbeat => "voice_heartbeat".to_string(),
             BotMetaKey::BotVersion => "bot_version".to_string(),
         }
     }

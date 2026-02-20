@@ -50,7 +50,7 @@ async fn main() -> Result<()> {
     let platforms = Arc::new(Platforms::new());
     let services = setup_services(db.clone(), platforms.clone()).await?;
 
-    setup_voice_tracking(&config, &services, init_start).await?;
+    setup_voice_tracking(&services, init_start).await?;
 
     let voice_subscriber = Arc::new(VoiceStateSubscriber::new(services.clone()));
     let bot = setup_bot(
@@ -98,16 +98,9 @@ async fn setup_services(db: Arc<Repository>, platforms: Arc<Platforms>) -> Resul
     Ok(Arc::new(Services::new(db, platforms).await?))
 }
 
-async fn setup_voice_tracking(
-    config: &Config,
-    services: &Services,
-    init_start: Instant,
-) -> Result<()> {
-    if !config.features.voice_tracking {
-        return Ok(());
-    }
+async fn setup_voice_tracking(services: &Services, init_start: Instant) -> Result<()> {
     let voice_heartbeat =
-        VoiceHeartbeatManager::new(&config.data_path, services.voice_tracking.clone());
+        VoiceHeartbeatManager::new(services.internal.clone(), services.voice_tracking.clone());
 
     info!("Performing voice tracking crash recovery...");
     let recovered = voice_heartbeat.recover_from_crash().await?;

@@ -13,7 +13,7 @@ pub async fn dump_db(ctx: Context<'_>) -> Result<(), Error> {
 
 pub async fn command(ctx: Context<'_>) -> Result<(), Error> {
     ctx.defer().await?;
-    let dump = ctx.data().service.maintenance.dump_database().await?;
+    let dump = ctx.data().service.internal.dump_database().await?;
 
     let reply = CreateReply::default()
         .content("Database dump:")

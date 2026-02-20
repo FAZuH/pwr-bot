@@ -20,6 +20,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use futures::lock::Mutex;
 use log::debug;
+use log::error;
 use log::info;
 use poise::Framework;
 use poise::FrameworkOptions;
@@ -44,6 +45,7 @@ use crate::config::Config;
 use crate::event::VoiceStateEvent;
 use crate::event::event_bus::EventBus;
 use crate::feed::platforms::Platforms;
+use crate::model::BotMetaKey;
 use crate::service::Services;
 use crate::subscriber::voice_state_subscriber::VoiceStateSubscriber;
 
@@ -76,13 +78,20 @@ impl Bot {
 
         let (token, intents) = Self::create_client_config(&config)?;
         let framework = Self::create_framework(&config)?;
-        let event_handler = Arc::new(BotEventHandler::new(event_bus, voice_subscriber));
+        let http = Arc::new(Http::new(token.clone()));
         let data = Arc::new(Data {
             config: config.clone(),
             platforms,
             service,
             start_time: Instant::now(),
         });
+
+        let event_handler = Arc::new(BotEventHandler::new(
+            event_bus,
+            data.clone(),
+            voice_subscriber.clone(),
+            http.clone(),
+        ));
 
         let client_builder = ClientBuilder::new(token.clone(), intents)
             .event_handler(event_handler)
@@ -92,7 +101,7 @@ impl Bot {
 
         Ok(Self {
             cache: Arc::new(Cache::default()),
-            http: Arc::new(Http::new(token)),
+            http,
             client_builder: Some(client_builder),
             client: Arc::new(Mutex::new(None)),
         })
@@ -164,14 +173,23 @@ impl Bot {
 /// Event handler for Discord gateway events.
 pub struct BotEventHandler {
     event_bus: Arc<EventBus>,
+    data: Arc<Data>,
     voice_subscriber: Arc<VoiceStateSubscriber>,
+    http: Arc<poise::serenity_prelude::Http>,
 }
 
 impl BotEventHandler {
-    pub fn new(event_bus: Arc<EventBus>, voice_subscriber: Arc<VoiceStateSubscriber>) -> Self {
+    pub fn new(
+        event_bus: Arc<EventBus>,
+        data: Arc<Data>,
+        voice_subscriber: Arc<VoiceStateSubscriber>,
+        http: Arc<poise::serenity_prelude::Http>,
+    ) -> Self {
         Self {
             event_bus,
+            data,
             voice_subscriber,
+            http,
         }
     }
 
@@ -182,8 +200,8 @@ impl BotEventHandler {
 
         for guild_id in guild_ids {
             let is_enabled = self
-                .voice_subscriber
-                .services
+                .data
+                .service
                 .voice_tracking
                 .is_enabled(guild_id.get())
                 .await;
@@ -255,6 +273,48 @@ impl BotEventHandler {
             })
             .collect()
     }
+
+    /// Registers commands globally if the bot version has changed.
+    async fn register_commands_if_needed(&self) {
+        if !self.data.config.features.autoregister_cmds {
+            info!("Autoregister command feature is disabled. Commands will not be registered globally.")
+        }
+
+        let current_version = self.data.config.version.clone();
+        let service = self.data.service.internal.clone();
+
+        // Get stored version from database
+        let stored_version = service.get_meta(BotMetaKey::BotVersion).await;
+
+        match stored_version {
+            Ok(Some(version)) if version == current_version => {
+                debug!("Bot version unchanged ({})", current_version);
+            }
+            _ => {
+                // Version mismatch or not found - register commands globally
+                info!(
+                    "Bot version changed or not found. Registering commands globally (current: {}, stored: {:?})",
+                    current_version,
+                    stored_version.ok().flatten()
+                );
+
+                let commands = Cogs.commands();
+                match poise::builtins::register_globally(&self.http, &commands).await {
+                    Ok(_) => {
+                        info!("Commands registered globally successfully");
+
+                        // Update stored version
+                        if let Err(e) = service.set_meta("bot_version", current_version).await {
+                            error!("Failed to update bot version in database: {}", e);
+                        }
+                    }
+                    Err(e) => {
+                        error!("Failed to register commands globally: {}", e);
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[async_trait]
@@ -264,6 +324,9 @@ impl poise::serenity_prelude::EventHandler for BotEventHandler {
             FullEvent::Ready { .. } => {
                 info!("Bot is ready, scanning voice channels...");
                 self.scan_voice_channels(ctx).await;
+
+                // Check if commands need to be re-registered
+                self.register_commands_if_needed().await;
             }
             FullEvent::VoiceStateUpdate { old, new, .. } => {
                 self.event_bus.publish(VoiceStateEvent {

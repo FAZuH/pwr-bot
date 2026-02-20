@@ -28,6 +28,7 @@ pub struct Config {
 pub struct Features {
     pub voice_tracking: bool,
     pub feed_publisher: bool,
+    pub autoregister_cmds: bool,
 }
 
 impl Config {
@@ -61,6 +62,7 @@ impl Config {
         self.features = Features {
             voice_tracking: parse_bool_env("ENABLE_VOICE_TRACKING", true),
             feed_publisher: parse_bool_env("ENABLE_FEED_PUBLISHER", true),
+            autoregister_cmds: parse_bool_env("ENABLE_AUTOREGISTER_CMD", true),
         };
 
         self.version = env!("CARGO_PKG_VERSION").to_string();
