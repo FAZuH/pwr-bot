@@ -435,46 +435,6 @@ pub trait Action: Send + Sync + Clone {
     fn label(&self) -> &'static str;
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[derive(Debug, PartialEq, Clone)]
-    enum TestAction {
-        First,
-        Second,
-        #[allow(dead_code)]
-        Third,
-    }
-
-    impl Action for TestAction {
-        fn label(&self) -> &'static str {
-            match self {
-                TestAction::First => "First",
-                TestAction::Second => "Second",
-                TestAction::Third => "Third",
-            }
-        }
-    }
-
-    #[test]
-    fn test_action_registry_new() {
-        let registry = ActionRegistry::<TestAction>::new();
-        assert!(registry.actions.is_empty());
-    }
-
-    #[test]
-    fn test_action_registry_register() {
-        let mut registry = ActionRegistry::<TestAction>::new();
-
-        let id1 = registry.register(TestAction::First);
-        assert!(id1.starts_with("TestAction:"));
-
-        let id2 = registry.register(TestAction::Second);
-        assert_ne!(id1, id2);
-    }
-}
-
 // ─── V2 Architecture ───────────────────────────────────────────────────────────
 
 use futures::StreamExt;
@@ -697,5 +657,45 @@ impl<'a, T: Action + Send + Sync + 'static, H: ViewHandlerV2<T> + ViewRenderV2<T
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Debug, PartialEq, Clone)]
+    enum TestAction {
+        First,
+        Second,
+        #[allow(dead_code)]
+        Third,
+    }
+
+    impl Action for TestAction {
+        fn label(&self) -> &'static str {
+            match self {
+                TestAction::First => "First",
+                TestAction::Second => "Second",
+                TestAction::Third => "Third",
+            }
+        }
+    }
+
+    #[test]
+    fn test_action_registry_new() {
+        let registry = ActionRegistry::<TestAction>::new();
+        assert!(registry.actions.is_empty());
+    }
+
+    #[test]
+    fn test_action_registry_register() {
+        let mut registry = ActionRegistry::<TestAction>::new();
+
+        let id1 = registry.register(TestAction::First);
+        assert!(id1.starts_with("TestAction:"));
+
+        let id2 = registry.register(TestAction::Second);
+        assert_ne!(id1, id2);
     }
 }

@@ -244,10 +244,7 @@ impl<'a> ViewHandler<VoiceLeaderboardAction> for VoiceLeaderboardHandler<'a> {
                     .handler
                     .handle(pagination_action, interaction)
                     .await?;
-                match action {
-                    Some(action) => Some(VoiceLeaderboardAction::Base(action)),
-                    None => None,
-                }
+                action.map(VoiceLeaderboardAction::Base)
             }
             TimeRange => {
                 if let ComponentInteractionDataKind::StringSelect { values } =

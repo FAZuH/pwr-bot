@@ -155,37 +155,32 @@ impl ViewHandlerV2<SettingsWelcomeAction> for SettingsWelcomeHandler {
                 self.settings.welcome.enabled = Some(!current);
             }
             ChannelSelect => {
-                if let Trigger::Component(interaction) = trigger {
-                    if let ComponentInteractionDataKind::ChannelSelect { values } =
+                if let Trigger::Component(interaction) = trigger
+                    && let ComponentInteractionDataKind::ChannelSelect { values } =
                         &interaction.data.kind
-                    {
-                        if let Some(channel) = values.first() {
-                            self.settings.welcome.channel_id = Some(channel.to_string());
-                        }
-                    }
+                    && let Some(channel) = values.first()
+                {
+                    self.settings.welcome.channel_id = Some(channel.to_string());
                 }
             }
             TemplateSelect => {
-                if let Trigger::Component(interaction) = trigger {
-                    if let ComponentInteractionDataKind::StringSelect { values } =
+                if let Trigger::Component(interaction) = trigger
+                    && let ComponentInteractionDataKind::StringSelect { values } =
                         &interaction.data.kind
-                    {
-                        if let Some(template) = values.first() {
-                            self.settings.welcome.template_id = Some(template.clone());
-                        }
-                    }
+                    && let Some(template) = values.first()
+                {
+                    self.settings.welcome.template_id = Some(template.clone());
                 }
             }
             MarkRemoval => {
-                if let Trigger::Component(interaction) = trigger {
-                    if let ComponentInteractionDataKind::StringSelect { values } =
+                if let Trigger::Component(interaction) = trigger
+                    && let ComponentInteractionDataKind::StringSelect { values } =
                         &interaction.data.kind
-                    {
-                        self.marked_removal.clear();
-                        for val in values {
-                            if let Ok(idx) = val.parse::<usize>() {
-                                self.marked_removal.insert(idx);
-                            }
+                {
+                    self.marked_removal.clear();
+                    for val in values {
+                        if let Ok(idx) = val.parse::<usize>() {
+                            self.marked_removal.insert(idx);
                         }
                     }
                 }

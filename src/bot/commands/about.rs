@@ -167,7 +167,7 @@ impl ViewRenderV2<AboutAction> for AboutView {
             CreateButton::new_link("https://github.com/FAZuH/pwr-bot/blob/main/LICENSE")
                 .label("License");
 
-        let mut back_action = crate::bot::views::RegisteredAction {
+        let back_action = crate::bot::views::RegisteredAction {
             id: registry.register(AboutAction::Back),
             label: "< Back",
         };
