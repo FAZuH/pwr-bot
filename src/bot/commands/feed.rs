@@ -32,7 +32,7 @@ use crate::bot::views::View;
 use crate::bot::views::ViewCommand;
 use crate::bot::views::ViewCore;
 use crate::bot::views::ViewHandler;
-use crate::entity::SubscriberModel;
+use crate::entity::SubscriberEntity;
 use crate::entity::SubscriberType;
 use crate::service::feed_subscription_service::SubscribeResult;
 use crate::service::feed_subscription_service::SubscriberTarget;
@@ -151,7 +151,7 @@ pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
 async fn process_subscription_batch(
     ctx: Context<'_>,
     urls: &[&str],
-    subscriber: &SubscriberModel,
+    subscriber: &SubscriberEntity,
     is_subscribe: bool,
 ) -> Result<NavigationResult, Error> {
     let mut states: Vec<String> = vec!["⏳ Processing...".to_string(); urls.len()];
@@ -274,7 +274,7 @@ fn get_target_id(
 async fn get_or_create_subscriber(
     ctx: Context<'_>,
     send_into: &SendInto,
-) -> Result<SubscriberModel, Error> {
+) -> Result<SubscriberEntity, Error> {
     let target_id = get_target_id(ctx.guild_id(), ctx.author().id, send_into)?;
     let subscriber_type = SubscriberType::from(send_into);
     let target = SubscriberTarget {

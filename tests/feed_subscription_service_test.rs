@@ -3,13 +3,13 @@
 use std::sync::Arc;
 
 use chrono::Utc;
+use pwr_bot::entity::FeedEntity;
+use pwr_bot::entity::FeedItemEntity;
+use pwr_bot::entity::ServerSettings;
+use pwr_bot::entity::SubscriberType;
 use pwr_bot::feed::FeedItem;
 use pwr_bot::feed::FeedSource;
 use pwr_bot::feed::platforms::Platforms;
-use pwr_bot::entity::FeedItemModel;
-use pwr_bot::entity::FeedModel;
-use pwr_bot::entity::ServerSettings;
-use pwr_bot::entity::SubscriberType;
 use pwr_bot::repository::table::Table;
 use pwr_bot::service::feed_subscription_service::FeedSubscriptionService;
 use pwr_bot::service::feed_subscription_service::SubscriberTarget;
@@ -195,7 +195,7 @@ async fn test_list_paginated_subscriptions_optimization() {
     let feed_names = ["Zebra Feed", "Apple Feed", "Mango Feed", "Banana Feed"];
 
     for (i, name) in feed_names.iter().enumerate() {
-        let feed = FeedModel {
+        let feed = FeedEntity {
             name: name.to_string(),
             platform_id: "mock".to_string(),
             source_id: format!("src_{}", i),
@@ -205,7 +205,7 @@ async fn test_list_paginated_subscriptions_optimization() {
         };
         let feed_id = db.feed.insert(&feed).await.unwrap();
 
-        let sub_model = pwr_bot::entity::FeedSubscriptionModel {
+        let sub_model = pwr_bot::entity::FeedSubscriptionEntity {
             feed_id,
             subscriber_id: subscriber.id,
             ..Default::default()
@@ -214,7 +214,7 @@ async fn test_list_paginated_subscriptions_optimization() {
 
         // Add item for some feeds
         if i % 2 == 0 {
-            let item = FeedItemModel {
+            let item = FeedItemEntity {
                 feed_id,
                 description: format!("Chapter {}", i),
                 published: Utc::now(),

@@ -43,10 +43,10 @@ use crate::bot::views::View;
 use crate::bot::views::ViewCommand;
 use crate::bot::views::ViewCore;
 use crate::bot::views::ViewHandler;
-use crate::error::AppError;
 use crate::entity::GuildDailyStats;
 use crate::entity::VoiceDailyActivity;
-use crate::entity::VoiceSessionsModel;
+use crate::entity::VoiceSessionsEntity;
+use crate::error::AppError;
 
 /// Display voice activity statistics with contribution graph
 ///
@@ -153,7 +153,7 @@ pub struct VoiceStatsData {
     /// Time range for the data
     pub time_range: VoiceStatsTimeRange,
     /// Raw sessions for line chart generation
-    pub raw_sessions: Vec<VoiceSessionsModel>,
+    pub raw_sessions: Vec<VoiceSessionsEntity>,
 }
 
 impl VoiceStatsData {

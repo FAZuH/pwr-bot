@@ -18,14 +18,14 @@ pub enum SubscriberType {
 ///
 /// Represents metadata for a subscribable content source (manga series, anime)
 /// on a specific platform. The actual version history is tracked separately in
-/// [`FeedItemModel`].
+/// [`FeedItemEntity`].
 ///
 /// # Hierarchy
 /// - **Platform**: External service (AniList, MangaDex, Comick)
 /// - **Feed/Source**: Specific content on that platform (One Punch Man on MangaDex)
 /// - **Feed Items**: Individual updates (chapters, episodes)
 #[derive(FromRow, Serialize, Default, Clone, Debug)]
-pub struct FeedModel {
+pub struct FeedEntity {
     #[serde(default)]
     pub id: i32,
     #[serde(default)]
@@ -58,7 +58,7 @@ pub struct FeedModel {
 /// chapter, or post creates a new version entry. The latest version can be
 /// determined by querying for the most recent `published` timestamp.
 #[derive(FromRow, Serialize, Default, Clone, Debug)]
-pub struct FeedItemModel {
+pub struct FeedItemEntity {
     #[serde(default)]
     pub id: i32,
     #[serde(default)]
@@ -74,9 +74,9 @@ pub struct FeedItemModel {
 ///
 /// Represents either a Discord guild channel or a direct message conversation
 /// with a user. Multiple subscribers can follow the same feed, and a single
-/// subscriber can follow multiple feeds (via `FeedSubscriptionModel`).
+/// subscriber can follow multiple feeds (via `FeedSubscriptionEntity`).
 #[derive(FromRow, Serialize, Default, Clone)]
-pub struct SubscriberModel {
+pub struct SubscriberEntity {
     #[serde(default)]
     pub id: i32,
     #[serde(default)]
@@ -92,7 +92,7 @@ pub struct SubscriberModel {
 /// and subscribers. When a new `FeedVersionModel` is published, query this
 /// table to find all subscribers that need to be notified.
 #[derive(FromRow, Serialize, Default, Clone)]
-pub struct FeedSubscriptionModel {
+pub struct FeedSubscriptionEntity {
     #[serde(default)]
     pub id: i32,
     #[serde(default)]
@@ -102,7 +102,7 @@ pub struct FeedSubscriptionModel {
 }
 
 #[derive(FromRow, Serialize, Deserialize, Default, Clone, Debug)]
-pub struct ServerSettingsModel {
+pub struct ServerSettingsEntity {
     #[serde(default)]
     #[sqlx(try_from = "i64")]
     pub guild_id: u64,
@@ -161,7 +161,7 @@ pub struct FeedWithLatestItemRow {
 }
 
 #[derive(FromRow, Serialize, Default, Clone)]
-pub struct VoiceSessionsModel {
+pub struct VoiceSessionsEntity {
     #[serde(default)]
     pub id: i32,
     #[serde(default)]
@@ -216,7 +216,7 @@ pub struct GuildDailyStats {
 
 /// Key-value store for bot metadata (version, heartbeat timestamp, etc.)
 #[derive(FromRow, Serialize, Deserialize, Default, Clone, Debug)]
-pub struct BotMetaModel {
+pub struct BotMetaEntity {
     #[serde(default)]
     pub key: String,
     #[serde(default)]

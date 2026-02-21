@@ -12,10 +12,10 @@ use serenity::all::CreateMessage;
 use serenity::all::GuildId;
 
 use crate::bot::Bot;
+use crate::entity::SubscriberEntity;
+use crate::entity::SubscriberType;
 use crate::event::Event;
 use crate::event::FeedUpdateEvent;
-use crate::entity::SubscriberModel;
-use crate::entity::SubscriberType;
 use crate::repository::Repository;
 use crate::repository::table::Table;
 use crate::subscriber::Subscriber;
@@ -58,7 +58,7 @@ impl DiscordGuildSubscriber {
     /// Sends a message to a guild channel for a subscriber.
     pub async fn handle_sub(
         &self,
-        sub: &SubscriberModel,
+        sub: &SubscriberEntity,
         message: CreateMessage<'_>,
     ) -> anyhow::Result<()> {
         let guild_id = GuildId::from_str(&sub.target_id)?;

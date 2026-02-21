@@ -47,9 +47,9 @@ use crate::bot::views::ViewCore;
 use crate::bot::views::ViewHandler;
 use crate::bot::views::pagination::PaginationAction;
 use crate::bot::views::pagination::PaginationView;
-use crate::error::AppError;
 use crate::entity::VoiceLeaderboardEntry;
 use crate::entity::VoiceLeaderboardOptBuilder;
+use crate::error::AppError;
 
 pub mod image_builder;
 pub mod image_generator;

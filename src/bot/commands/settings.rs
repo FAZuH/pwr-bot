@@ -38,9 +38,9 @@ use crate::bot::views::ViewCommand;
 use crate::bot::views::ViewCore;
 use crate::bot::views::ViewHandler;
 use crate::controller;
-use crate::error::AppError;
 use crate::entity::ServerSettings;
-use crate::entity::ServerSettingsModel;
+use crate::entity::ServerSettingsEntity;
+use crate::error::AppError;
 
 /// Opens main server settings
 ///
@@ -69,7 +69,7 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for SettingsMainController<'a> 
             .get_server_settings(guild_id.into())
             .await?;
 
-        let settings = ServerSettingsModel {
+        let settings = ServerSettingsEntity {
             guild_id: guild_id.into(),
             settings: sqlx::types::Json(settings),
         };
@@ -203,7 +203,7 @@ impl SettingsMainState {
 
 pub struct SettingsMainHandler {
     pub state: SettingsMainState,
-    pub settings: ServerSettingsModel,
+    pub settings: ServerSettingsEntity,
     pub is_settings_modified: bool,
 }
 
@@ -288,7 +288,7 @@ impl<'a> View<'a, SettingsMainAction> for SettingsMainView<'a> {
 }
 
 impl<'a> SettingsMainView<'a> {
-    pub fn new(ctx: &'a Context<'a>, settings: ServerSettingsModel) -> Self {
+    pub fn new(ctx: &'a Context<'a>, settings: ServerSettingsEntity) -> Self {
         Self {
             base: InteractiveViewBase::new(Self::create_core(ctx)),
             handler: SettingsMainHandler {

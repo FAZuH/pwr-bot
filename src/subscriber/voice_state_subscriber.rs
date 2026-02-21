@@ -10,8 +10,8 @@ use log::debug;
 use serenity::all::ChannelId;
 use tokio::sync::Mutex;
 
+use crate::entity::VoiceSessionsEntity;
 use crate::event::VoiceStateEvent;
-use crate::entity::VoiceSessionsModel;
 use crate::service::Services;
 use crate::subscriber::Subscriber;
 
@@ -61,7 +61,7 @@ impl VoiceStateSubscriber {
             };
 
             // Insert into database
-            let model = VoiceSessionsModel {
+            let model = VoiceSessionsEntity {
                 user_id,
                 guild_id,
                 channel_id,
@@ -109,7 +109,7 @@ impl VoiceStateSubscriber {
             .await
             .insert(session_id, session);
 
-        let model = VoiceSessionsModel {
+        let model = VoiceSessionsEntity {
             user_id,
             guild_id,
             channel_id: channel_id.get(),
@@ -135,7 +135,7 @@ impl VoiceStateSubscriber {
         let session = self.active_sessions.lock().await.remove(&session_id);
 
         if let Some(session) = session {
-            let model = VoiceSessionsModel {
+            let model = VoiceSessionsEntity {
                 user_id: old_state.user_id.get(),
                 guild_id: old_state
                     .guild_id
@@ -169,7 +169,7 @@ impl VoiceStateSubscriber {
 
         // Close old session
         if let Some(session) = self.active_sessions.lock().await.remove(&session_id) {
-            let model = VoiceSessionsModel {
+            let model = VoiceSessionsEntity {
                 user_id: old_state.user_id.get(),
                 guild_id: old_state
                     .guild_id
@@ -203,7 +203,7 @@ impl VoiceStateSubscriber {
             .await
             .insert(session_id.clone(), session);
 
-        let model = VoiceSessionsModel {
+        let model = VoiceSessionsEntity {
             user_id,
             guild_id,
             channel_id: new_channel_id.get(),

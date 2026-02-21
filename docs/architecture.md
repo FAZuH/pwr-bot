@@ -137,13 +137,13 @@ Plain domain objects and platform abstractions. Entities have no database concer
 
 | Entity | Description |
 |--------|-------------|
-| `FeedModel` | A content source on a platform |
-| `FeedItemModel` | An individual update (chapter, episode) |
-| `SubscriberModel` | A notification target (guild or DM) |
-| `FeedSubscriptionModel` | Link between a feed and a subscriber |
-| `ServerSettingsModel` | Per-guild configuration |
-| `VoiceSessionsModel` | Voice channel session record |
-| `BotMetaModel` | Key-value bot metadata |
+| `FeedEntity` | A content source on a platform |
+| `FeedItemEntity` | An individual update (chapter, episode) |
+| `SubscriberEntity` | A notification target (guild or DM) |
+| `FeedSubscriptionEntity` | Link between a feed and a subscriber |
+| `ServerSettingsEntity` | Per-guild configuration |
+| `VoiceSessionsEntity` | Voice channel session record |
+| `BotMetaEntity` | Key-value bot metadata |
 
 ### Platforms (`feed/`)
 
