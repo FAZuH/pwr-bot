@@ -10,6 +10,7 @@ use pwr_bot::entity::ServerSettingsEntity;
 use pwr_bot::entity::SubscriberEntity;
 use pwr_bot::entity::SubscriberType;
 use pwr_bot::entity::VoiceSessionsEntity;
+use pwr_bot::entity::WelcomeSettings;
 use pwr_bot::repository::table::Table;
 
 mod common;
@@ -430,6 +431,7 @@ mod server_settings_table_tests {
                     subscribe_role_id: None,
                     unsubscribe_role_id: None,
                 },
+                welcome: WelcomeSettings::default(),
             }),
         }
     }

@@ -10,7 +10,6 @@ use crate::bot::commands::Context;
 use crate::bot::commands::Error;
 use crate::bot::error::BotError;
 use crate::bot::views::ResponseKind;
-use crate::bot::views::ResponseView;
 
 /// Unregisters guild slash commands
 ///
@@ -62,10 +61,8 @@ impl CommandUnregistrationView {
         self.duration_ms = Some(duration_ms);
         self
     }
-}
 
-impl<'a> ResponseView<'a> for CommandUnregistrationView {
-    fn create_response<'b>(&mut self) -> ResponseKind<'b> {
+    pub fn create_response(&mut self) -> ResponseKind<'_> {
         let title = if self.is_complete {
             "Command Unregistration Complete"
         } else {
@@ -87,5 +84,9 @@ impl<'a> ResponseView<'a> for CommandUnregistrationView {
         ]));
 
         vec![container].into()
+    }
+
+    pub fn create_reply(&mut self) -> poise::CreateReply<'_> {
+        self.create_response().into()
     }
 }

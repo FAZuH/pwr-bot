@@ -8,6 +8,7 @@ pub mod register_owner;
 pub mod settings;
 pub mod unregister;
 pub mod voice;
+pub mod welcome;
 
 /// Error type used across bot commands.
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
@@ -39,6 +40,7 @@ impl Cog for Cogs {
             settings::settings(),
             unregister::unregister(),
             voice::voice(),
+            welcome::welcome(),
         ]
     }
 }

@@ -1,0 +1,28 @@
+<svg width="800" height="300" viewBox="0 0 800 300" xmlns="http://www.w3.org/2000/svg" style="background-color: #111214; font-family: 'Courier New', monospace, sans-serif;">
+    <rect x="0" y="0" width="800" height="300" fill="#111214"/>
+    
+    <!-- Background Grid -->
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+        <rect width="40" height="40" fill="none" stroke="#2B2D31" stroke-width="1" opacity="0.5"/>
+    </pattern>
+    <rect x="0" y="0" width="800" height="300" fill="url(#grid)"/>
+
+    <path d="M0 0 L150 0 L100 300 L0 300 Z" fill="{{ primary_color }}" opacity="0.2"/>
+    <path d="M0 250 L800 250 L800 300 L0 300 Z" fill="{{ primary_color }}" opacity="0.1"/>
+    
+    <defs>
+        <clipPath id="avatar-clip"><rect x="40" y="40" width="160" height="160" rx="15"/></clipPath>
+    </defs>
+    
+    <!-- Avatar with offset border -->
+    <rect x="45" y="45" width="160" height="160" rx="15" fill="none" stroke="{{ primary_color }}" stroke-width="4" opacity="0.8"/>
+    <image x="40" y="40" width="160" height="160" href="data:image/png;base64,{{ avatar_b64 }}" clip-path="url(#avatar-clip)"/>
+    
+    <text x="240" y="110" fill="#FFFFFF" font-size="54" font-weight="bold" letter-spacing="-1">{{ username }}</text>
+    <text x="240" y="150" fill="{{ primary_color }}" font-size="24">&gt; {{ user_tag }}</text>
+    <text x="240" y="210" fill="#949BA4" font-size="20">Sys.Log: Member {{ member_number }} initialized.</text>
+    
+    <!-- Accent blocks -->
+    <rect x="750" y="20" width="20" height="10" fill="{{ primary_color }}"/>
+    <rect x="750" y="35" width="20" height="10" fill="{{ primary_color }}" opacity="0.5"/>
+</svg>
