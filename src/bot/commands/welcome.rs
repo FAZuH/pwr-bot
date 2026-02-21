@@ -8,6 +8,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
 
+use log::debug;
 use poise::Command;
 use poise::Modal;
 use serenity::all::ButtonStyle;
@@ -121,7 +122,7 @@ impl ViewHandlerV2<SettingsWelcomeAction> for SettingsWelcomeHandler {
                         }
                     });
                 }
-                return Ok(ViewCommand::Ignore);
+                return Ok(ViewCommand::AlreadyResponded);
             }
             SetColor(None) => {
                 if let Trigger::Component(interaction) = trigger {
@@ -144,7 +145,7 @@ impl ViewHandlerV2<SettingsWelcomeAction> for SettingsWelcomeHandler {
                         }
                     });
                 }
-                return Ok(ViewCommand::Ignore);
+                return Ok(ViewCommand::AlreadyResponded);
             }
             _ => {}
         }
@@ -214,8 +215,7 @@ impl ViewHandlerV2<SettingsWelcomeAction> for SettingsWelcomeHandler {
             CancelRemoval => {
                 self.marked_removal.clear();
             }
-            Back => return Ok(ViewCommand::Exit),
-            About => return Ok(ViewCommand::Exit),
+            Back | About => return Ok(ViewCommand::Continue),
             _ => {}
         }
 
@@ -540,7 +540,7 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for WelcomeSettingsController<'
 
         view.current_image_bytes = Self::generate_preview_from(&view.settings, &generator).await;
 
-        let mut engine = ViewEngine::new(&ctx, view, Duration::from_secs(120)).acknowledge(false);
+        let mut engine = ViewEngine::new(&ctx, view, Duration::from_secs(120));
 
         let nav = Arc::new(Mutex::new(NavigationResult::Exit));
 
@@ -549,9 +549,11 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for WelcomeSettingsController<'
                 let nav = nav.clone();
                 Box::pin(async move {
                     use SettingsWelcomeAction::*;
+                    debug!("on_action for {:?}", action);
                     match action {
                         Back => {
                             *nav.lock().unwrap() = NavigationResult::Back;
+                            debug!("Setting nav to Back");
                             ViewCommand::Exit
                         }
                         About => {
@@ -564,7 +566,10 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for WelcomeSettingsController<'
             })
             .await?;
 
-        Ok(Arc::try_unwrap(nav).unwrap().into_inner().unwrap())
+        let nav = Arc::try_unwrap(nav).unwrap().into_inner().unwrap();
+        debug!("{:?}", nav);
+
+        Ok(nav)
     }
 }
 

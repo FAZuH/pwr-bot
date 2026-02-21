@@ -293,7 +293,7 @@ impl ViewHandlerV2<FeedListAction> for FeedListHandler {
             UndoUnsub { source_url } => {
                 self.marked_unsub.remove(source_url);
             }
-            Exit => return Ok(ViewCommand::Exit),
+            Exit => return Ok(ViewCommand::Continue),
             Save => {
                 // Controller handles the actual DB unsubscribe
                 self.state = FeedListState::View;
@@ -301,14 +301,11 @@ impl ViewHandlerV2<FeedListAction> for FeedListHandler {
         };
 
         if let Base(pagination_action) = action {
-            // Re-implement the sub-call manually since ViewHandlerV2 requires the exact generic
-            match pagination_action {
-                PaginationAction::First => self.pagination.state.first_page(),
-                PaginationAction::Prev => self.pagination.state.prev_page(),
-                PaginationAction::Next => self.pagination.state.next_page(),
-                PaginationAction::Last => self.pagination.state.last_page(),
-                _ => return Ok(ViewCommand::Ignore),
-            }
+            let cmd = self.pagination.handle(
+                pagination_action,
+                _trigger,
+                &_ctx.map(FeedListAction::Base),
+            ).await?;
 
             // Refresh page
             if let Ok(subs) = self
@@ -322,6 +319,8 @@ impl ViewHandlerV2<FeedListAction> for FeedListHandler {
             {
                 self.subscriptions = subs;
             }
+
+            return Ok(cmd);
         }
 
         Ok(ViewCommand::Render)

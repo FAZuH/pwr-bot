@@ -361,7 +361,7 @@ impl ViewHandlerV2<PaginationAction> for PaginationViewV2 {
             PaginationAction::Prev => self.state.prev_page(),
             PaginationAction::Next => self.state.next_page(),
             PaginationAction::Last => self.state.last_page(),
-            _ => return Ok(ViewCommand::Ignore),
+            _ => return Ok(ViewCommand::Continue),
         }
         Ok(ViewCommand::Render)
     }

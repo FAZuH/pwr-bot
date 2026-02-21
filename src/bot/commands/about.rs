@@ -103,7 +103,7 @@ impl ViewHandlerV2<AboutAction> for AboutView {
         _ctx: &ViewContextV2<'_, AboutAction>,
     ) -> Result<ViewCommand, Error> {
         match action {
-            AboutAction::Back => Ok(ViewCommand::Ignore),
+            AboutAction::Back => Ok(ViewCommand::Continue),
         }
     }
 }

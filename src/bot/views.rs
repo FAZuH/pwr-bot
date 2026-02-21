@@ -5,6 +5,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use log::debug;
 use poise::CreateReply;
 use poise::ReplyHandle;
 use serenity::all::ComponentInteraction;
@@ -239,13 +240,17 @@ impl RegisteredAction {
 use futures::future::BoxFuture;
 
 /// Enum returned by controller callbacks to signal the next action for the view loop.
+#[derive(Debug)]
 pub enum ViewCommand {
     /// Re-render the view and continue listening.
     Render,
     /// Exit the view loop.
     Exit,
-    /// Ignore the event and continue listening without re-rendering.
-    Ignore,
+    /// Continue the loop without re-rendering.
+    Continue,
+    /// Indicates the interaction was already responded to (e.g., a modal was opened),
+    /// so the engine should NOT auto-acknowledge it.
+    AlreadyResponded,
 }
 
 /// Trait implemented by views to handle interactions and timeouts.
@@ -460,13 +465,54 @@ pub enum Trigger<'a> {
     Timeout,
 }
 
+use std::sync::Arc;
+
+pub trait ViewSender<T: Action>: Send + Sync {
+    fn send(&self, event: ViewEvent<T>);
+}
+
+impl<T: Action> ViewSender<T> for mpsc::UnboundedSender<ViewEvent<T>> {
+    fn send(&self, event: ViewEvent<T>) {
+        let _ = self.send(event);
+    }
+}
+
+pub struct MappedSender<C: Action, P: Action> {
+    parent_tx: Arc<dyn ViewSender<P>>,
+    wrap: fn(C) -> P,
+}
+
+impl<C: Action, P: Action> ViewSender<C> for MappedSender<C, P> {
+    fn send(&self, event: ViewEvent<C>) {
+        let mapped_event = match event {
+            ViewEvent::Component(c, i) => ViewEvent::Component((self.wrap)(c), i),
+            ViewEvent::Modal(c, i) => ViewEvent::Modal((self.wrap)(c), i),
+            ViewEvent::Message(c, m) => ViewEvent::Message((self.wrap)(c), m),
+            ViewEvent::Async(c) => ViewEvent::Async((self.wrap)(c)),
+            ViewEvent::Timeout => ViewEvent::Timeout,
+        };
+        self.parent_tx.send(mapped_event);
+    }
+}
+
 /// Context passed to the handler.
 pub struct ViewContextV2<'a, T> {
     pub poise: &'a Context<'a>,
-    pub tx: mpsc::UnboundedSender<ViewEvent<T>>,
+    pub tx: Arc<dyn ViewSender<T>>,
 }
 
 impl<'a, T: Action + Send + 'static> ViewContextV2<'a, T> {
+    /// Maps this context into a context for a child view's action type.
+    pub fn map<C: Action + Send + 'static>(&self, wrap: fn(C) -> T) -> ViewContextV2<'a, C> {
+        ViewContextV2 {
+            poise: self.poise,
+            tx: Arc::new(MappedSender {
+                parent_tx: self.tx.clone(),
+                wrap,
+            }),
+        }
+    }
+
     /// Ergonomic helper to spawn a background task that eventually produces a new action
     pub fn spawn<F>(&self, future: F)
     where
@@ -475,7 +521,7 @@ impl<'a, T: Action + Send + 'static> ViewContextV2<'a, T> {
         let tx = self.tx.clone();
         tokio::spawn(async move {
             if let Some(action) = future.await {
-                let _ = tx.send(ViewEvent::Async(action));
+                tx.send(ViewEvent::Async(action));
             }
         });
     }
@@ -568,7 +614,7 @@ impl<'a, T: Action + Send + Sync + 'static, H: ViewHandlerV2<T> + ViewRenderV2<T
 
         let ctx_wrapper = ViewContextV2 {
             poise: self.ctx,
-            tx: tx.clone(),
+            tx: Arc::new(tx.clone()),
         };
 
         loop {
@@ -582,16 +628,18 @@ impl<'a, T: Action + Send + Sync + 'static, H: ViewHandlerV2<T> + ViewRenderV2<T
                         }
                     };
 
-
-                    if self.should_acknowledge {
-                        interaction.create_response(
-                            self.ctx.http(),
-                            CreateInteractionResponse::Acknowledge,
-                        ).await.ok();
-                    }
-
                     if let Some(action) = self.registry.get(&interaction.data.custom_id).cloned() {
                         let cmd = self.handler.handle(action.clone(), Trigger::Component(&interaction), &ctx_wrapper).await?;
+                        debug!("Handle returned {:?}", cmd);
+
+                        // Acknowledge after the handler runs, unless it explicitly tells us it already responded.
+                        if self.should_acknowledge && !matches!(cmd, ViewCommand::AlreadyResponded) {
+                            interaction.create_response(
+                                self.ctx.http(),
+                                CreateInteractionResponse::Acknowledge,
+                            ).await.ok();
+                        }
+
                         if let ViewCommand::Render = cmd {
                             self.render_view().await?;
                         } else if let ViewCommand::Exit = cmd {
@@ -604,6 +652,12 @@ impl<'a, T: Action + Send + Sync + 'static, H: ViewHandlerV2<T> + ViewRenderV2<T
                         } else if let ViewCommand::Exit = callback_cmd {
                             break;
                         }
+                    } else if self.should_acknowledge {
+                        // Action wasn't found in registry, just acknowledge it to not leave Discord hanging
+                        interaction.create_response(
+                            self.ctx.http(),
+                            CreateInteractionResponse::Acknowledge,
+                        ).await.ok();
                     }
                 }
 

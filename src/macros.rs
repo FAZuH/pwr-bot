@@ -229,12 +229,11 @@ macro_rules! impl_interactive_view {
                         let cmd = on_action(action).await;
                         match cmd {
                             ViewCommand::Render => {
-                                self.render().await?;
+                                let _ = crate::bot::views::RenderExt::render(self).await;
                             }
-                            ViewCommand::Exit => {
-                                break;
-                            }
-                            ViewCommand::Ignore => {}
+                            ViewCommand::Exit => break,
+                            ViewCommand::Continue => {}
+                            ViewCommand::AlreadyResponded => {}
                         }
                     } else {
                         self.handler.on_timeout().await?;
