@@ -276,7 +276,7 @@ impl ViewHandler<VoiceStatsAction> for VoiceStatsHandler {
                 self.data.stat_type = GuildStatType::AverageTime;
             }
 
-            ToggleDataMode | SelectUser => {},
+            ToggleDataMode | SelectUser => {}
         }
         Ok(Some(action.clone()))
     }

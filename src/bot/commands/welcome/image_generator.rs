@@ -137,9 +137,8 @@ impl WelcomeImageGenerator {
 
     fn svg_to_png(svg: &str, _width: u32, _height: u32) -> Result<Vec<u8>> {
         let mut fontdb = resvg::usvg::fontdb::Database::new();
-        fontdb.load_font_data(
-            include_bytes!("../../../../assets/fonts/Roboto-Regular.ttf").to_vec(),
-        );
+        fontdb
+            .load_font_data(include_bytes!("../../../../assets/fonts/Roboto-Regular.ttf").to_vec());
         // Map "sans-serif" to Roboto family
         fontdb.set_sans_serif_family("Roboto");
 

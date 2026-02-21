@@ -234,6 +234,7 @@ macro_rules! impl_interactive_view {
                             ViewCommand::Exit => {
                                 break;
                             }
+                            ViewCommand::Ignore => {}
                         }
                     } else {
                         self.handler.on_timeout().await?;

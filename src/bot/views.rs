@@ -244,13 +244,19 @@ pub enum ViewCommand {
     Render,
     /// Exit the view loop.
     Exit,
+    /// Ignore the event and continue listening without re-rendering.
+    Ignore,
 }
 
 /// Trait implemented by views to handle interactions and timeouts.
 #[async_trait::async_trait]
 pub trait ViewHandler<T: Action>: Send + Sync {
     /// Handles an action and returns the next action if any.
-    async fn handle(&mut self, action: &T, interaction: &ComponentInteraction) -> Result<Option<T>, Error>;
+    async fn handle(
+        &mut self,
+        action: &T,
+        interaction: &ComponentInteraction,
+    ) -> Result<Option<T>, Error>;
 
     /// Callback to execute when the interaction is timed out.
     async fn on_timeout(&mut self) -> Result<(), Error> {
@@ -466,5 +472,230 @@ mod tests {
 
         let id2 = registry.register(TestAction::Second);
         assert_ne!(id1, id2);
+    }
+}
+
+// ─── V2 Architecture ───────────────────────────────────────────────────────────
+
+use futures::StreamExt;
+use serenity::all::Message;
+use serenity::all::ModalInteraction;
+use tokio::sync::mpsc;
+
+/// Represents an event that can wake up the View Loop.
+pub enum ViewEvent<T> {
+    Component(T, ComponentInteraction),
+    Modal(T, ModalInteraction),
+    Message(T, Message),
+    Async(T),
+    Timeout,
+}
+
+/// Passed to the handler so it knows WHAT triggered the action.
+pub enum Trigger<'a> {
+    Component(&'a ComponentInteraction),
+    Modal(&'a ModalInteraction),
+    Message(&'a Message),
+    Async,
+    Timeout,
+}
+
+/// Context passed to the handler.
+pub struct ViewContextV2<'a, T> {
+    pub poise: &'a Context<'a>,
+    pub tx: mpsc::UnboundedSender<ViewEvent<T>>,
+}
+
+impl<'a, T: Action + Send + 'static> ViewContextV2<'a, T> {
+    /// Ergonomic helper to spawn a background task that eventually produces a new action
+    pub fn spawn<F>(&self, future: F)
+    where
+        F: std::future::Future<Output = Option<T>> + Send + 'static,
+    {
+        let tx = self.tx.clone();
+        tokio::spawn(async move {
+            if let Some(action) = future.await {
+                let _ = tx.send(ViewEvent::Async(action));
+            }
+        });
+    }
+}
+
+/// The trait for Rendering UI
+pub trait ViewRenderV2<T: Action> {
+    fn render(&self, registry: &mut ActionRegistry<T>) -> ResponseKind<'_>;
+
+    // Allows attaching attachments or setting ephemeral state
+    fn create_reply(&self, registry: &mut ActionRegistry<T>) -> CreateReply<'_> {
+        self.render(registry).into()
+    }
+}
+
+/// The trait for State Management & Logic
+#[async_trait::async_trait]
+pub trait ViewHandlerV2<T: Action>: Send + Sync {
+    async fn handle(
+        &mut self,
+        action: T,
+        trigger: Trigger<'_>,
+        ctx: &ViewContextV2<'_, T>,
+    ) -> Result<ViewCommand, Error>;
+
+    async fn on_timeout(&mut self) -> Result<(), Error> {
+        Ok(())
+    }
+}
+
+/// The Engine that drives the entire View.
+pub struct ViewEngine<'a, T: Action + Send + Sync + 'static, H: ViewHandlerV2<T> + ViewRenderV2<T>>
+{
+    pub ctx: &'a Context<'a>,
+    pub handler: H,
+    pub registry: ActionRegistry<T>,
+    pub timeout: Duration,
+    pub should_acknowledge: bool,
+    reply_handle: Option<ReplyHandle<'a>>,
+}
+
+impl<'a, T: Action + Send + Sync + 'static, H: ViewHandlerV2<T> + ViewRenderV2<T>>
+    ViewEngine<'a, T, H>
+{
+    pub fn new(ctx: &'a Context<'a>, handler: H, timeout: Duration) -> Self {
+        Self {
+            ctx,
+            handler,
+            registry: ActionRegistry::new(),
+            timeout,
+            should_acknowledge: true,
+            reply_handle: None,
+        }
+    }
+
+    pub fn acknowledge(mut self, should_acknowledge: bool) -> Self {
+        self.should_acknowledge = should_acknowledge;
+        self
+    }
+
+    pub async fn render_view(&mut self) -> Result<(), Error> {
+        self.registry.clear(); // Rebuild custom_ids
+        let reply = self.handler.create_reply(&mut self.registry);
+
+        if let Some(handle) = &self.reply_handle {
+            handle.edit(*self.ctx, reply).await?;
+        } else {
+            let handle = self.ctx.send(reply).await?;
+            self.reply_handle = Some(handle);
+        }
+        Ok(())
+    }
+
+    pub async fn run<F>(&mut self, mut on_action: F) -> Result<(), Error>
+    where
+        F: FnMut(T) -> BoxFuture<'a, ViewCommand> + Send + Sync,
+    {
+        self.render_view().await?;
+
+        let (tx, mut rx) = mpsc::unbounded_channel::<ViewEvent<T>>();
+
+        let msg_id = self.reply_handle.as_ref().unwrap().message().await?.id;
+        let collector = ComponentInteractionCollector::new(self.ctx.serenity_context())
+            .author_id(self.ctx.author().id)
+            .message_id(msg_id)
+            .timeout(self.timeout);
+
+        // Convert the builder into a stream so we can poll it repeatedly
+        let mut stream = collector.stream();
+
+        let ctx_wrapper = ViewContextV2 {
+            poise: self.ctx,
+            tx: tx.clone(),
+        };
+
+        loop {
+            tokio::select! {
+                interaction = stream.next() => {
+                    let interaction = match interaction {
+                        Some(i) => i,
+                        None => {
+                            let _ = tx.send(ViewEvent::Timeout);
+                            continue;
+                        }
+                    };
+
+
+                    if self.should_acknowledge {
+                        interaction.create_response(
+                            self.ctx.http(),
+                            CreateInteractionResponse::Acknowledge,
+                        ).await.ok();
+                    }
+
+                    if let Some(action) = self.registry.get(&interaction.data.custom_id).cloned() {
+                        let cmd = self.handler.handle(action.clone(), Trigger::Component(&interaction), &ctx_wrapper).await?;
+                        if let ViewCommand::Render = cmd {
+                            self.render_view().await?;
+                        } else if let ViewCommand::Exit = cmd {
+                            break;
+                        }
+
+                        let callback_cmd = on_action(action).await;
+                        if let ViewCommand::Render = callback_cmd {
+                            self.render_view().await?;
+                        } else if let ViewCommand::Exit = callback_cmd {
+                            break;
+                        }
+                    }
+                }
+
+                async_action = rx.recv() => {
+                    let event = match async_action {
+                        Some(e) => e,
+                        None => break,
+                    };
+
+                    let mut action_taken = None;
+
+                    let cmd = match event {
+                        ViewEvent::Component(action, interaction) => {
+                            action_taken = Some(action.clone());
+                            self.handler.handle(action, Trigger::Component(&interaction), &ctx_wrapper).await?
+                        }
+                        ViewEvent::Modal(action, interaction) => {
+                            action_taken = Some(action.clone());
+                            self.handler.handle(action, Trigger::Modal(&interaction), &ctx_wrapper).await?
+                        }
+                        ViewEvent::Message(action, msg) => {
+                            action_taken = Some(action.clone());
+                            self.handler.handle(action, Trigger::Message(&msg), &ctx_wrapper).await?
+                        }
+                        ViewEvent::Async(action) => {
+                            action_taken = Some(action.clone());
+                            self.handler.handle(action, Trigger::Async, &ctx_wrapper).await?
+                        }
+                        ViewEvent::Timeout => {
+                            self.handler.on_timeout().await?;
+                            ViewCommand::Render
+                        }
+                    };
+
+                    if let ViewCommand::Render = cmd {
+                        self.render_view().await?;
+                    } else if let ViewCommand::Exit = cmd {
+                        break;
+                    }
+
+                    if let Some(action) = action_taken {
+                        let callback_cmd = on_action(action).await;
+                        if let ViewCommand::Render = callback_cmd {
+                            self.render_view().await?;
+                        } else if let ViewCommand::Exit = callback_cmd {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 }
