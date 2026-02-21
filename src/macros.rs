@@ -243,7 +243,7 @@ macro_rules! action_enum {
                 match self {
                     $(
                         action_enum!(@match_pattern inner, Self::$variant $(, tuple: $($tuple_field)*)? $(, struct: $($struct_field)*)?) => {
-                            action_enum!(@label inner, $variant $(, literal: $label)? $(, tuple: $($tuple_field)*)?)
+                            action_enum!(@label $variant $(, literal: $label)? $(, tuple: $($tuple_field)*)?)
                         },
                     )*
                 }
@@ -253,14 +253,14 @@ macro_rules! action_enum {
 
     // Pattern helpers - now take $inner:ident to bind the captured value
     (@match_pattern $inner:ident, $path:path) => { $path };
-    (@match_pattern $inner:ident, $path:path, tuple: $($field:tt)+) => { $path($inner, ..) };
+    (@match_pattern $inner:ident, $path:path, tuple: $($field:tt)+) => { $path(..) };
     (@match_pattern $inner:ident, $path:path, struct: $($field:tt)+) => { $path { .. } };
 
     // Label helpers
-    (@label $inner:ident, $variant:ident) => { stringify!($variant) };
-    (@label $inner:ident, $variant:ident, literal: $label:literal) => { $label };
-    (@label $inner:ident, $variant:ident, literal: $label:literal, tuple: $($field:tt)+) => { $label };
-    (@label $inner:ident, $variant:ident, tuple: $($field:tt)+) => { $inner.label() };
+    (@label $variant:ident) => { stringify!($variant) };
+    (@label $variant:ident, tuple: $($field:tt)+) => { stringify!($variant) };
+    (@label $variant:ident, literal: $label:literal) => { $label };
+    (@label $variant:ident, literal: $label:literal, tuple: $($field:tt)+) => { $label };
 }
 
 /// Extends an existing Action enum with additional variants.
