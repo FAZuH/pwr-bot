@@ -331,9 +331,9 @@ impl<'a> InteractiveView<'a, FeedSubscriptionBatchAction> for FeedSubscriptionBa
         &mut self,
         action: &FeedSubscriptionBatchAction,
         _interaction: &ComponentInteraction,
-    ) -> Option<FeedSubscriptionBatchAction> {
+    ) -> Result<Option<FeedSubscriptionBatchAction>, Error> {
         match action {
-            FeedSubscriptionBatchAction::ViewSubscriptions => Some(action.clone()),
+            FeedSubscriptionBatchAction::ViewSubscriptions => Ok(Some(action.clone())),
         }
     }
 }

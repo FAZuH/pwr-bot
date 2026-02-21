@@ -481,7 +481,7 @@ impl<'a> InteractiveView<'a, VoiceLeaderboardAction> for VoiceLeaderboardView<'a
         &mut self,
         action: &VoiceLeaderboardAction,
         interaction: &ComponentInteraction,
-    ) -> Option<VoiceLeaderboardAction> {
+    ) -> Result<Option<VoiceLeaderboardAction>, Error> {
         use VoiceLeaderboardAction::*;
         match action {
             Base(pagination_action) => {
@@ -489,7 +489,7 @@ impl<'a> InteractiveView<'a, VoiceLeaderboardAction> for VoiceLeaderboardView<'a
                     .pagination
                     .handle(pagination_action, interaction)
                     .await?;
-                Some(VoiceLeaderboardAction::Base(action))
+                Ok(action.map(VoiceLeaderboardAction::Base))
             }
             TimeRange => {
                 if let ComponentInteractionDataKind::StringSelect { values } =
@@ -500,12 +500,12 @@ impl<'a> InteractiveView<'a, VoiceLeaderboardAction> for VoiceLeaderboardView<'a
                     && self.time_range != time_range
                 {
                     self.time_range = time_range;
-                    return Some(action.clone());
+                    return Ok(Some(action.clone()));
                 }
-                None
+                Ok(None)
             }
-            ToggleMode => Some(action.clone()),
-            SelectUser => Some(action.clone()),
+            ToggleMode => Ok(Some(action.clone())),
+            SelectUser => Ok(Some(action.clone())),
         }
     }
 

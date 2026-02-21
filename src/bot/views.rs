@@ -240,7 +240,7 @@ impl RegisteredAction {
 #[async_trait::async_trait]
 pub trait InteractiveView<'a, T: Action + 'a>: View<'a, T> + Sync {
     /// Handles an action and returns the next action if any.
-    async fn handle(&mut self, action: &T, interaction: &ComponentInteraction) -> Option<T>;
+    async fn handle(&mut self, action: &T, interaction: &ComponentInteraction) -> Result<Option<T>, Error>;
 
     /// Callback to execute when the interaction is timed out.
     async fn on_timeout(&mut self) -> Result<(), Error> {
@@ -277,7 +277,7 @@ pub trait InteractiveView<'a, T: Action + 'a>: View<'a, T> + Sync {
             None => return Ok(None),
         };
 
-        let action = match self.handle(&action, &interaction).await {
+        let action = match self.handle(&action, &interaction).await? {
             Some(action) => action,
             None => return Ok(None),
         };

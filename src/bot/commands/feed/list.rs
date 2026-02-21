@@ -273,7 +273,7 @@ impl<'a> InteractiveView<'a, FeedListAction> for FeedListView<'a> {
         &mut self,
         action: &FeedListAction,
         interaction: &ComponentInteraction,
-    ) -> Option<FeedListAction> {
+    ) -> Result<Option<FeedListAction>, Error> {
         use FeedListAction::*;
         match action {
             Base(pagination_action) => {
@@ -281,25 +281,25 @@ impl<'a> InteractiveView<'a, FeedListAction> for FeedListView<'a> {
                     .pagination
                     .handle(pagination_action, interaction)
                     .await?;
-                Some(Base(action))
+                Ok(action.map(Base))
             }
             Edit => {
                 self.state = FeedListState::Edit;
-                Some(action.clone())
+                Ok(Some(action.clone()))
             }
             View => {
                 self.state = FeedListState::View;
-                Some(action.clone())
+                Ok(Some(action.clone()))
             }
             Unsubscribe { source_url } => {
                 self.marked_unsub.insert(source_url.clone());
-                Some(action.clone())
+                Ok(Some(action.clone()))
             }
             UndoUnsub { source_url } => {
                 self.marked_unsub.remove(source_url);
-                Some(action.clone())
+                Ok(Some(action.clone()))
             }
-            Exit | Save => Some(action.clone()),
+            Exit | Save => Ok(Some(action.clone())),
         }
     }
 

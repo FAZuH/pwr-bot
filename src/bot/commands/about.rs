@@ -196,9 +196,9 @@ impl<'a> InteractiveView<'a, AboutAction> for AboutView<'a> {
         &mut self,
         action: &AboutAction,
         _interaction: &ComponentInteraction,
-    ) -> Option<AboutAction> {
+    ) -> Result<Option<AboutAction>, Error> {
         match action {
-            AboutAction::Back => Some(AboutAction::Back),
+            AboutAction::Back => Ok(Some(AboutAction::Back)),
         }
     }
 }

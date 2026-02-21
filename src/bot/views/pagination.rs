@@ -156,15 +156,15 @@ impl<'a> InteractiveView<'a, PaginationAction> for PaginationView<'a> {
         &mut self,
         action: &PaginationAction,
         _interaction: &ComponentInteraction,
-    ) -> Option<PaginationAction> {
+    ) -> Result<Option<PaginationAction>, Error> {
         match action {
             PaginationAction::First => self.state.first_page(),
             PaginationAction::Prev => self.state.prev_page(),
             PaginationAction::Next => self.state.next_page(),
             PaginationAction::Last => self.state.last_page(),
-            _ => return None,
+            _ => return Ok(None),
         }
-        Some(action.clone())
+        Ok(Some(action.clone()))
     }
 
     /// Disables pagination controls when the view times out.

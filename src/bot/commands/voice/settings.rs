@@ -164,14 +164,14 @@ impl<'a> InteractiveView<'a, SettingsVoiceAction> for SettingsVoiceView<'a> {
         &mut self,
         action: &SettingsVoiceAction,
         _interaction: &ComponentInteraction,
-    ) -> Option<SettingsVoiceAction> {
+    ) -> Result<Option<SettingsVoiceAction>, Error> {
         match action {
             SettingsVoiceAction::ToggleEnabled => {
                 let current = self.settings.voice.enabled.unwrap_or(true);
                 self.settings.voice.enabled = Some(!current);
-                Some(action.clone())
+                Ok(Some(action.clone()))
             }
-            SettingsVoiceAction::Back | SettingsVoiceAction::About => Some(action.clone()),
+            SettingsVoiceAction::Back | SettingsVoiceAction::About => Ok(Some(action.clone())),
         }
     }
 }

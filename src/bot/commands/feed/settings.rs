@@ -246,7 +246,7 @@ impl<'a> InteractiveView<'a, SettingsFeedAction> for SettingsFeedView<'a> {
         &mut self,
         action: &SettingsFeedAction,
         interaction: &ComponentInteraction,
-    ) -> Option<SettingsFeedAction> {
+    ) -> Result<Option<SettingsFeedAction>, Error> {
         let data = &interaction.data;
         let settings = &mut self.settings.feeds;
 
@@ -254,31 +254,31 @@ impl<'a> InteractiveView<'a, SettingsFeedAction> for SettingsFeedView<'a> {
             (ComponentInteractionDataKind::Button, SettingsFeedAction::Enabled) => {
                 let current = settings.enabled.unwrap_or(true);
                 settings.enabled = Some(!current);
-                Some(action.clone())
+                Ok(Some(action.clone()))
             }
             (
                 ComponentInteractionDataKind::ChannelSelect { values },
                 SettingsFeedAction::Channel,
             ) => {
                 settings.channel_id = values.first().map(|id| id.to_string());
-                Some(action.clone())
+                Ok(Some(action.clone()))
             }
             (ComponentInteractionDataKind::RoleSelect { values }, SettingsFeedAction::SubRole) => {
                 settings.subscribe_role_id = values.first().map(|v| v.to_string());
-                Some(action.clone())
+                Ok(Some(action.clone()))
             }
             (
                 ComponentInteractionDataKind::RoleSelect { values },
                 SettingsFeedAction::UnsubRole,
             ) => {
                 settings.unsubscribe_role_id = values.first().map(|v| v.to_string());
-                Some(action.clone())
+                Ok(Some(action.clone()))
             }
             (ComponentInteractionDataKind::Button, SettingsFeedAction::Back)
             | (ComponentInteractionDataKind::Button, SettingsFeedAction::About) => {
-                Some(action.clone())
+                Ok(Some(action.clone()))
             }
-            _ => None,
+            _ => Ok(None),
         }
     }
 }

@@ -24,7 +24,7 @@ use crate::bot::commands::Error;
 use crate::bot::commands::about::AboutController;
 use crate::bot::commands::feed::settings::FeedSettingsController;
 use crate::bot::commands::voice::settings::VoiceSettingsController;
-use crate::bot::commands::welcome::settings::WelcomeSettingsController;
+use crate::bot::commands::welcome::WelcomeSettingsController;
 use crate::bot::controller::Controller;
 use crate::bot::controller::Coordinator;
 use crate::bot::error::BotError;
@@ -426,16 +426,16 @@ impl<'a> InteractiveView<'a, SettingsMainAction> for SettingsMainView<'a> {
         &mut self,
         action: &SettingsMainAction,
         interaction: &ComponentInteraction,
-    ) -> Option<SettingsMainAction> {
+    ) -> Result<Option<SettingsMainAction>, Error> {
         use SettingsMainAction::*;
         use SettingsMainState::*;
 
         match action {
             Feeds | Voice | Welcome => match self.state {
-                FeatureSettings => Some(action.clone()),
+                FeatureSettings => Ok(Some(action.clone())),
                 DeactivateFeatures => {
                     self.toggle_features(from_ref(action));
-                    Some(ToggleState)
+                    Ok(Some(ToggleState))
                 }
             },
             AddFeatures => {
@@ -448,13 +448,13 @@ impl<'a> InteractiveView<'a, SettingsMainAction> for SettingsMainView<'a> {
                         .collect();
                     self.toggle_features(features);
                 }
-                Some(action.clone())
+                Ok(Some(action.clone()))
             }
             ToggleState => {
                 self.state.toggle();
-                Some(action.clone())
+                Ok(Some(action.clone()))
             }
-            About => Some(action.clone()),
+            About => Ok(Some(action.clone())),
         }
     }
 }

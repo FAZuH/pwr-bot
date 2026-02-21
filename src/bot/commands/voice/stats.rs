@@ -579,47 +579,47 @@ impl<'a> InteractiveView<'a, VoiceStatsAction> for VoiceStatsView<'a> {
         &mut self,
         action: &VoiceStatsAction,
         _interaction: &ComponentInteraction,
-    ) -> Option<VoiceStatsAction> {
+    ) -> Result<Option<VoiceStatsAction>, Error> {
         use VoiceStatsAction::*;
 
         match action {
             TimeYearly => {
                 self.data.time_range = VoiceStatsTimeRange::Yearly;
-                Some(action.clone())
+                Ok(Some(action.clone()))
             }
             TimeMonthly => {
                 self.data.time_range = VoiceStatsTimeRange::Monthly;
-                Some(action.clone())
+                Ok(Some(action.clone()))
             }
             TimeWeekly => {
                 self.data.time_range = VoiceStatsTimeRange::Weekly;
-                Some(action.clone())
+                Ok(Some(action.clone()))
             }
             TimeHourly => {
                 self.data.time_range = VoiceStatsTimeRange::Hourly;
-                Some(action.clone())
+                Ok(Some(action.clone()))
             }
 
             StatUniqueUsers => {
                 self.data.stat_type = GuildStatType::ActiveUserCount;
-                Some(action.clone())
+                Ok(Some(action.clone()))
             }
             StatTotalTime => {
                 self.data.stat_type = GuildStatType::TotalTime;
-                Some(action.clone())
+                Ok(Some(action.clone()))
             }
             StatAverageTime => {
                 self.data.stat_type = GuildStatType::AverageTime;
-                Some(action.clone())
+                Ok(Some(action.clone()))
             }
 
             ToggleDataMode => {
                 // Controller will handle this by returning from wait loop
-                Some(action.clone())
+                Ok(Some(action.clone()))
             }
             SelectUser => {
                 // Selected user handled by controller from interaction directly
-                Some(action.clone())
+                Ok(Some(action.clone()))
             }
         }
     }
