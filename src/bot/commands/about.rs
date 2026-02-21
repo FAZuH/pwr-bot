@@ -28,12 +28,14 @@ use crate::bot::controller::Controller;
 use crate::bot::controller::Coordinator;
 use crate::bot::navigation::NavigationResult;
 use crate::bot::views::InteractiveView;
-use crate::bot::views::RenderExt;
+use crate::bot::views::InteractiveViewBase;
 use crate::bot::views::ResponseKind;
 use crate::bot::views::ResponseView;
 use crate::bot::views::View;
+use crate::bot::views::ViewCommand;
+use crate::bot::views::ViewCore;
+use crate::bot::views::ViewHandler;
 use crate::controller;
-use crate::view_core;
 
 /// Show information about the bot
 #[poise::command(slash_command)]
@@ -56,19 +58,23 @@ impl<S: Send + Sync + 'static> Controller<S> for AboutController<'_> {
         let avatar_url = ctx.cache().current_user().face();
         let mut view = AboutView::new(&ctx, stats, avatar_url);
 
-        view.render().await?;
+        let nav = std::sync::Arc::new(std::sync::Mutex::new(NavigationResult::Exit));
 
-        // Wait for user interaction (Back button)
-        if let Some((action, _)) = view.listen_once().await? {
-            match action {
-                AboutAction::Back => {
-                    return Ok(NavigationResult::Back);
+        view.run(|action| {
+            let nav = nav.clone();
+            Box::pin(async move {
+                match action {
+                    AboutAction::Back => {
+                        *nav.lock().unwrap() = NavigationResult::Back;
+                        ViewCommand::Exit
+                    }
                 }
-            }
-        }
+            })
+        })
+        .await?;
 
-        // If interaction times out, just exit
-        Ok(NavigationResult::Exit)
+        let res = nav.lock().unwrap().clone();
+        Ok(res)
     }
 }
 
@@ -79,12 +85,39 @@ action_enum! {
     }
 }
 
-view_core! {
-    timeout = Duration::from_secs(120),
-    /// View for displaying bot statistics and information.
-    struct AboutView<'a, AboutAction> {
-        stats: AboutStats,
-        avatar_url: String,
+pub struct AboutHandler {
+    stats: AboutStats,
+    avatar_url: String,
+}
+
+#[async_trait::async_trait]
+impl ViewHandler<AboutAction> for AboutHandler {
+    async fn handle(
+        &mut self,
+        action: &AboutAction,
+        _interaction: &ComponentInteraction,
+    ) -> Option<AboutAction> {
+        match action {
+            AboutAction::Back => Some(AboutAction::Back),
+        }
+    }
+}
+
+/// View for displaying bot statistics and information.
+pub struct AboutView<'a> {
+    pub base: InteractiveViewBase<'a, AboutAction>,
+    pub handler: AboutHandler,
+}
+
+impl<'a> View<'a, AboutAction> for AboutView<'a> {
+    fn core(&self) -> &ViewCore<'a, AboutAction> {
+        &self.base.core
+    }
+    fn core_mut(&mut self) -> &mut ViewCore<'a, AboutAction> {
+        &mut self.base.core
+    }
+    fn create_core(poise_ctx: &'a Context<'a>) -> ViewCore<'a, AboutAction> {
+        ViewCore::new(poise_ctx, Duration::from_secs(120))
     }
 }
 
@@ -92,9 +125,8 @@ impl<'a> AboutView<'a> {
     /// Creates a new about view with the given context, stats, and avatar URL.
     pub fn new(ctx: &'a Context<'a>, stats: AboutStats, avatar_url: String) -> Self {
         Self {
-            core: Self::create_core(ctx),
-            stats,
-            avatar_url,
+            base: InteractiveViewBase::new(Self::create_core(ctx)),
+            handler: AboutHandler { stats, avatar_url },
         }
     }
 
@@ -142,17 +174,17 @@ impl<'a> ResponseView<'a> for AboutView<'a> {
 - **Source**: [GitHub](https://github.com/FAZuH/pwr-bot)
 - **License**: [MIT](https://github.com/FAZuH/pwr-bot/blob/main/LICENSE)
 Copyright © 2025-{} FAZuH  —  v{}",
-            Self::format_uptime(self.stats.uptime),
-            Self::format_number(self.stats.guild_count),
-            Self::format_number(self.stats.user_count),
-            self.stats.command_count,
-            self.stats.latency_ms,
-            self.stats.memory_mb,
-            self.stats.current_year,
-            self.stats.version,
+            Self::format_uptime(self.handler.stats.uptime),
+            Self::format_number(self.handler.stats.guild_count),
+            Self::format_number(self.handler.stats.user_count),
+            self.handler.stats.command_count,
+            self.handler.stats.latency_ms,
+            self.handler.stats.memory_mb,
+            self.handler.stats.current_year,
+            self.handler.stats.version,
         );
 
-        let avatar_url: String = self.avatar_url.clone();
+        let avatar_url: String = self.handler.avatar_url.clone();
         let avatar = CreateThumbnail::new(CreateUnfurledMediaItem::new(avatar_url));
 
         let content_section = CreateSection::new(
@@ -172,7 +204,8 @@ Copyright © 2025-{} FAZuH  —  v{}",
         // Register the back action and get its ID
         let back_button = CreateComponent::ActionRow(CreateActionRow::Buttons(
             vec![
-                self.register(AboutAction::Back)
+                self.base
+                    .register(AboutAction::Back)
                     .as_button()
                     .style(ButtonStyle::Secondary),
             ]
@@ -190,21 +223,10 @@ Copyright © 2025-{} FAZuH  —  v{}",
     }
 }
 
-#[async_trait::async_trait]
-impl<'a> InteractiveView<'a, AboutAction> for AboutView<'a> {
-    async fn handle(
-        &mut self,
-        action: &AboutAction,
-        _interaction: &ComponentInteraction,
-    ) -> Option<AboutAction> {
-        match action {
-            AboutAction::Back => Some(AboutAction::Back),
-        }
-    }
-}
+crate::impl_interactive_view!(AboutView<'a>, AboutHandler, AboutAction);
 
 /// Statistics displayed in the about command.
-struct AboutStats {
+pub struct AboutStats {
     version: String,
     uptime: Duration,
     guild_count: usize,

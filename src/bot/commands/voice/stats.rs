@@ -35,15 +35,18 @@ use crate::bot::error::BotError;
 use crate::bot::navigation::NavigationResult;
 use crate::bot::utils::format_duration;
 use crate::bot::views::InteractiveView;
+use crate::bot::views::InteractiveViewBase;
 use crate::bot::views::RenderExt;
 use crate::bot::views::ResponseKind;
 use crate::bot::views::ResponseView;
 use crate::bot::views::View;
+use crate::bot::views::ViewCommand;
+use crate::bot::views::ViewCore;
+use crate::bot::views::ViewHandler;
 use crate::error::AppError;
 use crate::model::GuildDailyStats;
 use crate::model::VoiceDailyActivity;
 use crate::model::VoiceSessionsModel;
-use crate::view_core;
 
 /// Display voice activity statistics with contribution graph
 ///
@@ -235,346 +238,13 @@ impl VoiceStatsData {
     }
 }
 
-view_core! {
-    timeout = Duration::from_secs(120),
-    /// View for displaying voice activity stats.
-    pub struct VoiceStatsView<'a, VoiceStatsAction> {
-        pub data: VoiceStatsData,
-        image_bytes: Option<Vec<u8>>,
-    }
-}
-
-impl<'a> VoiceStatsView<'a> {
-    /// Creates a new stats view.
-    pub fn new(ctx: &'a Context<'a>, data: VoiceStatsData) -> Self {
-        Self {
-            data,
-            image_bytes: None,
-            core: Self::create_core(ctx),
-        }
-    }
-
-    /// Sets the generated image bytes.
-    pub fn set_image_bytes(&mut self, bytes: Vec<u8>) {
-        self.image_bytes = Some(bytes);
-    }
-
-    /// Generates the contribution grid image.
-    pub fn generate_image(&self) -> anyhow::Result<Vec<u8>> {
-        if self.data.time_range != VoiceStatsTimeRange::Yearly {
-            return crate::bot::commands::voice::stats_chart::generate_line_chart(
-                &self.data.raw_sessions,
-                self.data.time_range,
-                self.data.stat_type,
-                self.data.is_user_stats(),
-            );
-        }
-
-        let (since, _until) = self.data.time_range.to_range();
-        let today = chrono::Local::now().date_naive();
-
-        // Build data map for contribution grid
-        let mut data_map: HashMap<NaiveDate, u32> = HashMap::new();
-
-        if self.data.is_user_stats() {
-            // User activity: map day -> total seconds (converted to minutes for display)
-            for activity in &self.data.user_activity {
-                let minutes = (activity.total_seconds / 60).max(1) as u32;
-                data_map.insert(activity.day, minutes);
-            }
-        } else {
-            // Guild stats: map day -> value (minutes for time, count for users)
-            for stat in &self.data.guild_stats {
-                let value = if self.data.stat_type == GuildStatType::AverageTime
-                    || self.data.stat_type == GuildStatType::TotalTime
-                {
-                    (stat.value / 60).max(1) as u32
-                } else {
-                    stat.value as u32
-                };
-                data_map.insert(stat.day, value);
-            }
-        }
-
-        // Generate the graph with appropriate date range
-        let img = ContributionGraph::new()
-            .with_data(data_map)
-            .start_date(since.date_naive())
-            .end_date(today)
-            .theme(Theme::github(Strategy::linear()))
-            .generate();
-
-        // Convert to PNG bytes
-        let mut bytes: Vec<u8> = Vec::new();
-        img.write_to(
-            &mut std::io::Cursor::new(&mut bytes),
-            image::ImageFormat::Png,
-        )?;
-
-        Ok(bytes)
-    }
-
-    /// Formats the stats summary text.
-    fn format_stats_summary(&self) -> String {
-        let (since, until) = self.data.time_range.to_range();
-        let time_range_text = format!(
-            "-# Time Range: **{}** — <t:{}:f> to <t:{}:R>",
-            self.data.time_range.display_name(),
-            since.timestamp(),
-            until.timestamp(),
-        );
-
-        if self.data.is_user_stats() {
-            let total = format_duration(self.data.total_time());
-            let avg = format_duration(self.data.average_daily_time());
-            let streak = self.data.current_streak();
-
-            format!(
-                "### Voice Stats\n{}\n\n**User:** {}\n**Total Time:** {}\n**Average Daily:** {}\n**Current Streak:** {} day(s)",
-                time_range_text,
-                self.data.display_name(),
-                total,
-                avg,
-                streak
-            )
-        } else {
-            // Guild stats - calculate average daily time (same for both modes)
-            let avg_time = if self.data.guild_stats.is_empty() {
-                0
-            } else {
-                self.data.guild_stats.iter().map(|s| s.value).sum::<i64>()
-                    / self.data.guild_stats.len() as i64
-            };
-            let _avg_time_str = format_duration(avg_time); // Reserved for future use
-
-            // For guild stats, show different metrics based on stat_type
-            let (first_label, first_value, second_label, second_value) = match self.data.stat_type {
-                GuildStatType::AverageTime => {
-                    // Peak Time: highest average voice time per user
-                    let peak = self.data.guild_stats.iter().max_by_key(|s| s.value);
-                    let peak_str = peak
-                        .map(|s| format_duration(s.value))
-                        .unwrap_or_else(|| "None".to_string());
-                    let peak_day = peak
-                        .map(|s| s.day)
-                        .unwrap_or_else(|| chrono::Utc::now().date_naive());
-                    let peak_day_str = format!(
-                        " {} on <t:{}:d>",
-                        peak_str,
-                        peak_day.and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp()
-                    );
-
-                    ("Peak Time", peak_str, "Most Active", peak_day_str)
-                }
-                GuildStatType::ActiveUserCount => {
-                    // Avg Daily Users: average number of active users per day
-                    let active_users = if self.data.guild_stats.is_empty() {
-                        0
-                    } else {
-                        let total_days = self.data.guild_stats.len() as i64;
-                        (self.data.total_active_users() as f64 / total_days as f64).ceil() as i64
-                    };
-
-                    // Most Active: day with most users
-                    let peak = self.data.guild_stats.iter().max_by_key(|s| s.value);
-                    let peak_str = peak
-                        .map(|s| s.value.to_string())
-                        .unwrap_or_else(|| "None".to_string());
-                    let peak_day = peak
-                        .map(|s| s.day)
-                        .unwrap_or_else(|| chrono::Utc::now().date_naive());
-                    let peak_day_str = format!(
-                        " {} on <t:{}:d>",
-                        peak_str,
-                        peak_day.and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp()
-                    );
-
-                    (
-                        "Avg Daily Users",
-                        active_users.to_string(),
-                        "Most Active",
-                        peak_day_str,
-                    )
-                }
-                GuildStatType::TotalTime => {
-                    // Peak Time: highest total voice time
-                    let peak = self.data.guild_stats.iter().max_by_key(|s| s.value);
-                    let peak_str = peak
-                        .map(|s| format_duration(s.value))
-                        .unwrap_or_else(|| "None".to_string());
-                    let peak_day = peak
-                        .map(|s| s.day)
-                        .unwrap_or_else(|| chrono::Utc::now().date_naive());
-                    let peak_day_str = format!(
-                        " {} on <t:{}:d>",
-                        peak_str,
-                        peak_day.and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp()
-                    );
-
-                    ("Peak Total Time", peak_str, "Most Active", peak_day_str)
-                }
-            };
-
-            format!(
-                "### Voice Stats\n{}\n\n**Guild:** {}\n**{}:** {}\n**{}:**{}",
-                time_range_text,
-                self.data.guild_name,
-                first_label,
-                first_value,
-                second_label,
-                second_value
-            )
-        }
-    }
-}
-
-impl<'a> ResponseView<'a> for VoiceStatsView<'a> {
-    fn create_response<'b>(&mut self) -> ResponseKind<'b> {
-        use VoiceStatsAction::*;
-
-        let mut container_components = vec![CreateContainerComponent::TextDisplay(
-            CreateTextDisplay::new(self.format_stats_summary()),
-        )];
-
-        container_components.push(CreateContainerComponent::Separator(CreateSeparator::new(
-            true,
-        )));
-
-        if self.data.user_activity.is_empty() && self.data.guild_stats.is_empty() {
-            container_components.push(CreateContainerComponent::TextDisplay(
-                CreateTextDisplay::new(
-                    "No voice activity recorded for this time range.\n\nJoin a **voice channel** to start tracking!",
-                ),
-            ));
-        } else {
-            container_components.push(CreateContainerComponent::MediaGallery(
-                CreateMediaGallery::new(vec![CreateMediaGalleryItem::new(
-                    CreateUnfurledMediaItem::new(format!(
-                        "attachment://{}",
-                        VOICE_STATS_IMAGE_FILENAME
-                    )),
-                )]),
-            ));
-        }
-
-        // Add Data Mode Toggle to bottom of Container
-        let toggle_label = if self.data.is_user_stats() {
-            format!("Show stats for {}", self.data.guild_name)
-        } else {
-            "Show stats for users".to_string()
-        };
-
-        let toggle_button = self
-            .register(ToggleDataMode)
-            .as_button()
-            .label(toggle_label)
-            .style(ButtonStyle::Primary);
-
-        container_components.push(CreateContainerComponent::ActionRow(
-            CreateActionRow::Buttons(vec![toggle_button].into()),
-        ));
-
-        let mut components = vec![CreateComponent::Container(CreateContainer::new(
-            container_components,
-        ))];
-
-        // 1. Time Range Row
-        let time_buttons = vec![
-            self.register(TimeYearly).as_button().style(
-                if self.data.time_range == VoiceStatsTimeRange::Yearly {
-                    ButtonStyle::Primary
-                } else {
-                    ButtonStyle::Secondary
-                },
-            ),
-            self.register(TimeMonthly).as_button().style(
-                if self.data.time_range == VoiceStatsTimeRange::Monthly {
-                    ButtonStyle::Primary
-                } else {
-                    ButtonStyle::Secondary
-                },
-            ),
-            self.register(TimeWeekly).as_button().style(
-                if self.data.time_range == VoiceStatsTimeRange::Weekly {
-                    ButtonStyle::Primary
-                } else {
-                    ButtonStyle::Secondary
-                },
-            ),
-            self.register(TimeHourly).as_button().style(
-                if self.data.time_range == VoiceStatsTimeRange::Hourly {
-                    ButtonStyle::Primary
-                } else {
-                    ButtonStyle::Secondary
-                },
-            ),
-        ];
-        components.push(CreateComponent::ActionRow(CreateActionRow::Buttons(
-            time_buttons.into(),
-        )));
-
-        // 2. Aggregation Row (Only for Guild)
-        let mut stat_buttons = vec![];
-        if !self.data.is_user_stats() {
-            stat_buttons.push(self.register(StatUniqueUsers).as_button().style(
-                if self.data.stat_type == GuildStatType::ActiveUserCount {
-                    ButtonStyle::Primary
-                } else {
-                    ButtonStyle::Secondary
-                },
-            ));
-        }
-        stat_buttons.push(self.register(StatTotalTime).as_button().style(
-            if self.data.stat_type == GuildStatType::TotalTime {
-                ButtonStyle::Primary
-            } else {
-                ButtonStyle::Secondary
-            },
-        ));
-        stat_buttons.push(self.register(StatAverageTime).as_button().style(
-            if self.data.stat_type == GuildStatType::AverageTime {
-                ButtonStyle::Primary
-            } else {
-                ButtonStyle::Secondary
-            },
-        ));
-        components.push(CreateComponent::ActionRow(CreateActionRow::Buttons(
-            stat_buttons.into(),
-        )));
-
-        // 3. User Select Menu (Only for User)
-        if self.data.is_user_stats() {
-            let default_users = self
-                .data
-                .user
-                .clone()
-                .map(|u| std::borrow::Cow::Owned(vec![u.id]));
-            let user_select = self
-                .register(SelectUser)
-                .as_select(serenity::all::CreateSelectMenuKind::User { default_users });
-            components.push(CreateComponent::ActionRow(CreateActionRow::SelectMenu(
-                user_select,
-            )));
-        }
-
-        components.into()
-    }
-
-    fn create_reply<'b>(&mut self) -> poise::CreateReply<'b> {
-        let response = self.create_response();
-        let mut reply: poise::CreateReply<'b> = response.into();
-
-        if let Some(ref bytes) = self.image_bytes {
-            let attachment = CreateAttachment::bytes(bytes.clone(), VOICE_STATS_IMAGE_FILENAME);
-            reply = reply.attachment(attachment);
-        }
-
-        reply
-    }
+pub struct VoiceStatsHandler {
+    pub data: VoiceStatsData,
+    pub image_bytes: Option<Vec<u8>>,
 }
 
 #[async_trait::async_trait]
-impl<'a> InteractiveView<'a, VoiceStatsAction> for VoiceStatsView<'a> {
+impl ViewHandler<VoiceStatsAction> for VoiceStatsHandler {
     async fn handle(
         &mut self,
         action: &VoiceStatsAction,
@@ -613,17 +283,370 @@ impl<'a> InteractiveView<'a, VoiceStatsAction> for VoiceStatsView<'a> {
                 Some(action.clone())
             }
 
-            ToggleDataMode => {
-                // Controller will handle this by returning from wait loop
-                Some(action.clone())
-            }
-            SelectUser => {
-                // Selected user handled by controller from interaction directly
-                Some(action.clone())
-            }
+            ToggleDataMode | SelectUser => Some(action.clone()),
         }
     }
 }
+
+pub struct VoiceStatsView<'a> {
+    pub base: InteractiveViewBase<'a, VoiceStatsAction>,
+    pub handler: VoiceStatsHandler,
+}
+
+impl<'a> View<'a, VoiceStatsAction> for VoiceStatsView<'a> {
+    fn core(&self) -> &ViewCore<'a, VoiceStatsAction> {
+        &self.base.core
+    }
+    fn core_mut(&mut self) -> &mut ViewCore<'a, VoiceStatsAction> {
+        &mut self.base.core
+    }
+    fn create_core(poise_ctx: &'a Context<'a>) -> ViewCore<'a, VoiceStatsAction> {
+        ViewCore::new(poise_ctx, Duration::from_secs(120))
+    }
+}
+
+impl<'a> VoiceStatsView<'a> {
+    /// Creates a new stats view.
+    pub fn new(ctx: &'a Context<'a>, data: VoiceStatsData) -> Self {
+        Self {
+            base: InteractiveViewBase::new(Self::create_core(ctx)),
+            handler: VoiceStatsHandler {
+                data,
+                image_bytes: None,
+            },
+        }
+    }
+
+    /// Sets the generated image bytes.
+    pub fn set_image_bytes(&mut self, bytes: Vec<u8>) {
+        self.handler.image_bytes = Some(bytes);
+    }
+
+    /// Generates the contribution grid image.
+    pub fn generate_image(&self) -> anyhow::Result<Vec<u8>> {
+        if self.handler.data.time_range != VoiceStatsTimeRange::Yearly {
+            return crate::bot::commands::voice::stats_chart::generate_line_chart(
+                &self.handler.data.raw_sessions,
+                self.handler.data.time_range,
+                self.handler.data.stat_type,
+                self.handler.data.is_user_stats(),
+            );
+        }
+
+        let (since, _until) = self.handler.data.time_range.to_range();
+        let today = chrono::Local::now().date_naive();
+
+        // Build data map for contribution grid
+        let mut data_map: HashMap<NaiveDate, u32> = HashMap::new();
+
+        if self.handler.data.is_user_stats() {
+            // User activity: map day -> total seconds (converted to minutes for display)
+            for activity in &self.handler.data.user_activity {
+                let minutes = (activity.total_seconds / 60).max(1) as u32;
+                data_map.insert(activity.day, minutes);
+            }
+        } else {
+            // Guild stats: map day -> value (minutes for time, count for users)
+            for stat in &self.handler.data.guild_stats {
+                let value = if self.handler.data.stat_type == GuildStatType::AverageTime
+                    || self.handler.data.stat_type == GuildStatType::TotalTime
+                {
+                    (stat.value / 60).max(1) as u32
+                } else {
+                    stat.value as u32
+                };
+                data_map.insert(stat.day, value);
+            }
+        }
+
+        // Generate the graph with appropriate date range
+        let img = ContributionGraph::new()
+            .with_data(data_map)
+            .start_date(since.date_naive())
+            .end_date(today)
+            .theme(Theme::github(Strategy::linear()))
+            .generate();
+
+        // Convert to PNG bytes
+        let mut bytes: Vec<u8> = Vec::new();
+        img.write_to(
+            &mut std::io::Cursor::new(&mut bytes),
+            image::ImageFormat::Png,
+        )?;
+
+        Ok(bytes)
+    }
+
+    /// Formats the stats summary text.
+    fn format_stats_summary(&self) -> String {
+        let (since, until) = self.handler.data.time_range.to_range();
+        let time_range_text = format!(
+            "-# Time Range: **{}** — <t:{}:f> to <t:{}:R>",
+            self.handler.data.time_range.display_name(),
+            since.timestamp(),
+            until.timestamp(),
+        );
+
+        if self.handler.data.is_user_stats() {
+            let total = format_duration(self.handler.data.total_time());
+            let avg = format_duration(self.handler.data.average_daily_time());
+            let streak = self.handler.data.current_streak();
+
+            format!(
+                "### Voice Stats\n{}\n\n**User:** {}\n**Total Time:** {}\n**Average Daily:** {}\n**Current Streak:** {} day(s)",
+                time_range_text,
+                self.handler.data.display_name(),
+                total,
+                avg,
+                streak
+            )
+        } else {
+            // Guild stats - calculate average daily time (same for both modes)
+            let avg_time = if self.handler.data.guild_stats.is_empty() {
+                0
+            } else {
+                self.handler
+                    .data
+                    .guild_stats
+                    .iter()
+                    .map(|s| s.value)
+                    .sum::<i64>()
+                    / self.handler.data.guild_stats.len() as i64
+            };
+            let _avg_time_str = format_duration(avg_time); // Reserved for future use
+
+            // For guild stats, show different metrics based on stat_type
+            let (first_label, first_value, second_label, second_value) =
+                match self.handler.data.stat_type {
+                    GuildStatType::AverageTime => {
+                        // Peak Time: highest average voice time per user
+                        let peak = self.handler.data.guild_stats.iter().max_by_key(|s| s.value);
+                        let peak_str = peak
+                            .map(|s| format_duration(s.value))
+                            .unwrap_or_else(|| "None".to_string());
+                        let peak_day = peak
+                            .map(|s| s.day)
+                            .unwrap_or_else(|| chrono::Utc::now().date_naive());
+                        let peak_day_str = format!(
+                            " {} on <t:{}:d>",
+                            peak_str,
+                            peak_day.and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp()
+                        );
+
+                        ("Peak Time", peak_str, "Most Active", peak_day_str)
+                    }
+                    GuildStatType::ActiveUserCount => {
+                        // Avg Daily Users: average number of active users per day
+                        let active_users = if self.handler.data.guild_stats.is_empty() {
+                            0
+                        } else {
+                            let total_days = self.handler.data.guild_stats.len() as i64;
+                            (self.handler.data.total_active_users() as f64 / total_days as f64)
+                                .ceil() as i64
+                        };
+
+                        // Most Active: day with most users
+                        let peak = self.handler.data.guild_stats.iter().max_by_key(|s| s.value);
+                        let peak_str = peak
+                            .map(|s| s.value.to_string())
+                            .unwrap_or_else(|| "None".to_string());
+                        let peak_day = peak
+                            .map(|s| s.day)
+                            .unwrap_or_else(|| chrono::Utc::now().date_naive());
+                        let peak_day_str = format!(
+                            " {} on <t:{}:d>",
+                            peak_str,
+                            peak_day.and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp()
+                        );
+
+                        (
+                            "Avg Daily Users",
+                            active_users.to_string(),
+                            "Most Active",
+                            peak_day_str,
+                        )
+                    }
+                    GuildStatType::TotalTime => {
+                        // Peak Time: highest total voice time
+                        let peak = self.handler.data.guild_stats.iter().max_by_key(|s| s.value);
+                        let peak_str = peak
+                            .map(|s| format_duration(s.value))
+                            .unwrap_or_else(|| "None".to_string());
+                        let peak_day = peak
+                            .map(|s| s.day)
+                            .unwrap_or_else(|| chrono::Utc::now().date_naive());
+                        let peak_day_str = format!(
+                            " {} on <t:{}:d>",
+                            peak_str,
+                            peak_day.and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp()
+                        );
+
+                        ("Peak Total Time", peak_str, "Most Active", peak_day_str)
+                    }
+                };
+
+            format!(
+                "### Voice Stats\n{}\n\n**Guild:** {}\n**{}:** {}\n**{}:**{}",
+                time_range_text,
+                self.handler.data.guild_name,
+                first_label,
+                first_value,
+                second_label,
+                second_value
+            )
+        }
+    }
+}
+
+impl<'a> ResponseView<'a> for VoiceStatsView<'a> {
+    fn create_response<'b>(&mut self) -> ResponseKind<'b> {
+        use VoiceStatsAction::*;
+
+        let mut container_components = vec![CreateContainerComponent::TextDisplay(
+            CreateTextDisplay::new(self.format_stats_summary()),
+        )];
+
+        container_components.push(CreateContainerComponent::Separator(CreateSeparator::new(
+            true,
+        )));
+
+        if self.handler.data.user_activity.is_empty() && self.handler.data.guild_stats.is_empty() {
+            container_components.push(CreateContainerComponent::TextDisplay(
+                CreateTextDisplay::new(
+                    "No voice activity recorded for this time range.\n\nJoin a **voice channel** to start tracking!",
+                ),
+            ));
+        } else {
+            container_components.push(CreateContainerComponent::MediaGallery(
+                CreateMediaGallery::new(vec![CreateMediaGalleryItem::new(
+                    CreateUnfurledMediaItem::new(format!(
+                        "attachment://{}",
+                        VOICE_STATS_IMAGE_FILENAME
+                    )),
+                )]),
+            ));
+        }
+
+        // Add Data Mode Toggle to bottom of Container
+        let toggle_label = if self.handler.data.is_user_stats() {
+            format!("Show stats for {}", self.handler.data.guild_name)
+        } else {
+            "Show stats for users".to_string()
+        };
+
+        let toggle_button = self
+            .base
+            .register(ToggleDataMode)
+            .as_button()
+            .label(toggle_label)
+            .style(ButtonStyle::Primary);
+
+        container_components.push(CreateContainerComponent::ActionRow(
+            CreateActionRow::Buttons(vec![toggle_button].into()),
+        ));
+
+        let mut components = vec![CreateComponent::Container(CreateContainer::new(
+            container_components,
+        ))];
+
+        // 1. Time Range Row
+        let time_buttons = vec![
+            self.base.register(TimeYearly).as_button().style(
+                if self.handler.data.time_range == VoiceStatsTimeRange::Yearly {
+                    ButtonStyle::Primary
+                } else {
+                    ButtonStyle::Secondary
+                },
+            ),
+            self.base.register(TimeMonthly).as_button().style(
+                if self.handler.data.time_range == VoiceStatsTimeRange::Monthly {
+                    ButtonStyle::Primary
+                } else {
+                    ButtonStyle::Secondary
+                },
+            ),
+            self.base.register(TimeWeekly).as_button().style(
+                if self.handler.data.time_range == VoiceStatsTimeRange::Weekly {
+                    ButtonStyle::Primary
+                } else {
+                    ButtonStyle::Secondary
+                },
+            ),
+            self.base.register(TimeHourly).as_button().style(
+                if self.handler.data.time_range == VoiceStatsTimeRange::Hourly {
+                    ButtonStyle::Primary
+                } else {
+                    ButtonStyle::Secondary
+                },
+            ),
+        ];
+        components.push(CreateComponent::ActionRow(CreateActionRow::Buttons(
+            time_buttons.into(),
+        )));
+
+        // 2. Aggregation Row (Only for Guild)
+        let mut stat_buttons = vec![];
+        if !self.handler.data.is_user_stats() {
+            stat_buttons.push(self.base.register(StatUniqueUsers).as_button().style(
+                if self.handler.data.stat_type == GuildStatType::ActiveUserCount {
+                    ButtonStyle::Primary
+                } else {
+                    ButtonStyle::Secondary
+                },
+            ));
+        }
+        stat_buttons.push(self.base.register(StatTotalTime).as_button().style(
+            if self.handler.data.stat_type == GuildStatType::TotalTime {
+                ButtonStyle::Primary
+            } else {
+                ButtonStyle::Secondary
+            },
+        ));
+        stat_buttons.push(self.base.register(StatAverageTime).as_button().style(
+            if self.handler.data.stat_type == GuildStatType::AverageTime {
+                ButtonStyle::Primary
+            } else {
+                ButtonStyle::Secondary
+            },
+        ));
+        components.push(CreateComponent::ActionRow(CreateActionRow::Buttons(
+            stat_buttons.into(),
+        )));
+
+        // 3. User Select Menu (Only for User)
+        if self.handler.data.is_user_stats() {
+            let default_users = self
+                .handler
+                .data
+                .user
+                .clone()
+                .map(|u| std::borrow::Cow::Owned(vec![u.id]));
+            let user_select = self
+                .base
+                .register(SelectUser)
+                .as_select(serenity::all::CreateSelectMenuKind::User { default_users });
+            components.push(CreateComponent::ActionRow(CreateActionRow::SelectMenu(
+                user_select,
+            )));
+        }
+
+        components.into()
+    }
+
+    fn create_reply<'b>(&mut self) -> poise::CreateReply<'b> {
+        let response = self.create_response();
+        let mut reply: poise::CreateReply<'b> = response.into();
+
+        if let Some(ref bytes) = self.handler.image_bytes {
+            let attachment = CreateAttachment::bytes(bytes.clone(), VOICE_STATS_IMAGE_FILENAME);
+            reply = reply.attachment(attachment);
+        }
+
+        reply
+    }
+}
+
+crate::impl_interactive_view!(VoiceStatsView<'a>, VoiceStatsHandler, VoiceStatsAction);
 
 /// Controller for voice stats display and interaction.
 pub struct VoiceStatsController<'a> {
@@ -730,9 +753,9 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceStatsController<'a> {
         let mut view = VoiceStatsView::new(&ctx, data);
 
         // Generate and send the image
-        if !view.data.user_activity.is_empty()
-            || !view.data.guild_stats.is_empty()
-            || !view.data.raw_sessions.is_empty()
+        if !view.handler.data.user_activity.is_empty()
+            || !view.handler.data.guild_stats.is_empty()
+            || !view.handler.data.raw_sessions.is_empty()
         {
             let bytes = view.generate_image().map_err(AppError::internal_with_ref)?;
             view.set_image_bytes(bytes);
@@ -745,52 +768,8 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceStatsController<'a> {
             controller_start.elapsed().as_millis()
         );
 
-        while let Some((action, interaction)) = view.listen_once().await? {
-            // Handle updates based on action
-            match action {
-                VoiceStatsAction::ToggleDataMode => {
-                    if self.target_user.is_some() {
-                        self.target_user = None;
-                    } else {
-                        self.target_user = Some(ctx.author().clone());
-                        if self.stat_type == GuildStatType::ActiveUserCount {
-                            self.stat_type = GuildStatType::TotalTime;
-                        }
-                    }
-                }
-                VoiceStatsAction::SelectUser => {
-                    if let serenity::all::ComponentInteractionDataKind::UserSelect { values } =
-                        &interaction.data.kind
-                        && let Some(_user_id) = values.first()
-                        && let Ok(user) = _user_id.to_user(ctx.http()).await
-                    {
-                        self.target_user = Some(user);
-                    }
-                }
-                _ => {
-                    // Update controller state from view
-                    self.time_range = view.data.time_range;
-                    self.stat_type = view.data.stat_type;
-                }
-            }
-
-            // Re-fetch data with new parameters
-            let new_data = self.fetch_data(&ctx).await?;
-            view.data = new_data;
-
-            // Regenerate image
-            if !view.data.user_activity.is_empty()
-                || !view.data.guild_stats.is_empty()
-                || !view.data.raw_sessions.is_empty()
-            {
-                let bytes = view.generate_image().map_err(AppError::internal_with_ref)?;
-                view.set_image_bytes(bytes);
-            } else {
-                view.image_bytes = None;
-            }
-
-            view.render().await?;
-        }
+        view.run(|_action| Box::pin(async move { ViewCommand::Render }))
+            .await?;
 
         trace!(
             "stats_controller_total {} ms",

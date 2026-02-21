@@ -20,13 +20,15 @@ use crate::bot::controller::Coordinator;
 use crate::bot::error::BotError;
 use crate::bot::navigation::NavigationResult;
 use crate::bot::views::InteractiveView;
-use crate::bot::views::RenderExt;
+use crate::bot::views::InteractiveViewBase;
 use crate::bot::views::ResponseKind;
 use crate::bot::views::ResponseView;
 use crate::bot::views::View;
+use crate::bot::views::ViewCommand;
+use crate::bot::views::ViewCore;
+use crate::bot::views::ViewHandler;
 use crate::controller;
 use crate::model::ServerSettings;
-use crate::view_core;
 
 /// Configure voice tracking settings for this server
 ///
@@ -60,27 +62,35 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceSettingsController<'a>
             .map_err(Error::from)?;
 
         let mut view = SettingsVoiceView::new(&ctx, settings);
-        view.render().await?;
 
-        while let Some((action, _interaction)) = view.listen_once().await? {
-            match action {
-                SettingsVoiceAction::Back => return Ok(NavigationResult::Back),
-                SettingsVoiceAction::About => {
-                    return Ok(NavigationResult::SettingsAbout);
+        let nav = std::sync::Arc::new(std::sync::Mutex::new(NavigationResult::Exit));
+
+        view.run(|action| {
+            let nav = nav.clone();
+            Box::pin(async move {
+                match action {
+                    SettingsVoiceAction::Back => {
+                        *nav.lock().unwrap() = NavigationResult::Back;
+                        ViewCommand::Exit
+                    }
+                    SettingsVoiceAction::About => {
+                        *nav.lock().unwrap() = NavigationResult::SettingsAbout;
+                        ViewCommand::Exit
+                    }
+                    SettingsVoiceAction::ToggleEnabled => ViewCommand::Render,
                 }
-                SettingsVoiceAction::ToggleEnabled => {
-                    // Update the settings in the database
-                    service
-                        .update_server_settings(guild_id, view.settings.clone())
-                        .await
-                        .map_err(Error::from)?;
+            })
+        })
+        .await?;
 
-                    view.render().await?;
-                }
-            }
-        }
+        // Save the settings once the run exits
+        service
+            .update_server_settings(guild_id, view.handler.settings.clone())
+            .await
+            .map_err(Error::from)?;
 
-        Ok(NavigationResult::Exit)
+        let res = nav.lock().unwrap().clone();
+        Ok(res)
     }
 }
 
@@ -94,11 +104,43 @@ action_enum! {
     }
 }
 
-view_core! {
-    timeout = Duration::from_secs(120),
-    /// View for voice tracking settings.
-    pub struct SettingsVoiceView<'a, SettingsVoiceAction> {
-        pub settings: ServerSettings,
+pub struct SettingsVoiceHandler {
+    pub settings: ServerSettings,
+}
+
+#[async_trait::async_trait]
+impl ViewHandler<SettingsVoiceAction> for SettingsVoiceHandler {
+    async fn handle(
+        &mut self,
+        action: &SettingsVoiceAction,
+        _interaction: &ComponentInteraction,
+    ) -> Option<SettingsVoiceAction> {
+        match action {
+            SettingsVoiceAction::ToggleEnabled => {
+                let current = self.settings.voice.enabled.unwrap_or(true);
+                self.settings.voice.enabled = Some(!current);
+                Some(action.clone())
+            }
+            SettingsVoiceAction::Back | SettingsVoiceAction::About => Some(action.clone()),
+        }
+    }
+}
+
+/// View for voice tracking settings.
+pub struct SettingsVoiceView<'a> {
+    pub base: InteractiveViewBase<'a, SettingsVoiceAction>,
+    pub handler: SettingsVoiceHandler,
+}
+
+impl<'a> View<'a, SettingsVoiceAction> for SettingsVoiceView<'a> {
+    fn core(&self) -> &ViewCore<'a, SettingsVoiceAction> {
+        &self.base.core
+    }
+    fn core_mut(&mut self) -> &mut ViewCore<'a, SettingsVoiceAction> {
+        &mut self.base.core
+    }
+    fn create_core(poise_ctx: &'a Context<'a>) -> ViewCore<'a, SettingsVoiceAction> {
+        ViewCore::new(poise_ctx, Duration::from_secs(120))
     }
 }
 
@@ -106,15 +148,15 @@ impl<'a> SettingsVoiceView<'a> {
     /// Creates a new voice settings view.
     pub fn new(ctx: &'a Context<'a>, settings: ServerSettings) -> Self {
         Self {
-            settings,
-            core: Self::create_core(ctx),
+            base: InteractiveViewBase::new(Self::create_core(ctx)),
+            handler: SettingsVoiceHandler { settings },
         }
     }
 }
 
 impl<'a> ResponseView<'a> for SettingsVoiceView<'a> {
     fn create_response<'b>(&mut self) -> ResponseKind<'b> {
-        let is_enabled = self.settings.voice.enabled.unwrap_or(true);
+        let is_enabled = self.handler.settings.voice.enabled.unwrap_or(true);
 
         let status_text = format!(
             "-# **Settings > Voice**\n## Voice Tracking Settings\n\n> 🛈  {}",
@@ -126,6 +168,7 @@ impl<'a> ResponseView<'a> for SettingsVoiceView<'a> {
         );
 
         let enabled_button = self
+            .base
             .register(SettingsVoiceAction::ToggleEnabled)
             .as_button()
             .label(if is_enabled { "Disable" } else { "Enable" })
@@ -144,10 +187,12 @@ impl<'a> ResponseView<'a> for SettingsVoiceView<'a> {
 
         let nav_buttons = CreateComponent::ActionRow(CreateActionRow::Buttons(
             vec![
-                self.register(SettingsVoiceAction::Back)
+                self.base
+                    .register(SettingsVoiceAction::Back)
                     .as_button()
                     .style(ButtonStyle::Secondary),
-                self.register(SettingsVoiceAction::About)
+                self.base
+                    .register(SettingsVoiceAction::About)
                     .as_button()
                     .style(ButtonStyle::Secondary),
             ]
@@ -158,20 +203,8 @@ impl<'a> ResponseView<'a> for SettingsVoiceView<'a> {
     }
 }
 
-#[async_trait::async_trait]
-impl<'a> InteractiveView<'a, SettingsVoiceAction> for SettingsVoiceView<'a> {
-    async fn handle(
-        &mut self,
-        action: &SettingsVoiceAction,
-        _interaction: &ComponentInteraction,
-    ) -> Option<SettingsVoiceAction> {
-        match action {
-            SettingsVoiceAction::ToggleEnabled => {
-                let current = self.settings.voice.enabled.unwrap_or(true);
-                self.settings.voice.enabled = Some(!current);
-                Some(action.clone())
-            }
-            SettingsVoiceAction::Back | SettingsVoiceAction::About => Some(action.clone()),
-        }
-    }
-}
+crate::impl_interactive_view!(
+    SettingsVoiceView<'a>,
+    SettingsVoiceHandler,
+    SettingsVoiceAction
+);

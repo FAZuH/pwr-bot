@@ -10,18 +10,19 @@ use serenity::all::CreateComponent;
 use crate::action_enum;
 use crate::bot::Error;
 use crate::bot::commands::Context;
-use crate::bot::views::InteractiveView;
+use crate::bot::views::InteractiveViewBase;
 use crate::bot::views::ResponseKind;
 use crate::bot::views::ResponseView;
 use crate::bot::views::View;
-use crate::view_core;
+use crate::bot::views::ViewCore;
+use crate::bot::views::ViewHandler;
 
 /// Model for tracking pagination state.
 pub struct PaginationModel {
-    current_page: u32,
-    pages: u32,
+    pub current_page: u32,
+    pub pages: u32,
     #[allow(dead_code)]
-    per_page: u32,
+    pub per_page: u32,
 }
 
 impl PaginationModel {
@@ -74,84 +75,13 @@ action_enum!(PaginationAction {
     Last,
 });
 
-view_core! {
-    timeout = Duration::from_secs(120),
-    /// View that provides pagination controls for multi-page content.
-    pub struct PaginationView<'a, PaginationAction> {
-        pub state: PaginationModel,
-        pub disabled: bool,
-    }
-}
-
-impl<'a> PaginationView<'a> {
-    /// Creates a new pagination view with the given item count and page size.
-    pub fn new(
-        ctx: &'a Context<'a>,
-        total_items: impl Into<u32>,
-        per_page: impl Into<u32>,
-    ) -> Self {
-        let per_page = per_page.into();
-        let pages = total_items.into().div_ceil(per_page);
-        let model = PaginationModel::new(pages, per_page, 1);
-        Self {
-            state: model,
-            disabled: false,
-            core: Self::create_core(ctx),
-        }
-    }
-
-    /// Attaches pagination controls only if there are multiple pages and not disabled.
-    pub fn attach_if_multipage<'b>(&mut self, components: &mut impl Extend<CreateComponent<'b>>) {
-        if !self.disabled
-            && self.state.pages > 1
-            && let ResponseKind::Component(create_components) = self.create_response()
-        {
-            components.extend(create_components)
-        }
-    }
-
-    pub fn current_page(&self) -> u32 {
-        self.state.current_page
-    }
-}
-
-impl<'a> ResponseView<'a> for PaginationView<'a> {
-    /// Creates the pagination control buttons.
-    fn create_response<'b>(&mut self) -> ResponseKind<'b> {
-        if self.disabled {
-            return ResponseKind::Component(vec![]);
-        }
-
-        let page_label = format!("{}/{}", self.state.current_page, self.state.pages);
-
-        vec![CreateComponent::ActionRow(CreateActionRow::Buttons(
-            vec![
-                self.register(PaginationAction::First)
-                    .as_button()
-                    .disabled(self.state.current_page == 1),
-                self.register(PaginationAction::Prev)
-                    .as_button()
-                    .disabled(self.state.current_page == 1),
-                self.register(PaginationAction::Page)
-                    .as_button()
-                    .label(page_label)
-                    .disabled(true)
-                    .style(ButtonStyle::Secondary),
-                self.register(PaginationAction::Next)
-                    .as_button()
-                    .disabled(self.state.current_page == self.state.pages),
-                self.register(PaginationAction::Last)
-                    .as_button()
-                    .disabled(self.state.current_page == self.state.pages),
-            ]
-            .into(),
-        ))]
-        .into()
-    }
+pub struct PaginationHandler {
+    pub state: PaginationModel,
+    pub disabled: bool,
 }
 
 #[async_trait::async_trait]
-impl<'a> InteractiveView<'a, PaginationAction> for PaginationView<'a> {
+impl ViewHandler<PaginationAction> for PaginationHandler {
     async fn handle(
         &mut self,
         action: &PaginationAction,
@@ -173,6 +103,103 @@ impl<'a> InteractiveView<'a, PaginationAction> for PaginationView<'a> {
         Ok(())
     }
 }
+
+/// View that provides pagination controls for multi-page content.
+pub struct PaginationView<'a> {
+    pub base: InteractiveViewBase<'a, PaginationAction>,
+    pub handler: PaginationHandler,
+}
+
+impl<'a> View<'a, PaginationAction> for PaginationView<'a> {
+    fn core(&self) -> &ViewCore<'a, PaginationAction> {
+        &self.base.core
+    }
+    fn core_mut(&mut self) -> &mut ViewCore<'a, PaginationAction> {
+        &mut self.base.core
+    }
+    fn create_core(poise_ctx: &'a Context<'a>) -> ViewCore<'a, PaginationAction> {
+        ViewCore::new(poise_ctx, Duration::from_secs(120))
+    }
+}
+
+impl<'a> PaginationView<'a> {
+    /// Creates a new pagination view with the given item count and page size.
+    pub fn new(
+        ctx: &'a Context<'a>,
+        total_items: impl Into<u32>,
+        per_page: impl Into<u32>,
+    ) -> Self {
+        let per_page = per_page.into();
+        let pages = total_items.into().div_ceil(per_page);
+        let model = PaginationModel::new(pages, per_page, 1);
+        Self {
+            base: InteractiveViewBase::new(Self::create_core(ctx)),
+            handler: PaginationHandler {
+                state: model,
+                disabled: false,
+            },
+        }
+    }
+
+    /// Attaches pagination controls only if there are multiple pages and not disabled.
+    pub fn attach_if_multipage<'b>(&mut self, components: &mut impl Extend<CreateComponent<'b>>) {
+        if !self.handler.disabled
+            && self.handler.state.pages > 1
+            && let ResponseKind::Component(create_components) = self.create_response()
+        {
+            components.extend(create_components)
+        }
+    }
+
+    pub fn current_page(&self) -> u32 {
+        self.handler.state.current_page
+    }
+}
+
+impl<'a> ResponseView<'a> for PaginationView<'a> {
+    /// Creates the pagination control buttons.
+    fn create_response<'b>(&mut self) -> ResponseKind<'b> {
+        if self.handler.disabled {
+            return ResponseKind::Component(vec![]);
+        }
+
+        let page_label = format!(
+            "{}/{}",
+            self.handler.state.current_page, self.handler.state.pages
+        );
+
+        vec![CreateComponent::ActionRow(CreateActionRow::Buttons(
+            vec![
+                self.base
+                    .register(PaginationAction::First)
+                    .as_button()
+                    .disabled(self.handler.state.current_page == 1),
+                self.base
+                    .register(PaginationAction::Prev)
+                    .as_button()
+                    .disabled(self.handler.state.current_page == 1),
+                self.base
+                    .register(PaginationAction::Page)
+                    .as_button()
+                    .label(page_label)
+                    .disabled(true)
+                    .style(ButtonStyle::Secondary),
+                self.base
+                    .register(PaginationAction::Next)
+                    .as_button()
+                    .disabled(self.handler.state.current_page == self.handler.state.pages),
+                self.base
+                    .register(PaginationAction::Last)
+                    .as_button()
+                    .disabled(self.handler.state.current_page == self.handler.state.pages),
+            ]
+            .into(),
+        ))]
+        .into()
+    }
+}
+
+crate::impl_interactive_view!(PaginationView<'a>, PaginationHandler, PaginationAction);
 
 #[cfg(test)]
 mod tests {

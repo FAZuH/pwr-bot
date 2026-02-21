@@ -29,13 +29,15 @@ use crate::bot::error::BotError;
 use crate::bot::navigation::NavigationResult;
 use crate::bot::views::Action;
 use crate::bot::views::InteractiveView;
-use crate::bot::views::RenderExt;
+use crate::bot::views::InteractiveViewBase;
 use crate::bot::views::ResponseKind;
 use crate::bot::views::ResponseView;
 use crate::bot::views::View;
+use crate::bot::views::ViewCommand;
+use crate::bot::views::ViewCore;
+use crate::bot::views::ViewHandler;
 use crate::controller;
 use crate::model::ServerSettings;
-use crate::view_core;
 
 /// Configure feed settings for this server
 ///
@@ -66,23 +68,33 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for FeedSettingsController<'a> 
         let mut settings = service.get_server_settings(guild_id).await?;
 
         let mut view = SettingsFeedView::new(&ctx, &mut settings);
-        view.render().await?;
 
-        while let Some((action, _)) = view.listen_once().await? {
-            if action == SettingsFeedAction::Back {
-                return Ok(NavigationResult::Back);
-            } else if action == SettingsFeedAction::About {
-                return Ok(NavigationResult::SettingsAbout);
-            }
+        let nav = std::sync::Arc::new(std::sync::Mutex::new(NavigationResult::Exit));
 
-            service
-                .update_server_settings(guild_id, view.settings.clone())
-                .await?;
+        view.run(|action| {
+            let nav = nav.clone();
+            Box::pin(async move {
+                if action == SettingsFeedAction::Back {
+                    *nav.lock().unwrap() = NavigationResult::Back;
+                    return ViewCommand::Exit;
+                } else if action == SettingsFeedAction::About {
+                    *nav.lock().unwrap() = NavigationResult::SettingsAbout;
+                    return ViewCommand::Exit;
+                }
 
-            view.render().await?;
-        }
+                ViewCommand::Render
+            })
+        })
+        .await?;
 
-        Ok(NavigationResult::Exit)
+        // Save settings after the view loop completes
+        service
+            .update_server_settings(guild_id, settings.clone())
+            .await
+            .ok();
+
+        let res = nav.lock().unwrap().clone();
+        Ok(res)
     }
 }
 
@@ -97,151 +109,12 @@ action_enum! { SettingsFeedAction {
     About,
 } }
 
-view_core! {
-    timeout = Duration::from_secs(120),
-    /// View for configuring server feed settings.
-    pub struct SettingsFeedView<'a, SettingsFeedAction> {
-        pub settings: &'a mut ServerSettings,
-    }
-}
-
-impl<'a> SettingsFeedView<'a> {
-    /// Creates a new settings view with the given settings reference.
-    pub fn new(ctx: &'a Context<'a>, settings: &'a mut ServerSettings) -> Self {
-        Self {
-            settings,
-            core: Self::create_core(ctx),
-        }
-    }
-
-    /// Updates the settings reference.
-    pub fn set_settings(&mut self, settings: &'a mut ServerSettings) {
-        self.settings = settings;
-    }
-
-    /// Parses a role ID string into a RoleId vector.
-    fn parse_role_id(id: Option<&String>) -> Vec<RoleId> {
-        id.and_then(|id| RoleId::from_str(id).ok())
-            .into_iter()
-            .collect()
-    }
-
-    /// Parses a channel ID string into a GenericChannelId vector.
-    fn parse_channel_id(id: Option<&String>) -> Vec<GenericChannelId> {
-        id.and_then(|id| ChannelId::from_str(id).ok().map(GenericChannelId::from))
-            .into_iter()
-            .collect()
-    }
-}
-
-impl<'a> ResponseView<'a> for SettingsFeedView<'a> {
-    fn create_response<'b>(&mut self) -> ResponseKind<'b> {
-        let is_enabled = self.settings.feeds.enabled.unwrap_or(true);
-
-        let status_text = format!(
-            "-# **Settings > Feeds**\n## Feed Subscription Settings\n\n> 🛈  {}",
-            if is_enabled {
-                match &self.settings.feeds.channel_id {
-                    Some(id) => format!("Feed notifications are currently **active**. Notifications will be sent to <#{id}>"),
-                    None => "Feed notifications are currently **active**, but notification channel is not set.".to_string(),
-                }
-            } else {
-                "Feed notifications are currently **paused**. No notifications will be sent until it is re-enabled.".to_string()
-            }
-        );
-
-        let enabled_button = self
-            .register(SettingsFeedAction::Enabled)
-            .as_button()
-            .label(if is_enabled { "Disable" } else { "Enable" })
-            .style(if is_enabled {
-                ButtonStyle::Danger
-            } else {
-                ButtonStyle::Success
-            });
-
-        let channel_text =
-            "### Notification Channel\n\n> 🛈  Choose where feed updates will be posted.";
-
-        let channel_select = self
-            .register(SettingsFeedAction::Channel)
-            .as_select(CreateSelectMenuKind::Channel {
-                channel_types: Some(vec![ChannelType::Text, ChannelType::News].into()),
-                default_channels: Some(
-                    Self::parse_channel_id(self.settings.feeds.channel_id.as_ref()).into(),
-                ),
-            })
-            .placeholder(if self.settings.feeds.channel_id.is_some() {
-                "Change notification channel"
-            } else {
-                "⚠️ Required: Select a notification channel"
-            });
-
-        let sub_role_text = "### Subscribe Permission\n\n> 🛈  Who can add new feeds to this server. Leave empty to allow users with \"Manage Server\" permission.";
-        let sub_role_select = self
-            .register(SettingsFeedAction::SubRole)
-            .as_select(CreateSelectMenuKind::Role {
-                default_roles: Some(
-                    Self::parse_role_id(self.settings.feeds.subscribe_role_id.as_ref()).into(),
-                ),
-            })
-            .min_values(0)
-            .placeholder(if self.settings.feeds.subscribe_role_id.is_some() {
-                "Change subscribe role"
-            } else {
-                "Optional: Select role for subscribe permission"
-            });
-
-        let unsub_role_text = "### Unsubscribe Permission\n\n> 🛈  Who can remove feeds from this server. Leave empty to allow users with \"Manage Server\" permission.";
-        let unsub_role_select = self
-            .register(SettingsFeedAction::UnsubRole)
-            .as_select(CreateSelectMenuKind::Role {
-                default_roles: Some(
-                    Self::parse_role_id(self.settings.feeds.unsubscribe_role_id.as_ref()).into(),
-                ),
-            })
-            .min_values(0)
-            .placeholder(if self.settings.feeds.unsubscribe_role_id.is_some() {
-                "Change unsubscribe role"
-            } else {
-                "Optional: Select role for unsubscribe permission"
-            });
-
-        let container = CreateComponent::Container(CreateContainer::new(vec![
-            CreateContainerComponent::TextDisplay(CreateTextDisplay::new(status_text)),
-            CreateContainerComponent::ActionRow(CreateActionRow::Buttons(
-                vec![enabled_button].into(),
-            )),
-            CreateContainerComponent::TextDisplay(CreateTextDisplay::new(channel_text)),
-            CreateContainerComponent::ActionRow(CreateActionRow::SelectMenu(channel_select)),
-            CreateContainerComponent::TextDisplay(CreateTextDisplay::new(sub_role_text)),
-            CreateContainerComponent::ActionRow(CreateActionRow::SelectMenu(sub_role_select)),
-            CreateContainerComponent::TextDisplay(CreateTextDisplay::new(unsub_role_text)),
-            CreateContainerComponent::ActionRow(CreateActionRow::SelectMenu(unsub_role_select)),
-        ]));
-
-        let back = self.register(SettingsFeedAction::Back);
-        let about = self.register(SettingsFeedAction::About);
-
-        let nav_buttons =
-            CreateComponent::ActionRow(CreateActionRow::Buttons(<std::borrow::Cow<
-                '_,
-                [serenity::all::CreateButton<'_>],
-            >>::from(vec![
-                CreateButton::new(back.id)
-                    .label(SettingsFeedAction::Back.label())
-                    .style(ButtonStyle::Secondary),
-                CreateButton::new(about.id)
-                    .label(SettingsFeedAction::About.label())
-                    .style(ButtonStyle::Secondary),
-            ])));
-
-        vec![container, nav_buttons].into()
-    }
+pub struct SettingsFeedHandler<'a> {
+    pub settings: &'a mut ServerSettings,
 }
 
 #[async_trait::async_trait]
-impl<'a> InteractiveView<'a, SettingsFeedAction> for SettingsFeedView<'a> {
+impl<'a> ViewHandler<SettingsFeedAction> for SettingsFeedHandler<'a> {
     async fn handle(
         &mut self,
         action: &SettingsFeedAction,
@@ -282,3 +155,165 @@ impl<'a> InteractiveView<'a, SettingsFeedAction> for SettingsFeedView<'a> {
         }
     }
 }
+
+/// View for configuring server feed settings.
+pub struct SettingsFeedView<'a> {
+    pub base: InteractiveViewBase<'a, SettingsFeedAction>,
+    pub handler: SettingsFeedHandler<'a>,
+}
+
+impl<'a> View<'a, SettingsFeedAction> for SettingsFeedView<'a> {
+    fn core(&self) -> &ViewCore<'a, SettingsFeedAction> {
+        &self.base.core
+    }
+    fn core_mut(&mut self) -> &mut ViewCore<'a, SettingsFeedAction> {
+        &mut self.base.core
+    }
+    fn create_core(poise_ctx: &'a Context<'a>) -> ViewCore<'a, SettingsFeedAction> {
+        ViewCore::new(poise_ctx, Duration::from_secs(120))
+    }
+}
+
+impl<'a> SettingsFeedView<'a> {
+    /// Creates a new settings view with the given settings reference.
+    pub fn new(ctx: &'a Context<'a>, settings: &'a mut ServerSettings) -> Self {
+        Self {
+            base: InteractiveViewBase::new(Self::create_core(ctx)),
+            handler: SettingsFeedHandler { settings },
+        }
+    }
+
+    /// Parses a role ID string into a RoleId vector.
+    fn parse_role_id(id: Option<&String>) -> Vec<RoleId> {
+        id.and_then(|id| RoleId::from_str(id).ok())
+            .into_iter()
+            .collect()
+    }
+
+    /// Parses a channel ID string into a GenericChannelId vector.
+    fn parse_channel_id(id: Option<&String>) -> Vec<GenericChannelId> {
+        id.and_then(|id| ChannelId::from_str(id).ok().map(GenericChannelId::from))
+            .into_iter()
+            .collect()
+    }
+}
+
+impl<'a> ResponseView<'a> for SettingsFeedView<'a> {
+    fn create_response<'b>(&mut self) -> ResponseKind<'b> {
+        let is_enabled = self.handler.settings.feeds.enabled.unwrap_or(true);
+
+        let status_text = format!(
+            "-# **Settings > Feeds**\n## Feed Subscription Settings\n\n> 🛈  {}",
+            if is_enabled {
+                match &self.handler.settings.feeds.channel_id {
+                    Some(id) => format!("Feed notifications are currently **active**. Notifications will be sent to <#{id}>"),
+                    None => "Feed notifications are currently **active**, but notification channel is not set.".to_string(),
+                }
+            } else {
+                "Feed notifications are currently **paused**. No notifications will be sent until it is re-enabled.".to_string()
+            }
+        );
+
+        let enabled_button = self
+            .base
+            .register(SettingsFeedAction::Enabled)
+            .as_button()
+            .label(if is_enabled { "Disable" } else { "Enable" })
+            .style(if is_enabled {
+                ButtonStyle::Danger
+            } else {
+                ButtonStyle::Success
+            });
+
+        let channel_text =
+            "### Notification Channel\n\n> 🛈  Choose where feed updates will be posted.";
+
+        let channel_select = self
+            .base
+            .register(SettingsFeedAction::Channel)
+            .as_select(CreateSelectMenuKind::Channel {
+                channel_types: Some(vec![ChannelType::Text, ChannelType::News].into()),
+                default_channels: Some(
+                    Self::parse_channel_id(self.handler.settings.feeds.channel_id.as_ref()).into(),
+                ),
+            })
+            .placeholder(if self.handler.settings.feeds.channel_id.is_some() {
+                "Change notification channel"
+            } else {
+                "⚠️ Required: Select a notification channel"
+            });
+
+        let sub_role_text = "### Subscribe Permission\n\n> 🛈  Who can add new feeds to this server. Leave empty to allow users with \"Manage Server\" permission.";
+        let sub_role_select = self
+            .base
+            .register(SettingsFeedAction::SubRole)
+            .as_select(CreateSelectMenuKind::Role {
+                default_roles: Some(
+                    Self::parse_role_id(self.handler.settings.feeds.subscribe_role_id.as_ref())
+                        .into(),
+                ),
+            })
+            .min_values(0)
+            .placeholder(if self.handler.settings.feeds.subscribe_role_id.is_some() {
+                "Change subscribe role"
+            } else {
+                "Optional: Select role for subscribe permission"
+            });
+
+        let unsub_role_text = "### Unsubscribe Permission\n\n> 🛈  Who can remove feeds from this server. Leave empty to allow users with \"Manage Server\" permission.";
+        let unsub_role_select = self
+            .base
+            .register(SettingsFeedAction::UnsubRole)
+            .as_select(CreateSelectMenuKind::Role {
+                default_roles: Some(
+                    Self::parse_role_id(self.handler.settings.feeds.unsubscribe_role_id.as_ref())
+                        .into(),
+                ),
+            })
+            .min_values(0)
+            .placeholder(
+                if self.handler.settings.feeds.unsubscribe_role_id.is_some() {
+                    "Change unsubscribe role"
+                } else {
+                    "Optional: Select role for unsubscribe permission"
+                },
+            );
+
+        let container = CreateComponent::Container(CreateContainer::new(vec![
+            CreateContainerComponent::TextDisplay(CreateTextDisplay::new(status_text)),
+            CreateContainerComponent::ActionRow(CreateActionRow::Buttons(
+                vec![enabled_button].into(),
+            )),
+            CreateContainerComponent::TextDisplay(CreateTextDisplay::new(channel_text)),
+            CreateContainerComponent::ActionRow(CreateActionRow::SelectMenu(channel_select)),
+            CreateContainerComponent::TextDisplay(CreateTextDisplay::new(sub_role_text)),
+            CreateContainerComponent::ActionRow(CreateActionRow::SelectMenu(sub_role_select)),
+            CreateContainerComponent::TextDisplay(CreateTextDisplay::new(unsub_role_text)),
+            CreateContainerComponent::ActionRow(CreateActionRow::SelectMenu(unsub_role_select)),
+        ]));
+
+        let back = self.base.register(SettingsFeedAction::Back);
+        let about = self.base.register(SettingsFeedAction::About);
+
+        let nav_buttons =
+            CreateComponent::ActionRow(CreateActionRow::Buttons(<std::borrow::Cow<
+                '_,
+                [serenity::all::CreateButton<'_>],
+            >>::from(vec![
+                CreateButton::new(back.id)
+                    .label(SettingsFeedAction::Back.label())
+                    .style(ButtonStyle::Secondary),
+                CreateButton::new(about.id)
+                    .label(SettingsFeedAction::About.label())
+                    .style(ButtonStyle::Secondary),
+            ])));
+
+        vec![container, nav_buttons].into()
+    }
+}
+
+crate::impl_interactive_view!(
+    SettingsFeedView<'a>,
+    SettingsFeedHandler<'a>,
+    SettingsFeedAction
+);

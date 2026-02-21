@@ -199,6 +199,54 @@ macro_rules! view_core {
     };
 }
 
+#[macro_export]
+macro_rules! impl_interactive_view {
+    ($type:ident $(<$lt:lifetime>)?, $handler:ty, $action:ty) => {
+        #[async_trait::async_trait]
+        impl<'a> $crate::bot::views::InteractiveView<'a, $action> for $type<'a> {
+            type Handler = $handler;
+
+            fn handler(&mut self) -> &mut Self::Handler {
+                &mut self.handler
+            }
+
+            async fn run<F>(&mut self, mut on_action: F) -> Result<(), $crate::bot::commands::Error>
+            where
+                F: FnMut(
+                        $action,
+                    )
+                        -> futures::future::BoxFuture<'a, $crate::bot::views::ViewCommand>
+                    + Send
+                    + Sync,
+            {
+                use $crate::bot::views::RenderExt;
+                use $crate::bot::views::ViewCommand;
+
+                self.render().await?;
+                loop {
+                    let res = self.base.listen_once(&mut self.handler).await?;
+                    if let Some((action, _)) = res {
+                        let cmd = on_action(action).await;
+                        match cmd {
+                            ViewCommand::Render => {
+                                self.render().await?;
+                            }
+                            ViewCommand::Exit => {
+                                break;
+                            }
+                        }
+                    } else {
+                        self.handler.on_timeout().await?;
+                        self.render().await?;
+                        break;
+                    }
+                }
+                Ok(())
+            }
+        }
+    };
+}
+
 /// Generates an enum that implements the `Action` trait for use in interactive Discord views.
 ///
 /// # Syntax

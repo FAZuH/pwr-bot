@@ -203,7 +203,7 @@ pub trait RenderExt<'a, T> {
 impl<'a, T, S> RenderExt<'a, T> for S
 where
     S: View<'a, T> + ResponseView<'a> + Send,
-    T: Action,
+    T: Action + Send + Sync + 'a,
 {
     async fn render(&mut self) -> Result<(), Error> {
         let reply = self.create_reply();
@@ -236,9 +236,19 @@ impl RegisteredAction {
     }
 }
 
-/// Trait for interactive views that handle actions.
+use futures::future::BoxFuture;
+
+/// Enum returned by controller callbacks to signal the next action for the view loop.
+pub enum ViewCommand {
+    /// Re-render the view and continue listening.
+    Render,
+    /// Exit the view loop.
+    Exit,
+}
+
+/// Trait implemented by views to handle interactions and timeouts.
 #[async_trait::async_trait]
-pub trait InteractiveView<'a, T: Action + 'a>: View<'a, T> + Sync {
+pub trait ViewHandler<T: Action>: Send + Sync {
     /// Handles an action and returns the next action if any.
     async fn handle(&mut self, action: &T, interaction: &ComponentInteraction) -> Option<T>;
 
@@ -247,13 +257,40 @@ pub trait InteractiveView<'a, T: Action + 'a>: View<'a, T> + Sync {
         Ok(())
     }
 
-    /// Collects a single interaction.
-    /// Returns the action and interaction if received, None if timed out.
-    async fn listen_once(&mut self) -> Result<Option<(T, ComponentInteraction)>, Error> {
-        let mut collector = self.create_collector().await;
+    /// Provides child view resolvers for action routing.
+    fn children(&mut self) -> Vec<Box<dyn ChildViewResolver<T> + '_>> {
+        vec![]
+    }
+}
 
-        // Filter by message ID if we have a reply handle
-        if let Some(msg_id) = self.core().ctx.message_id().await {
+/// Base implementation of interactive view logic.
+pub struct InteractiveViewBase<'a, T: Action + 'a> {
+    pub core: ViewCore<'a, T>,
+    pub should_acknowledge: bool,
+}
+
+impl<'a, T: Action + 'a> InteractiveViewBase<'a, T> {
+    pub fn new(core: ViewCore<'a, T>) -> Self {
+        Self {
+            core,
+            should_acknowledge: true,
+        }
+    }
+
+    /// Configures whether to automatically acknowledge interactions.
+    pub fn acknowledge(mut self, should_acknowledge: bool) -> Self {
+        self.should_acknowledge = should_acknowledge;
+        self
+    }
+
+    /// Collects a single interaction and dispatches it to the handler.
+    pub async fn listen_once<H: ViewHandler<T>>(
+        &mut self,
+        handler: &mut H,
+    ) -> Result<Option<(T, ComponentInteraction)>, Error> {
+        let mut collector = self.create_collector(handler).await;
+
+        if let Some(msg_id) = self.core.ctx.message_id().await {
             collector = collector.message_id(msg_id);
         }
 
@@ -262,90 +299,106 @@ pub trait InteractiveView<'a, T: Action + 'a>: View<'a, T> + Sync {
             None => return Ok(None),
         };
 
-        interaction
-            .create_response(
-                self.core().ctx.poise_ctx.http(),
-                CreateInteractionResponse::Acknowledge,
-            )
-            .await
-            .ok();
+        if self.should_acknowledge {
+            interaction
+                .create_response(
+                    self.core.ctx.poise_ctx.http(),
+                    CreateInteractionResponse::Acknowledge,
+                )
+                .await
+                .ok();
+        }
 
-        let action = match self.resolve_action(&interaction.data.custom_id) {
+        let action = match self.resolve_action(&interaction.data.custom_id, handler) {
             Some(action) => action,
             None => return Ok(None),
         };
 
-        let action = match self.handle(&action, &interaction).await {
+        let action = match handler.handle(&action, &interaction).await {
             Some(action) => action,
             None => return Ok(None),
         };
 
-        self.clear_registry();
-
+        self.clear_registry(handler);
         Ok(Some((action, interaction)))
     }
 
-    fn register(&mut self, action: T) -> RegisteredAction {
+    /// Registers an action and returns a unique ID for it.
+    pub fn register(&mut self, action: T) -> RegisteredAction {
         let label = action.label();
-        let id = self.core_mut().registry.register(action);
+        let id = self.core.registry.register(action);
         RegisteredAction { id, label }
     }
 
-    /// Creates a collector for interactions.
-    async fn create_collector(&mut self) -> ComponentInteractionCollector<'a> {
-        let filter_ids = self.collector_filter();
-        let core = self.core();
-        ComponentInteractionCollector::new(core.ctx.poise_ctx.serenity_context())
-            .author_id(core.ctx.poise_ctx.author().id)
-            .timeout(core.ctx.timeout)
+    async fn create_collector<H: ViewHandler<T>>(
+        &mut self,
+        handler: &mut H,
+    ) -> ComponentInteractionCollector<'a> {
+        let filter_ids = self.collector_filter(handler);
+        ComponentInteractionCollector::new(self.core.ctx.poise_ctx.serenity_context())
+            .author_id(self.core.ctx.poise_ctx.author().id)
+            .timeout(self.core.ctx.timeout)
             .filter(move |i| filter_ids.contains(&i.data.custom_id.to_string()))
     }
 
-    fn children(&mut self) -> Vec<Box<dyn ChildViewResolver<T> + '_>> {
-        vec![]
-    }
-
-    fn child<'b, C, S>(view: &'b mut S, wrap: fn(C) -> T) -> Box<dyn ChildViewResolver<T> + 'b>
-    where
-        S: View<'a, C>,
-        C: Action + Clone + 'a,
-        'a: 'b,
-    {
-        Box::new((&mut view.core_mut().registry, wrap))
-    }
-
-    fn clear_registry(&mut self) {
-        self.core_mut().registry.clear();
-        for mut child in self.children() {
+    fn clear_registry<H: ViewHandler<T>>(&mut self, handler: &mut H) {
+        self.core.registry.clear();
+        for mut child in handler.children() {
             child.clear()
         }
     }
 
-    fn collector_filter(&mut self) -> Vec<String> {
+    fn collector_filter<H: ViewHandler<T>>(&mut self, handler: &mut H) -> Vec<String> {
         let mut ids: Vec<String> = self
-            .core()
+            .core
             .registry
             .ids()
             .into_iter()
             .map(|s| s.to_string())
             .collect();
-        for child in self.children() {
+        for child in handler.children() {
             ids.extend(child.filter_ids());
         }
         ids
     }
 
-    fn resolve_action(&mut self, custom_id: &str) -> Option<T> {
-        if let Some(action) = self.core().registry.get(custom_id) {
+    fn resolve_action<H: ViewHandler<T>>(&mut self, custom_id: &str, handler: &mut H) -> Option<T> {
+        if let Some(action) = self.core.registry.get(custom_id) {
             return Some(action.clone());
         }
-        for child in self.children() {
+        for child in handler.children() {
             if let Some(action) = child.resolve(custom_id) {
                 return Some(action);
             }
         }
         None
     }
+}
+
+/// Trait for interactive views that handle actions.
+#[async_trait::async_trait]
+pub trait InteractiveView<'a, T: Action + 'a>: ResponseView<'a> + Send + Sync {
+    type Handler: ViewHandler<T> + Send + Sync;
+
+    fn handler(&mut self) -> &mut Self::Handler;
+
+    /// Runs the view event loop.
+    async fn run<F>(&mut self, on_action: F) -> Result<(), Error>
+    where
+        F: FnMut(T) -> BoxFuture<'a, ViewCommand> + Send + Sync;
+}
+
+pub fn child<'a, 'b, C, S, T>(
+    view: &'b mut S,
+    wrap: fn(C) -> T,
+) -> Box<dyn ChildViewResolver<T> + 'b>
+where
+    S: View<'a, C>,
+    C: Action + Clone + 'a,
+    T: Action + 'b,
+    'a: 'b,
+{
+    Box::new((&mut view.core_mut().registry, wrap))
 }
 
 pub trait ChildViewResolver<T> {
