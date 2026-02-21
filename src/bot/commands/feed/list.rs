@@ -32,7 +32,7 @@ use crate::bot::views::ViewEngine;
 use crate::bot::views::ViewHandlerV2;
 use crate::bot::views::ViewRenderV2;
 use crate::bot::views::pagination::PaginationAction;
-use crate::bot::views::pagination::PaginationViewV2;
+use crate::bot::views::pagination::PaginationView;
 use crate::controller;
 use crate::service::feed_subscription_service::Subscription;
 
@@ -83,7 +83,7 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for FeedListController<'a> {
             .list_paginated_subscriptions(&subscriber, 1u32, SUBSCRIPTIONS_PER_PAGE)
             .await?;
 
-        let pagination = PaginationViewV2::new(total_items, SUBSCRIPTIONS_PER_PAGE);
+        let pagination = PaginationView::new(total_items, SUBSCRIPTIONS_PER_PAGE);
 
         let view = FeedListHandler {
             subscriptions,
@@ -132,7 +132,7 @@ pub enum FeedListState {
 
 pub struct FeedListHandler {
     pub subscriptions: Vec<Subscription>,
-    pub pagination: PaginationViewV2,
+    pub pagination: PaginationView,
     pub state: FeedListState,
     pub marked_unsub: HashSet<String>,
     pub service: std::sync::Arc<crate::service::feed_subscription_service::FeedSubscriptionService>,
@@ -301,11 +301,10 @@ impl ViewHandlerV2<FeedListAction> for FeedListHandler {
         };
 
         if let Base(pagination_action) = action {
-            let cmd = self.pagination.handle(
-                pagination_action,
-                _trigger,
-                &_ctx.map(FeedListAction::Base),
-            ).await?;
+            let cmd = self
+                .pagination
+                .handle(pagination_action, _trigger, &_ctx.map(FeedListAction::Base))
+                .await?;
 
             // Refresh page
             if let Ok(subs) = self
