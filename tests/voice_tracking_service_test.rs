@@ -2,10 +2,10 @@
 
 use chrono::Duration;
 use chrono::Utc;
-use pwr_bot::model::ServerSettings;
-use pwr_bot::model::ServerSettingsModel;
-use pwr_bot::model::VoiceSessionsModel;
-use pwr_bot::model::VoiceSettings;
+use pwr_bot::entity::ServerSettings;
+use pwr_bot::entity::ServerSettingsEntity;
+use pwr_bot::entity::VoiceSessionsEntity;
+use pwr_bot::entity::VoiceSettings;
 use pwr_bot::repository::table::Table;
 use pwr_bot::service::voice_tracking_service::VoiceTrackingService;
 
@@ -117,7 +117,7 @@ async fn test_insert_and_replace_voice_session() {
         .expect("Failed to create service");
 
     let now = Utc::now();
-    let session = VoiceSessionsModel {
+    let session = VoiceSessionsEntity {
         id: 0,
         user_id: 111111,
         guild_id: 222222,
@@ -133,7 +133,7 @@ async fn test_insert_and_replace_voice_session() {
         .expect("Failed to insert voice session");
 
     // Verify it was inserted by querying the database directly
-    let sessions: Vec<VoiceSessionsModel> = db
+    let sessions: Vec<VoiceSessionsEntity> = db
         .voice_sessions
         .select_all()
         .await
@@ -143,7 +143,7 @@ async fn test_insert_and_replace_voice_session() {
     assert_eq!(sessions[0].guild_id, 222222);
 
     // Test replace (update) the session
-    let updated_session = VoiceSessionsModel {
+    let updated_session = VoiceSessionsEntity {
         id: sessions[0].id,
         user_id: 111111,
         guild_id: 222222,
@@ -156,7 +156,7 @@ async fn test_insert_and_replace_voice_session() {
         .await
         .expect("Failed to replace voice session");
 
-    let sessions: Vec<VoiceSessionsModel> = db
+    let sessions: Vec<VoiceSessionsEntity> = db
         .voice_sessions
         .select_all()
         .await
@@ -231,7 +231,7 @@ async fn test_get_leaderboard() {
 
     // Insert multiple voice sessions for different users
     let sessions = vec![
-        VoiceSessionsModel {
+        VoiceSessionsEntity {
             id: 0,
             user_id: 1001,
             guild_id,
@@ -239,7 +239,7 @@ async fn test_get_leaderboard() {
             join_time: now,
             leave_time: now + Duration::hours(1), // 3600 seconds
         },
-        VoiceSessionsModel {
+        VoiceSessionsEntity {
             id: 0,
             user_id: 1001,
             guild_id,
@@ -247,7 +247,7 @@ async fn test_get_leaderboard() {
             join_time: now + Duration::hours(2),
             leave_time: now + Duration::hours(4), // 7200 seconds, total: 10800
         },
-        VoiceSessionsModel {
+        VoiceSessionsEntity {
             id: 0,
             user_id: 1002,
             guild_id,
@@ -255,7 +255,7 @@ async fn test_get_leaderboard() {
             join_time: now,
             leave_time: now + Duration::minutes(30), // 1800 seconds
         },
-        VoiceSessionsModel {
+        VoiceSessionsEntity {
             id: 0,
             user_id: 1003,
             guild_id,
@@ -308,7 +308,7 @@ async fn test_get_leaderboard_with_limit() {
 
     // Insert sessions for 5 users
     for i in 1..=5 {
-        let session = VoiceSessionsModel {
+        let session = VoiceSessionsEntity {
             id: 0,
             user_id: 2000 + i as u64,
             guild_id,
@@ -350,7 +350,7 @@ async fn test_get_leaderboard_with_offset() {
 
     // Insert sessions for 5 users
     for i in 1..=5 {
-        let session = VoiceSessionsModel {
+        let session = VoiceSessionsEntity {
             id: 0,
             user_id: 3000 + i as u64,
             guild_id,
@@ -411,7 +411,7 @@ async fn test_disabled_guilds_cache_on_init() {
 
     // Pre-populate database with disabled guild
     let disabled_guild_id: u64 = 999999;
-    let settings = ServerSettingsModel {
+    let settings = ServerSettingsEntity {
         guild_id: disabled_guild_id,
         settings: sqlx::types::Json(ServerSettings {
             voice: VoiceSettings {
@@ -454,7 +454,7 @@ async fn test_get_leaderboard_includes_active_sessions() {
     // Insert a mix of completed and active sessions
     // Active session: leave_time == join_time
     let sessions = vec![
-        VoiceSessionsModel {
+        VoiceSessionsEntity {
             id: 0,
             user_id: 2001,
             guild_id,
@@ -462,7 +462,7 @@ async fn test_get_leaderboard_includes_active_sessions() {
             join_time: now - Duration::hours(2),
             leave_time: now, // Completed: 2 hours (7200 seconds)
         },
-        VoiceSessionsModel {
+        VoiceSessionsEntity {
             id: 0,
             user_id: 2002,
             guild_id,
@@ -470,7 +470,7 @@ async fn test_get_leaderboard_includes_active_sessions() {
             join_time: now - Duration::hours(1),
             leave_time: now - Duration::hours(1), // Active: 1 hour so far
         },
-        VoiceSessionsModel {
+        VoiceSessionsEntity {
             id: 0,
             user_id: 2003,
             guild_id,
@@ -533,7 +533,7 @@ async fn test_get_leaderboard_active_and_completed_mixed() {
     // User with multiple sessions: one completed, one active
     let sessions = vec![
         // User 3001: Completed session (1 hour)
-        VoiceSessionsModel {
+        VoiceSessionsEntity {
             id: 0,
             user_id: 3001,
             guild_id,
@@ -542,7 +542,7 @@ async fn test_get_leaderboard_active_and_completed_mixed() {
             leave_time: now - Duration::hours(2),
         },
         // User 3001: Active session (30 minutes so far)
-        VoiceSessionsModel {
+        VoiceSessionsEntity {
             id: 0,
             user_id: 3001,
             guild_id,
@@ -551,7 +551,7 @@ async fn test_get_leaderboard_active_and_completed_mixed() {
             leave_time: now - Duration::minutes(30),
         },
         // User 3002: Only completed sessions (2 hours total)
-        VoiceSessionsModel {
+        VoiceSessionsEntity {
             id: 0,
             user_id: 3002,
             guild_id,
@@ -559,7 +559,7 @@ async fn test_get_leaderboard_active_and_completed_mixed() {
             join_time: now - Duration::hours(4),
             leave_time: now - Duration::hours(3),
         },
-        VoiceSessionsModel {
+        VoiceSessionsEntity {
             id: 0,
             user_id: 3002,
             guild_id,

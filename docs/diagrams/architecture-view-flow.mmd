@@ -13,40 +13,69 @@
   }
 }}%%
 graph TB
-    subgraph UIPaths["UI Navigation Paths"]
+    subgraph Commands["Command Entry Points"]
+        direction TB
+        SettingsCmd["/settings"]
+        FeedListCmd["/feed list"]
+        FeedSubCmd["/feed subscribe"]
+        FeedUnsubCmd["/feed unsubscribe"]
+        VoiceLBCmd["/voice leaderboard"]
+    end
+    
+    subgraph Navigation["Navigation Flow"]
         direction TB
         
-        subgraph MainFlow["Settings Flow"]
+        subgraph SettingsFlow["Settings Flow"]
             direction TB
-            Main["SettingsMain"]
-            Feeds["SettingsFeeds"]
-            Voice["SettingsVoice"]
-            About["SettingsAbout"]
+            SettingsMain["SettingsMain"]
+            SettingsFeeds["SettingsFeeds"]
+            SettingsVoice["SettingsVoice"]
+            SettingsAbout["SettingsAbout"]
             
-            Main <-->|Feeds| Feeds
-            Main <-->|Voice| Voice
-            Main <-->|About| About
+            SettingsMain <-->|Feeds| SettingsFeeds
+            SettingsMain <-->|Voice| SettingsVoice
+            SettingsMain <-->|About| SettingsAbout
         end
         
-        subgraph Standalone["Standalone Views"]
+        subgraph FeedFlow["Feed Flow"]
             direction TB
-            Leaderboard["VoiceLeaderboard"]
+            FeedList["FeedList"]
+            FeedSubscribe["FeedSubscribe"]
+            FeedUnsubscribe["FeedUnsubscribe"]
+            FeedBatch["FeedSubscriptionBatch"]
+            
+            FeedList <-->|Subscribe| FeedSubscribe
+            FeedList <-->|Unsubscribe| FeedUnsubscribe
+            FeedSubscribe -->|Multiple| FeedBatch
+        end
+        
+        subgraph VoiceFlow["Voice Flow"]
+            direction TB
+            VoiceLeaderboard["VoiceLeaderboard"]
             VoiceStats["VoiceStats"]
-            SubList["FeedSubscriptionList"]
-        end
-        
-        subgraph BatchFlow["Subscription Batch Flow"]
-            direction TB
-            Batch["FeedSubscriptionBatch"]
-            Batch -->|View Subscriptions button| SubList
+            
+            VoiceLeaderboard -->|Stats| VoiceStats
         end
     end
     
-    style Main fill:#2d2d2d,stroke:#ffffff,stroke-width:3px
-    style Feeds fill:#1e1e1e,stroke:#ffffff
-    style Voice fill:#1e1e1e,stroke:#ffffff
-    style About fill:#1e1e1e,stroke:#ffffff
-    style Leaderboard fill:#1e1e1e,stroke:#ffffff
-    style SubList fill:#1e1e1e,stroke:#ffffff
+    Commands -->|settings| SettingsMain
+    Commands -->|list| FeedList
+    Commands -->|subscribe| FeedSubscribe
+    Commands -->|unsubscribe| FeedUnsubscribe
+    Commands -->|leaderboard| VoiceLeaderboard
+    
+    SettingsMain -->|Exit| Exit1[Exit]
+    FeedList -->|Exit| Exit2[Exit]
+    FeedSubscribe -->|Exit| Exit3[Exit]
+    VoiceLeaderboard -->|Exit| Exit4[Exit]
+    
+    style SettingsMain fill:#2d2d2d,stroke:#ffffff,stroke-width:3px
+    style SettingsFeeds fill:#1e1e1e,stroke:#ffffff
+    style SettingsVoice fill:#1e1e1e,stroke:#ffffff
+    style SettingsAbout fill:#1e1e1e,stroke:#ffffff
+    style FeedList fill:#1e1e1e,stroke:#ffffff
+    style FeedSubscribe fill:#1e1e1e,stroke:#ffffff
+    style FeedUnsubscribe fill:#1e1e1e,stroke:#ffffff
+    style FeedBatch fill:#1e1e1e,stroke:#ffffff
+    style VoiceLeaderboard fill:#2d2d2d,stroke:#ffffff,stroke-width:3px
     style VoiceStats fill:#1e1e1e,stroke:#ffffff
-    style Batch fill:#1e1e1e,stroke:#ffffff

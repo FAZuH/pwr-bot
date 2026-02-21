@@ -4,12 +4,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::Utc;
+use pwr_bot::entity::SubscriberType;
 use pwr_bot::event::FeedUpdateEvent;
 use pwr_bot::event::event_bus::EventBus;
 use pwr_bot::feed::FeedItem;
 use pwr_bot::feed::FeedSource;
 use pwr_bot::feed::platforms::Platforms;
-use pwr_bot::model::SubscriberType;
 use pwr_bot::repository::table::Table;
 use pwr_bot::service::feed_subscription_service::FeedSubscriptionService;
 use pwr_bot::service::feed_subscription_service::SubscribeResult;

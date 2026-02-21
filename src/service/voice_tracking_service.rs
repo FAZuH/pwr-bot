@@ -8,12 +8,12 @@ use chrono::Utc;
 use tokio::sync::RwLock;
 
 use crate::bot::commands::voice::GuildStatType;
-use crate::model::GuildDailyStats;
-use crate::model::ServerSettings;
-use crate::model::VoiceDailyActivity;
-use crate::model::VoiceLeaderboardEntry;
-use crate::model::VoiceLeaderboardOpt;
-use crate::model::VoiceSessionsModel;
+use crate::entity::GuildDailyStats;
+use crate::entity::ServerSettings;
+use crate::entity::VoiceDailyActivity;
+use crate::entity::VoiceLeaderboardEntry;
+use crate::entity::VoiceLeaderboardOpt;
+use crate::entity::VoiceSessionsEntity;
 use crate::repository::Repository;
 use crate::repository::table::Table;
 use crate::service::settings_service::SettingsService;
@@ -52,11 +52,11 @@ impl VoiceTrackingService {
         !self.disabled_guilds.read().await.contains(&guild_id)
     }
 
-    pub async fn insert(&self, model: &VoiceSessionsModel) -> anyhow::Result<()> {
+    pub async fn insert(&self, model: &VoiceSessionsEntity) -> anyhow::Result<()> {
         self.db.voice_sessions.insert(model).await?;
         Ok(())
     }
-    pub async fn replace(&self, model: &VoiceSessionsModel) -> anyhow::Result<()> {
+    pub async fn replace(&self, model: &VoiceSessionsEntity) -> anyhow::Result<()> {
         self.db.voice_sessions.replace(model).await?;
         Ok(())
     }
@@ -155,7 +155,7 @@ impl VoiceTrackingService {
     }
 
     /// Find all active sessions from database
-    pub async fn find_active_sessions(&self) -> anyhow::Result<Vec<VoiceSessionsModel>> {
+    pub async fn find_active_sessions(&self) -> anyhow::Result<Vec<VoiceSessionsEntity>> {
         Ok(self.db.voice_sessions.find_active_sessions().await?)
     }
 
@@ -165,7 +165,7 @@ impl VoiceTrackingService {
         user_id: Option<u64>,
         since: &DateTime<Utc>,
         until: &DateTime<Utc>,
-    ) -> anyhow::Result<Vec<VoiceSessionsModel>> {
+    ) -> anyhow::Result<Vec<VoiceSessionsEntity>> {
         Ok(self
             .db
             .voice_sessions

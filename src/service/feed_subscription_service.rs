@@ -6,16 +6,16 @@ use std::sync::Arc;
 // Especially with db results
 use sqlx::error::ErrorKind;
 
+use crate::entity::FeedEntity;
+use crate::entity::FeedItemEntity;
+use crate::entity::FeedSubscriptionEntity;
+use crate::entity::ServerSettings;
+use crate::entity::SubscriberEntity;
+use crate::entity::SubscriberType;
 use crate::error::AppError;
 use crate::feed::PlatformInfo;
 use crate::feed::error::FeedError;
 use crate::feed::platforms::Platforms;
-use crate::model::FeedItemModel;
-use crate::model::FeedModel;
-use crate::model::FeedSubscriptionModel;
-use crate::model::ServerSettings;
-use crate::model::SubscriberModel;
-use crate::model::SubscriberType;
 use crate::repository::Repository;
 use crate::repository::error::DatabaseError;
 use crate::repository::table::Table;
@@ -46,7 +46,7 @@ impl FeedSubscriptionService {
     pub async fn subscribe(
         &self,
         url: &str,
-        subscriber: &SubscriberModel,
+        subscriber: &SubscriberEntity,
     ) -> Result<SubscribeResult, ServiceError> {
         let feed = self.get_or_create_feed(url).await?;
 
@@ -69,7 +69,7 @@ impl FeedSubscriptionService {
     }
     /// # Performance
     /// * DB calls: 1
-    pub async fn get_feeds_by_tag(&self, tag: &str) -> Result<Vec<FeedModel>, ServiceError> {
+    pub async fn get_feeds_by_tag(&self, tag: &str) -> Result<Vec<FeedEntity>, ServiceError> {
         Ok(self.db.feed.select_all_by_tag(tag).await?)
     }
 
@@ -77,7 +77,7 @@ impl FeedSubscriptionService {
         &self,
         target_id: impl Into<String>,
         guild_id: Option<impl Into<String>>,
-    ) -> (Option<SubscriberModel>, Option<SubscriberModel>) {
+    ) -> (Option<SubscriberEntity>, Option<SubscriberEntity>) {
         let user_target = SubscriberTarget {
             target_id: target_id.into(),
             subscriber_type: SubscriberType::Dm,
@@ -104,9 +104,9 @@ impl FeedSubscriptionService {
     pub async fn search_and_combine_feeds(
         &self,
         partial: &str,
-        user_subscriber: Option<SubscriberModel>,
-        guild_subscriber: Option<SubscriberModel>,
-    ) -> Vec<FeedModel> {
+        user_subscriber: Option<SubscriberEntity>,
+        guild_subscriber: Option<SubscriberEntity>,
+    ) -> Vec<FeedEntity> {
         let mut user_feeds = match user_subscriber {
             Some(sub) => self
                 .search_subcriptions(&sub, partial)
@@ -135,7 +135,7 @@ impl FeedSubscriptionService {
     }
 
     /// Adds a prefix to feed name indicating subscription type.
-    fn format_subscription_with_prefix(feed: &mut FeedModel, is_dm: bool) {
+    fn format_subscription_with_prefix(feed: &mut FeedEntity, is_dm: bool) {
         let prefix = if is_dm { "(DM) " } else { "(Server) " };
         feed.name.insert_str(0, prefix);
     }
@@ -143,7 +143,7 @@ impl FeedSubscriptionService {
     /// Check for updates on a specific feed
     pub async fn check_feed_update(
         &self,
-        feed: &FeedModel,
+        feed: &FeedEntity,
     ) -> Result<FeedUpdateResult, ServiceError> {
         // Skip feeds with no subscribers
         let subs = self.db.feed_subscription.exists_by_feed_id(feed.id).await?;
@@ -186,7 +186,7 @@ impl FeedSubscriptionService {
         }
 
         // Insert new version into database
-        let new_feed_item = FeedItemModel {
+        let new_feed_item = FeedItemEntity {
             id: 0,
             feed_id: feed.id,
             description: new_latest.title.clone(),
@@ -207,7 +207,7 @@ impl FeedSubscriptionService {
     pub async fn unsubscribe(
         &self,
         source_url: &str,
-        subscriber: &SubscriberModel,
+        subscriber: &SubscriberEntity,
     ) -> Result<UnsubscribeResult, ServiceError> {
         // DB 1
         let feed = match self.get_feed_by_source_url(source_url).await? {
@@ -245,7 +245,7 @@ impl FeedSubscriptionService {
     /// Where N is number of subscriptions found for given page
     pub async fn list_paginated_subscriptions(
         &self,
-        subscriber: &SubscriberModel,
+        subscriber: &SubscriberEntity,
         page: impl Into<u32>,
         per_page: impl Into<u32>,
     ) -> Result<Vec<Subscription>, ServiceError> {
@@ -261,7 +261,7 @@ impl FeedSubscriptionService {
         let ret = rows
             .into_iter()
             .map(|row| {
-                let feed = FeedModel {
+                let feed = FeedEntity {
                     id: row.id,
                     name: row.name,
                     description: row.description,
@@ -276,7 +276,7 @@ impl FeedSubscriptionService {
                 let feed_latest = if let (Some(id), Some(desc), Some(pub_date)) =
                     (row.item_id, row.item_description, row.item_published)
                 {
-                    Some(FeedItemModel {
+                    Some(FeedItemEntity {
                         id,
                         feed_id: feed.id,
                         description: desc,
@@ -297,7 +297,7 @@ impl FeedSubscriptionService {
     /// * DB calls: 1
     pub async fn get_subscription_count(
         &self,
-        subscriber: &SubscriberModel,
+        subscriber: &SubscriberEntity,
     ) -> Result<u32, ServiceError> {
         // DB 1
         Ok(self
@@ -311,9 +311,9 @@ impl FeedSubscriptionService {
     /// * DB calls: 1
     pub async fn search_subcriptions(
         &self,
-        subscriber: &SubscriberModel,
+        subscriber: &SubscriberEntity,
         partial: &str,
-    ) -> Result<Vec<FeedModel>, ServiceError> {
+    ) -> Result<Vec<FeedEntity>, ServiceError> {
         // DB 1
         Ok(self
             .db
@@ -325,7 +325,7 @@ impl FeedSubscriptionService {
     /// # Performance
     /// * DB calls: 1 + 1? + 1??
     /// * API calls: 2?
-    pub async fn get_or_create_feed(&self, source_url: &str) -> Result<FeedModel, ServiceError> {
+    pub async fn get_or_create_feed(&self, source_url: &str) -> Result<FeedEntity, ServiceError> {
         let platform = self
             .platforms
             .get_platform_by_source_url(source_url)
@@ -347,7 +347,7 @@ impl FeedSubscriptionService {
                 // API 1?
                 let feed_source = platform.fetch_source(source_id).await?;
 
-                let mut feed = FeedModel {
+                let mut feed = FeedEntity {
                     id: 0,
                     name: feed_source.name,
                     description: feed_source.description,
@@ -364,7 +364,7 @@ impl FeedSubscriptionService {
                 // API 1?
                 if let Ok(feed_latest) = platform.fetch_latest(&feed.items_id).await {
                     // Create initial version
-                    let version = FeedItemModel {
+                    let version = FeedItemEntity {
                         id: 0,
                         feed_id: feed.id,
                         description: feed_latest.title,
@@ -385,7 +385,7 @@ impl FeedSubscriptionService {
     pub async fn get_or_create_subscriber(
         &self,
         target: &SubscriberTarget,
-    ) -> Result<SubscriberModel, ServiceError> {
+    ) -> Result<SubscriberEntity, ServiceError> {
         // DB 1
         let subscriber = match self
             .db
@@ -396,7 +396,7 @@ impl FeedSubscriptionService {
             Some(res) => res,
             None => {
                 // Subscriber doesn't exist, create it
-                let mut subscriber = SubscriberModel {
+                let mut subscriber = SubscriberEntity {
                     r#type: target.subscriber_type,
                     target_id: target.target_id.clone(),
                     ..Default::default()
@@ -409,16 +409,16 @@ impl FeedSubscriptionService {
         Ok(subscriber)
     }
 
-    /// Get [`FeedModel`] by source url.
+    /// Get [`FeedEntity`] by source url.
     ///
-    /// Returns `Some(FeedModel)` if found. `None` otherwise.
+    /// Returns `Some(FeedEntity)` if found. `None` otherwise.
     ///
     /// # Performance
     /// * DB calls: 1
     pub async fn get_feed_by_source_url(
         &self,
         source_url: &str,
-    ) -> Result<Option<FeedModel>, ServiceError> {
+    ) -> Result<Option<FeedEntity>, ServiceError> {
         let platform = self
             .platforms
             .get_platform_by_source_url(source_url)
@@ -460,7 +460,7 @@ impl FeedSubscriptionService {
         feed_id: i32,
         subscriber_id: i32,
     ) -> Result<(), ServiceError> {
-        let subscription = FeedSubscriptionModel {
+        let subscription = FeedSubscriptionEntity {
             feed_id,
             subscriber_id,
             ..Default::default()
@@ -473,16 +473,16 @@ impl FeedSubscriptionService {
 // Return types
 pub enum SubscribeResult {
     /// Successfully subscribed from feed
-    Success { feed: FeedModel },
+    Success { feed: FeedEntity },
     /// Already subscribed from feed
-    AlreadySubscribed { feed: FeedModel },
+    AlreadySubscribed { feed: FeedEntity },
 }
 
 pub enum UnsubscribeResult {
     /// Successfully unsubscribed from feed
-    Success { feed: FeedModel },
+    Success { feed: FeedEntity },
     /// Already unsubscribed from feed
-    AlreadyUnsubscribed { feed: FeedModel },
+    AlreadyUnsubscribed { feed: FeedEntity },
     /// The url is not found in the app database, i.e., the url has not been subscribed by anyone
     NoneSubscribed { url: String },
 }
@@ -494,17 +494,17 @@ pub struct SubscriberTarget {
 
 #[derive(Clone)]
 pub struct Subscription {
-    pub feed: FeedModel,
-    pub feed_latest: Option<FeedItemModel>,
+    pub feed: FeedEntity,
+    pub feed_latest: Option<FeedItemEntity>,
 }
 
 #[allow(clippy::large_enum_variant)]
 pub enum FeedUpdateResult {
     NoUpdate,
     Updated {
-        feed: FeedModel,
-        old_item: Option<FeedItemModel>,
-        new_item: FeedItemModel,
+        feed: FeedEntity,
+        old_item: Option<FeedItemEntity>,
+        new_item: FeedItemEntity,
         feed_info: PlatformInfo,
     },
     SourceFinished,

@@ -12,10 +12,10 @@ use plotters::prelude::*;
 
 use crate::bot::commands::voice::GuildStatType;
 use crate::bot::commands::voice::VoiceStatsTimeRange;
-use crate::model::VoiceSessionsModel;
+use crate::entity::VoiceSessionsEntity;
 
 /// Compute duration from join to leave
-fn duration_secs(session: &VoiceSessionsModel, now: DateTime<Utc>) -> i64 {
+fn duration_secs(session: &VoiceSessionsEntity, now: DateTime<Utc>) -> i64 {
     let leave = if session.leave_time == session.join_time {
         now
     } else {
@@ -26,7 +26,7 @@ fn duration_secs(session: &VoiceSessionsModel, now: DateTime<Utc>) -> i64 {
 
 /// Generate a line chart for the given time range and aggregation
 pub fn generate_line_chart(
-    sessions: &[VoiceSessionsModel],
+    sessions: &[VoiceSessionsEntity],
     time_range: VoiceStatsTimeRange,
     stat_type: GuildStatType,
     is_user: bool,
@@ -287,7 +287,7 @@ mod tests {
     fn test_duration_capping() {
         let now = Utc::now();
         // create a ghost session 30 days ago
-        let session = VoiceSessionsModel {
+        let session = VoiceSessionsEntity {
             id: 1,
             user_id: 1,
             guild_id: 1,
@@ -299,7 +299,7 @@ mod tests {
         assert_eq!(duration_secs(&session, now), 86400);
 
         // create a normal 2h session
-        let session2 = VoiceSessionsModel {
+        let session2 = VoiceSessionsEntity {
             id: 2,
             user_id: 1,
             guild_id: 1,

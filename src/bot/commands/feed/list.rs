@@ -26,15 +26,17 @@ use crate::bot::controller::Coordinator;
 use crate::bot::navigation::NavigationResult;
 use crate::bot::views::ChildViewResolver;
 use crate::bot::views::InteractiveView;
-use crate::bot::views::RenderExt;
+use crate::bot::views::InteractiveViewBase;
 use crate::bot::views::ResponseKind;
 use crate::bot::views::ResponseView;
 use crate::bot::views::View;
+use crate::bot::views::ViewCommand;
+use crate::bot::views::ViewCore;
+use crate::bot::views::ViewHandler;
 use crate::bot::views::pagination::PaginationAction;
 use crate::bot::views::pagination::PaginationView;
 use crate::controller;
 use crate::service::feed_subscription_service::Subscription;
-use crate::view_core;
 
 /// Number of items per page for subscriptions list.
 const SUBSCRIPTIONS_PER_PAGE: u32 = 10;
@@ -84,48 +86,67 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for FeedListController<'a> {
             .await?;
 
         let pagination = PaginationView::new(&ctx, total_items, SUBSCRIPTIONS_PER_PAGE);
-        let mut view = FeedListView::new(&ctx, subscriptions, pagination);
+        let mut view = FeedListView::new(
+            &ctx,
+            subscriptions,
+            pagination,
+            service.clone(),
+            subscriber.clone(),
+        );
+        let mut exit_nav = NavigationResult::Exit;
 
-        view.render().await?;
-
-        while let Some((action, _)) = view.listen_once().await? {
-            if matches!(action, FeedListAction::Save) {
-                for url in &view.marked_unsub {
-                    service.unsubscribe(url, &subscriber).await?;
+        view.run(|action| {
+            let _nav_ref = &mut exit_nav;
+            Box::pin(async move {
+                match action {
+                    FeedListAction::Exit => ViewCommand::Exit,
+                    _ => ViewCommand::Render,
                 }
-                let total_items = service.get_subscription_count(&subscriber).await?;
-                let pagination = PaginationView::new(&ctx, total_items, SUBSCRIPTIONS_PER_PAGE);
-                view.pagination = pagination
+            })
+        })
+        .await?;
+
+        // Handle the save logic after the view loop completes
+        if view.handler.state == FeedListState::View && !view.handler.marked_unsub.is_empty() {
+            for url in &view.handler.marked_unsub {
+                service.unsubscribe(url, &subscriber).await.ok();
             }
-            let subscriptions = service
-                .list_paginated_subscriptions(
-                    &subscriber,
-                    view.pagination.current_page(),
-                    SUBSCRIPTIONS_PER_PAGE,
-                )
-                .await?;
-
-            view.set_subscriptions(subscriptions);
-
-            view.render().await?;
         }
 
-        Ok(NavigationResult::Exit)
+        Ok(exit_nav)
     }
 }
 
+#[derive(PartialEq)]
 pub enum FeedListState {
     View,
     Edit,
 }
 
-view_core! {
-    timeout = Duration::from_secs(120),
-    pub struct FeedListView<'a, FeedListAction> {
-        subscriptions: Vec<Subscription>,
-        pub pagination: PaginationView<'a>,
-        pub state: FeedListState,
-        pub marked_unsub: HashSet<String>
+pub struct FeedListHandler<'a> {
+    pub subscriptions: Vec<Subscription>,
+    pub pagination: PaginationView<'a>,
+    pub state: FeedListState,
+    pub marked_unsub: HashSet<String>,
+    pub service: std::sync::Arc<crate::service::feed_subscription_service::FeedSubscriptionService>,
+    pub subscriber: crate::entity::SubscriberEntity,
+    pub ctx_ref: &'a Context<'a>,
+}
+
+pub struct FeedListView<'a> {
+    pub base: InteractiveViewBase<'a, FeedListAction>,
+    pub handler: FeedListHandler<'a>,
+}
+
+impl<'a> View<'a, FeedListAction> for FeedListView<'a> {
+    fn core(&self) -> &ViewCore<'a, FeedListAction> {
+        &self.base.core
+    }
+    fn core_mut(&mut self) -> &mut ViewCore<'a, FeedListAction> {
+        &mut self.base.core
+    }
+    fn create_core(poise_ctx: &'a Context<'a>) -> ViewCore<'a, FeedListAction> {
+        ViewCore::new(poise_ctx, Duration::from_secs(120))
     }
 }
 
@@ -134,19 +155,26 @@ impl<'a> FeedListView<'a> {
         ctx: &'a Context<'a>,
         subscriptions: Vec<Subscription>,
         pagination: PaginationView<'a>,
+        service: std::sync::Arc<crate::service::feed_subscription_service::FeedSubscriptionService>,
+        subscriber: crate::entity::SubscriberEntity,
     ) -> Self {
         Self {
-            subscriptions,
-            pagination,
-            core: Self::create_core(ctx),
-            state: FeedListState::View,
-            marked_unsub: HashSet::new(),
+            base: InteractiveViewBase::new(Self::create_core(ctx)),
+            handler: FeedListHandler {
+                subscriptions,
+                pagination,
+                state: FeedListState::View,
+                marked_unsub: HashSet::new(),
+                service,
+                subscriber,
+                ctx_ref: ctx,
+            },
         }
     }
 
     /// Updates the subscriptions list.
     pub fn set_subscriptions(&mut self, subscriptions: Vec<Subscription>) -> &mut Self {
-        self.subscriptions = subscriptions;
+        self.handler.subscriptions = subscriptions;
         self
     }
 
@@ -182,18 +210,20 @@ impl<'a> FeedListView<'a> {
 
         let text_component = CreateSectionComponent::TextDisplay(CreateTextDisplay::new(text));
 
-        let accessory = match self.state {
+        let accessory = match self.handler.state {
             FeedListState::View => CreateSectionAccessory::Thumbnail(CreateThumbnail::new(
                 CreateUnfurledMediaItem::new(sub.feed.cover_url),
             )),
             FeedListState::Edit => {
                 let source_url = sub.feed.source_url;
-                let button = if self.marked_unsub.contains(&source_url) {
-                    self.register(UndoUnsub { source_url })
+                let button = if self.handler.marked_unsub.contains(&source_url) {
+                    self.base
+                        .register(UndoUnsub { source_url })
                         .as_button()
                         .style(ButtonStyle::Secondary)
                 } else {
-                    self.register(Unsubscribe { source_url })
+                    self.base
+                        .register(Unsubscribe { source_url })
                         .as_button()
                         .style(ButtonStyle::Danger)
                 };
@@ -206,22 +236,24 @@ impl<'a> FeedListView<'a> {
 
     /// Create button section of the view at the bottom.
     fn create_toggle_button<'b>(&mut self) -> CreateComponent<'b> {
-        let action = match self.state {
+        let action = match self.handler.state {
             FeedListState::Edit => FeedListAction::View,
             FeedListState::View => FeedListAction::Edit,
         };
 
         let state_button = self
+            .base
             .register(action)
             .as_button()
             .style(ButtonStyle::Primary);
 
         let mut save_button = self
+            .base
             .register(FeedListAction::Save)
             .as_button()
             .style(ButtonStyle::Success);
 
-        if self.marked_unsub.is_empty() {
+        if self.handler.marked_unsub.is_empty() {
             save_button = save_button.disabled(true)
         }
 
@@ -233,11 +265,12 @@ impl<'a> FeedListView<'a> {
 
 impl<'a> ResponseView<'a> for FeedListView<'a> {
     fn create_response<'b>(&mut self) -> ResponseKind<'b> {
-        if self.subscriptions.is_empty() {
+        if self.handler.subscriptions.is_empty() {
             return Self::create_empty().into();
         }
 
         let sections: Vec<CreateContainerComponent<'b>> = self
+            .handler
             .subscriptions
             .clone()
             .into_iter()
@@ -247,7 +280,7 @@ impl<'a> ResponseView<'a> for FeedListView<'a> {
         let container = CreateComponent::Container(CreateContainer::new(sections));
         let mut components = vec![container];
 
-        self.pagination.attach_if_multipage(&mut components);
+        self.handler.pagination.attach_if_multipage(&mut components);
         components.push(self.create_toggle_button());
 
         components.into()
@@ -268,48 +301,76 @@ action_extends! { FeedListAction extends PaginationAction {
 }}
 
 #[async_trait::async_trait]
-impl<'a> InteractiveView<'a, FeedListAction> for FeedListView<'a> {
+impl<'a> ViewHandler<FeedListAction> for FeedListHandler<'a> {
     async fn handle(
         &mut self,
         action: &FeedListAction,
         interaction: &ComponentInteraction,
     ) -> Result<Option<FeedListAction>, Error> {
         use FeedListAction::*;
-        match action {
+        let action = match action {
             Base(pagination_action) => {
                 let action = self
                     .pagination
+                    .handler
                     .handle(pagination_action, interaction)
                     .await?;
-                Ok(action.map(Base))
+
+                // Refresh page
+                if let Ok(subs) = self
+                    .service
+                    .list_paginated_subscriptions(
+                        &self.subscriber,
+                        self.pagination.handler.state.current_page,
+                        SUBSCRIPTIONS_PER_PAGE,
+                    )
+                    .await
+                {
+                    self.subscriptions = subs;
+                }
+
+                match action {
+                    Some(action) => Base(action),
+                    None => return Ok(None),
+                }
             }
             Edit => {
                 self.state = FeedListState::Edit;
-                Ok(Some(action.clone()))
+                action.clone()
             }
             View => {
                 self.state = FeedListState::View;
-                Ok(Some(action.clone()))
+                action.clone()
             }
             Unsubscribe { source_url } => {
                 self.marked_unsub.insert(source_url.clone());
-                Ok(Some(action.clone()))
+                action.clone()
             }
             UndoUnsub { source_url } => {
                 self.marked_unsub.remove(source_url);
-                Ok(Some(action.clone()))
+                action.clone()
             }
-            Exit | Save => Ok(Some(action.clone())),
-        }
+            Exit => action.clone(),
+            Save => {
+                // Controller handles the actual DB unsubscribe
+                self.state = FeedListState::View;
+                action.clone()
+            }
+        };
+        Ok(Some(action))
     }
 
     async fn on_timeout(&mut self) -> Result<(), Error> {
-        self.pagination.disabled = true;
-        self.render().await?;
+        self.pagination.handler.disabled = true;
         Ok(())
     }
 
     fn children(&mut self) -> Vec<Box<dyn ChildViewResolver<FeedListAction> + '_>> {
-        vec![Self::child(&mut self.pagination, FeedListAction::Base)]
+        vec![crate::bot::views::child(
+            &mut self.pagination,
+            FeedListAction::Base,
+        )]
     }
 }
+
+crate::impl_interactive_view!(FeedListView<'a>, FeedListHandler<'a>, FeedListAction);

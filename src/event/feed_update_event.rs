@@ -17,15 +17,15 @@ use serenity::all::CreateThumbnail;
 use serenity::all::CreateUnfurledMediaItem;
 use serenity::all::MessageFlags;
 
+use crate::entity::FeedEntity;
+use crate::entity::FeedItemEntity;
 use crate::event::Event;
 use crate::feed::PlatformInfo;
-use crate::model::FeedItemModel;
-use crate::model::FeedModel;
 
 /// Event fired when a new version/episode of a feed is published.
 #[derive(Clone, Debug)]
 pub struct FeedUpdateEvent {
-    pub feed: Arc<FeedModel>,
+    pub feed: Arc<FeedEntity>,
     pub data: Arc<FeedUpdateData>,
 }
 
@@ -42,10 +42,10 @@ impl FeedUpdateEvent {
 
 #[derive(Clone, Debug)]
 pub struct FeedUpdateData {
-    pub feed: Arc<FeedModel>,
+    pub feed: Arc<FeedEntity>,
     pub feed_info: Arc<PlatformInfo>,
-    pub old_feed_item: Option<Arc<FeedItemModel>>,
-    pub new_feed_item: Arc<FeedItemModel>,
+    pub old_feed_item: Option<Arc<FeedItemEntity>>,
+    pub new_feed_item: Arc<FeedItemEntity>,
 }
 
 impl FeedUpdateData {

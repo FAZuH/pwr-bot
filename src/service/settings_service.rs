@@ -2,8 +2,8 @@
 
 use std::sync::Arc;
 
-use crate::model::ServerSettings;
-use crate::model::ServerSettingsModel;
+use crate::entity::ServerSettings;
+use crate::entity::ServerSettingsEntity;
 use crate::repository::Repository;
 use crate::repository::table::Table;
 use crate::service::error::ServiceError;
@@ -41,7 +41,7 @@ impl SettingsService {
         guild_id: u64,
         settings: ServerSettings,
     ) -> Result<(), ServiceError> {
-        let model = ServerSettingsModel {
+        let model = ServerSettingsEntity {
             guild_id,
             settings: sqlx::types::Json(settings),
         };

@@ -37,16 +37,19 @@ use crate::bot::navigation::NavigationResult;
 use crate::bot::utils::format_duration;
 use crate::bot::views::ChildViewResolver;
 use crate::bot::views::InteractiveView;
+use crate::bot::views::InteractiveViewBase;
 use crate::bot::views::RenderExt;
 use crate::bot::views::ResponseKind;
 use crate::bot::views::ResponseView;
 use crate::bot::views::View;
+use crate::bot::views::ViewCommand;
+use crate::bot::views::ViewCore;
+use crate::bot::views::ViewHandler;
 use crate::bot::views::pagination::PaginationAction;
 use crate::bot::views::pagination::PaginationView;
+use crate::entity::VoiceLeaderboardEntry;
+use crate::entity::VoiceLeaderboardOptBuilder;
 use crate::error::AppError;
-use crate::model::VoiceLeaderboardEntry;
-use crate::model::VoiceLeaderboardOptBuilder;
-use crate::view_core;
 
 pub mod image_builder;
 pub mod image_generator;
@@ -185,7 +188,7 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceLeaderboardController<
 
         let mut view = VoiceLeaderboardView::new(&ctx, session_data, self.time_range);
 
-        if view.leaderboard_data.is_empty() {
+        if view.handler.leaderboard_data.is_empty() {
             view.render().await?;
             return Ok(NavigationResult::Exit);
         }
@@ -200,38 +203,8 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceLeaderboardController<
             controller_start.elapsed().as_millis()
         );
 
-        while let Some((action, interaction)) = view.listen_once().await? {
-            if matches!(action, VoiceLeaderboardAction::TimeRange)
-                || matches!(action, VoiceLeaderboardAction::ToggleMode)
-                || matches!(action, VoiceLeaderboardAction::SelectUser)
-            {
-                if matches!(action, VoiceLeaderboardAction::ToggleMode) {
-                    view.is_partner_mode = !view.is_partner_mode;
-                    if view.is_partner_mode && view.target_user.is_none() {
-                        view.target_user = Some(ctx.author().clone());
-                    }
-                } else if matches!(action, VoiceLeaderboardAction::SelectUser)
-                    && let ComponentInteractionDataKind::UserSelect { values } =
-                        &interaction.data.kind
-                    && let Some(user_id) = values.first()
-                    && let Ok(user) = user_id.to_user(ctx.http()).await
-                {
-                    view.target_user = Some(user);
-                }
-
-                let new_data = Self::fetch_entries(
-                    &ctx,
-                    view.time_range,
-                    view.is_partner_mode,
-                    view.target_user.as_ref().map(|u| u.id),
-                )
-                .await?;
-                view.update_leaderboard_data(new_data);
-            }
-            let page_result = view.generate_current_page().await?;
-            view.set_current_page_bytes(page_result.image_bytes.clone());
-            view.render().await?;
-        }
+        view.run(|_action| Box::pin(async move { ViewCommand::Render }))
+            .await?;
 
         trace!(
             "controller_total {} ms",
@@ -246,17 +219,86 @@ pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
     run_settings(ctx, Some(SettingsPage::Voice)).await
 }
 
-view_core! {
-    timeout = Duration::from_secs(120),
-    /// View for displaying voice leaderboard with pagination.
-    pub struct VoiceLeaderboardView<'a, VoiceLeaderboardAction> {
-        pub leaderboard_data: LeaderboardSessionData,
-        pub time_range: VoiceLeaderboardTimeRange,
-        pub pagination: PaginationView<'a>,
-        pub page_builder: LeaderboardPageBuilder<'a>,
-        current_page_bytes: Option<Vec<u8>>,
-        pub is_partner_mode: bool,
-        pub target_user: Option<serenity::all::User>,
+pub struct VoiceLeaderboardHandler<'a> {
+    pub leaderboard_data: LeaderboardSessionData,
+    pub time_range: VoiceLeaderboardTimeRange,
+    pub pagination: PaginationView<'a>,
+    pub page_builder: LeaderboardPageBuilder<'a>,
+    pub current_page_bytes: Option<Vec<u8>>,
+    pub is_partner_mode: bool,
+    pub target_user: Option<serenity::all::User>,
+}
+
+#[async_trait::async_trait]
+impl<'a> ViewHandler<VoiceLeaderboardAction> for VoiceLeaderboardHandler<'a> {
+    async fn handle(
+        &mut self,
+        action: &VoiceLeaderboardAction,
+        interaction: &ComponentInteraction,
+    ) -> Result<Option<VoiceLeaderboardAction>, Error> {
+        use VoiceLeaderboardAction::*;
+        let action = match action {
+            Base(pagination_action) => {
+                let action = self
+                    .pagination
+                    .handler
+                    .handle(pagination_action, interaction)
+                    .await?;
+                match action {
+                    Some(action) => Some(VoiceLeaderboardAction::Base(action)),
+                    None => None,
+                }
+            }
+            TimeRange => {
+                if let ComponentInteractionDataKind::StringSelect { values } =
+                    &interaction.data.kind
+                    && let Some(time_range) = values
+                        .first()
+                        .and_then(|v| VoiceLeaderboardTimeRange::from_display_name(v))
+                    && self.time_range != time_range
+                {
+                    self.time_range = time_range;
+                    Some(action.clone())
+                } else {
+                    None
+                }
+            }
+            ToggleMode => {
+                self.is_partner_mode = !self.is_partner_mode;
+                Some(action.clone())
+            }
+            SelectUser => Some(action.clone()),
+        };
+        Ok(action)
+    }
+
+    async fn on_timeout(&mut self) -> Result<(), Error> {
+        self.pagination.handler.disabled = true;
+        Ok(())
+    }
+
+    fn children(&mut self) -> Vec<Box<dyn ChildViewResolver<VoiceLeaderboardAction> + '_>> {
+        vec![crate::bot::views::child(
+            &mut self.pagination,
+            VoiceLeaderboardAction::Base,
+        )]
+    }
+}
+
+pub struct VoiceLeaderboardView<'a> {
+    pub base: InteractiveViewBase<'a, VoiceLeaderboardAction>,
+    pub handler: VoiceLeaderboardHandler<'a>,
+}
+
+impl<'a> View<'a, VoiceLeaderboardAction> for VoiceLeaderboardView<'a> {
+    fn core(&self) -> &ViewCore<'a, VoiceLeaderboardAction> {
+        &self.base.core
+    }
+    fn core_mut(&mut self) -> &mut ViewCore<'a, VoiceLeaderboardAction> {
+        &mut self.base.core
+    }
+    fn create_core(poise_ctx: &'a Context<'a>) -> ViewCore<'a, VoiceLeaderboardAction> {
+        ViewCore::new(poise_ctx, Duration::from_secs(120))
     }
 }
 
@@ -271,54 +313,60 @@ impl<'a> VoiceLeaderboardView<'a> {
             PaginationView::new(ctx, leaderboard_data.len() as u32, LEADERBOARD_PER_PAGE);
         let page_builder = LeaderboardPageBuilder::new(ctx);
         Self {
-            leaderboard_data,
-            time_range,
-            pagination,
-            page_builder,
-            current_page_bytes: None,
-            is_partner_mode: false,
-            target_user: None,
-            core: Self::create_core(ctx),
+            base: InteractiveViewBase::new(Self::create_core(ctx)),
+            handler: VoiceLeaderboardHandler {
+                leaderboard_data,
+                time_range,
+                pagination,
+                page_builder,
+                current_page_bytes: None,
+                is_partner_mode: false,
+                target_user: None,
+            },
         }
     }
 
     /// Calculates the slice indices for the current page.
     fn current_page_indices(&self) -> (usize, usize) {
-        if self.leaderboard_data.is_empty() {
+        if self.handler.leaderboard_data.is_empty() {
             return (0, 0);
         }
-        let offset = ((self.pagination.current_page() - 1) * LEADERBOARD_PER_PAGE) as usize;
-        let end = (offset + LEADERBOARD_PER_PAGE as usize).min(self.leaderboard_data.len());
+        let offset = ((self.handler.pagination.handler.state.current_page - 1)
+            * LEADERBOARD_PER_PAGE) as usize;
+        let end = (offset + LEADERBOARD_PER_PAGE as usize).min(self.handler.leaderboard_data.len());
         (offset, end)
     }
 
     /// Returns the rank offset for the current page.
     fn current_page_rank_offset(&self) -> u32 {
-        (self.pagination.current_page() - 1) * LEADERBOARD_PER_PAGE
+        (self.handler.pagination.handler.state.current_page - 1) * LEADERBOARD_PER_PAGE
     }
 
     /// Generates the page image for the current page.
     pub async fn generate_current_page(&mut self) -> Result<PageGenerationResult, Error> {
         let (offset, end) = self.current_page_indices();
-        let entries = &self.leaderboard_data.entries[offset..end];
+        let entries = &self.handler.leaderboard_data.entries[offset..end];
         let rank_offset = self.current_page_rank_offset();
-        self.page_builder.build_page(entries, rank_offset).await
+        self.handler
+            .page_builder
+            .build_page(entries, rank_offset)
+            .await
     }
 
     /// Updates the leaderboard data and resets pagination to page 1.
     pub fn update_leaderboard_data(&mut self, data: LeaderboardSessionData) {
-        self.leaderboard_data = data;
+        self.handler.leaderboard_data = data;
         let poise_ctx = self.core().ctx.poise_ctx;
-        self.pagination = PaginationView::new(
+        self.handler.pagination = PaginationView::new(
             poise_ctx,
-            self.leaderboard_data.len() as u32,
+            self.handler.leaderboard_data.len() as u32,
             LEADERBOARD_PER_PAGE,
         );
     }
 
     /// Sets the current page image bytes for attachment on edit.
     pub fn set_current_page_bytes(&mut self, bytes: Vec<u8>) {
-        self.current_page_bytes = Some(bytes);
+        self.handler.current_page_bytes = Some(bytes);
     }
 }
 
@@ -328,8 +376,9 @@ impl<'a> ResponseView<'a> for VoiceLeaderboardView<'a> {
         use VoiceLeaderboardTimeRange::*;
 
         let mut container = vec![CreateContainerComponent::TextDisplay(
-            CreateTextDisplay::new(if self.is_partner_mode {
+            CreateTextDisplay::new(if self.handler.is_partner_mode {
                 let display_name = self
+                    .handler
                     .target_user
                     .as_ref()
                     .map(|u| u.name.to_string())
@@ -340,8 +389,9 @@ impl<'a> ResponseView<'a> for VoiceLeaderboardView<'a> {
             }),
         )];
 
-        if let Some(rank) = self.leaderboard_data.user_rank {
+        if let Some(rank) = self.handler.leaderboard_data.user_rank {
             let duration_text = self
+                .handler
                 .leaderboard_data
                 .user_duration
                 .map(format_duration)
@@ -359,11 +409,11 @@ impl<'a> ResponseView<'a> for VoiceLeaderboardView<'a> {
             ));
         }
 
-        let (since, until) = self.time_range.to_range();
+        let (since, until) = self.handler.time_range.to_range();
         container.push(CreateContainerComponent::TextDisplay(
             CreateTextDisplay::new(format!(
                 "\n-# Time Range: **{}** — <t:{}:f> to <t:{}:R>",
-                self.time_range.name(),
+                self.handler.time_range.name(),
                 since.timestamp(),
                 until.timestamp(),
             )),
@@ -373,7 +423,7 @@ impl<'a> ResponseView<'a> for VoiceLeaderboardView<'a> {
             true,
         )));
 
-        if self.leaderboard_data.is_empty() {
+        if self.handler.leaderboard_data.is_empty() {
             container.push(CreateContainerComponent::TextDisplay(
                 CreateTextDisplay::new(
                     "No voice activity recorded yet at this time range.\n\nJoin a **voice channel** to start tracking!",
@@ -390,12 +440,13 @@ impl<'a> ResponseView<'a> for VoiceLeaderboardView<'a> {
             ));
         }
 
-        let toggle_label = if self.is_partner_mode {
+        let toggle_label = if self.handler.is_partner_mode {
             "Show Server Leaderboard"
         } else {
             "Show Voice Partners"
         };
         let toggle_button = self
+            .base
             .register(ToggleMode)
             .as_button()
             .label(toggle_label)
@@ -406,11 +457,12 @@ impl<'a> ResponseView<'a> for VoiceLeaderboardView<'a> {
         ));
 
         let time_range_menu = self
+            .base
             .register(TimeRange)
             .as_select(CreateSelectMenuKind::String {
                 options: vec![
-                    Today.into(),
-                    Past3Days.into(),
+                    Past24Hours.into(),
+                    Past72Hours.into(),
                     ThisWeek.into(),
                     Past2Weeks.into(),
                     ThisMonth.into(),
@@ -428,12 +480,14 @@ impl<'a> ResponseView<'a> for VoiceLeaderboardView<'a> {
             CreateComponent::ActionRow(action_row),
         ];
 
-        if self.is_partner_mode {
+        if self.handler.is_partner_mode {
             let default_users = self
+                .handler
                 .target_user
                 .clone()
                 .map(|u| std::borrow::Cow::Owned(vec![u.id]));
             let user_select = self
+                .base
                 .register(SelectUser)
                 .as_select(CreateSelectMenuKind::User { default_users })
                 .placeholder("Select a user to view their voice partners");
@@ -442,7 +496,7 @@ impl<'a> ResponseView<'a> for VoiceLeaderboardView<'a> {
             )));
         }
 
-        self.pagination.attach_if_multipage(&mut components);
+        self.handler.pagination.attach_if_multipage(&mut components);
 
         components.into()
     }
@@ -451,7 +505,7 @@ impl<'a> ResponseView<'a> for VoiceLeaderboardView<'a> {
         let response = self.create_response();
         let mut reply: poise::CreateReply<'b> = response.into();
 
-        if let Some(ref bytes) = self.current_page_bytes {
+        if let Some(ref bytes) = self.handler.current_page_bytes {
             let attachment =
                 CreateAttachment::bytes(bytes.clone(), VOICE_LEADERBOARD_IMAGE_FILENAME);
             reply = reply.attachment(attachment);
@@ -475,51 +529,11 @@ action_extends! {
     }
 }
 
-#[async_trait::async_trait]
-impl<'a> InteractiveView<'a, VoiceLeaderboardAction> for VoiceLeaderboardView<'a> {
-    async fn handle(
-        &mut self,
-        action: &VoiceLeaderboardAction,
-        interaction: &ComponentInteraction,
-    ) -> Result<Option<VoiceLeaderboardAction>, Error> {
-        use VoiceLeaderboardAction::*;
-        match action {
-            Base(pagination_action) => {
-                let action = self
-                    .pagination
-                    .handle(pagination_action, interaction)
-                    .await?;
-                Ok(action.map(VoiceLeaderboardAction::Base))
-            }
-            TimeRange => {
-                if let ComponentInteractionDataKind::StringSelect { values } =
-                    &interaction.data.kind
-                    && let Some(time_range) = values
-                        .first()
-                        .and_then(|v| VoiceLeaderboardTimeRange::from_display_name(v))
-                    && self.time_range != time_range
-                {
-                    self.time_range = time_range;
-                    return Ok(Some(action.clone()));
-                }
-                Ok(None)
-            }
-            ToggleMode => Ok(Some(action.clone())),
-            SelectUser => Ok(Some(action.clone())),
-        }
-    }
-
-    async fn on_timeout(&mut self) -> Result<(), Error> {
-        self.pagination.disabled = true;
-        Ok(())
-    }
-    fn children(&mut self) -> Vec<Box<dyn ChildViewResolver<VoiceLeaderboardAction> + '_>> {
-        vec![Self::child(
-            &mut self.pagination,
-            VoiceLeaderboardAction::Base,
-        )]
-    }
-}
+crate::impl_interactive_view!(
+    VoiceLeaderboardView<'a>,
+    VoiceLeaderboardHandler<'a>,
+    VoiceLeaderboardAction
+);
 
 #[cfg(test)]
 mod tests {
@@ -556,7 +570,7 @@ mod tests {
     #[test]
     fn test_voice_leaderboard_time_range_to_range() {
         // Test that to_range returns valid datetime range
-        let (since, until) = VoiceLeaderboardTimeRange::Today.to_range();
+        let (since, until) = VoiceLeaderboardTimeRange::Past24Hours.to_range();
         assert!(since <= until);
 
         let (since, until) = VoiceLeaderboardTimeRange::AllTime.to_range();
@@ -567,8 +581,9 @@ mod tests {
     #[test]
     fn test_voice_leaderboard_time_range_into_datetime() {
         let now = chrono::Utc::now();
-        let today_start: chrono::DateTime<chrono::Utc> = VoiceLeaderboardTimeRange::Today.into();
-        assert!(today_start <= now);
+        let past_24h_start: chrono::DateTime<chrono::Utc> =
+            VoiceLeaderboardTimeRange::Past24Hours.into();
+        assert!(past_24h_start <= now);
 
         let all_time_start: chrono::DateTime<chrono::Utc> =
             VoiceLeaderboardTimeRange::AllTime.into();
@@ -577,8 +592,8 @@ mod tests {
 
     #[test]
     fn test_voice_leaderboard_time_range_equality() {
-        let range1 = VoiceLeaderboardTimeRange::Today;
-        let range2 = VoiceLeaderboardTimeRange::Today;
+        let range1 = VoiceLeaderboardTimeRange::Past24Hours;
+        let range2 = VoiceLeaderboardTimeRange::Past24Hours;
         let range3 = VoiceLeaderboardTimeRange::ThisMonth;
 
         assert_eq!(range1, range2);

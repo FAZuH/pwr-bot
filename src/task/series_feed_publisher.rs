@@ -11,10 +11,10 @@ use log::info;
 use tokio::time::Sleep;
 use tokio::time::sleep;
 
+use crate::entity::FeedEntity;
 use crate::event::FeedUpdateData;
 use crate::event::FeedUpdateEvent;
 use crate::event::event_bus::EventBus;
-use crate::model::FeedModel;
 use crate::service::feed_subscription_service::FeedSubscriptionService;
 use crate::service::feed_subscription_service::FeedUpdateResult;
 
@@ -99,7 +99,7 @@ impl SeriesFeedPublisher {
         Ok(())
     }
 
-    async fn check_feed(&self, feed: FeedModel) -> anyhow::Result<()> {
+    async fn check_feed(&self, feed: FeedEntity) -> anyhow::Result<()> {
         match self.service.check_feed_update(&feed).await? {
             FeedUpdateResult::NoUpdate => {
                 debug!(
@@ -151,7 +151,7 @@ impl SeriesFeedPublisher {
         }
     }
 
-    fn get_feed_desc(&self, feed: &FeedModel) -> String {
+    fn get_feed_desc(&self, feed: &FeedEntity) -> String {
         format!("feed id `{}` ({})", feed.id, feed.name)
     }
 

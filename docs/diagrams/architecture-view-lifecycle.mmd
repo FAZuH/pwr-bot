@@ -21,8 +21,9 @@ graph TB
         Render["Render<br/>Send/Edit Message"]
         Listen["Listen for Interactions"]
         Collect["Collect Interaction"]
+        Ack["Acknowledge"]
         Resolve["Resolve Action"]
-        Handle["Handle Action"]
+        Handle["Handle Action<br/>via ViewHandler"]
         Update["Update State"]
         Stop["Stop / Exit"]
         Timeout["Timeout"]
@@ -31,12 +32,13 @@ graph TB
         Create --> Render
         Render --> Listen
         Listen --> Collect
-        Collect -->|received| Resolve
-        Collect -->|timeout| Timeout
+        Collect -->|received| Ack
+        Ack --> Resolve
         Resolve --> Handle
         Handle -->|Some action| Update
         Handle -->|None| Stop
         Update --> Create
+        Collect -->|timeout| Timeout
         Timeout -->|on_timeout| Render
         Render -.->|final| Stop
     end
@@ -56,14 +58,30 @@ graph TB
         View["View"]
         ResponseView["ResponseView"]
         InteractiveView["InteractiveView"]
+        ViewHandler["ViewHandler"]
+        ChildViewResolver["ChildViewResolver"]
         
         View --> ResponseView
         View --> InteractiveView
+        InteractiveView --> ViewHandler
+        ViewHandler --> ChildViewResolver
+    end
+    
+    subgraph Handler["ViewHandler Trait"]
+        direction TB
+        VH_Handle["handle(action, interaction)<br/>-> Option~Action~"]
+        VH_Timeout["on_timeout()<br/>-> Result"]
+        VH_Children["children()<br/>-> Vec~ChildViewResolver~"]
     end
     
     Core -->|powers| ViewLifecycle
     Traits -->|implements| ViewLifecycle
+    ViewHandler -.->|defines| VH_Handle
+    ViewHandler -.->|defines| VH_Timeout
+    ViewHandler -.->|defines| VH_Children
     
     style Init fill:#2d2d2d,stroke:#ffffff,stroke-width:2px
     style Stop fill:#2d2d2d,stroke:#ffffff,stroke-width:2px
     style Create fill:#1e1e1e,stroke:#ffffff
+    style Render fill:#1e1e1e,stroke:#ffffff
+    style Listen fill:#1e1e1e,stroke:#ffffff
