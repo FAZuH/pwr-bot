@@ -39,8 +39,8 @@ use crate::bot::views::ViewCore;
 use crate::bot::views::ViewHandler;
 use crate::controller;
 use crate::error::AppError;
-use crate::model::ServerSettings;
-use crate::model::ServerSettingsModel;
+use crate::entity::ServerSettings;
+use crate::entity::ServerSettingsModel;
 
 /// Opens main server settings
 ///

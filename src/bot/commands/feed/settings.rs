@@ -37,7 +37,7 @@ use crate::bot::views::ViewCommand;
 use crate::bot::views::ViewCore;
 use crate::bot::views::ViewHandler;
 use crate::controller;
-use crate::model::ServerSettings;
+use crate::entity::ServerSettings;
 
 /// Configure feed settings for this server
 ///

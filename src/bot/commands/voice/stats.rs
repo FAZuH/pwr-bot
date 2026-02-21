@@ -44,9 +44,9 @@ use crate::bot::views::ViewCommand;
 use crate::bot::views::ViewCore;
 use crate::bot::views::ViewHandler;
 use crate::error::AppError;
-use crate::model::GuildDailyStats;
-use crate::model::VoiceDailyActivity;
-use crate::model::VoiceSessionsModel;
+use crate::entity::GuildDailyStats;
+use crate::entity::VoiceDailyActivity;
+use crate::entity::VoiceSessionsModel;
 
 /// Display voice activity statistics with contribution graph
 ///

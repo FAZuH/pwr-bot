@@ -46,7 +46,7 @@ use crate::config::Config;
 use crate::event::VoiceStateEvent;
 use crate::event::event_bus::EventBus;
 use crate::feed::platforms::Platforms;
-use crate::model::BotMetaKey;
+use crate::entity::BotMetaKey;
 use crate::service::Services;
 use crate::subscriber::voice_state_subscriber::VoiceStateSubscriber;
 

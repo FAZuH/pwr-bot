@@ -8,12 +8,12 @@ use chrono::Utc;
 use tokio::sync::RwLock;
 
 use crate::bot::commands::voice::GuildStatType;
-use crate::model::GuildDailyStats;
-use crate::model::ServerSettings;
-use crate::model::VoiceDailyActivity;
-use crate::model::VoiceLeaderboardEntry;
-use crate::model::VoiceLeaderboardOpt;
-use crate::model::VoiceSessionsModel;
+use crate::entity::GuildDailyStats;
+use crate::entity::ServerSettings;
+use crate::entity::VoiceDailyActivity;
+use crate::entity::VoiceLeaderboardEntry;
+use crate::entity::VoiceLeaderboardOpt;
+use crate::entity::VoiceSessionsModel;
 use crate::repository::Repository;
 use crate::repository::table::Table;
 use crate::service::settings_service::SettingsService;

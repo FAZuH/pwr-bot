@@ -2,10 +2,10 @@
 
 use chrono::Duration;
 use chrono::Utc;
-use pwr_bot::model::ServerSettings;
-use pwr_bot::model::ServerSettingsModel;
-use pwr_bot::model::VoiceSessionsModel;
-use pwr_bot::model::VoiceSettings;
+use pwr_bot::entity::ServerSettings;
+use pwr_bot::entity::ServerSettingsModel;
+use pwr_bot::entity::VoiceSessionsModel;
+use pwr_bot::entity::VoiceSettings;
 use pwr_bot::repository::table::Table;
 use pwr_bot::service::voice_tracking_service::VoiceTrackingService;
 

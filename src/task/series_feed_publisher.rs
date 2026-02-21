@@ -14,7 +14,7 @@ use tokio::time::sleep;
 use crate::event::FeedUpdateData;
 use crate::event::FeedUpdateEvent;
 use crate::event::event_bus::EventBus;
-use crate::model::FeedModel;
+use crate::entity::FeedModel;
 use crate::service::feed_subscription_service::FeedSubscriptionService;
 use crate::service::feed_subscription_service::FeedUpdateResult;
 

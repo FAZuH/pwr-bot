@@ -12,7 +12,7 @@ use plotters::prelude::*;
 
 use crate::bot::commands::voice::GuildStatType;
 use crate::bot::commands::voice::VoiceStatsTimeRange;
-use crate::model::VoiceSessionsModel;
+use crate::entity::VoiceSessionsModel;
 
 /// Compute duration from join to leave
 fn duration_secs(session: &VoiceSessionsModel, now: DateTime<Utc>) -> i64 {

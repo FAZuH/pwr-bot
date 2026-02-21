@@ -2,12 +2,12 @@
 
 use std::sync::Arc;
 
-use crate::model::BotMetaKey;
-use crate::model::BotMetaModel;
-use crate::model::FeedItemModel;
-use crate::model::FeedModel;
-use crate::model::FeedSubscriptionModel;
-use crate::model::SubscriberModel;
+use crate::entity::BotMetaKey;
+use crate::entity::BotMetaModel;
+use crate::entity::FeedItemModel;
+use crate::entity::FeedModel;
+use crate::entity::FeedSubscriptionModel;
+use crate::entity::SubscriberModel;
 use crate::repository::Repository;
 use crate::repository::error::DatabaseError;
 use crate::repository::table::Table;

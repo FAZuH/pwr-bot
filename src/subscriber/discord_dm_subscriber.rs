@@ -13,8 +13,8 @@ use serenity::all::CreateMessage;
 use crate::bot::Bot;
 use crate::event::Event;
 use crate::event::FeedUpdateEvent;
-use crate::model::SubscriberModel;
-use crate::model::SubscriberType;
+use crate::entity::SubscriberModel;
+use crate::entity::SubscriberType;
 use crate::repository::Repository;
 use crate::subscriber::Subscriber;
 

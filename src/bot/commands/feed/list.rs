@@ -129,7 +129,7 @@ pub struct FeedListHandler<'a> {
     pub state: FeedListState,
     pub marked_unsub: HashSet<String>,
     pub service: std::sync::Arc<crate::service::feed_subscription_service::FeedSubscriptionService>,
-    pub subscriber: crate::model::SubscriberModel,
+    pub subscriber: crate::entity::SubscriberModel,
     pub ctx_ref: &'a Context<'a>,
 }
 
@@ -156,7 +156,7 @@ impl<'a> FeedListView<'a> {
         subscriptions: Vec<Subscription>,
         pagination: PaginationView<'a>,
         service: std::sync::Arc<crate::service::feed_subscription_service::FeedSubscriptionService>,
-        subscriber: crate::model::SubscriberModel,
+        subscriber: crate::entity::SubscriberModel,
     ) -> Self {
         Self {
             base: InteractiveViewBase::new(Self::create_core(ctx)),
