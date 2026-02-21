@@ -68,9 +68,12 @@ pub async fn parent_command(_ctx: Context<'_>) -> Result<(), Error> { Ok(()) }
 
 ## Creating UI Views (MVC-C pattern)
 
-See [`.opencode/skills/ui-views/SKILL.md`](.opencode/skills/ui-views/SKILL.md) for 
-- Detailed documentation on creating interactive Discord UI components using Components V2.
-- Controller Pattern (Coordinator -> Controller -> View -> NavigationResult) architecture.
+Views use the three-trait system in `src/bot/views.rs`:
+- `View<'a, T>` - Core trait providing access to `ViewCore` via `view_core!` macro
+- `ResponseView<'a>` - Creates Discord components via `create_response()`
+- `InteractiveView<'a, T>` - Handles user interactions via a handler
+
+See [`.opencode/skills/ui-views/SKILL.md`](.opencode/skills/ui-views/SKILL.md) for detailed documentation.
 
 ## Database Schema Changes
 

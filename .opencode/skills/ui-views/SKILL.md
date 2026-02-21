@@ -1,13 +1,13 @@
 ---
 name: ui-views
-description: Create interactive UI views using Discord Components V2. Covers the three-trait system (View, ResponseView, InteractiveView), action_enum!, view_core! macros, and view utilities for building interactive Discord interfaces.
+description: Create interactive UI views using Discord Components V2. Covers the three-trait system (View, ResponseView, InteractiveView), action_enum!, view_core! macros, ViewHandler trait, and the Controller pattern for building interactive Discord interfaces.
 ---
 
 # UI Views (Components V2)
 
 ## Overview
 
-This skill covers creating interactive UI views using Discord's Components V2 system. Views use three interconnected traits to handle UI rendering and user interactions.
+This skill covers creating interactive UI views using Discord's Components V2 system. Views use three interconnected traits to handle UI rendering and user interactions, with a Controller pattern for complex flows.
 
 ## Core Traits
 
@@ -15,7 +15,8 @@ This skill covers creating interactive UI views using Discord's Components V2 sy
 |-------|---------|
 | `View<'a, T>` | Core trait providing access to `ViewCore` (via `view_core!` macro) |
 | `ResponseView<'a>` | Creates Discord components/embeds via `create_response()` |
-| `InteractiveView<'a, T>` | Handles user interactions via `handle()` |
+| `InteractiveView<'a, T>` | Handles user interactions via a handler |
+| `ViewHandler<T>` | Handles actions and timeouts for interactive views |
 
 ## View Creation Steps
 
@@ -48,7 +49,7 @@ use crate::view_core;
 view_core! {
     timeout = Duration::from_secs(120),
     /// Description of your view
-    pub struct MyView<'a, MyAction> {
+    pub struct MyView<'a> {
         pub counter: i32,
     }
 }
@@ -102,13 +103,16 @@ impl<'a> ResponseView<'a> for MyView<'a> {
 - Use `self.register(action).as_button()` to create buttons
 - Return `ResponseKind` (components, embeds, or both)
 
-### Step 5: Implement InteractiveView
+### Step 5: Implement ViewHandler
+
+Instead of implementing `InteractiveView::handle` directly, implement `ViewHandler`:
 
 ```rust
-use crate::bot::views::InteractiveView;
+use crate::bot::views::ViewHandler;
+use serenity::all::ComponentInteraction;
 
 #[async_trait::async_trait]
-impl<'a> InteractiveView<'a, MyAction> for MyView<'a> {
+impl ViewHandler<MyAction> for MyViewHandler {
     async fn handle(
         &mut self,
         action: &MyAction,
@@ -122,11 +126,48 @@ impl<'a> InteractiveView<'a, MyAction> for MyView<'a> {
             MyAction::Back => Some(action.clone()),
         }
     }
+
+    async fn on_timeout(&mut self) -> Result<(), Error> {
+        Ok(())
+    }
 }
 ```
 
-- Handle incoming actions and update state
-- Return `Some(action)` to re-render, `None` to end view
+### Step 6: Implement InteractiveView
+
+```rust
+use crate::bot::views::InteractiveView;
+use futures::future::BoxFuture;
+
+#[async_trait::async_trait]
+impl<'a> InteractiveView<'a, MyAction> for MyView<'a> {
+    type Handler = MyViewHandler;
+
+    fn handler(&mut self) -> &mut Self::Handler {
+        &mut self.handler
+    }
+
+    async fn run<F>(&mut self, mut on_action: F) -> Result<(), Error>
+    where
+        F: FnMut(MyAction) -> BoxFuture<'a, ViewCommand> + Send + Sync,
+    {
+        loop {
+            let Some((action, interaction)) = self.listen_once(self.handler()).await? else {
+                break;
+            };
+
+            let cmd = on_action(action).await;
+            match cmd {
+                ViewCommand::Render => {
+                    self.render().await?;
+                }
+                ViewCommand::Exit => break,
+            }
+        }
+        Ok(())
+    }
+}
+```
 
 ## Key View Components
 
@@ -187,22 +228,17 @@ Automatically send or edit the view:
 ```rust
 use crate::bot::views::RenderExt;
 
-// Send new message with view
-view.render(ctx).await?;
-
-// Edit existing message
-view.render_edit(ctx, message_id).await?;
+// Send new message or edit existing
+view.render().await?;
 ```
 
-### listen_once()
+### InteractiveViewBase::listen_once()
 
 Wait for a single interaction:
 
 ```rust
-use crate::bot::views::listen_once;
-
-// Returns Option<(Action, Interaction)>
-if let Some((action, interaction)) = listen_once(ctx, timeout).await {
+// Returns Option<(Action, ComponentInteraction)>
+if let Some((action, interaction)) = self.listen_once(handler).await {
     // Handle the interaction
 }
 ```
@@ -222,13 +258,33 @@ self.register(MyAction::Select).as_select(SelectMenuKind::String)
 self.register(MyAction::Option).as_select_option()
 ```
 
+### ViewCommand
+
+Returned by the action callback to control the view loop:
+
+```rust
+use crate::bot::views::ViewCommand;
+
+match action {
+    MyAction::Click => ViewCommand::Render,  // Re-render and continue
+    MyAction::Back => ViewCommand::Exit,     // Exit the view
+}
+```
+
 ## Complete Example
 
 ```rust
 use std::time::Duration;
+use std::sync::Arc;
+use futures::future::BoxFuture;
+
 use crate::view_core;
-use crate::bot::views::{View, ResponseView, InteractiveView, ResponseKind, RenderExt};
 use crate::action_enum;
+use crate::bot::views::{
+    View, ResponseView, InteractiveView, ResponseKind, RenderExt,
+    ViewHandler, ViewCommand, InteractiveViewBase,
+};
+use serenity::all::ComponentInteraction;
 
 action_enum! {
     CounterAction {
@@ -246,11 +302,36 @@ view_core! {
     }
 }
 
+pub struct CounterViewHandler {
+    count: i32,
+}
+
+#[async_trait::async_trait]
+impl ViewHandler<CounterAction> for CounterViewHandler {
+    async fn handle(
+        &mut self,
+        action: &CounterAction,
+        _interaction: &ComponentInteraction,
+    ) -> Option<CounterAction> {
+        match action {
+            CounterAction::Increment => {
+                self.count += 1;
+                Some(action.clone())
+            }
+            CounterAction::Reset => {
+                self.count = 0;
+                Some(action.clone())
+            }
+        }
+    }
+}
+
 impl<'a> CounterView<'a> {
     pub fn new(ctx: &'a Context<'a>) -> Self {
         Self {
             count: 0,
             core: Self::create_core(ctx),
+            handler: CounterViewHandler { count: 0 },
         }
     }
 }
@@ -276,74 +357,53 @@ impl<'a> ResponseView<'a> for CounterView<'a> {
 
 #[async_trait::async_trait]
 impl<'a> InteractiveView<'a, CounterAction> for CounterView<'a> {
-    async fn handle(
-        &mut self,
-        action: &CounterAction,
-        _interaction: &ComponentInteraction,
-    ) -> Option<CounterAction> {
-        match action {
-            CounterAction::Increment => {
-                self.count += 1;
-                Some(action.clone())
-            }
-            CounterAction::Reset => {
-                self.count = 0;
-                Some(action.clone())
+    type Handler = CounterViewHandler;
+
+    fn handler(&mut self) -> &mut Self::Handler {
+        &mut self.handler
+    }
+
+    async fn run<F>(&mut self, mut on_action: F) -> Result<(), Error>
+    where
+        F: FnMut(CounterAction) -> BoxFuture<'a, ViewCommand> + Send + Sync,
+    {
+        loop {
+            let Some((action, _)) = self.listen_once(self.handler()).await? else {
+                break;
+            };
+
+            let cmd = on_action(action).await;
+            match cmd {
+                ViewCommand::Render => {
+                    self.render().await?;
+                }
+                ViewCommand::Exit => break,
             }
         }
+        Ok(())
     }
-}
-
-// Usage
-pub async fn counter_command(ctx: Context<'_>) -> Result<(), Error> {
-    let mut view = CounterView::new(&ctx);
-    view.render(&ctx).await?;
-    Ok(())
 }
 ```
 
 ## Imports Reference
 
 ```rust
-// Core
+// Core macros
 use crate::view_core;
 use crate::action_enum;
 
 // Views
 use crate::bot::views::{View, ResponseView, InteractiveView, ResponseKind};
-use crate::bot::views::{RenderExt, listen_once};
+use crate::bot::views::{RenderExt, ViewHandler, ViewCommand};
+use crate::bot::views::{InteractiveViewBase, RegisteredAction};
 
 // Components
 use serenity::all::{CreateComponent, CreateTextDisplay, CreateActionRow, CreateButton, ButtonStyle};
 ```
 
-## Best Practices
-
-1. **Keep views focused** - One view per feature/command
-2. **Handle timeouts** - Return gracefully when timeout expires
-3. **Validate input** - Check interaction author matches command author
-4. **Use proper state** - Store all UI state in the view struct
-5. **Return actions wisely** - Return `Some(action)` to re-render, `None` to end
-
-## Troubleshooting
-
-### View not responding
-- Check `timeout` is set appropriately
-- Ensure `InteractiveView::handle` returns `Some(action)` to re-render
-
-### Components not showing
-- Verify `create_response` returns properly formatted `ResponseKind`
-- Check component limits (5 per action row, 5 action rows per message)
-
-### Interaction errors
-- Ensure interaction is acknowledged within 3 seconds
-- Use `interaction.defer` or `interaction.create_followup` for long operations
-
----
-
 ## Controller Pattern (MVC-C)
 
-The Controller Pattern provides a structured architecture for building complex interactive flows. Coordinator manages `Context` and message lifecycle while Controllers implement logic and return `NavigationResult`.
+The Controller Pattern provides a structured architecture for building complex interactive flows. Coordinator manages `Context` and state while Controllers implement logic and return `NavigationResult`.
 
 **Architecture**: `Coordinator` -> `Controller` -> `View` -> `NavigationResult`
 
@@ -358,25 +418,27 @@ controller! { pub struct MyController<'a> {} }
 ### Implementing Controller Trait
 
 ```rust
+use crate::bot::controller::{Controller, Coordinator};
+use crate::bot::navigation::NavigationResult;
+
 #[async_trait]
 impl<S: Send + Sync + 'static> Controller<S> for MyController<'_> {
     async fn run(&mut self, coord: &mut Coordinator<'_, S>) -> Result<NavigationResult, Error> {
         let ctx = *coord.context();
         
         // Create and render a view
-        let view = MyView::new(&ctx);
-        coord.send(view.create_reply()).await?;
+        let mut view = MyView::new(&ctx);
+        view.render().await?;
         
         // Handle interactions in a loop
-        while let Some((action, _interaction)) = coord.listen().await {
-            let result = self.handle_action(&mut view, action).await?;
-            match result {
-                NavigationResult::Continue => {
-                    view.render_edit(&ctx).await?;
-                }
-                other => return Ok(other),
+        view.run(|action| Box::pin(async move {
+            // Handle action and return ViewCommand
+            match action {
+                MyAction::Continue => ViewCommand::Render,
+                MyAction::Back => return NavigationResult::Back.into(),
+                MyAction::Exit => return NavigationResult::Exit.into(),
             }
-        }
+        })).await?;
         
         Ok(NavigationResult::Exit)
     }
@@ -388,20 +450,26 @@ impl<S: Send + Sync + 'static> Controller<S> for MyController<'_> {
 Use `NavigationResult` to control flow:
 
 ```rust
-use crate::bot::views::NavigationResult;
+use crate::bot::navigation::NavigationResult;
 
-// Continue to next interaction
-NavigationResult::Continue
-
-// Exit this view (end interaction)
-NavigationResult::Exit
-
-// Go back to previous view
-NavigationResult::Back
-
-// Navigate to specific views (e.g., SettingsAbout, SettingsMain, etc.)
-NavigationResult::SettingsAbout
+// Settings navigation
 NavigationResult::SettingsMain
+NavigationResult::SettingsFeeds
+NavigationResult::SettingsVoice
+NavigationResult::SettingsAbout
+
+// Feed navigation
+NavigationResult::FeedSubscriptions { send_into }
+NavigationResult::FeedSubscribe { links, send_into }
+NavigationResult::FeedUnsubscribe { links, send_into }
+NavigationResult::FeedList(send_into)
+
+// Voice navigation
+NavigationResult::VoiceLeaderboard
+
+// Universal navigation
+NavigationResult::Back   // Go back to previous view
+NavigationResult::Exit  // Exit this controller
 ```
 
 ### Coordinator Loop
@@ -419,7 +487,7 @@ pub async fn my_command(ctx: Context<'_>) -> Result<(), Error> {
 
 1. **Navigation**: Use `NavigationResult` unified enum for all navigation decisions
 2. **Context**: Clone context `let ctx = *coord.context()` to avoid borrows
-3. **Recursion**: Avoid recursion; use the coordinator loop instead
+3. **View Loop**: Use `view.run()` with callback for handling actions
 4. **Entry Point**: Create a wrapper function that initializes coordinator and controller
 
 ### Controller State
@@ -443,3 +511,30 @@ impl<'a> SettingsController<'a> {
     }
 }
 ```
+
+## Best Practices
+
+1. **Keep views focused** - One view per feature/command
+2. **Handle timeouts** - Implement `on_timeout` in ViewHandler
+3. **Validate input** - Check interaction author matches command author
+4. **Use proper state** - Store all UI state in the view struct
+5. **Return commands wisely** - Use `ViewCommand::Render` to re-render, `ViewCommand::Exit` to end
+6. **Separate concerns** - Use ViewHandler for action logic, keep view for rendering
+
+## Troubleshooting
+
+### View not responding
+- Check `timeout` is set appropriately
+- Ensure `ViewHandler::handle` returns `Some(action)` to re-render
+
+### Components not showing
+- Verify `create_response` returns properly formatted `ResponseKind`
+- Check component limits (5 per action row, 5 action rows per message)
+
+### Interaction errors
+- Ensure interaction is acknowledged within 3 seconds
+- Set `should_acknowledge` on `InteractiveViewBase` to control auto-ack
+
+### Navigation issues
+- Use `NavigationResult::Exit` to end a controller
+- Use `NavigationResult::Back` to return to previous controller (if using coordinator stack)
