@@ -47,7 +47,7 @@ use crate::entity::ServerSettings;
 
 const WELCOME_FILE: &str = "welcome_preview.png";
 
-/// Server welcome configuration.
+/// Configure welcome cards for new members
 #[poise::command(slash_command)]
 pub async fn welcome(ctx: Context<'_>) -> Result<(), Error> {
     run_settings(ctx, Some(SettingsPage::Welcome)).await
