@@ -24,10 +24,10 @@ use crate::bot::views::ActionRegistry;
 use crate::bot::views::ResponseKind;
 use crate::bot::views::Trigger;
 use crate::bot::views::ViewCommand;
-use crate::bot::views::ViewContextV2;
+use crate::bot::views::ViewContext;
 use crate::bot::views::ViewEngine;
-use crate::bot::views::ViewHandlerV2;
-use crate::bot::views::ViewRenderV2;
+use crate::bot::views::ViewHandler;
+use crate::bot::views::ViewRender;
 use crate::controller;
 use crate::entity::ServerSettings;
 
@@ -113,12 +113,12 @@ pub struct SettingsVoiceHandler {
 }
 
 #[async_trait::async_trait]
-impl ViewHandlerV2<SettingsVoiceAction> for SettingsVoiceHandler {
+impl ViewHandler<SettingsVoiceAction> for SettingsVoiceHandler {
     async fn handle(
         &mut self,
         action: SettingsVoiceAction,
         _trigger: Trigger<'_>,
-        _ctx: &ViewContextV2<'_, SettingsVoiceAction>,
+        _ctx: &ViewContext<'_, SettingsVoiceAction>,
     ) -> Result<ViewCommand, Error> {
         match action {
             SettingsVoiceAction::ToggleEnabled => {
@@ -131,7 +131,7 @@ impl ViewHandlerV2<SettingsVoiceAction> for SettingsVoiceHandler {
     }
 }
 
-impl ViewRenderV2<SettingsVoiceAction> for SettingsVoiceHandler {
+impl ViewRender<SettingsVoiceAction> for SettingsVoiceHandler {
     fn render(&self, registry: &mut ActionRegistry<SettingsVoiceAction>) -> ResponseKind<'_> {
         let is_enabled = self.settings.voice.enabled.unwrap_or(true);
 

@@ -32,10 +32,10 @@ use crate::bot::views::ActionRegistry;
 use crate::bot::views::ResponseKind;
 use crate::bot::views::Trigger;
 use crate::bot::views::ViewCommand;
-use crate::bot::views::ViewContextV2;
+use crate::bot::views::ViewContext;
 use crate::bot::views::ViewEngine;
-use crate::bot::views::ViewHandlerV2;
-use crate::bot::views::ViewRenderV2;
+use crate::bot::views::ViewHandler;
+use crate::bot::views::ViewRender;
 use crate::controller;
 use crate::entity::ServerSettings;
 
@@ -119,12 +119,12 @@ pub struct SettingsFeedHandler<'a> {
 }
 
 #[async_trait::async_trait]
-impl<'a> ViewHandlerV2<SettingsFeedAction> for SettingsFeedHandler<'a> {
+impl<'a> ViewHandler<SettingsFeedAction> for SettingsFeedHandler<'a> {
     async fn handle(
         &mut self,
         action: SettingsFeedAction,
         trigger: Trigger<'_>,
-        _ctx: &ViewContextV2<'_, SettingsFeedAction>,
+        _ctx: &ViewContext<'_, SettingsFeedAction>,
     ) -> Result<ViewCommand, Error> {
         let settings = &mut self.settings.feeds;
 
@@ -182,7 +182,7 @@ impl<'a> SettingsFeedHandler<'a> {
     }
 }
 
-impl<'a> ViewRenderV2<SettingsFeedAction> for SettingsFeedHandler<'a> {
+impl<'a> ViewRender<SettingsFeedAction> for SettingsFeedHandler<'a> {
     fn render(&self, registry: &mut ActionRegistry<SettingsFeedAction>) -> ResponseKind<'_> {
         let is_enabled = self.settings.feeds.enabled.unwrap_or(true);
 

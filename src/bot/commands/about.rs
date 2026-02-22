@@ -30,10 +30,10 @@ use crate::bot::views::ActionRegistry;
 use crate::bot::views::ResponseKind;
 use crate::bot::views::Trigger;
 use crate::bot::views::ViewCommand;
-use crate::bot::views::ViewContextV2;
+use crate::bot::views::ViewContext;
 use crate::bot::views::ViewEngine;
-use crate::bot::views::ViewHandlerV2;
-use crate::bot::views::ViewRenderV2;
+use crate::bot::views::ViewHandler;
+use crate::bot::views::ViewRender;
 use crate::controller;
 
 /// Show information about the bot
@@ -95,12 +95,12 @@ pub struct AboutView {
 }
 
 #[async_trait::async_trait]
-impl ViewHandlerV2<AboutAction> for AboutView {
+impl ViewHandler<AboutAction> for AboutView {
     async fn handle(
         &mut self,
         action: AboutAction,
         _trigger: Trigger<'_>,
-        _ctx: &ViewContextV2<'_, AboutAction>,
+        _ctx: &ViewContext<'_, AboutAction>,
     ) -> Result<ViewCommand, Error> {
         match action {
             AboutAction::Back => Ok(ViewCommand::Continue),
@@ -136,7 +136,7 @@ impl AboutView {
     }
 }
 
-impl ViewRenderV2<AboutAction> for AboutView {
+impl ViewRender<AboutAction> for AboutView {
     fn render(&self, registry: &mut ActionRegistry<AboutAction>) -> ResponseKind<'_> {
         let content_text = format!(
             "-# **Settings > About**\n## pwr-bot\n### Stats\n- **Uptime**: {}\n- **Servers**: {}\n- **Users**: {}\n- **Commands**: {}\n- **Latency**: {}ms\n- **Memory**: {:.1} MB\n### Info\n- **Author**: [FAZuH](https://github.com/FAZuH)\n- **Source**: [GitHub](https://github.com/FAZuH/pwr-bot)\n- **License**: [MIT](https://github.com/FAZuH/pwr-bot/blob/main/LICENSE)\nCopyright © 2025-{} FAZuH  —  v{}",

@@ -38,10 +38,10 @@ use crate::bot::views::RegisteredAction;
 use crate::bot::views::ResponseKind;
 use crate::bot::views::Trigger;
 use crate::bot::views::ViewCommand;
-use crate::bot::views::ViewContextV2;
+use crate::bot::views::ViewContext;
 use crate::bot::views::ViewEngine;
-use crate::bot::views::ViewHandlerV2;
-use crate::bot::views::ViewRenderV2;
+use crate::bot::views::ViewHandler;
+use crate::bot::views::ViewRender;
 use crate::controller;
 use crate::entity::ServerSettings;
 
@@ -91,12 +91,12 @@ pub struct SettingsWelcomeHandler {
 }
 
 #[async_trait::async_trait]
-impl ViewHandlerV2<SettingsWelcomeAction> for SettingsWelcomeHandler {
+impl ViewHandler<SettingsWelcomeAction> for SettingsWelcomeHandler {
     async fn handle(
         &mut self,
         action: SettingsWelcomeAction,
         trigger: Trigger<'_>,
-        ctx: &ViewContextV2<'_, SettingsWelcomeAction>,
+        ctx: &ViewContext<'_, SettingsWelcomeAction>,
     ) -> Result<ViewCommand, Error> {
         use SettingsWelcomeAction::*;
 
@@ -234,7 +234,7 @@ impl ViewHandlerV2<SettingsWelcomeAction> for SettingsWelcomeHandler {
 
 // ── View ─────────────────────────────────────────────────────────────────────
 
-impl ViewRenderV2<SettingsWelcomeAction> for SettingsWelcomeHandler {
+impl ViewRender<SettingsWelcomeAction> for SettingsWelcomeHandler {
     fn render(&self, registry: &mut ActionRegistry<SettingsWelcomeAction>) -> ResponseKind<'_> {
         let is_enabled = self.settings.welcome.enabled.unwrap_or(false);
         let msgs = self

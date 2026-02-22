@@ -39,10 +39,10 @@ use crate::bot::views::ActionRegistry;
 use crate::bot::views::ResponseKind;
 use crate::bot::views::Trigger;
 use crate::bot::views::ViewCommand;
-use crate::bot::views::ViewContextV2;
+use crate::bot::views::ViewContext;
 use crate::bot::views::ViewEngine;
-use crate::bot::views::ViewHandlerV2;
-use crate::bot::views::ViewRenderV2;
+use crate::bot::views::ViewHandler;
+use crate::bot::views::ViewRender;
 use crate::entity::GuildDailyStats;
 use crate::entity::VoiceDailyActivity;
 use crate::entity::VoiceSessionsEntity;
@@ -457,12 +457,12 @@ impl VoiceStatsHandler {
 }
 
 #[async_trait::async_trait]
-impl ViewHandlerV2<VoiceStatsAction> for VoiceStatsHandler {
+impl ViewHandler<VoiceStatsAction> for VoiceStatsHandler {
     async fn handle(
         &mut self,
         action: VoiceStatsAction,
         _trigger: Trigger<'_>,
-        _ctx: &ViewContextV2<'_, VoiceStatsAction>,
+        _ctx: &ViewContext<'_, VoiceStatsAction>,
     ) -> Result<ViewCommand, Error> {
         use VoiceStatsAction::*;
 
@@ -530,7 +530,7 @@ impl ViewHandlerV2<VoiceStatsAction> for VoiceStatsHandler {
     }
 }
 
-impl ViewRenderV2<VoiceStatsAction> for VoiceStatsHandler {
+impl ViewRender<VoiceStatsAction> for VoiceStatsHandler {
     fn render(&self, registry: &mut ActionRegistry<VoiceStatsAction>) -> ResponseKind<'_> {
         use VoiceStatsAction::*;
 

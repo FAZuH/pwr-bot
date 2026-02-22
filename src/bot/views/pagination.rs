@@ -70,8 +70,8 @@ action_enum!(PaginationAction {
 use crate::bot::views::ActionRegistry;
 use crate::bot::views::Trigger;
 use crate::bot::views::ViewCommand;
-use crate::bot::views::ViewContextV2;
-use crate::bot::views::ViewHandlerV2;
+use crate::bot::views::ViewContext;
+use crate::bot::views::ViewHandler;
 
 #[derive(Clone)]
 pub struct PaginationView {
@@ -155,12 +155,12 @@ impl PaginationView {
 }
 
 #[async_trait::async_trait]
-impl ViewHandlerV2<PaginationAction> for PaginationView {
+impl ViewHandler<PaginationAction> for PaginationView {
     async fn handle(
         &mut self,
         action: PaginationAction,
         _trigger: Trigger<'_>,
-        _ctx: &ViewContextV2<'_, PaginationAction>,
+        _ctx: &ViewContext<'_, PaginationAction>,
     ) -> Result<ViewCommand, Error> {
         match action {
             PaginationAction::First => self.state.first_page(),

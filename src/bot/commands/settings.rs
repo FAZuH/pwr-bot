@@ -33,10 +33,10 @@ use crate::bot::views::ActionRegistry;
 use crate::bot::views::ResponseKind;
 use crate::bot::views::Trigger;
 use crate::bot::views::ViewCommand;
-use crate::bot::views::ViewContextV2;
+use crate::bot::views::ViewContext;
 use crate::bot::views::ViewEngine;
-use crate::bot::views::ViewHandlerV2;
-use crate::bot::views::ViewRenderV2;
+use crate::bot::views::ViewHandler;
+use crate::bot::views::ViewRender;
 use crate::controller;
 use crate::entity::ServerSettings;
 use crate::entity::ServerSettingsEntity;
@@ -298,7 +298,7 @@ impl SettingsMainHandler {
     }
 }
 
-impl ViewRenderV2<SettingsMainAction> for SettingsMainHandler {
+impl ViewRender<SettingsMainAction> for SettingsMainHandler {
     fn render(&self, registry: &mut ActionRegistry<SettingsMainAction>) -> ResponseKind<'_> {
         let text_active_features_description = match &self.state {
             SettingsMainState::FeatureSettings => {
@@ -435,12 +435,12 @@ action_enum! {
 }
 
 #[async_trait::async_trait]
-impl ViewHandlerV2<SettingsMainAction> for SettingsMainHandler {
+impl ViewHandler<SettingsMainAction> for SettingsMainHandler {
     async fn handle(
         &mut self,
         action: SettingsMainAction,
         trigger: Trigger<'_>,
-        _ctx: &ViewContextV2<'_, SettingsMainAction>,
+        _ctx: &ViewContext<'_, SettingsMainAction>,
     ) -> Result<ViewCommand, Error> {
         use SettingsMainAction::*;
         use SettingsMainState::*;

@@ -38,10 +38,10 @@ use crate::bot::views::ActionRegistry;
 use crate::bot::views::ResponseKind;
 use crate::bot::views::Trigger;
 use crate::bot::views::ViewCommand;
-use crate::bot::views::ViewContextV2;
+use crate::bot::views::ViewContext;
 use crate::bot::views::ViewEngine;
-use crate::bot::views::ViewHandlerV2;
-use crate::bot::views::ViewRenderV2;
+use crate::bot::views::ViewHandler;
+use crate::bot::views::ViewRender;
 use crate::bot::views::pagination::PaginationAction;
 use crate::bot::views::pagination::PaginationView;
 use crate::entity::VoiceLeaderboardEntry;
@@ -324,12 +324,12 @@ impl<'a> VoiceLeaderboardHandler<'a> {
 }
 
 #[async_trait::async_trait]
-impl<'a> ViewHandlerV2<VoiceLeaderboardAction> for VoiceLeaderboardHandler<'a> {
+impl<'a> ViewHandler<VoiceLeaderboardAction> for VoiceLeaderboardHandler<'a> {
     async fn handle(
         &mut self,
         action: VoiceLeaderboardAction,
         _trigger: Trigger<'_>,
-        _ctx: &ViewContextV2<'_, VoiceLeaderboardAction>,
+        _ctx: &ViewContext<'_, VoiceLeaderboardAction>,
     ) -> Result<ViewCommand, Error> {
         use VoiceLeaderboardAction::*;
 
@@ -392,7 +392,7 @@ impl<'a> ViewHandlerV2<VoiceLeaderboardAction> for VoiceLeaderboardHandler<'a> {
     }
 }
 
-impl<'a> ViewRenderV2<VoiceLeaderboardAction> for VoiceLeaderboardHandler<'a> {
+impl<'a> ViewRender<VoiceLeaderboardAction> for VoiceLeaderboardHandler<'a> {
     fn render(&self, registry: &mut ActionRegistry<VoiceLeaderboardAction>) -> ResponseKind<'_> {
         use VoiceLeaderboardAction::*;
         use VoiceLeaderboardTimeRange::*;

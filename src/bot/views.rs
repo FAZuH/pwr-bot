@@ -189,14 +189,14 @@ impl<C: Action, P: Action> ViewSender<C> for MappedSender<C, P> {
 }
 
 /// Context passed to the handler.
-pub struct ViewContextV2<'a, T> {
+pub struct ViewContext<'a, T> {
     pub poise: &'a Context<'a>,
     pub tx: Arc<dyn ViewSender<T>>,
 }
 
-impl<'a, T: Action + Send + 'static> ViewContextV2<'a, T> {
-    pub fn map<C: Action + Send + 'static>(&self, wrap: fn(C) -> T) -> ViewContextV2<'a, C> {
-        ViewContextV2 {
+impl<'a, T: Action + Send + 'static> ViewContext<'a, T> {
+    pub fn map<C: Action + Send + 'static>(&self, wrap: fn(C) -> T) -> ViewContext<'a, C> {
+        ViewContext {
             poise: self.poise,
             tx: Arc::new(MappedSender {
                 parent_tx: self.tx.clone(),
@@ -219,7 +219,7 @@ impl<'a, T: Action + Send + 'static> ViewContextV2<'a, T> {
 }
 
 /// The trait for Rendering UI
-pub trait ViewRenderV2<T: Action> {
+pub trait ViewRender<T: Action> {
     fn render(&self, registry: &mut ActionRegistry<T>) -> ResponseKind<'_>;
 
     fn create_reply(&self, registry: &mut ActionRegistry<T>) -> CreateReply<'_> {
@@ -229,12 +229,12 @@ pub trait ViewRenderV2<T: Action> {
 
 /// The trait for State Management & Logic
 #[async_trait::async_trait]
-pub trait ViewHandlerV2<T: Action>: Send + Sync {
+pub trait ViewHandler<T: Action>: Send + Sync {
     async fn handle(
         &mut self,
         action: T,
         trigger: Trigger<'_>,
-        ctx: &ViewContextV2<'_, T>,
+        ctx: &ViewContext<'_, T>,
     ) -> Result<ViewCommand, Error>;
 
     async fn on_timeout(&mut self) -> Result<(), Error> {
@@ -246,7 +246,7 @@ pub trait ViewHandlerV2<T: Action>: Send + Sync {
 pub struct ViewEngine<'a, T, H>
 where
     T: Action + Send + Sync + 'static,
-    H: ViewHandlerV2<T> + ViewRenderV2<T>,
+    H: ViewHandler<T> + ViewRender<T>,
 {
     pub ctx: &'a Context<'a>,
     pub handler: H,
@@ -259,7 +259,7 @@ where
 impl<'a, T, H> ViewEngine<'a, T, H>
 where
     T: Action + Send + Sync + 'static,
-    H: ViewHandlerV2<T> + ViewRenderV2<T>,
+    H: ViewHandler<T> + ViewRender<T>,
 {
     pub fn new(ctx: &'a Context<'a>, handler: H, timeout: Duration) -> Self {
         Self {
@@ -306,7 +306,7 @@ where
 
         let mut stream = collector.stream();
 
-        let ctx_wrapper = ViewContextV2 {
+        let ctx_wrapper = ViewContext {
             poise: self.ctx,
             tx: Arc::new(tx.clone()),
         };

@@ -27,10 +27,10 @@ use crate::bot::views::ActionRegistry;
 use crate::bot::views::ResponseKind;
 use crate::bot::views::Trigger;
 use crate::bot::views::ViewCommand;
-use crate::bot::views::ViewContextV2;
+use crate::bot::views::ViewContext;
 use crate::bot::views::ViewEngine;
-use crate::bot::views::ViewHandlerV2;
-use crate::bot::views::ViewRenderV2;
+use crate::bot::views::ViewHandler;
+use crate::bot::views::ViewRender;
 use crate::bot::views::pagination::PaginationAction;
 use crate::bot::views::pagination::PaginationView;
 use crate::controller;
@@ -234,7 +234,7 @@ impl FeedListHandler {
     }
 }
 
-impl ViewRenderV2<FeedListAction> for FeedListHandler {
+impl ViewRender<FeedListAction> for FeedListHandler {
     fn render(&self, registry: &mut ActionRegistry<FeedListAction>) -> ResponseKind<'_> {
         if self.subscriptions.is_empty() {
             return FeedListHandler::create_empty().into();
@@ -272,12 +272,12 @@ action_extends! { FeedListAction extends PaginationAction {
 }}
 
 #[async_trait::async_trait]
-impl ViewHandlerV2<FeedListAction> for FeedListHandler {
+impl ViewHandler<FeedListAction> for FeedListHandler {
     async fn handle(
         &mut self,
         action: FeedListAction,
         _trigger: Trigger<'_>,
-        _ctx: &ViewContextV2<'_, FeedListAction>,
+        _ctx: &ViewContext<'_, FeedListAction>,
     ) -> Result<ViewCommand, Error> {
         use FeedListAction::*;
         match &action {

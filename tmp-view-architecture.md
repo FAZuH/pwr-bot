@@ -22,7 +22,7 @@ A borrowed representation of the event source, passed into `handle()`. This allo
 
 ### `ViewSender<T>` & Context Mapping
 A trait abstracting the ability to send `ViewEvent<T>`. This powers the **Delegation Pattern** without requiring `children()` trait leaks.
-- `ViewContextV2` holds an `Arc<dyn ViewSender<T>>`.
+- `ViewContext` holds an `Arc<dyn ViewSender<T>>`.
 - Calling `ctx.map(ParentAction::Child)` creates a new context for the child. 
 - The child handles its own events, and `MappedSender` automatically wraps them in the parent's `Action` enum before passing them back to the main loop.
 
@@ -38,14 +38,14 @@ Registers `T: Action` mapping to a string ID.
 - Resolves Discord `custom_id`s back into enum actions.
 - Passed directly to `render()` and `create_reply()` to dynamically generate components.
 
-### `ViewRenderV2<T>`
+### `ViewRender<T>`
 Trait defining how the state translates to Discord UI.
 - **Responsibility**: Provides a `render(&self, registry: &mut ActionRegistry<T>) -> ResponseKind` method.
 - *Not its responsibility*: Tracking message IDs, editing messages, logic.
 
-### `ViewHandlerV2<T>`
+### `ViewHandler<T>`
 Trait defining the business logic and state mutations.
-- **Responsibility**: Provides `handle(&mut self, action: T, trigger: Trigger<'_>, ctx: &ViewContextV2<'_, T>) -> Result<ViewCommand, Error>`.
+- **Responsibility**: Provides `handle(&mut self, action: T, trigger: Trigger<'_>, ctx: &ViewContext<'_, T>) -> Result<ViewCommand, Error>`.
 - *Not its responsibility*: Resolving children registries, rendering, editing messages.
 
 ### `ViewEngine<'a, T, H>`

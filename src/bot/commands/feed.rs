@@ -28,10 +28,10 @@ use crate::bot::views::ActionRegistry;
 use crate::bot::views::ResponseKind;
 use crate::bot::views::Trigger;
 use crate::bot::views::ViewCommand;
-use crate::bot::views::ViewContextV2;
+use crate::bot::views::ViewContext;
 use crate::bot::views::ViewEngine;
-use crate::bot::views::ViewHandlerV2;
-use crate::bot::views::ViewRenderV2;
+use crate::bot::views::ViewHandler;
+use crate::bot::views::ViewRender;
 use crate::entity::SubscriberEntity;
 use crate::entity::SubscriberType;
 use crate::service::feed_subscription_service::SubscribeResult;
@@ -315,12 +315,12 @@ pub struct FeedSubscriptionBatchHandler {
 }
 
 #[async_trait::async_trait]
-impl ViewHandlerV2<FeedSubscriptionBatchAction> for FeedSubscriptionBatchHandler {
+impl ViewHandler<FeedSubscriptionBatchAction> for FeedSubscriptionBatchHandler {
     async fn handle(
         &mut self,
         action: FeedSubscriptionBatchAction,
         _trigger: Trigger<'_>,
-        _ctx: &ViewContextV2<'_, FeedSubscriptionBatchAction>,
+        _ctx: &ViewContext<'_, FeedSubscriptionBatchAction>,
     ) -> Result<ViewCommand, Error> {
         match action {
             FeedSubscriptionBatchAction::ViewSubscriptions => Ok(ViewCommand::Continue),
@@ -328,7 +328,7 @@ impl ViewHandlerV2<FeedSubscriptionBatchAction> for FeedSubscriptionBatchHandler
     }
 }
 
-impl ViewRenderV2<FeedSubscriptionBatchAction> for FeedSubscriptionBatchHandler {
+impl ViewRender<FeedSubscriptionBatchAction> for FeedSubscriptionBatchHandler {
     fn render(
         &self,
         registry: &mut ActionRegistry<FeedSubscriptionBatchAction>,
