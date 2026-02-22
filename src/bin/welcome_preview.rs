@@ -68,10 +68,9 @@ async fn main() -> Result<()> {
         );
         if let Ok(label_png) =
             WelcomeImageGenerator::svg_to_png(&label_svg, template_width, label_height)
+            && let Ok(label_img) = image::load_from_memory(&label_png)
         {
-            if let Ok(label_img) = image::load_from_memory(&label_png) {
-                image::imageops::overlay(&mut combined_image, &label_img, x.into(), y.into());
-            }
+            image::imageops::overlay(&mut combined_image, &label_img, x.into(), y.into());
         }
 
         image::imageops::overlay(

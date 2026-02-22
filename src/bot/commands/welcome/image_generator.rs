@@ -139,7 +139,7 @@ impl WelcomeImageGenerator {
         let mut fontdb = resvg::usvg::fontdb::Database::new();
         fontdb
             .load_font_data(include_bytes!("../../../../assets/fonts/Roboto-Regular.ttf").to_vec());
-        
+
         // Map all generic font families to Roboto to ensure text always renders
         fontdb.set_sans_serif_family("Roboto");
         fontdb.set_serif_family("Roboto");
