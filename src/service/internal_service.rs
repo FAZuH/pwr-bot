@@ -2,12 +2,12 @@
 
 use std::sync::Arc;
 
-use crate::model::BotMetaKey;
-use crate::model::BotMetaModel;
-use crate::model::FeedItemModel;
-use crate::model::FeedModel;
-use crate::model::FeedSubscriptionModel;
-use crate::model::SubscriberModel;
+use crate::entity::BotMetaEntity;
+use crate::entity::BotMetaKey;
+use crate::entity::FeedEntity;
+use crate::entity::FeedItemEntity;
+use crate::entity::FeedSubscriptionEntity;
+use crate::entity::SubscriberEntity;
 use crate::repository::Repository;
 use crate::repository::error::DatabaseError;
 use crate::repository::table::Table;
@@ -35,7 +35,7 @@ impl InternalService {
         key: BotMetaKey,
         value: impl Into<String>,
     ) -> Result<(), DatabaseError> {
-        let model = BotMetaModel {
+        let model = BotMetaEntity {
             key: key.into(),
             value: value.into(),
         };
@@ -61,8 +61,8 @@ impl InternalService {
 
 /// Container for a full database dump.
 pub struct DatabaseDump {
-    pub feeds: Vec<FeedModel>,
-    pub feed_items: Vec<FeedItemModel>,
-    pub subscribers: Vec<SubscriberModel>,
-    pub subscriptions: Vec<FeedSubscriptionModel>,
+    pub feeds: Vec<FeedEntity>,
+    pub feed_items: Vec<FeedItemEntity>,
+    pub subscribers: Vec<SubscriberEntity>,
+    pub subscriptions: Vec<FeedSubscriptionEntity>,
 }

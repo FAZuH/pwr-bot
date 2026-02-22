@@ -66,11 +66,15 @@ For commands with subcommands, use the `subcommands` attribute:
 pub async fn parent_command(_ctx: Context<'_>) -> Result<(), Error> { Ok(()) }
 ```
 
-## Creating UI Views (MVC-C pattern)
+## Creating UI Views (ViewEngine architecture)
 
-See [`.opencode/skills/ui-views/SKILL.md`](.opencode/skills/ui-views/SKILL.md) for 
-- Detailed documentation on creating interactive Discord UI components using Components V2.
-- Controller Pattern (Coordinator -> Controller -> View -> NavigationResult) architecture.
+Views use the `ViewEngine` system in `src/bot/views.rs`:
+- `Action` - Trait for the action enum.
+- `ViewRender<T>` - Renders components/embeds using `ActionRegistry`.
+- `ViewHandler<T>` - Handles logic and returns `ViewCommand`.
+- `ViewEngine<T, H>` - Runs the event loop.
+
+See [`.opencode/skills/ui-views/SKILL.md`](.opencode/skills/ui-views/SKILL.md) for detailed documentation and patterns.
 
 ## Database Schema Changes
 

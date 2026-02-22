@@ -5,8 +5,8 @@ use std::time::Instant;
 
 use poise::ChoiceParameter;
 use serenity::all::ButtonStyle;
-use serenity::all::ComponentInteraction;
 use serenity::all::CreateActionRow;
+use serenity::all::CreateButton;
 use serenity::all::CreateComponent;
 use serenity::all::CreateContainer;
 use serenity::all::CreateContainerComponent;
@@ -23,17 +23,20 @@ use crate::bot::commands::settings::SettingsPage;
 use crate::bot::commands::settings::run_settings;
 use crate::bot::error::BotError;
 use crate::bot::navigation::NavigationResult;
-use crate::bot::views::InteractiveView;
-use crate::bot::views::RenderExt;
+use crate::bot::views::Action;
+use crate::bot::views::ActionRegistry;
 use crate::bot::views::ResponseKind;
-use crate::bot::views::ResponseView;
-use crate::bot::views::View;
-use crate::model::SubscriberModel;
-use crate::model::SubscriberType;
+use crate::bot::views::Trigger;
+use crate::bot::views::ViewCommand;
+use crate::bot::views::ViewContext;
+use crate::bot::views::ViewEngine;
+use crate::bot::views::ViewHandler;
+use crate::bot::views::ViewRender;
+use crate::entity::SubscriberEntity;
+use crate::entity::SubscriberType;
 use crate::service::feed_subscription_service::SubscribeResult;
 use crate::service::feed_subscription_service::SubscriberTarget;
 use crate::service::feed_subscription_service::UnsubscribeResult;
-use crate::view_core;
 
 pub mod list;
 pub mod settings;
@@ -148,12 +151,12 @@ pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
 async fn process_subscription_batch(
     ctx: Context<'_>,
     urls: &[&str],
-    subscriber: &SubscriberModel,
+    subscriber: &SubscriberEntity,
     is_subscribe: bool,
 ) -> Result<NavigationResult, Error> {
     let mut states: Vec<String> = vec!["⏳ Processing...".to_string(); urls.len()];
     let mut last_send = Instant::now();
-    let mut view: Option<FeedSubscriptionBatchView> = None;
+    let mut handler: Option<FeedSubscriptionBatchHandler> = None;
     let service = ctx.data().service.feed_subscription.clone();
 
     for (i, url) in urls.iter().enumerate() {
@@ -173,26 +176,54 @@ async fn process_subscription_batch(
 
         let is_final = i + 1 == urls.len();
         if last_send.elapsed().as_secs() > UPDATE_INTERVAL_SECS || is_final {
-            let mut batch_view = FeedSubscriptionBatchView::new(&ctx, states.clone(), is_final);
-            batch_view.render().await?;
-            if is_final {
-                view = Some(batch_view);
+            let batch_handler = FeedSubscriptionBatchHandler {
+                states: states.clone(),
+                is_final,
+            };
+
+            // To render without waiting for interaction, we could run the engine for 0 seconds
+            // but we can also just use ViewEngine::render_standalone if it exists, or
+            // construct an engine and exit immediately. In V2, the recommended way to just render is:
+            let mut engine = ViewEngine::new(&ctx, batch_handler, Duration::from_millis(1));
+
+            if !is_final {
+                // Just render and exit since it's an intermediate step
+                engine
+                    .run(|_| Box::pin(async { ViewCommand::Exit }))
+                    .await?;
+            } else {
+                handler = Some(engine.handler); // take it back for the final loop
             }
             last_send = Instant::now();
         }
     }
 
     // Listen for "View Subscriptions" button click after final message
-    if let Some(mut view) = view
-        && let Some((action, _)) = view.listen_once().await?
-        && action == FeedSubscriptionBatchAction::ViewSubscriptions
-    {
-        // Convert subscriber type back to SendInto
-        let send_into = match subscriber.r#type {
-            SubscriberType::Guild => SendInto::Server,
-            SubscriberType::Dm => SendInto::DM,
-        };
-        Ok(NavigationResult::FeedList(Some(send_into)))
+    if let Some(handler) = handler {
+        let nav = std::sync::Arc::new(std::sync::Mutex::new(NavigationResult::Exit));
+        let mut engine = ViewEngine::new(&ctx, handler, Duration::from_secs(120));
+
+        engine
+            .run(|action| {
+                let nav = nav.clone();
+                let subscriber_type = subscriber.r#type;
+                Box::pin(async move {
+                    if action == FeedSubscriptionBatchAction::ViewSubscriptions {
+                        // Convert subscriber type back to SendInto
+                        let send_into = match subscriber_type {
+                            SubscriberType::Guild => SendInto::Server,
+                            SubscriberType::Dm => SendInto::DM,
+                        };
+                        *nav.lock().unwrap() = NavigationResult::FeedList(Some(send_into));
+                        return ViewCommand::Exit;
+                    }
+                    ViewCommand::Render
+                })
+            })
+            .await?;
+
+        let res = nav.lock().unwrap().clone();
+        Ok(res)
     } else {
         Ok(NavigationResult::Exit)
     }
@@ -258,7 +289,7 @@ fn get_target_id(
 async fn get_or_create_subscriber(
     ctx: Context<'_>,
     send_into: &SendInto,
-) -> Result<SubscriberModel, Error> {
+) -> Result<SubscriberEntity, Error> {
     let target_id = get_target_id(ctx.guild_id(), ctx.author().id, send_into)?;
     let subscriber_type = SubscriberType::from(send_into);
     let target = SubscriberTarget {
@@ -278,28 +309,30 @@ action_enum! { FeedSubscriptionBatchAction {
     ViewSubscriptions,
 } }
 
-view_core! {
-    timeout = Duration::from_secs(120),
-    /// View that shows the progress of a subscription batch operation.
-    pub struct FeedSubscriptionBatchView<'a, FeedSubscriptionBatchAction> {
-        states: Vec<String>,
-        is_final: bool,
-    }
+pub struct FeedSubscriptionBatchHandler {
+    pub states: Vec<String>,
+    pub is_final: bool,
 }
 
-impl<'a> FeedSubscriptionBatchView<'a> {
-    /// Creates a new batch view with the given states.
-    pub fn new(ctx: &'a Context<'a>, states: Vec<String>, is_final: bool) -> Self {
-        Self {
-            states,
-            is_final,
-            core: Self::create_core(ctx),
+#[async_trait::async_trait]
+impl ViewHandler<FeedSubscriptionBatchAction> for FeedSubscriptionBatchHandler {
+    async fn handle(
+        &mut self,
+        action: FeedSubscriptionBatchAction,
+        _trigger: Trigger<'_>,
+        _ctx: &ViewContext<'_, FeedSubscriptionBatchAction>,
+    ) -> Result<ViewCommand, Error> {
+        match action {
+            FeedSubscriptionBatchAction::ViewSubscriptions => Ok(ViewCommand::Continue),
         }
     }
 }
 
-impl<'a> ResponseView<'a> for FeedSubscriptionBatchView<'a> {
-    fn create_response<'b>(&mut self) -> ResponseKind<'b> {
+impl ViewRender<FeedSubscriptionBatchAction> for FeedSubscriptionBatchHandler {
+    fn render(
+        &self,
+        registry: &mut ActionRegistry<FeedSubscriptionBatchAction>,
+    ) -> ResponseKind<'_> {
         let text_components: Vec<CreateContainerComponent> = self
             .states
             .iter()
@@ -311,10 +344,11 @@ impl<'a> ResponseView<'a> for FeedSubscriptionBatchView<'a> {
         ))];
 
         if self.is_final {
-            let nav_button = self
-                .register(FeedSubscriptionBatchAction::ViewSubscriptions)
-                .as_button()
-                .style(ButtonStyle::Secondary);
+            let nav_button = CreateButton::new(
+                registry.register(FeedSubscriptionBatchAction::ViewSubscriptions),
+            )
+            .label(FeedSubscriptionBatchAction::ViewSubscriptions.label())
+            .style(ButtonStyle::Secondary);
 
             components.push(CreateComponent::ActionRow(CreateActionRow::Buttons(
                 vec![nav_button].into(),
@@ -325,18 +359,6 @@ impl<'a> ResponseView<'a> for FeedSubscriptionBatchView<'a> {
     }
 }
 
-#[async_trait::async_trait]
-impl<'a> InteractiveView<'a, FeedSubscriptionBatchAction> for FeedSubscriptionBatchView<'a> {
-    async fn handle(
-        &mut self,
-        action: &FeedSubscriptionBatchAction,
-        _interaction: &ComponentInteraction,
-    ) -> Option<FeedSubscriptionBatchAction> {
-        match action {
-            FeedSubscriptionBatchAction::ViewSubscriptions => Some(action.clone()),
-        }
-    }
-}
 #[cfg(test)]
 mod tests {
     use serenity::all::GuildId;

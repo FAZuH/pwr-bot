@@ -17,7 +17,6 @@ use poise::serenity_prelude::CreateSectionComponent;
 use poise::serenity_prelude::CreateTextDisplay;
 use poise::serenity_prelude::CreateThumbnail;
 use poise::serenity_prelude::CreateUnfurledMediaItem;
-use serenity::all::ComponentInteraction;
 
 use crate::action_enum;
 use crate::bot::commands::Context;
@@ -27,13 +26,15 @@ use crate::bot::commands::settings::run_settings;
 use crate::bot::controller::Controller;
 use crate::bot::controller::Coordinator;
 use crate::bot::navigation::NavigationResult;
-use crate::bot::views::InteractiveView;
-use crate::bot::views::RenderExt;
+use crate::bot::views::ActionRegistry;
 use crate::bot::views::ResponseKind;
-use crate::bot::views::ResponseView;
-use crate::bot::views::View;
+use crate::bot::views::Trigger;
+use crate::bot::views::ViewCommand;
+use crate::bot::views::ViewContext;
+use crate::bot::views::ViewEngine;
+use crate::bot::views::ViewHandler;
+use crate::bot::views::ViewRender;
 use crate::controller;
-use crate::view_core;
 
 /// Show information about the bot
 #[poise::command(slash_command)]
@@ -54,21 +55,29 @@ impl<S: Send + Sync + 'static> Controller<S> for AboutController<'_> {
 
         let stats = AboutStats::gather_stats(&ctx).await?;
         let avatar_url = ctx.cache().current_user().face();
-        let mut view = AboutView::new(&ctx, stats, avatar_url);
 
-        view.render().await?;
+        let view = AboutView { stats, avatar_url };
 
-        // Wait for user interaction (Back button)
-        if let Some((action, _)) = view.listen_once().await? {
-            match action {
-                AboutAction::Back => {
-                    return Ok(NavigationResult::Back);
-                }
-            }
-        }
+        let mut engine = ViewEngine::new(&ctx, view, Duration::from_secs(120));
 
-        // If interaction times out, just exit
-        Ok(NavigationResult::Exit)
+        let nav = std::sync::Arc::new(std::sync::Mutex::new(NavigationResult::Exit));
+
+        engine
+            .run(|action| {
+                let nav = nav.clone();
+                Box::pin(async move {
+                    match action {
+                        AboutAction::Back => {
+                            *nav.lock().unwrap() = NavigationResult::Back;
+                            ViewCommand::Exit
+                        }
+                    }
+                })
+            })
+            .await?;
+
+        let res = nav.lock().unwrap().clone();
+        Ok(res)
     }
 }
 
@@ -79,25 +88,27 @@ action_enum! {
     }
 }
 
-view_core! {
-    timeout = Duration::from_secs(120),
-    /// View for displaying bot statistics and information.
-    struct AboutView<'a, AboutAction> {
-        stats: AboutStats,
-        avatar_url: String,
+/// View for displaying bot statistics and information.
+pub struct AboutView {
+    stats: AboutStats,
+    avatar_url: String,
+}
+
+#[async_trait::async_trait]
+impl ViewHandler<AboutAction> for AboutView {
+    async fn handle(
+        &mut self,
+        action: AboutAction,
+        _trigger: Trigger<'_>,
+        _ctx: &ViewContext<'_, AboutAction>,
+    ) -> Result<ViewCommand, Error> {
+        match action {
+            AboutAction::Back => Ok(ViewCommand::Continue),
+        }
     }
 }
 
-impl<'a> AboutView<'a> {
-    /// Creates a new about view with the given context, stats, and avatar URL.
-    pub fn new(ctx: &'a Context<'a>, stats: AboutStats, avatar_url: String) -> Self {
-        Self {
-            core: Self::create_core(ctx),
-            stats,
-            avatar_url,
-        }
-    }
-
+impl AboutView {
     /// Formats a duration into a human-readable uptime string.
     fn format_uptime(duration: Duration) -> String {
         let days = duration.as_secs() / 86400;
@@ -125,23 +136,10 @@ impl<'a> AboutView<'a> {
     }
 }
 
-impl<'a> ResponseView<'a> for AboutView<'a> {
-    fn create_response<'b>(&mut self) -> ResponseKind<'b> {
+impl ViewRender<AboutAction> for AboutView {
+    fn render(&self, registry: &mut ActionRegistry<AboutAction>) -> ResponseKind<'_> {
         let content_text = format!(
-            "-# **Settings > About**
-## pwr-bot
-### Stats
-- **Uptime**: {}
-- **Servers**: {}
-- **Users**: {}
-- **Commands**: {}
-- **Latency**: {}ms
-- **Memory**: {:.1} MB
-### Info
-- **Author**: [FAZuH](https://github.com/FAZuH)
-- **Source**: [GitHub](https://github.com/FAZuH/pwr-bot)
-- **License**: [MIT](https://github.com/FAZuH/pwr-bot/blob/main/LICENSE)
-Copyright © 2025-{} FAZuH  —  v{}",
+            "-# **Settings > About**\n## pwr-bot\n### Stats\n- **Uptime**: {}\n- **Servers**: {}\n- **Users**: {}\n- **Commands**: {}\n- **Latency**: {}ms\n- **Memory**: {:.1} MB\n### Info\n- **Author**: [FAZuH](https://github.com/FAZuH)\n- **Source**: [GitHub](https://github.com/FAZuH/pwr-bot)\n- **License**: [MIT](https://github.com/FAZuH/pwr-bot/blob/main/LICENSE)\nCopyright © 2025-{} FAZuH  —  v{}",
             Self::format_uptime(self.stats.uptime),
             Self::format_number(self.stats.guild_count),
             Self::format_number(self.stats.user_count),
@@ -169,14 +167,13 @@ Copyright © 2025-{} FAZuH  —  v{}",
             CreateButton::new_link("https://github.com/FAZuH/pwr-bot/blob/main/LICENSE")
                 .label("License");
 
-        // Register the back action and get its ID
+        let back_action = crate::bot::views::RegisteredAction {
+            id: registry.register(AboutAction::Back),
+            label: "< Back",
+        };
+
         let back_button = CreateComponent::ActionRow(CreateActionRow::Buttons(
-            vec![
-                self.register(AboutAction::Back)
-                    .as_button()
-                    .style(ButtonStyle::Secondary),
-            ]
-            .into(),
+            vec![back_action.as_button().style(ButtonStyle::Secondary)].into(),
         ));
 
         let container = CreateComponent::Container(CreateContainer::new(vec![
@@ -190,21 +187,8 @@ Copyright © 2025-{} FAZuH  —  v{}",
     }
 }
 
-#[async_trait::async_trait]
-impl<'a> InteractiveView<'a, AboutAction> for AboutView<'a> {
-    async fn handle(
-        &mut self,
-        action: &AboutAction,
-        _interaction: &ComponentInteraction,
-    ) -> Option<AboutAction> {
-        match action {
-            AboutAction::Back => Some(AboutAction::Back),
-        }
-    }
-}
-
 /// Statistics displayed in the about command.
-struct AboutStats {
+pub struct AboutStats {
     version: String,
     uptime: Duration,
     guild_count: usize,

@@ -11,11 +11,11 @@
 }}%%
 classDiagram
     %% ── Core structs ──────────────────────────────────────────────
-    class ViewContext {
-        poise_ctx: Context
-        timeout: Duration
-        reply_handle: Option~ReplyHandle~
-        message_id() Option~MessageId~
+    class ViewContext~T~ {
+        poise: Context
+        tx: Arc~dyn ViewSender~T~~
+        map(wrap) ViewContext~C~
+        spawn(future)
     }
 
     class ActionRegistry~T~ {
@@ -24,15 +24,17 @@ classDiagram
         counter: usize
         register(action: T) String
         get(id: str) Option~T~
-        ids() Vec~str~
         clear()
     }
 
-    class ViewCore~T~ {
-        ctx: ViewContext
+    class ViewEngine~T, H~ {
+        ctx: Context
+        handler: H
         registry: ActionRegistry~T~
-        send(reply) Result
-        edit(reply) Result
+        timeout: Duration
+        should_acknowledge: bool
+        render_view() Result
+        run(on_action) Result
     }
 
     class RegisteredAction {
@@ -46,163 +48,67 @@ classDiagram
     class Coordinator~S~ {
         ctx: Context
         state: S
-        send(reply) Result
-        edit(reply) Result
         context() Context
+        state() S
+        state_mut() S
     }
 
     class NavigationResult {
         <<enum>>
-        SettingsMain
-        SettingsFeeds
-        SettingsVoice
-        SettingsAbout
         Back
         Exit
-        FeedList
-        FeedSubscribe
-        FeedUnsubscribe
-        VoiceLeaderboard
-        VoiceStats
+        SettingsMain
+        ...
+    }
+
+    class ViewCommand {
+        <<enum>>
+        Render
+        Exit
+        Continue
+        AlreadyResponded
+    }
+
+    class Trigger {
+        <<enum>>
+        Component
+        Modal
+        Message
+        Async
+        Timeout
     }
 
     %% ── Traits ────────────────────────────────────────────────────
-    class View~T~ {
-        <<trait>>
-        core() ViewCore~T~
-        core_mut() ViewCore~T~
-    }
-
-    class ResponseView {
-        <<trait>>
-        create_response() ResponseKind
-        create_reply() CreateReply
-    }
-
-    class RenderExt {
-        <<trait>>
-        render() Result
-    }
-
-    class InteractiveView~T: Action~ {
-        <<trait>>
-        handle(action, interaction) Option~T~
-        on_timeout() Result
-        listen_once() Result~Option~(T, ComponentInteraction)~~
-        register(action) RegisteredAction
-        children() Vec~ChildViewResolver~T~~
-    }
-
     class Action {
         <<trait>>
         label() str
     }
 
+    class ViewRender~T: Action~ {
+        <<trait>>
+        render(registry) ResponseKind
+        create_reply(registry) CreateReply
+    }
+
+    class ViewHandler~T: Action~ {
+        <<trait>>
+        handle(action, trigger, ctx) Result~ViewCommand~
+        on_timeout() Result
+    }
+
     class Controller~S~ {
         <<trait>>
-        run(coord: Coordinator~S~) Result~NavigationResult~
+        run(coordinator: Coordinator~S~) Result~NavigationResult~
     }
 
     %% ── Trait relationships ───────────────────────────────────────
-    View <|-- ResponseView
-    View <|-- InteractiveView
-    ResponseView <|-- RenderExt : blanket impl
-    InteractiveView ..> Action : bound
-    InteractiveView ..> RegisteredAction : produces
-    ViewCore *-- ViewContext
-    ViewCore *-- ActionRegistry
+    ViewEngine --> ViewHandler : owns
+    ViewEngine --> ViewRender : owns
+    ViewEngine --> ActionRegistry : owns
+    ViewHandler ..> ViewCommand : returns
+    ViewHandler ..> Trigger : receives
+    ViewHandler ..> ViewContext : receives
+    ActionRegistry ..> Action : maps
+    ActionRegistry ..> RegisteredAction : produces
     Coordinator ..> Controller : drives
     Controller ..> NavigationResult : returns
-
-    %% ── Concrete views ───────────────────────────────────────────
-    class PaginationView {
-        core: ViewCore~PaginationAction~
-        state: PaginationModel
-        disabled: bool
-    }
-
-    class SettingsMainView {
-        core: ViewCore~SettingsMainAction~
-        guild_id: GuildId
-    }
-
-    class SettingsFeedView {
-        core: ViewCore~SettingsFeedAction~
-        guild_id: GuildId
-        feed: Option~FeedConfig~
-        form: FeedForm
-    }
-
-    class SettingsVoiceView {
-        core: ViewCore~SettingsVoiceAction~
-        guild_id: GuildId
-        config: VoiceConfig
-    }
-
-    class VoiceLeaderboardView {
-        core: ViewCore~VoiceLeaderboardAction~
-        guild_id: GuildId
-        data: Vec~VoiceStats~
-        pagination: PaginationView
-    }
-
-    class VoiceStatsView {
-        core: ViewCore~VoiceStatsAction~
-        data: VoiceStatsData
-        image_bytes: Option~Vec~u8~~
-    }
-
-    class VoiceStatsData {
-        user: Option~User~
-        guild_name: String
-        user_activity: Vec~VoiceDailyActivity~
-        guild_stats: Vec~GuildDailyStats~
-        stat_type: GuildStatType
-        time_range: VoiceStatsTimeRange
-        raw_sessions: Vec~VoiceSessionsModel~
-    }
-
-    VoiceStatsView *-- VoiceStatsData
-
-    class FeedListView {
-        core: ViewCore~FeedListAction~
-        guild_id: GuildId
-        feeds: Vec~Feed~
-        pagination: PaginationView
-    }
-
-    class FeedSubscriptionBatchView {
-        core: ViewCore~FeedSubscriptionBatchAction~
-        guild_id: GuildId
-        url: String
-        feeds: Vec~DetectedFeed~
-    }
-
-    class SettingsNavigationView {
-        core: ViewCore
-        sections: Vec~SettingsSection~
-    }
-
-    InteractiveView <|.. PaginationView
-    InteractiveView <|.. SettingsMainView
-    InteractiveView <|.. SettingsFeedView
-    InteractiveView <|.. SettingsVoiceView
-    InteractiveView <|.. VoiceLeaderboardView
-    InteractiveView <|.. VoiceStatsView
-    InteractiveView <|.. FeedListView
-    InteractiveView <|.. FeedSubscriptionBatchView
-    ResponseView <|.. SettingsNavigationView
-
-    %% ── Controllers ──────────────────────────────────────────────
-    Controller <|.. SettingsMainController
-    Controller <|.. FeedSettingsController
-    Controller <|.. VoiceSettingsController
-    Controller <|.. FeedListController
-    Controller <|.. FeedSubscribeController
-    Controller <|.. FeedUnsubscribeController
-    Controller <|.. VoiceLeaderboardController
-    Controller <|.. VoiceStatsController
-    Controller <|.. AboutController
-
-    note for View "view_core! macro generates impl"
-    note for Action "action_enum! macro generates impl"

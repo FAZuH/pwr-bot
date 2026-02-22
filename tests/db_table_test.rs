@@ -2,14 +2,15 @@
 
 use chrono::Duration;
 use chrono::Utc;
-use pwr_bot::model::FeedItemModel;
-use pwr_bot::model::FeedModel;
-use pwr_bot::model::FeedSubscriptionModel;
-use pwr_bot::model::FeedsSettings;
-use pwr_bot::model::ServerSettingsModel;
-use pwr_bot::model::SubscriberModel;
-use pwr_bot::model::SubscriberType;
-use pwr_bot::model::VoiceSessionsModel;
+use pwr_bot::entity::FeedEntity;
+use pwr_bot::entity::FeedItemEntity;
+use pwr_bot::entity::FeedSubscriptionEntity;
+use pwr_bot::entity::FeedsSettings;
+use pwr_bot::entity::ServerSettingsEntity;
+use pwr_bot::entity::SubscriberEntity;
+use pwr_bot::entity::SubscriberType;
+use pwr_bot::entity::VoiceSessionsEntity;
+use pwr_bot::entity::WelcomeSettings;
 use pwr_bot::repository::table::Table;
 
 mod common;
@@ -40,7 +41,7 @@ macro_rules! create_feed {
     ($db:expr, $name:expr, { $($field:ident : $val:expr),* }) => {
         {
             #[allow(unused_mut)]
-            let mut feed = FeedModel {
+            let mut feed = FeedEntity {
                 name: $name.to_string(),
                 platform_id: $name.replace(" ", "").to_lowercase(),
                 source_url: format!("https://{}.com", $name.replace(" ", "").to_lowercase()),
@@ -55,7 +56,7 @@ macro_rules! create_feed {
 macro_rules! create_sub {
     ($db:expr, $target:expr) => {
         $db.subscriber
-            .insert(&SubscriberModel {
+            .insert(&SubscriberEntity {
                 r#type: SubscriberType::Dm,
                 target_id: $target.to_string(),
                 ..Default::default()
@@ -68,7 +69,7 @@ macro_rules! create_sub {
 macro_rules! create_subscription {
     ($db:expr, $feed_id:expr, $sub_id:expr) => {
         $db.feed_subscription
-            .insert(&FeedSubscriptionModel {
+            .insert(&FeedSubscriptionEntity {
                 feed_id: $feed_id,
                 subscriber_id: $sub_id,
                 ..Default::default()
@@ -84,7 +85,7 @@ macro_rules! create_item {
     };
     ($db:expr, $feed_id:expr, $desc:expr, $date:expr) => {
         $db.feed_item
-            .insert(&FeedItemModel {
+            .insert(&FeedItemEntity {
                 feed_id: $feed_id,
                 description: $desc.to_string(),
                 published: $date,
@@ -98,7 +99,7 @@ macro_rules! create_item {
 macro_rules! create_voice_session {
     ($db:expr, $user:expr, $guild:expr, $chan:expr) => {
         $db.voice_sessions
-            .insert(&VoiceSessionsModel {
+            .insert(&VoiceSessionsEntity {
                 user_id: $user,
                 guild_id: $guild,
                 channel_id: $chan,
@@ -414,13 +415,13 @@ mod feed_subscription_table_tests {
 }
 
 mod server_settings_table_tests {
-    use pwr_bot::model::ServerSettings;
-    use pwr_bot::model::VoiceSettings;
+    use pwr_bot::entity::ServerSettings;
+    use pwr_bot::entity::VoiceSettings;
 
     use super::*;
 
-    fn create_settings(guild_id: u64, chan: &str) -> ServerSettingsModel {
-        ServerSettingsModel {
+    fn create_settings(guild_id: u64, chan: &str) -> ServerSettingsEntity {
+        ServerSettingsEntity {
             guild_id,
             settings: sqlx::types::Json(ServerSettings {
                 voice: VoiceSettings::default(),
@@ -430,6 +431,7 @@ mod server_settings_table_tests {
                     subscribe_role_id: None,
                     unsubscribe_role_id: None,
                 },
+                welcome: WelcomeSettings::default(),
             }),
         }
     }
@@ -502,7 +504,7 @@ mod voice_sessions_table_tests {
 
     db_test!(update_leave_time, |db| {
         let join_time = Utc::now();
-        let session = VoiceSessionsModel {
+        let session = VoiceSessionsEntity {
             id: 0,
             user_id: 100,
             guild_id: 200,
@@ -523,7 +525,7 @@ mod voice_sessions_table_tests {
             .expect("Failed to update leave time");
 
         // Verify the update
-        let sessions: Vec<VoiceSessionsModel> = db
+        let sessions: Vec<VoiceSessionsEntity> = db
             .voice_sessions
             .select_all()
             .await
@@ -537,7 +539,7 @@ mod voice_sessions_table_tests {
         let now = Utc::now();
 
         // Insert mix of active and completed sessions
-        let active_session = VoiceSessionsModel {
+        let active_session = VoiceSessionsEntity {
             id: 0,
             user_id: 100,
             guild_id: 200,
@@ -550,7 +552,7 @@ mod voice_sessions_table_tests {
             .await
             .expect("Failed to insert active session");
 
-        let completed_session = VoiceSessionsModel {
+        let completed_session = VoiceSessionsEntity {
             id: 0,
             user_id: 101,
             guild_id: 200,
@@ -563,7 +565,7 @@ mod voice_sessions_table_tests {
             .await
             .expect("Failed to insert completed session");
 
-        let another_active = VoiceSessionsModel {
+        let another_active = VoiceSessionsEntity {
             id: 0,
             user_id: 102,
             guild_id: 200,
@@ -619,7 +621,7 @@ mod voice_sessions_table_tests {
         assert!(result.is_ok());
 
         // Verify no sessions exist
-        let sessions: Vec<VoiceSessionsModel> = db
+        let sessions: Vec<VoiceSessionsEntity> = db
             .voice_sessions
             .select_all()
             .await
@@ -633,7 +635,7 @@ mod voice_sessions_table_tests {
         let yesterday = today - Duration::days(1);
 
         // Insert sessions for user 100 on different days
-        let session1 = VoiceSessionsModel {
+        let session1 = VoiceSessionsEntity {
             id: 0,
             user_id: 100,
             guild_id: 200,
@@ -646,7 +648,7 @@ mod voice_sessions_table_tests {
             .await
             .expect("Failed to insert session 1");
 
-        let session2 = VoiceSessionsModel {
+        let session2 = VoiceSessionsEntity {
             id: 0,
             user_id: 100,
             guild_id: 200,
@@ -660,7 +662,7 @@ mod voice_sessions_table_tests {
             .expect("Failed to insert session 2");
 
         // Insert session for different user (should not appear in results)
-        let session3 = VoiceSessionsModel {
+        let session3 = VoiceSessionsEntity {
             id: 0,
             user_id: 101,
             guild_id: 200,
@@ -728,7 +730,7 @@ mod voice_sessions_table_tests {
         let now = Utc::now();
 
         // User 100: 2 hours today
-        let session1 = VoiceSessionsModel {
+        let session1 = VoiceSessionsEntity {
             id: 0,
             user_id: 100,
             guild_id: 200,
@@ -742,7 +744,7 @@ mod voice_sessions_table_tests {
             .expect("Failed to insert session 1");
 
         // User 101: 1 hour today (same guild)
-        let session2 = VoiceSessionsModel {
+        let session2 = VoiceSessionsEntity {
             id: 0,
             user_id: 101,
             guild_id: 200,
@@ -756,7 +758,7 @@ mod voice_sessions_table_tests {
             .expect("Failed to insert session 2");
 
         // User 102: 30 minutes today (different guild - should not appear)
-        let session3 = VoiceSessionsModel {
+        let session3 = VoiceSessionsEntity {
             id: 0,
             user_id: 102,
             guild_id: 999,
@@ -788,7 +790,7 @@ mod voice_sessions_table_tests {
         let today = now.date_naive();
 
         // User 100: active today
-        let session1 = VoiceSessionsModel {
+        let session1 = VoiceSessionsEntity {
             id: 0,
             user_id: 100,
             guild_id: 200,
@@ -802,7 +804,7 @@ mod voice_sessions_table_tests {
             .expect("Failed to insert session 1");
 
         // User 101: active today (same guild, different channel)
-        let session2 = VoiceSessionsModel {
+        let session2 = VoiceSessionsEntity {
             id: 0,
             user_id: 101,
             guild_id: 200,
@@ -816,7 +818,7 @@ mod voice_sessions_table_tests {
             .expect("Failed to insert session 2");
 
         // User 100: another session today (should not double count)
-        let session3 = VoiceSessionsModel {
+        let session3 = VoiceSessionsEntity {
             id: 0,
             user_id: 100,
             guild_id: 200,

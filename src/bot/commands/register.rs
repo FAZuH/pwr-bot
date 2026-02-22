@@ -11,7 +11,6 @@ use crate::bot::commands::Context;
 use crate::bot::commands::Error;
 use crate::bot::error::BotError;
 use crate::bot::views::ResponseKind;
-use crate::bot::views::ResponseView;
 
 /// Registers guild slash commands
 ///
@@ -69,10 +68,8 @@ impl CommandRegistrationView {
         self.duration_ms = Some(duration_ms);
         self
     }
-}
 
-impl<'a> ResponseView<'a> for CommandRegistrationView {
-    fn create_response<'b>(&mut self) -> ResponseKind<'b> {
+    pub fn create_response(&mut self) -> ResponseKind<'_> {
         let title = if self.is_complete {
             "Command Registration Complete"
         } else {
@@ -98,5 +95,9 @@ impl<'a> ResponseView<'a> for CommandRegistrationView {
         ]));
 
         vec![container].into()
+    }
+
+    pub fn create_reply(&mut self) -> poise::CreateReply<'_> {
+        self.create_response().into()
     }
 }

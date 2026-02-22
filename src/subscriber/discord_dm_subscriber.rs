@@ -11,10 +11,10 @@ use poise::serenity_prelude::UserId;
 use serenity::all::CreateMessage;
 
 use crate::bot::Bot;
+use crate::entity::SubscriberEntity;
+use crate::entity::SubscriberType;
 use crate::event::Event;
 use crate::event::FeedUpdateEvent;
-use crate::model::SubscriberModel;
-use crate::model::SubscriberType;
 use crate::repository::Repository;
 use crate::subscriber::Subscriber;
 
@@ -57,7 +57,7 @@ impl DiscordDmSubscriber {
     /// Sends a message to a subscriber via DM.
     pub async fn handle_sub(
         &self,
-        sub: &SubscriberModel,
+        sub: &SubscriberEntity,
         message: CreateMessage<'_>,
     ) -> anyhow::Result<()> {
         let user_id = UserId::from_str(&sub.target_id)?;

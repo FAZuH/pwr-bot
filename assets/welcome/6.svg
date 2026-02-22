@@ -1,0 +1,11 @@
+<svg width="600" height="300" viewBox="0 0 600 300" xmlns="http://www.w3.org/2000/svg" style="background-color: #2B2D31; font-family: sans-serif; border-radius: 24px;">
+    <rect x="0" y="0" width="600" height="150" fill="{{ primary_color }}"/>
+    <defs>
+        <clipPath id="avatar-clip"><circle cx="300" cy="150" r="60"/></clipPath>
+    </defs>
+    <circle cx="300" cy="150" r="70" fill="#2B2D31"/>
+    <image x="240" y="90" width="120" height="120" href="data:image/png;base64,{{ avatar_b64 }}" clip-path="url(#avatar-clip)"/>
+    
+    <text x="300" y="245" fill="#FFFFFF" font-size="32" font-weight="bold" text-anchor="middle">{{ username }}</text>
+    <text x="300" y="275" fill="#949BA4" font-size="18" text-anchor="middle">{{ welcome_message }} • {{ member_number }}</text>
+</svg>

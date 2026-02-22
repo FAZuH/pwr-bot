@@ -10,7 +10,7 @@ use log::info;
 use tokio::time::Duration;
 use tokio::time::interval;
 
-use crate::model::BotMetaKey;
+use crate::entity::BotMetaKey;
 use crate::service::internal_service::InternalService;
 use crate::service::voice_tracking_service::VoiceTrackingService;
 

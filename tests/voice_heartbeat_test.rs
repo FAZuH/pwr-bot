@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use chrono::Duration;
 use chrono::Utc;
-use pwr_bot::model::BotMetaKey;
-use pwr_bot::model::VoiceSessionsModel;
+use pwr_bot::entity::BotMetaKey;
+use pwr_bot::entity::VoiceSessionsEntity;
 use pwr_bot::repository::table::Table;
 use pwr_bot::service::internal_service::InternalService;
 use pwr_bot::service::voice_tracking_service::VoiceTrackingService;
@@ -76,7 +76,7 @@ async fn test_heartbeat_crash_recovery_with_active_sessions() {
     // Create active sessions (leave_time == join_time)
     let now = Utc::now();
     let active_sessions = vec![
-        VoiceSessionsModel {
+        VoiceSessionsEntity {
             id: 0,
             user_id: 1001,
             guild_id: 555555,
@@ -84,7 +84,7 @@ async fn test_heartbeat_crash_recovery_with_active_sessions() {
             join_time: now - Duration::hours(2),
             leave_time: now - Duration::hours(2), // Active session
         },
-        VoiceSessionsModel {
+        VoiceSessionsEntity {
             id: 0,
             user_id: 1002,
             guild_id: 555555,
@@ -118,7 +118,7 @@ async fn test_heartbeat_crash_recovery_with_active_sessions() {
     assert_eq!(recovered, 2, "Should recover 2 active sessions");
 
     // Verify sessions were closed with heartbeat timestamp
-    let sessions: Vec<VoiceSessionsModel> = db
+    let sessions: Vec<VoiceSessionsEntity> = db
         .voice_sessions
         .select_all()
         .await
@@ -157,7 +157,7 @@ async fn test_heartbeat_crash_recovery_no_heartbeat() {
 
     // Create active sessions
     let now = Utc::now();
-    let session = VoiceSessionsModel {
+    let session = VoiceSessionsEntity {
         id: 0,
         user_id: 1001,
         guild_id: 555555,
@@ -182,7 +182,7 @@ async fn test_heartbeat_crash_recovery_no_heartbeat() {
     );
 
     // Verify session is still active (not closed)
-    let sessions: Vec<VoiceSessionsModel> = db
+    let sessions: Vec<VoiceSessionsEntity> = db
         .voice_sessions
         .select_all()
         .await
@@ -208,7 +208,7 @@ async fn test_find_active_sessions() {
 
     // Insert a mix of active and completed sessions
     let sessions = vec![
-        VoiceSessionsModel {
+        VoiceSessionsEntity {
             id: 0,
             user_id: 1001,
             guild_id: 555555,
@@ -216,7 +216,7 @@ async fn test_find_active_sessions() {
             join_time: now - Duration::hours(2),
             leave_time: now - Duration::hours(2), // Active
         },
-        VoiceSessionsModel {
+        VoiceSessionsEntity {
             id: 0,
             user_id: 1002,
             guild_id: 555555,
@@ -224,7 +224,7 @@ async fn test_find_active_sessions() {
             join_time: now - Duration::hours(3),
             leave_time: now - Duration::hours(1), // Completed (2 hours)
         },
-        VoiceSessionsModel {
+        VoiceSessionsEntity {
             id: 0,
             user_id: 1003,
             guild_id: 555555,
@@ -269,7 +269,7 @@ async fn test_update_session_leave_time() {
     let join_time = now - Duration::hours(1);
 
     // Insert an active session
-    let session = VoiceSessionsModel {
+    let session = VoiceSessionsEntity {
         id: 0,
         user_id: 1001,
         guild_id: 555555,
@@ -284,7 +284,7 @@ async fn test_update_session_leave_time() {
         .expect("Failed to insert session");
 
     // Verify it's active
-    let sessions: Vec<VoiceSessionsModel> = db
+    let sessions: Vec<VoiceSessionsEntity> = db
         .voice_sessions
         .select_all()
         .await
@@ -299,7 +299,7 @@ async fn test_update_session_leave_time() {
         .expect("Failed to update leave time");
 
     // Verify it was updated
-    let sessions: Vec<VoiceSessionsModel> = db
+    let sessions: Vec<VoiceSessionsEntity> = db
         .voice_sessions
         .select_all()
         .await

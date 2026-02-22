@@ -1,5 +1,6 @@
 [package]
 name = "pwr-bot"
+default-run = "pwr-bot"
 
 
 version = "0.2.12"

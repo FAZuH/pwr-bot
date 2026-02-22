@@ -13,57 +13,58 @@
   }
 }}%%
 graph TB
-    subgraph ViewLifecycle["Interactive View Lifecycle"]
+    subgraph ViewEngineLoop["View Engine Event Loop (tokio::select!)"]
         direction TB
         
-        Init["Initialize View"]
-        Create["Create Components<br/>+ Register Actions"]
-        Render["Render<br/>Send/Edit Message"]
-        Listen["Listen for Interactions"]
-        Collect["Collect Interaction"]
-        Resolve["Resolve Action"]
-        Handle["Handle Action"]
-        Update["Update State"]
-        Stop["Stop / Exit"]
-        Timeout["Timeout"]
-
-        Init --> Create
-        Create --> Render
-        Render --> Listen
-        Listen --> Collect
-        Collect -->|received| Resolve
-        Collect -->|timeout| Timeout
-        Resolve --> Handle
-        Handle -->|Some action| Update
-        Handle -->|None| Stop
-        Update --> Create
-        Timeout -->|on_timeout| Render
-        Render -.->|final| Stop
-    end
-    
-    subgraph Core["View Core"]
-        direction TB
-        ViewCore["ViewCore"]
-        ViewContext["ViewContext"]
-        ActionRegistry["ActionRegistry"]
+        Start["Start ViewEngine"]
+        Render["Render View<br/>(handler.render)"]
+        Select["tokio::select!"]
         
-        ViewCore --> ViewContext
-        ViewCore --> ActionRegistry
-    end
-    
-    subgraph Traits["View Traits"]
-        direction TB
-        View["View"]
-        ResponseView["ResponseView"]
-        InteractiveView["InteractiveView"]
+        Component["Component Interaction<br/>(Discord UI)"]
+        Async["Async Event<br/>(ctx.spawn / tx.send)"]
+        Modal["Modal Submission"]
+        Timeout["Timeout Event"]
         
-        View --> ResponseView
-        View --> InteractiveView
+        TriggerNode["Map to Trigger<br/>+ Action Enum"]
+        Handle["ViewHandler::handle"]
+        
+        CmdRender["ViewCommand::Render"]
+        CmdContinue["ViewCommand::Continue / AlreadyResponded"]
+        CmdExit["ViewCommand::Exit"]
+        
+        Start -->|engine.run| Render
+        Render -->|loop| Select
+        
+        Select -->|ComponentInteraction| Component
+        Select -->|mpsc::recv| Async
+        Select -->|ModalSubmit| Modal
+        Select -->|Collector Timeout| Timeout
+        
+        Component & Async & Modal & Timeout -->|Trigger::from| TriggerNode
+        TriggerNode -->|handler.handle| Handle
+        
+        Handle -->|return| CmdRender
+        Handle -->|return| CmdContinue
+        Handle -->|return| CmdExit
+        
+        CmdRender -->|re-render| Render
+        CmdContinue -->|next event| Select
+        CmdExit -->|break| Stop[Stop Engine]
     end
     
-    Core -->|powers| ViewLifecycle
-    Traits -->|implements| ViewLifecycle
+    subgraph Mapping["Context & Delegation"]
+        direction TB
+        ParentCtx["Parent ViewContext"]
+        Map["ctx.map(Wrap)"]
+        ChildCtx["Child ViewContext"]
+        
+        ParentCtx --> Map
+        Map --> ChildCtx
+    end
     
-    style Init fill:#2d2d2d,stroke:#ffffff,stroke-width:2px
+    Mapping -.->|provides| Handle
+    
+    style Start fill:#2d2d2d,stroke:#ffffff,stroke-width:2px
     style Stop fill:#2d2d2d,stroke:#ffffff,stroke-width:2px
-    style Create fill:#1e1e1e,stroke:#ffffff
+    style Render fill:#1e1e1e,stroke:#ffffff
+    style Select fill:#1e1e1e,stroke:#ffffff

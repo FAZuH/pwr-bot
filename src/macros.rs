@@ -139,66 +139,6 @@ macro_rules! controller {
     };
 }
 
-/// Generates a struct with an embedded [`ViewCore`] and implements the [`View`] trait.
-///
-/// # Syntax
-///
-/// ```rust,ignore
-/// view_core! {
-///     timeout = Duration::from_secs(120),
-///     /// Optional doc comment
-///     pub struct MyView<'a, MyAction> {
-///         pub field: FieldType,
-///     }
-/// }
-/// ```
-///
-/// # Generated Code
-///
-/// - A struct `MyView<'a>` with a `core: ViewCore<'a, MyAction>` field plus your fields
-/// - `impl View<'a, MyAction> for MyView<'a>` with `core()`, `core_mut()`, `create_core()`
-///
-/// # Notes
-///
-/// - The lifetime parameter must be named (e.g. `'a`)
-/// - `timeout` sets the interaction collector timeout via [`ViewCore::new`]
-/// - Access the core via `self.core()` / `self.core_mut()` from trait methods
-#[macro_export]
-macro_rules! view_core {
-    (
-        timeout = $timeout:expr,
-        $(#[$meta:meta])*
-        $vis:vis struct $name:ident<$lt:lifetime, $action:ty> {
-            $(
-                $(#[$field_meta:meta])*
-                $field_vis:vis $field:ident : $field_type:ty
-            ),* $(,)?
-        }
-    ) => {
-        $(#[$meta])*
-        $vis struct $name<$lt> {
-            #[allow(dead_code)]
-            core: $crate::bot::views::ViewCore<$lt, $action>,
-            $(
-                $(#[$field_meta])*
-                $field_vis $field: $field_type,
-            )*
-        }
-
-        impl<$lt> $crate::bot::views::View<$lt, $action> for $name<$lt> {
-            fn core(&self) -> &$crate::bot::views::ViewCore<$lt, $action> {
-                &self.core
-            }
-            fn core_mut(&mut self) -> &mut $crate::bot::views::ViewCore<$lt, $action> {
-                &mut self.core
-            }
-            fn create_core(poise_ctx: &$lt $crate::bot::commands::Context<$lt>) -> $crate::bot::views::ViewCore<$lt, $action> {
-                $crate::bot::views::ViewCore::new(poise_ctx, $timeout)
-            }
-        }
-    };
-}
-
 /// Generates an enum that implements the `Action` trait for use in interactive Discord views.
 ///
 /// # Syntax
@@ -243,7 +183,7 @@ macro_rules! action_enum {
                 match self {
                     $(
                         action_enum!(@match_pattern inner, Self::$variant $(, tuple: $($tuple_field)*)? $(, struct: $($struct_field)*)?) => {
-                            action_enum!(@label inner, $variant $(, literal: $label)? $(, tuple: $($tuple_field)*)?)
+                            action_enum!(@label $variant $(, literal: $label)? $(, tuple: $($tuple_field)*)?)
                         },
                     )*
                 }
@@ -253,14 +193,14 @@ macro_rules! action_enum {
 
     // Pattern helpers - now take $inner:ident to bind the captured value
     (@match_pattern $inner:ident, $path:path) => { $path };
-    (@match_pattern $inner:ident, $path:path, tuple: $($field:tt)+) => { $path($inner, ..) };
+    (@match_pattern $inner:ident, $path:path, tuple: $($field:tt)+) => { $path(..) };
     (@match_pattern $inner:ident, $path:path, struct: $($field:tt)+) => { $path { .. } };
 
     // Label helpers
-    (@label $inner:ident, $variant:ident) => { stringify!($variant) };
-    (@label $inner:ident, $variant:ident, literal: $label:literal) => { $label };
-    (@label $inner:ident, $variant:ident, literal: $label:literal, tuple: $($field:tt)+) => { $label };
-    (@label $inner:ident, $variant:ident, tuple: $($field:tt)+) => { $inner.label() };
+    (@label $variant:ident) => { stringify!($variant) };
+    (@label $variant:ident, tuple: $($field:tt)+) => { stringify!($variant) };
+    (@label $variant:ident, literal: $label:literal) => { $label };
+    (@label $variant:ident, literal: $label:literal, tuple: $($field:tt)+) => { $label };
 }
 
 /// Extends an existing Action enum with additional variants.

@@ -10,9 +10,9 @@ use contribution_grid::builtins::Strategy;
 use contribution_grid::builtins::Theme;
 use log::trace;
 use serenity::all::ButtonStyle;
-use serenity::all::ComponentInteraction;
 use serenity::all::CreateActionRow;
 use serenity::all::CreateAttachment;
+use serenity::all::CreateButton;
 use serenity::all::CreateComponent;
 use serenity::all::CreateContainer;
 use serenity::all::CreateContainerComponent;
@@ -34,16 +34,19 @@ use crate::bot::controller::Coordinator;
 use crate::bot::error::BotError;
 use crate::bot::navigation::NavigationResult;
 use crate::bot::utils::format_duration;
-use crate::bot::views::InteractiveView;
-use crate::bot::views::RenderExt;
+use crate::bot::views::Action;
+use crate::bot::views::ActionRegistry;
 use crate::bot::views::ResponseKind;
-use crate::bot::views::ResponseView;
-use crate::bot::views::View;
+use crate::bot::views::Trigger;
+use crate::bot::views::ViewCommand;
+use crate::bot::views::ViewContext;
+use crate::bot::views::ViewEngine;
+use crate::bot::views::ViewHandler;
+use crate::bot::views::ViewRender;
+use crate::entity::GuildDailyStats;
+use crate::entity::VoiceDailyActivity;
+use crate::entity::VoiceSessionsEntity;
 use crate::error::AppError;
-use crate::model::GuildDailyStats;
-use crate::model::VoiceDailyActivity;
-use crate::model::VoiceSessionsModel;
-use crate::view_core;
 
 /// Display voice activity statistics with contribution graph
 ///
@@ -150,7 +153,7 @@ pub struct VoiceStatsData {
     /// Time range for the data
     pub time_range: VoiceStatsTimeRange,
     /// Raw sessions for line chart generation
-    pub raw_sessions: Vec<VoiceSessionsModel>,
+    pub raw_sessions: Vec<VoiceSessionsEntity>,
 }
 
 impl VoiceStatsData {
@@ -235,28 +238,53 @@ impl VoiceStatsData {
     }
 }
 
-view_core! {
-    timeout = Duration::from_secs(120),
-    /// View for displaying voice activity stats.
-    pub struct VoiceStatsView<'a, VoiceStatsAction> {
-        pub data: VoiceStatsData,
-        image_bytes: Option<Vec<u8>>,
-    }
+pub struct VoiceStatsHandler {
+    pub data: VoiceStatsData,
+    pub image_bytes: Option<Vec<u8>>,
+    pub service: std::sync::Arc<crate::service::voice_tracking_service::VoiceTrackingService>,
+    pub guild_id: u64,
+    pub original_target_user: Option<User>,
 }
 
-impl<'a> VoiceStatsView<'a> {
-    /// Creates a new stats view.
-    pub fn new(ctx: &'a Context<'a>, data: VoiceStatsData) -> Self {
-        Self {
-            data,
-            image_bytes: None,
-            core: Self::create_core(ctx),
-        }
-    }
+impl VoiceStatsHandler {
+    pub async fn refetch_data(&mut self) -> Result<(), Error> {
+        let (since, until) = self.data.time_range.to_range();
 
-    /// Sets the generated image bytes.
-    pub fn set_image_bytes(&mut self, bytes: Vec<u8>) {
-        self.image_bytes = Some(bytes);
+        self.data.raw_sessions = if self.data.time_range != VoiceStatsTimeRange::Yearly {
+            self.service
+                .get_sessions_in_range(
+                    self.guild_id,
+                    self.data.user.as_ref().map(|u| u.id.get()),
+                    &since,
+                    &until,
+                )
+                .await
+                .map_err(Error::from)?
+        } else {
+            vec![]
+        };
+
+        if let Some(ref target_user) = self.data.user {
+            self.data.user_activity = self
+                .service
+                .get_user_daily_activity(target_user.id.get(), self.guild_id, &since, &until)
+                .await
+                .map_err(Error::from)?;
+        } else {
+            self.data.guild_stats = self
+                .service
+                .get_guild_daily_stats(self.guild_id, &since, &until, self.data.stat_type)
+                .await
+                .map_err(Error::from)?;
+        }
+
+        if let Ok(bytes) = self.generate_image() {
+            self.image_bytes = Some(bytes);
+        } else {
+            self.image_bytes = None;
+        }
+
+        Ok(())
     }
 
     /// Generates the contribution grid image.
@@ -428,8 +456,82 @@ impl<'a> VoiceStatsView<'a> {
     }
 }
 
-impl<'a> ResponseView<'a> for VoiceStatsView<'a> {
-    fn create_response<'b>(&mut self) -> ResponseKind<'b> {
+#[async_trait::async_trait]
+impl ViewHandler<VoiceStatsAction> for VoiceStatsHandler {
+    async fn handle(
+        &mut self,
+        action: VoiceStatsAction,
+        _trigger: Trigger<'_>,
+        _ctx: &ViewContext<'_, VoiceStatsAction>,
+    ) -> Result<ViewCommand, Error> {
+        use VoiceStatsAction::*;
+
+        let mut changed = false;
+
+        match action {
+            TimeYearly => {
+                self.data.time_range = VoiceStatsTimeRange::Yearly;
+                changed = true;
+            }
+            TimeMonthly => {
+                self.data.time_range = VoiceStatsTimeRange::Monthly;
+                changed = true;
+            }
+            TimeWeekly => {
+                self.data.time_range = VoiceStatsTimeRange::Weekly;
+                changed = true;
+            }
+            TimeHourly => {
+                self.data.time_range = VoiceStatsTimeRange::Hourly;
+                changed = true;
+            }
+
+            StatUniqueUsers => {
+                self.data.stat_type = GuildStatType::ActiveUserCount;
+                changed = true;
+            }
+            StatTotalTime => {
+                self.data.stat_type = GuildStatType::TotalTime;
+                changed = true;
+            }
+            StatAverageTime => {
+                self.data.stat_type = GuildStatType::AverageTime;
+                changed = true;
+            }
+
+            ToggleDataMode => {
+                if self.data.is_user_stats() {
+                    self.data.user = None;
+                } else {
+                    self.data.user = self.original_target_user.clone();
+                }
+                changed = true;
+            }
+            SelectUser => {
+                if let Trigger::Component(interaction) = _trigger
+                    && let serenity::all::ComponentInteractionDataKind::UserSelect { values } =
+                        &interaction.data.kind
+                    && let Some(user_id) = values.first()
+                {
+                    // Fetch user object
+                    if let Ok(user) = user_id.to_user(_ctx.poise.http()).await {
+                        self.data.user = Some(user);
+                        changed = true;
+                    }
+                }
+            }
+        }
+
+        if changed {
+            self.refetch_data().await?;
+        }
+
+        Ok(ViewCommand::Render)
+    }
+}
+
+impl ViewRender<VoiceStatsAction> for VoiceStatsHandler {
+    fn render(&self, registry: &mut ActionRegistry<VoiceStatsAction>) -> ResponseKind<'_> {
         use VoiceStatsAction::*;
 
         let mut container_components = vec![CreateContainerComponent::TextDisplay(
@@ -464,9 +566,7 @@ impl<'a> ResponseView<'a> for VoiceStatsView<'a> {
             "Show stats for users".to_string()
         };
 
-        let toggle_button = self
-            .register(ToggleDataMode)
-            .as_button()
+        let toggle_button = CreateButton::new(registry.register(ToggleDataMode))
             .label(toggle_label)
             .style(ButtonStyle::Primary);
 
@@ -480,34 +580,34 @@ impl<'a> ResponseView<'a> for VoiceStatsView<'a> {
 
         // 1. Time Range Row
         let time_buttons = vec![
-            self.register(TimeYearly).as_button().style(
-                if self.data.time_range == VoiceStatsTimeRange::Yearly {
+            CreateButton::new(registry.register(TimeYearly))
+                .label(TimeYearly.label())
+                .style(if self.data.time_range == VoiceStatsTimeRange::Yearly {
                     ButtonStyle::Primary
                 } else {
                     ButtonStyle::Secondary
-                },
-            ),
-            self.register(TimeMonthly).as_button().style(
-                if self.data.time_range == VoiceStatsTimeRange::Monthly {
+                }),
+            CreateButton::new(registry.register(TimeMonthly))
+                .label(TimeMonthly.label())
+                .style(if self.data.time_range == VoiceStatsTimeRange::Monthly {
                     ButtonStyle::Primary
                 } else {
                     ButtonStyle::Secondary
-                },
-            ),
-            self.register(TimeWeekly).as_button().style(
-                if self.data.time_range == VoiceStatsTimeRange::Weekly {
+                }),
+            CreateButton::new(registry.register(TimeWeekly))
+                .label(TimeWeekly.label())
+                .style(if self.data.time_range == VoiceStatsTimeRange::Weekly {
                     ButtonStyle::Primary
                 } else {
                     ButtonStyle::Secondary
-                },
-            ),
-            self.register(TimeHourly).as_button().style(
-                if self.data.time_range == VoiceStatsTimeRange::Hourly {
+                }),
+            CreateButton::new(registry.register(TimeHourly))
+                .label(TimeHourly.label())
+                .style(if self.data.time_range == VoiceStatsTimeRange::Hourly {
                     ButtonStyle::Primary
                 } else {
                     ButtonStyle::Secondary
-                },
-            ),
+                }),
         ];
         components.push(CreateComponent::ActionRow(CreateActionRow::Buttons(
             time_buttons.into(),
@@ -516,28 +616,34 @@ impl<'a> ResponseView<'a> for VoiceStatsView<'a> {
         // 2. Aggregation Row (Only for Guild)
         let mut stat_buttons = vec![];
         if !self.data.is_user_stats() {
-            stat_buttons.push(self.register(StatUniqueUsers).as_button().style(
-                if self.data.stat_type == GuildStatType::ActiveUserCount {
+            stat_buttons.push(
+                CreateButton::new(registry.register(StatUniqueUsers))
+                    .label(StatUniqueUsers.label())
+                    .style(if self.data.stat_type == GuildStatType::ActiveUserCount {
+                        ButtonStyle::Primary
+                    } else {
+                        ButtonStyle::Secondary
+                    }),
+            );
+        }
+        stat_buttons.push(
+            CreateButton::new(registry.register(StatTotalTime))
+                .label(StatTotalTime.label())
+                .style(if self.data.stat_type == GuildStatType::TotalTime {
                     ButtonStyle::Primary
                 } else {
                     ButtonStyle::Secondary
-                },
-            ));
-        }
-        stat_buttons.push(self.register(StatTotalTime).as_button().style(
-            if self.data.stat_type == GuildStatType::TotalTime {
-                ButtonStyle::Primary
-            } else {
-                ButtonStyle::Secondary
-            },
-        ));
-        stat_buttons.push(self.register(StatAverageTime).as_button().style(
-            if self.data.stat_type == GuildStatType::AverageTime {
-                ButtonStyle::Primary
-            } else {
-                ButtonStyle::Secondary
-            },
-        ));
+                }),
+        );
+        stat_buttons.push(
+            CreateButton::new(registry.register(StatAverageTime))
+                .label(StatAverageTime.label())
+                .style(if self.data.stat_type == GuildStatType::AverageTime {
+                    ButtonStyle::Primary
+                } else {
+                    ButtonStyle::Secondary
+                }),
+        );
         components.push(CreateComponent::ActionRow(CreateActionRow::Buttons(
             stat_buttons.into(),
         )));
@@ -549,9 +655,10 @@ impl<'a> ResponseView<'a> for VoiceStatsView<'a> {
                 .user
                 .clone()
                 .map(|u| std::borrow::Cow::Owned(vec![u.id]));
-            let user_select = self
-                .register(SelectUser)
-                .as_select(serenity::all::CreateSelectMenuKind::User { default_users });
+            let user_select = serenity::all::CreateSelectMenu::new(
+                registry.register(SelectUser),
+                serenity::all::CreateSelectMenuKind::User { default_users },
+            );
             components.push(CreateComponent::ActionRow(CreateActionRow::SelectMenu(
                 user_select,
             )));
@@ -560,9 +667,12 @@ impl<'a> ResponseView<'a> for VoiceStatsView<'a> {
         components.into()
     }
 
-    fn create_reply<'b>(&mut self) -> poise::CreateReply<'b> {
-        let response = self.create_response();
-        let mut reply: poise::CreateReply<'b> = response.into();
+    fn create_reply(
+        &self,
+        registry: &mut ActionRegistry<VoiceStatsAction>,
+    ) -> poise::CreateReply<'_> {
+        let response = self.render(registry);
+        let mut reply: poise::CreateReply<'_> = response.into();
 
         if let Some(ref bytes) = self.image_bytes {
             let attachment = CreateAttachment::bytes(bytes.clone(), VOICE_STATS_IMAGE_FILENAME);
@@ -570,58 +680,6 @@ impl<'a> ResponseView<'a> for VoiceStatsView<'a> {
         }
 
         reply
-    }
-}
-
-#[async_trait::async_trait]
-impl<'a> InteractiveView<'a, VoiceStatsAction> for VoiceStatsView<'a> {
-    async fn handle(
-        &mut self,
-        action: &VoiceStatsAction,
-        _interaction: &ComponentInteraction,
-    ) -> Option<VoiceStatsAction> {
-        use VoiceStatsAction::*;
-
-        match action {
-            TimeYearly => {
-                self.data.time_range = VoiceStatsTimeRange::Yearly;
-                Some(action.clone())
-            }
-            TimeMonthly => {
-                self.data.time_range = VoiceStatsTimeRange::Monthly;
-                Some(action.clone())
-            }
-            TimeWeekly => {
-                self.data.time_range = VoiceStatsTimeRange::Weekly;
-                Some(action.clone())
-            }
-            TimeHourly => {
-                self.data.time_range = VoiceStatsTimeRange::Hourly;
-                Some(action.clone())
-            }
-
-            StatUniqueUsers => {
-                self.data.stat_type = GuildStatType::ActiveUserCount;
-                Some(action.clone())
-            }
-            StatTotalTime => {
-                self.data.stat_type = GuildStatType::TotalTime;
-                Some(action.clone())
-            }
-            StatAverageTime => {
-                self.data.stat_type = GuildStatType::AverageTime;
-                Some(action.clone())
-            }
-
-            ToggleDataMode => {
-                // Controller will handle this by returning from wait loop
-                Some(action.clone())
-            }
-            SelectUser => {
-                // Selected user handled by controller from interaction directly
-                Some(action.clone())
-            }
-        }
     }
 }
 
@@ -720,14 +778,22 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceStatsController<'a> {
         &mut self,
         coordinator: &mut Coordinator<'_, S>,
     ) -> Result<NavigationResult, Error> {
-        let controller_start = Instant::now();
-
         let ctx = *coordinator.context();
         ctx.defer().await?;
 
+        let controller_start = Instant::now();
+
         // Fetch initial data
         let data = self.fetch_data(&ctx).await?;
-        let mut view = VoiceStatsView::new(&ctx, data);
+        let guild_id = ctx.guild_id().map(|id| id.get()).unwrap_or(0);
+
+        let mut view = VoiceStatsHandler {
+            data,
+            image_bytes: None,
+            service: ctx.data().service.voice_tracking.clone(),
+            guild_id,
+            original_target_user: self.target_user.clone(),
+        };
 
         // Generate and send the image
         if !view.data.user_activity.is_empty()
@@ -735,67 +801,20 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceStatsController<'a> {
             || !view.data.raw_sessions.is_empty()
         {
             let bytes = view.generate_image().map_err(AppError::internal_with_ref)?;
-            view.set_image_bytes(bytes);
+            view.image_bytes = Some(bytes);
         }
 
-        view.render().await?;
+        let mut engine = ViewEngine::new(&ctx, view, Duration::from_secs(120));
 
         trace!(
             "stats_controller_initial_response {} ms",
             controller_start.elapsed().as_millis()
         );
 
-        while let Some((action, interaction)) = view.listen_once().await? {
-            // Handle updates based on action
-            match action {
-                VoiceStatsAction::ToggleDataMode => {
-                    if self.target_user.is_some() {
-                        self.target_user = None;
-                    } else {
-                        self.target_user = Some(ctx.author().clone());
-                        if self.stat_type == GuildStatType::ActiveUserCount {
-                            self.stat_type = GuildStatType::TotalTime;
-                        }
-                    }
-                }
-                VoiceStatsAction::SelectUser => {
-                    if let serenity::all::ComponentInteractionDataKind::UserSelect { values } =
-                        &interaction.data.kind
-                        && let Some(_user_id) = values.first()
-                        && let Ok(user) = _user_id.to_user(ctx.http()).await
-                    {
-                        self.target_user = Some(user);
-                    }
-                }
-                _ => {
-                    // Update controller state from view
-                    self.time_range = view.data.time_range;
-                    self.stat_type = view.data.stat_type;
-                }
-            }
+        engine
+            .run(|_action| Box::pin(async move { ViewCommand::Render }))
+            .await?;
 
-            // Re-fetch data with new parameters
-            let new_data = self.fetch_data(&ctx).await?;
-            view.data = new_data;
-
-            // Regenerate image
-            if !view.data.user_activity.is_empty()
-                || !view.data.guild_stats.is_empty()
-                || !view.data.raw_sessions.is_empty()
-            {
-                let bytes = view.generate_image().map_err(AppError::internal_with_ref)?;
-                view.set_image_bytes(bytes);
-            } else {
-                view.image_bytes = None;
-            }
-
-            view.render().await?;
-        }
-
-        trace!(
-            "stats_controller_total {} ms",
-            controller_start.elapsed().as_millis()
-        );
         Ok(NavigationResult::Exit)
     }
 }

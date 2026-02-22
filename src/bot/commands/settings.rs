@@ -5,7 +5,6 @@ use std::slice::from_ref;
 use std::time::Duration;
 
 use serenity::all::ButtonStyle;
-use serenity::all::ComponentInteraction;
 use serenity::all::ComponentInteractionDataKind;
 use serenity::all::CreateActionRow;
 use serenity::all::CreateButton;
@@ -24,20 +23,24 @@ use crate::bot::commands::Error;
 use crate::bot::commands::about::AboutController;
 use crate::bot::commands::feed::settings::FeedSettingsController;
 use crate::bot::commands::voice::settings::VoiceSettingsController;
+use crate::bot::commands::welcome::WelcomeSettingsController;
 use crate::bot::controller::Controller;
 use crate::bot::controller::Coordinator;
 use crate::bot::error::BotError;
 use crate::bot::navigation::NavigationResult;
-use crate::bot::views::InteractiveView;
-use crate::bot::views::RenderExt;
+use crate::bot::views::Action;
+use crate::bot::views::ActionRegistry;
 use crate::bot::views::ResponseKind;
-use crate::bot::views::ResponseView;
-use crate::bot::views::View;
+use crate::bot::views::Trigger;
+use crate::bot::views::ViewCommand;
+use crate::bot::views::ViewContext;
+use crate::bot::views::ViewEngine;
+use crate::bot::views::ViewHandler;
+use crate::bot::views::ViewRender;
 use crate::controller;
+use crate::entity::ServerSettings;
+use crate::entity::ServerSettingsEntity;
 use crate::error::AppError;
-use crate::model::ServerSettings;
-use crate::model::ServerSettingsModel;
-use crate::view_core;
 
 /// Opens main server settings
 ///
@@ -66,43 +69,62 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for SettingsMainController<'a> 
             .get_server_settings(guild_id.into())
             .await?;
 
-        let settings = ServerSettingsModel {
+        let settings = ServerSettingsEntity {
             guild_id: guild_id.into(),
             settings: sqlx::types::Json(settings),
         };
 
-        let mut view = SettingsMainView::new(&ctx, settings);
-        view.render().await?;
+        let view = SettingsMainHandler {
+            state: SettingsMainState::FeatureSettings,
+            settings,
+            is_settings_modified: false,
+        };
 
-        while let Some((action, _)) = view.listen_once().await? {
-            view.render().await?;
-            if view.is_settings_modified {
-                let guild_id = view.settings.guild_id;
-                let settings = view.settings.settings.0.clone();
-                ctx.data()
-                    .service
-                    .feed_subscription
-                    .update_server_settings(guild_id, settings)
-                    .await?;
-                view.done_update_settings()?;
-            }
+        let mut engine = ViewEngine::new(&ctx, view, Duration::from_secs(120));
 
-            // Check for navigation actions
-            match action {
-                SettingsMainAction::Feeds => {
-                    return Ok(NavigationResult::SettingsFeeds);
-                }
-                SettingsMainAction::Voice => {
-                    return Ok(NavigationResult::SettingsVoice);
-                }
-                SettingsMainAction::About => {
-                    return Ok(NavigationResult::SettingsAbout);
-                }
-                _ => {}
-            }
+        let nav = std::sync::Arc::new(std::sync::Mutex::new(NavigationResult::Exit));
+
+        engine
+            .run(|action| {
+                let nav = nav.clone();
+                Box::pin(async move {
+                    match action {
+                        SettingsMainAction::Feeds => {
+                            *nav.lock().unwrap() = NavigationResult::SettingsFeeds;
+                            ViewCommand::Exit
+                        }
+                        SettingsMainAction::Voice => {
+                            *nav.lock().unwrap() = NavigationResult::SettingsVoice;
+                            ViewCommand::Exit
+                        }
+                        SettingsMainAction::About => {
+                            *nav.lock().unwrap() = NavigationResult::SettingsAbout;
+                            ViewCommand::Exit
+                        }
+                        SettingsMainAction::Welcome => {
+                            *nav.lock().unwrap() = NavigationResult::SettingsWelcome;
+                            ViewCommand::Exit
+                        }
+                        _ => ViewCommand::Render,
+                    }
+                })
+            })
+            .await?;
+
+        // Save settings if modified
+        if engine.handler.is_settings_modified {
+            let guild_id = engine.handler.settings.guild_id;
+            let settings_data = engine.handler.settings.settings.0.clone();
+            ctx.data()
+                .service
+                .feed_subscription
+                .update_server_settings(guild_id, settings_data)
+                .await?;
+            engine.handler.done_update_settings()?;
         }
 
-        Ok(NavigationResult::Exit)
+        let res = nav.lock().unwrap().clone();
+        Ok(res)
     }
 }
 /// Tracks the current settings page for navigation.
@@ -114,6 +136,8 @@ pub enum SettingsPage {
     Feeds,
     /// Voice settings page
     Voice,
+    /// Welcome settings page
+    Welcome,
     /// About page
     About,
 }
@@ -151,6 +175,10 @@ pub async fn run_settings(
                 let mut controller = VoiceSettingsController::new(&ctx_clone);
                 controller.run(&mut coordinator).await?
             }
+            SettingsPage::Welcome => {
+                let mut controller = WelcomeSettingsController::new(&ctx_clone);
+                controller.run(&mut coordinator).await?
+            }
             SettingsPage::About => {
                 let mut controller = AboutController::new(&ctx_clone);
                 controller.run(&mut coordinator).await?
@@ -162,6 +190,7 @@ pub async fn run_settings(
             NavigationResult::SettingsMain => current_page = SettingsPage::Main,
             NavigationResult::SettingsFeeds => current_page = SettingsPage::Feeds,
             NavigationResult::SettingsVoice => current_page = SettingsPage::Voice,
+            NavigationResult::SettingsWelcome => current_page = SettingsPage::Welcome,
             NavigationResult::SettingsAbout => current_page = SettingsPage::About,
             NavigationResult::Back => {
                 // Go back to main from any sub-page
@@ -190,26 +219,13 @@ impl SettingsMainState {
     }
 }
 
-view_core! {
-    timeout = Duration::from_secs(120),
-    /// Main settings view for managing server features.
-    pub struct SettingsMainView<'a, SettingsMainAction> {
-        pub state: SettingsMainState,
-        pub settings: ServerSettingsModel,
-        pub is_settings_modified: bool,
-    }
+pub struct SettingsMainHandler {
+    pub state: SettingsMainState,
+    pub settings: ServerSettingsEntity,
+    pub is_settings_modified: bool,
 }
 
-impl<'a> SettingsMainView<'a> {
-    pub fn new(ctx: &'a Context<'a>, settings: ServerSettingsModel) -> Self {
-        Self {
-            core: Self::create_core(ctx),
-            state: SettingsMainState::FeatureSettings,
-            settings,
-            is_settings_modified: false,
-        }
-    }
-
+impl SettingsMainHandler {
     pub fn settings_mut(&mut self) -> &mut ServerSettings {
         &mut self.settings.settings.0
     }
@@ -243,6 +259,11 @@ impl<'a> SettingsMainView<'a> {
                         Some(!self.settings_mut().voice.enabled.unwrap_or(false));
                     self.is_settings_modified = true;
                 }
+                SettingsMainAction::Welcome => {
+                    self.settings_mut().welcome.enabled =
+                        Some(!self.settings_mut().welcome.enabled.unwrap_or(false));
+                    self.is_settings_modified = true;
+                }
                 _ => {}
             }
         }
@@ -256,6 +277,9 @@ impl<'a> SettingsMainView<'a> {
         if self.settings().feeds.enabled.unwrap_or(false) {
             features.push(SettingsMainAction::Feeds);
         }
+        if self.settings().welcome.enabled.unwrap_or(false) {
+            features.push(SettingsMainAction::Welcome);
+        }
         features
     }
 
@@ -267,12 +291,15 @@ impl<'a> SettingsMainView<'a> {
         if !self.settings().feeds.enabled.unwrap_or(false) {
             features.push(SettingsMainAction::Feeds);
         }
+        if !self.settings().welcome.enabled.unwrap_or(false) {
+            features.push(SettingsMainAction::Welcome);
+        }
         features
     }
 }
 
-impl<'a> ResponseView<'a> for SettingsMainView<'a> {
-    fn create_response<'b>(&mut self) -> ResponseKind<'b> {
+impl ViewRender<SettingsMainAction> for SettingsMainHandler {
+    fn render(&self, registry: &mut ActionRegistry<SettingsMainAction>) -> ResponseKind<'_> {
         let text_active_features_description = match &self.state {
             SettingsMainState::FeatureSettings => {
                 "You can **configure** a feature by clicking the buttons below"
@@ -309,10 +336,13 @@ impl<'a> ResponseView<'a> for SettingsMainView<'a> {
                 active_features
                     .into_iter()
                     .map(|feat| {
-                        self.register(feat).as_button().style(match &self.state {
-                            SettingsMainState::FeatureSettings => ButtonStyle::Primary,
-                            SettingsMainState::DeactivateFeatures => ButtonStyle::Danger,
-                        })
+                        let id = registry.register(feat.clone());
+                        CreateButton::new(id)
+                            .label(feat.label())
+                            .style(match &self.state {
+                                SettingsMainState::FeatureSettings => ButtonStyle::Primary,
+                                SettingsMainState::DeactivateFeatures => ButtonStyle::Danger,
+                            })
                     })
                     .collect(),
             )
@@ -321,8 +351,7 @@ impl<'a> ResponseView<'a> for SettingsMainView<'a> {
 
         let button_toggle_state = CreateActionRow::Buttons(
             vec![
-                self.register(SettingsMainAction::ToggleState)
-                    .as_button()
+                CreateButton::new(registry.register(SettingsMainAction::ToggleState))
                     .label(match &self.state {
                         SettingsMainState::FeatureSettings => "Deactivate Features",
                         SettingsMainState::DeactivateFeatures => "Feature Settings",
@@ -358,16 +387,23 @@ impl<'a> ResponseView<'a> for SettingsMainView<'a> {
                 .disabled(true),
             )
         } else {
-            CreateActionRow::SelectMenu(
-                self.register(SettingsMainAction::AddFeatures).as_select(
-                    CreateSelectMenuKind::String {
-                        options: inactive_features
-                            .into_iter()
-                            .map(|feat| self.register(feat).as_select_option())
-                            .collect(),
-                    },
-                ),
-            )
+            CreateActionRow::SelectMenu(CreateSelectMenu::new(
+                registry.register(SettingsMainAction::AddFeatures),
+                CreateSelectMenuKind::String {
+                    options: inactive_features
+                        .into_iter()
+                        .map(|feat| {
+                            let label = feat.label();
+                            let val = match feat {
+                                SettingsMainAction::Feeds => "feeds",
+                                SettingsMainAction::Voice => "voice",
+                                _ => "unknown",
+                            };
+                            CreateSelectMenuOption::new(label, val)
+                        })
+                        .collect(),
+                },
+            ))
         };
         components.push(CreateContainerComponent::ActionRow(selectmenu_add_features));
 
@@ -375,8 +411,8 @@ impl<'a> ResponseView<'a> for SettingsMainView<'a> {
 
         let bottom_buttons = CreateComponent::ActionRow(CreateActionRow::Buttons(
             vec![
-                self.register(SettingsMainAction::About)
-                    .as_button()
+                CreateButton::new(registry.register(SettingsMainAction::About))
+                    .label(SettingsMainAction::About.label())
                     .style(ButtonStyle::Secondary),
             ]
             .into(),
@@ -390,6 +426,7 @@ action_enum! {
     SettingsMainAction {
         Feeds,
         Voice,
+        Welcome,
         AddFeatures,
         ToggleState,
         #[label = "🛈 About"]
@@ -398,40 +435,46 @@ action_enum! {
 }
 
 #[async_trait::async_trait]
-impl<'a> InteractiveView<'a, SettingsMainAction> for SettingsMainView<'a> {
+impl ViewHandler<SettingsMainAction> for SettingsMainHandler {
     async fn handle(
         &mut self,
-        action: &SettingsMainAction,
-        interaction: &ComponentInteraction,
-    ) -> Option<SettingsMainAction> {
+        action: SettingsMainAction,
+        trigger: Trigger<'_>,
+        _ctx: &ViewContext<'_, SettingsMainAction>,
+    ) -> Result<ViewCommand, Error> {
         use SettingsMainAction::*;
         use SettingsMainState::*;
 
         match action {
-            Feeds | Voice => match self.state {
-                FeatureSettings => Some(action.clone()),
+            Feeds | Voice | Welcome => match self.state {
+                FeatureSettings => Ok(ViewCommand::Continue),
                 DeactivateFeatures => {
-                    self.toggle_features(from_ref(action));
-                    Some(ToggleState)
+                    self.toggle_features(from_ref(&action));
+                    Ok(ViewCommand::Render)
                 }
             },
             AddFeatures => {
-                if let ComponentInteractionDataKind::StringSelect { values } =
-                    &interaction.data.kind
+                if let Trigger::Component(interaction) = trigger
+                    && let ComponentInteractionDataKind::StringSelect { values } =
+                        &interaction.data.kind
                 {
-                    let features: Vec<_> = values
-                        .iter()
-                        .filter_map(|val| self.core().registry.get(val).cloned())
-                        .collect();
+                    let mut features = Vec::new();
+                    for val in values {
+                        match val.as_str() {
+                            "feeds" => features.push(Feeds),
+                            "voice" => features.push(Voice),
+                            _ => {}
+                        }
+                    }
                     self.toggle_features(features);
                 }
-                Some(action.clone())
+                Ok(ViewCommand::Render)
             }
             ToggleState => {
                 self.state.toggle();
-                Some(action.clone())
+                Ok(ViewCommand::Render)
             }
-            About => Some(action.clone()),
+            About => Ok(ViewCommand::Continue),
         }
     }
 }

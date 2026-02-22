@@ -3,19 +3,19 @@
 use sqlx::SqlitePool;
 use sqlx::sqlite::SqliteArguments;
 
+use crate::entity::BotMetaEntity;
+use crate::entity::FeedEntity;
+use crate::entity::FeedItemEntity;
+use crate::entity::FeedSubscriptionEntity;
+use crate::entity::FeedWithLatestItemRow;
+use crate::entity::ServerSettingsEntity;
+use crate::entity::SubscriberEntity;
+use crate::entity::SubscriberType;
+use crate::entity::VoiceLeaderboardEntry;
+use crate::entity::VoiceLeaderboardOpt;
+use crate::entity::VoiceLeaderboardOptBuilder;
+use crate::entity::VoiceSessionsEntity;
 use crate::error::AppError;
-use crate::model::BotMetaModel;
-use crate::model::FeedItemModel;
-use crate::model::FeedModel;
-use crate::model::FeedSubscriptionModel;
-use crate::model::FeedWithLatestItemRow;
-use crate::model::ServerSettingsModel;
-use crate::model::SubscriberModel;
-use crate::model::SubscriberType;
-use crate::model::VoiceLeaderboardEntry;
-use crate::model::VoiceLeaderboardOpt;
-use crate::model::VoiceLeaderboardOptBuilder;
-use crate::model::VoiceSessionsModel;
 use crate::repository::error::DatabaseError;
 
 /// Base table struct providing database pool access.
@@ -251,7 +251,7 @@ macro_rules! impl_table {
 
 impl_table!(
     FeedTable,
-    FeedModel,
+    FeedEntity,
     "feeds",
     id,
     i32,
@@ -285,9 +285,9 @@ impl_table!(
 );
 
 impl FeedTable {
-    pub async fn select_all_by_tag(&self, tag: &str) -> Result<Vec<FeedModel>, DatabaseError> {
+    pub async fn select_all_by_tag(&self, tag: &str) -> Result<Vec<FeedEntity>, DatabaseError> {
         Ok(
-            sqlx::query_as::<_, FeedModel>("SELECT * FROM feeds WHERE tags LIKE ?")
+            sqlx::query_as::<_, FeedEntity>("SELECT * FROM feeds WHERE tags LIKE ?")
                 .bind(format!("%{}%", tag))
                 .fetch_all(&self.base.pool)
                 .await?,
@@ -298,8 +298,8 @@ impl FeedTable {
         &self,
         platform_id: &str,
         source_id: &str,
-    ) -> Result<Option<FeedModel>, DatabaseError> {
-        Ok(sqlx::query_as::<_, FeedModel>(
+    ) -> Result<Option<FeedEntity>, DatabaseError> {
+        Ok(sqlx::query_as::<_, FeedEntity>(
             "SELECT * FROM feeds WHERE platform_id = ? AND source_id = ?",
         )
         .bind(platform_id)
@@ -313,10 +313,10 @@ impl FeedTable {
         subscriber_id: &i32,
         name_search: &str,
         limit: impl Into<Option<u32>>,
-    ) -> Result<Vec<FeedModel>, DatabaseError> {
+    ) -> Result<Vec<FeedEntity>, DatabaseError> {
         let limit = limit.into().unwrap_or(25);
         let search_pattern = format!("%{}%", name_search.to_lowercase());
-        Ok(sqlx::query_as::<_, FeedModel>(
+        Ok(sqlx::query_as::<_, FeedEntity>(
             r#"
                 SELECT * FROM feeds 
                 WHERE LOWER(name) LIKE ? 
@@ -343,7 +343,7 @@ impl FeedTable {
 
 impl_table!(
     FeedItemTable,
-    FeedItemModel,
+    FeedItemEntity,
     "feed_items",
     id,
     i32,
@@ -369,8 +369,8 @@ impl FeedItemTable {
     pub async fn select_latest_by_feed_id(
         &self,
         feed_id: i32,
-    ) -> Result<Option<FeedItemModel>, DatabaseError> {
-        Ok(sqlx::query_as::<_, FeedItemModel>(
+    ) -> Result<Option<FeedItemEntity>, DatabaseError> {
+        Ok(sqlx::query_as::<_, FeedItemEntity>(
             "SELECT * FROM feed_items WHERE feed_id = ? ORDER BY published DESC LIMIT 1",
         )
         .bind(feed_id)
@@ -382,8 +382,8 @@ impl FeedItemTable {
     pub async fn select_all_by_feed_id(
         &self,
         feed_id: i32,
-    ) -> Result<Vec<FeedItemModel>, DatabaseError> {
-        Ok(sqlx::query_as::<_, FeedItemModel>(
+    ) -> Result<Vec<FeedItemEntity>, DatabaseError> {
+        Ok(sqlx::query_as::<_, FeedItemEntity>(
             "SELECT * FROM feed_items WHERE feed_id = ? ORDER BY published DESC",
         )
         .bind(feed_id)
@@ -407,7 +407,7 @@ impl FeedItemTable {
 
 impl_table!(
     SubscriberTable,
-    SubscriberModel,
+    SubscriberEntity,
     "subscribers",
     id,
     i32,
@@ -429,8 +429,8 @@ impl SubscriberTable {
         &self,
         r#type: SubscriberType,
         feed_id: i32,
-    ) -> Result<Vec<SubscriberModel>, DatabaseError> {
-        Ok(sqlx::query_as::<_, SubscriberModel>(
+    ) -> Result<Vec<SubscriberEntity>, DatabaseError> {
+        Ok(sqlx::query_as::<_, SubscriberEntity>(
             r#"
             SELECT * FROM subscribers
             WHERE type = ?
@@ -451,8 +451,8 @@ impl SubscriberTable {
         &self,
         r#type: &SubscriberType,
         target_id: &str,
-    ) -> Result<Option<SubscriberModel>, DatabaseError> {
-        Ok(sqlx::query_as::<_, SubscriberModel>(
+    ) -> Result<Option<SubscriberEntity>, DatabaseError> {
+        Ok(sqlx::query_as::<_, SubscriberEntity>(
             "SELECT * FROM subscribers WHERE type = ? AND target_id = ? LIMIT 1",
         )
         .bind(r#type)
@@ -468,7 +468,7 @@ impl SubscriberTable {
 
 impl_table!(
     FeedSubscriptionTable,
-    FeedSubscriptionModel,
+    FeedSubscriptionEntity,
     "feed_subscriptions",
     id,
     i32,
@@ -496,8 +496,8 @@ impl FeedSubscriptionTable {
     pub async fn select_all_by_feed_id(
         &self,
         feed_id: i32,
-    ) -> Result<Vec<FeedSubscriptionModel>, DatabaseError> {
-        Ok(sqlx::query_as::<_, FeedSubscriptionModel>(
+    ) -> Result<Vec<FeedSubscriptionEntity>, DatabaseError> {
+        Ok(sqlx::query_as::<_, FeedSubscriptionEntity>(
             "SELECT * FROM feed_subscriptions WHERE feed_id = ?",
         )
         .bind(feed_id)
@@ -509,8 +509,8 @@ impl FeedSubscriptionTable {
     pub async fn select_all_by_subscriber_id(
         &self,
         subscriber_id: i32,
-    ) -> Result<Vec<FeedSubscriptionModel>, DatabaseError> {
-        Ok(sqlx::query_as::<_, FeedSubscriptionModel>(
+    ) -> Result<Vec<FeedSubscriptionEntity>, DatabaseError> {
+        Ok(sqlx::query_as::<_, FeedSubscriptionEntity>(
             "SELECT * FROM feed_subscriptions WHERE subscriber_id = ?",
         )
         .bind(subscriber_id)
@@ -538,14 +538,14 @@ impl FeedSubscriptionTable {
         subscriber_id: i32,
         page: impl Into<u32>,
         per_page: impl Into<u32>,
-    ) -> Result<Vec<FeedSubscriptionModel>, DatabaseError> {
+    ) -> Result<Vec<FeedSubscriptionEntity>, DatabaseError> {
         let page: u32 = page.into();
         let per_page: u32 = per_page.into();
 
         let limit = per_page;
         let offset = per_page * page;
 
-        Ok(sqlx::query_as::<_, FeedSubscriptionModel>(
+        Ok(sqlx::query_as::<_, FeedSubscriptionEntity>(
             "SELECT * FROM feed_subscriptions WHERE subscriber_id = ? ORDER BY id LIMIT ? OFFSET ?",
         )
         .bind(subscriber_id)
@@ -647,7 +647,7 @@ impl FeedSubscriptionTable {
 
 impl_table!(
     ServerSettingsTable,
-    ServerSettingsModel,
+    ServerSettingsEntity,
     "server_settings",
     guild_id,
     u64,
@@ -668,7 +668,7 @@ impl_table!(
 
 impl_table!(
     VoiceSessionsTable,
-    VoiceSessionsModel,
+    VoiceSessionsEntity,
     "voice_sessions",
     id,
     i32,
@@ -850,8 +850,8 @@ impl VoiceSessionsTable {
     }
 
     /// Find all active sessions (where leave_time equals join_time)
-    pub async fn find_active_sessions(&self) -> Result<Vec<VoiceSessionsModel>, DatabaseError> {
-        Ok(sqlx::query_as::<_, VoiceSessionsModel>(
+    pub async fn find_active_sessions(&self) -> Result<Vec<VoiceSessionsEntity>, DatabaseError> {
+        Ok(sqlx::query_as::<_, VoiceSessionsEntity>(
             r#"
             SELECT * FROM voice_sessions
             WHERE leave_time = join_time
@@ -868,9 +868,9 @@ impl VoiceSessionsTable {
         user_id: Option<u64>,
         since: &chrono::DateTime<chrono::Utc>,
         until: &chrono::DateTime<chrono::Utc>,
-    ) -> Result<Vec<VoiceSessionsModel>, DatabaseError> {
+    ) -> Result<Vec<VoiceSessionsEntity>, DatabaseError> {
         if let Some(uid) = user_id {
-            Ok(sqlx::query_as::<_, VoiceSessionsModel>(
+            Ok(sqlx::query_as::<_, VoiceSessionsEntity>(
                 r#"
                 SELECT *
                 FROM voice_sessions
@@ -885,7 +885,7 @@ impl VoiceSessionsTable {
             .fetch_all(&self.base.pool)
             .await?)
         } else {
-            Ok(sqlx::query_as::<_, VoiceSessionsModel>(
+            Ok(sqlx::query_as::<_, VoiceSessionsEntity>(
                 r#"
                 SELECT *
                 FROM voice_sessions
@@ -909,8 +909,8 @@ impl VoiceSessionsTable {
         guild_id: u64,
         since: &chrono::DateTime<chrono::Utc>,
         until: &chrono::DateTime<chrono::Utc>,
-    ) -> Result<Vec<crate::model::VoiceDailyActivity>, DatabaseError> {
-        Ok(sqlx::query_as::<_, crate::model::VoiceDailyActivity>(
+    ) -> Result<Vec<crate::entity::VoiceDailyActivity>, DatabaseError> {
+        Ok(sqlx::query_as::<_, crate::entity::VoiceDailyActivity>(
             r#"
             SELECT 
                 date(join_time) as day,
@@ -941,8 +941,8 @@ impl VoiceSessionsTable {
         guild_id: u64,
         since: &chrono::DateTime<chrono::Utc>,
         until: &chrono::DateTime<chrono::Utc>,
-    ) -> Result<Vec<crate::model::GuildDailyStats>, DatabaseError> {
-        Ok(sqlx::query_as::<_, crate::model::GuildDailyStats>(
+    ) -> Result<Vec<crate::entity::GuildDailyStats>, DatabaseError> {
+        Ok(sqlx::query_as::<_, crate::entity::GuildDailyStats>(
             r#"
             SELECT 
                 day,
@@ -979,8 +979,8 @@ impl VoiceSessionsTable {
         guild_id: u64,
         since: &chrono::DateTime<chrono::Utc>,
         until: &chrono::DateTime<chrono::Utc>,
-    ) -> Result<Vec<crate::model::GuildDailyStats>, DatabaseError> {
-        Ok(sqlx::query_as::<_, crate::model::GuildDailyStats>(
+    ) -> Result<Vec<crate::entity::GuildDailyStats>, DatabaseError> {
+        Ok(sqlx::query_as::<_, crate::entity::GuildDailyStats>(
             r#"
             SELECT 
                 day,
@@ -1017,8 +1017,8 @@ impl VoiceSessionsTable {
         guild_id: u64,
         since: &chrono::DateTime<chrono::Utc>,
         until: &chrono::DateTime<chrono::Utc>,
-    ) -> Result<Vec<crate::model::GuildDailyStats>, DatabaseError> {
-        Ok(sqlx::query_as::<_, crate::model::GuildDailyStats>(
+    ) -> Result<Vec<crate::entity::GuildDailyStats>, DatabaseError> {
+        Ok(sqlx::query_as::<_, crate::entity::GuildDailyStats>(
             r#"
             SELECT 
                 date(join_time) as day,
@@ -1037,8 +1037,8 @@ impl VoiceSessionsTable {
     }
 }
 
-impl From<crate::model::VoiceLeaderboardOptBuilderError> for AppError {
-    fn from(value: crate::model::VoiceLeaderboardOptBuilderError) -> Self {
+impl From<crate::entity::VoiceLeaderboardOptBuilderError> for AppError {
+    fn from(value: crate::entity::VoiceLeaderboardOptBuilderError) -> Self {
         AppError::internal_with_ref(value)
     }
 }
@@ -1049,7 +1049,7 @@ impl From<crate::model::VoiceLeaderboardOptBuilderError> for AppError {
 
 impl_table!(
     BotMetaTable,
-    BotMetaModel,
+    BotMetaEntity,
     "bot_meta",
     key,
     String,
