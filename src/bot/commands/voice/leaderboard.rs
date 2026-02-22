@@ -477,8 +477,8 @@ impl<'a> ViewRenderV2<VoiceLeaderboardAction> for VoiceLeaderboardHandler<'a> {
                 options: vec![
                     Past24Hours.into(),
                     Past72Hours.into(),
-                    ThisWeek.into(),
-                    Past2Weeks.into(),
+                    Past7Days.into(),
+                    Past14Days.into(),
                     ThisMonth.into(),
                     ThisYear.into(),
                     AllTime.into(),
