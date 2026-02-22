@@ -110,16 +110,6 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for FeedListController<'a> {
             })
             .await?;
 
-        // Extract handler to save state
-        let final_handler = engine.handler;
-
-        // Handle the save logic after the view loop completes
-        if final_handler.state == FeedListState::View && !final_handler.marked_unsub.is_empty() {
-            for url in &final_handler.marked_unsub {
-                service.unsubscribe(url, &subscriber).await.ok();
-            }
-        }
-
         Ok(exit_nav)
     }
 }
@@ -229,6 +219,18 @@ impl FeedListHandler {
 
         CreateComponent::ActionRow(CreateActionRow::Buttons(buttons.into()))
     }
+    
+    async fn update_subs(&mut self) -> Result<(), Error> {
+        let subs = self.service
+            .list_paginated_subscriptions(
+                &self.subscriber,
+                self.pagination.state.current_page,
+                SUBSCRIPTIONS_PER_PAGE,
+            )
+            .await?;
+        self.subscriptions = subs;
+        Ok(())
+    }
 }
 
 impl ViewRenderV2<FeedListAction> for FeedListHandler {
@@ -295,8 +297,12 @@ impl ViewHandlerV2<FeedListAction> for FeedListHandler {
             }
             Exit => return Ok(ViewCommand::Continue),
             Save => {
-                // Controller handles the actual DB unsubscribe
                 self.state = FeedListState::View;
+                for sub in &self.marked_unsub {
+                    self.service.unsubscribe(&sub, &self.subscriber).await?;
+                }
+                self.marked_unsub.clear();
+                self.update_subs().await?;
             }
         };
 
@@ -306,18 +312,7 @@ impl ViewHandlerV2<FeedListAction> for FeedListHandler {
                 .handle(pagination_action, _trigger, &_ctx.map(FeedListAction::Base))
                 .await?;
 
-            // Refresh page
-            if let Ok(subs) = self
-                .service
-                .list_paginated_subscriptions(
-                    &self.subscriber,
-                    self.pagination.state.current_page,
-                    SUBSCRIPTIONS_PER_PAGE,
-                )
-                .await
-            {
-                self.subscriptions = subs;
-            }
+            self.update_subs().await?;
 
             return Ok(cmd);
         }
