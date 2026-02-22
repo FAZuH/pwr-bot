@@ -101,6 +101,10 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for SettingsMainController<'a> 
                             *nav.lock().unwrap() = NavigationResult::SettingsAbout;
                             ViewCommand::Exit
                         }
+                        SettingsMainAction::Welcome => {
+                            *nav.lock().unwrap() = NavigationResult::SettingsWelcome;
+                            ViewCommand::Exit
+                        }
                         _ => ViewCommand::Render,
                     }
                 })
