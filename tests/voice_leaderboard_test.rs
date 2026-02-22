@@ -56,9 +56,8 @@ fn test_voice_leaderboard_time_range_all_variants() {
     // Test all time range variants can be converted to datetime
     let ranges = vec![
         VoiceLeaderboardTimeRange::Today,
-        VoiceLeaderboardTimeRange::Past3Days,
-        VoiceLeaderboardTimeRange::ThisWeek,
-        VoiceLeaderboardTimeRange::Past2Weeks,
+        VoiceLeaderboardTimeRange::Past7Days,
+        VoiceLeaderboardTimeRange::Past14Days,
         VoiceLeaderboardTimeRange::ThisMonth,
         VoiceLeaderboardTimeRange::ThisYear,
         VoiceLeaderboardTimeRange::AllTime,
@@ -126,18 +125,8 @@ fn test_time_range_date_boundaries() {
 fn test_time_range_relative_durations() {
     let now = Utc::now();
 
-    // Past 3 days should be approximately 3 days ago
-    let (since, _) = VoiceLeaderboardTimeRange::Past3Days.to_range();
-    let duration = now.signed_duration_since(since);
-    // Should be between 2 and 4 days (accounting for time-of-day variations)
-    assert!(
-        duration.num_days() >= 2 && duration.num_days() <= 4,
-        "Past 3 days should be roughly 3 days ago, got {} days",
-        duration.num_days()
-    );
-
     // This week should be within the last 7 days
-    let (since, _) = VoiceLeaderboardTimeRange::ThisWeek.to_range();
+    let (since, _) = VoiceLeaderboardTimeRange::Past7Days.to_range();
     let duration = now.signed_duration_since(since);
     assert!(
         duration.num_days() >= 0 && duration.num_days() <= 7,
@@ -146,7 +135,7 @@ fn test_time_range_relative_durations() {
     );
 
     // Past 2 weeks should be within the last 14 days
-    let (since, _) = VoiceLeaderboardTimeRange::Past2Weeks.to_range();
+    let (since, _) = VoiceLeaderboardTimeRange::Past14Days.to_range();
     let duration = now.signed_duration_since(since);
     assert!(
         duration.num_days() >= 7 && duration.num_days() <= 14,

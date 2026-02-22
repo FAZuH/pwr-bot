@@ -1,0 +1,15 @@
+<svg width="650" height="220" viewBox="0 0 650 220" xmlns="http://www.w3.org/2000/svg" style="background-color: #0f1013; font-family: 'Courier New', monospace; border-left: 10px solid {{ primary_color }};">
+    <defs>
+        <clipPath id="avatar-clip">
+            <polygon points="110,40 170,75 170,145 110,180 50,145 50,75" />
+        </clipPath>
+    </defs>
+    <polygon points="110,36 174,73 174,147 110,184 46,147 46,73" fill="none" stroke="{{ primary_color }}" stroke-width="4"/>
+    <image x="50" y="40" width="120" height="140" href="data:image/png;base64,{{ avatar_b64 }}" clip-path="url(#avatar-clip)" preserveAspectRatio="xMidYMid slice"/>
+    
+    <text x="210" y="80" fill="{{ primary_color }}" font-size="16">[ SYSTEM NOTICE ]</text>
+    <text x="210" y="125" fill="#FFFFFF" font-size="40" font-weight="bold">{{ username }}</text>
+    <text x="210" y="165" fill="#A0A0A0" font-size="20">HAS CONNECTED TO {{ server_name }}</text>
+    
+    <rect x="210" y="180" width="180" height="4" fill="{{ primary_color }}"/>
+</svg>

@@ -17,7 +17,6 @@ use poise::serenity_prelude::CreateSectionComponent;
 use poise::serenity_prelude::CreateTextDisplay;
 use poise::serenity_prelude::CreateThumbnail;
 use poise::serenity_prelude::CreateUnfurledMediaItem;
-use serenity::all::ComponentInteraction;
 
 use crate::action_enum;
 use crate::bot::commands::Context;
@@ -27,14 +26,14 @@ use crate::bot::commands::settings::run_settings;
 use crate::bot::controller::Controller;
 use crate::bot::controller::Coordinator;
 use crate::bot::navigation::NavigationResult;
-use crate::bot::views::InteractiveView;
-use crate::bot::views::InteractiveViewBase;
+use crate::bot::views::ActionRegistry;
 use crate::bot::views::ResponseKind;
-use crate::bot::views::ResponseView;
-use crate::bot::views::View;
+use crate::bot::views::Trigger;
 use crate::bot::views::ViewCommand;
-use crate::bot::views::ViewCore;
+use crate::bot::views::ViewContext;
+use crate::bot::views::ViewEngine;
 use crate::bot::views::ViewHandler;
+use crate::bot::views::ViewRender;
 use crate::controller;
 
 /// Show information about the bot
@@ -56,22 +55,26 @@ impl<S: Send + Sync + 'static> Controller<S> for AboutController<'_> {
 
         let stats = AboutStats::gather_stats(&ctx).await?;
         let avatar_url = ctx.cache().current_user().face();
-        let mut view = AboutView::new(&ctx, stats, avatar_url);
+
+        let view = AboutView { stats, avatar_url };
+
+        let mut engine = ViewEngine::new(&ctx, view, Duration::from_secs(120));
 
         let nav = std::sync::Arc::new(std::sync::Mutex::new(NavigationResult::Exit));
 
-        view.run(|action| {
-            let nav = nav.clone();
-            Box::pin(async move {
-                match action {
-                    AboutAction::Back => {
-                        *nav.lock().unwrap() = NavigationResult::Back;
-                        ViewCommand::Exit
+        engine
+            .run(|action| {
+                let nav = nav.clone();
+                Box::pin(async move {
+                    match action {
+                        AboutAction::Back => {
+                            *nav.lock().unwrap() = NavigationResult::Back;
+                            ViewCommand::Exit
+                        }
                     }
-                }
+                })
             })
-        })
-        .await?;
+            .await?;
 
         let res = nav.lock().unwrap().clone();
         Ok(res)
@@ -85,51 +88,27 @@ action_enum! {
     }
 }
 
-pub struct AboutHandler {
+/// View for displaying bot statistics and information.
+pub struct AboutView {
     stats: AboutStats,
     avatar_url: String,
 }
 
 #[async_trait::async_trait]
-impl ViewHandler<AboutAction> for AboutHandler {
+impl ViewHandler<AboutAction> for AboutView {
     async fn handle(
         &mut self,
-        action: &AboutAction,
-        _interaction: &ComponentInteraction,
-    ) -> Option<AboutAction> {
+        action: AboutAction,
+        _trigger: Trigger<'_>,
+        _ctx: &ViewContext<'_, AboutAction>,
+    ) -> Result<ViewCommand, Error> {
         match action {
-            AboutAction::Back => Some(AboutAction::Back),
+            AboutAction::Back => Ok(ViewCommand::Continue),
         }
     }
 }
 
-/// View for displaying bot statistics and information.
-pub struct AboutView<'a> {
-    pub base: InteractiveViewBase<'a, AboutAction>,
-    pub handler: AboutHandler,
-}
-
-impl<'a> View<'a, AboutAction> for AboutView<'a> {
-    fn core(&self) -> &ViewCore<'a, AboutAction> {
-        &self.base.core
-    }
-    fn core_mut(&mut self) -> &mut ViewCore<'a, AboutAction> {
-        &mut self.base.core
-    }
-    fn create_core(poise_ctx: &'a Context<'a>) -> ViewCore<'a, AboutAction> {
-        ViewCore::new(poise_ctx, Duration::from_secs(120))
-    }
-}
-
-impl<'a> AboutView<'a> {
-    /// Creates a new about view with the given context, stats, and avatar URL.
-    pub fn new(ctx: &'a Context<'a>, stats: AboutStats, avatar_url: String) -> Self {
-        Self {
-            base: InteractiveViewBase::new(Self::create_core(ctx)),
-            handler: AboutHandler { stats, avatar_url },
-        }
-    }
-
+impl AboutView {
     /// Formats a duration into a human-readable uptime string.
     fn format_uptime(duration: Duration) -> String {
         let days = duration.as_secs() / 86400;
@@ -157,34 +136,21 @@ impl<'a> AboutView<'a> {
     }
 }
 
-impl<'a> ResponseView<'a> for AboutView<'a> {
-    fn create_response<'b>(&mut self) -> ResponseKind<'b> {
+impl ViewRender<AboutAction> for AboutView {
+    fn render(&self, registry: &mut ActionRegistry<AboutAction>) -> ResponseKind<'_> {
         let content_text = format!(
-            "-# **Settings > About**
-## pwr-bot
-### Stats
-- **Uptime**: {}
-- **Servers**: {}
-- **Users**: {}
-- **Commands**: {}
-- **Latency**: {}ms
-- **Memory**: {:.1} MB
-### Info
-- **Author**: [FAZuH](https://github.com/FAZuH)
-- **Source**: [GitHub](https://github.com/FAZuH/pwr-bot)
-- **License**: [MIT](https://github.com/FAZuH/pwr-bot/blob/main/LICENSE)
-Copyright © 2025-{} FAZuH  —  v{}",
-            Self::format_uptime(self.handler.stats.uptime),
-            Self::format_number(self.handler.stats.guild_count),
-            Self::format_number(self.handler.stats.user_count),
-            self.handler.stats.command_count,
-            self.handler.stats.latency_ms,
-            self.handler.stats.memory_mb,
-            self.handler.stats.current_year,
-            self.handler.stats.version,
+            "-# **Settings > About**\n## pwr-bot\n### Stats\n- **Uptime**: {}\n- **Servers**: {}\n- **Users**: {}\n- **Commands**: {}\n- **Latency**: {}ms\n- **Memory**: {:.1} MB\n### Info\n- **Author**: [FAZuH](https://github.com/FAZuH)\n- **Source**: [GitHub](https://github.com/FAZuH/pwr-bot)\n- **License**: [MIT](https://github.com/FAZuH/pwr-bot/blob/main/LICENSE)\nCopyright © 2025-{} FAZuH  —  v{}",
+            Self::format_uptime(self.stats.uptime),
+            Self::format_number(self.stats.guild_count),
+            Self::format_number(self.stats.user_count),
+            self.stats.command_count,
+            self.stats.latency_ms,
+            self.stats.memory_mb,
+            self.stats.current_year,
+            self.stats.version,
         );
 
-        let avatar_url: String = self.handler.avatar_url.clone();
+        let avatar_url: String = self.avatar_url.clone();
         let avatar = CreateThumbnail::new(CreateUnfurledMediaItem::new(avatar_url));
 
         let content_section = CreateSection::new(
@@ -201,15 +167,13 @@ Copyright © 2025-{} FAZuH  —  v{}",
             CreateButton::new_link("https://github.com/FAZuH/pwr-bot/blob/main/LICENSE")
                 .label("License");
 
-        // Register the back action and get its ID
+        let back_action = crate::bot::views::RegisteredAction {
+            id: registry.register(AboutAction::Back),
+            label: "< Back",
+        };
+
         let back_button = CreateComponent::ActionRow(CreateActionRow::Buttons(
-            vec![
-                self.base
-                    .register(AboutAction::Back)
-                    .as_button()
-                    .style(ButtonStyle::Secondary),
-            ]
-            .into(),
+            vec![back_action.as_button().style(ButtonStyle::Secondary)].into(),
         ));
 
         let container = CreateComponent::Container(CreateContainer::new(vec![
@@ -222,8 +186,6 @@ Copyright © 2025-{} FAZuH  —  v{}",
         vec![container, back_button].into()
     }
 }
-
-crate::impl_interactive_view!(AboutView<'a>, AboutHandler, AboutAction);
 
 /// Statistics displayed in the about command.
 pub struct AboutStats {

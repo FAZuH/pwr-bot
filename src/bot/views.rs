@@ -3,8 +3,12 @@
 //! Provides traits and utilities for building interactive UI components.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 
+use futures::StreamExt;
+use futures::future::BoxFuture;
+use log::debug;
 use poise::CreateReply;
 use poise::ReplyHandle;
 use serenity::all::ComponentInteraction;
@@ -16,8 +20,10 @@ use serenity::all::CreateInteractionResponse;
 use serenity::all::CreateSelectMenu;
 use serenity::all::CreateSelectMenuKind;
 use serenity::all::CreateSelectMenuOption;
+use serenity::all::Message;
 use serenity::all::MessageFlags;
-use serenity::all::MessageId;
+use serenity::all::ModalInteraction;
+use tokio::sync::mpsc;
 
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;
@@ -53,39 +59,7 @@ impl<'a> From<ResponseKind<'a>> for CreateReply<'a> {
     }
 }
 
-/// Context data for views.
-pub struct ViewContext<'a> {
-    pub poise_ctx: &'a Context<'a>,
-    pub timeout: Duration,
-    pub reply_handle: Option<ReplyHandle<'a>>,
-}
-
-impl<'a> ViewContext<'a> {
-    /// Creates a new view context with default data.
-    pub fn new(ctx: &'a Context<'a>, timeout: Duration) -> Self {
-        Self {
-            poise_ctx: ctx,
-            timeout,
-            reply_handle: None,
-        }
-    }
-
-    /// Gets the message ID for filtering interactions, if available.
-    pub async fn message_id(&self) -> Option<MessageId> {
-        self.reply_handle
-            .as_ref()?
-            .message()
-            .await
-            .ok()
-            .map(|m| m.id)
-    }
-}
-
 /// Registry for actions that maps unique IDs to action instances.
-///
-/// This struct manages the mapping between Discord custom_id strings
-/// and action instances, allowing views to retrieve the original action
-/// from an interaction without recreating it.
 pub struct ActionRegistry<T> {
     actions: HashMap<String, T>,
     prefix: String,
@@ -93,10 +67,6 @@ pub struct ActionRegistry<T> {
 }
 
 impl<T> ActionRegistry<T> {
-    /// Creates a new empty action registry with an auto-generated unique prefix.
-    ///
-    /// The prefix combines the type name and a timestamp to ensure uniqueness
-    /// across different view instances while remaining readable.
     pub fn new() -> Self {
         let type_name = std::any::type_name::<T>();
         let type_name = type_name.rsplit("::").next().unwrap_or(type_name);
@@ -112,11 +82,6 @@ impl<T> ActionRegistry<T> {
         }
     }
 
-    /// Registers an action and returns a unique ID for it.
-    ///
-    /// The returned ID should be used as the `custom_id` for Discord components.
-    /// When an interaction comes back with this ID, use `get()` to retrieve
-    /// the original action instance.
     pub fn register(&mut self, action: T) -> String {
         let id = format!("{}:{}", self.prefix, self.counter);
         self.counter += 1;
@@ -124,19 +89,8 @@ impl<T> ActionRegistry<T> {
         id
     }
 
-    /// Gets an action by its ID.
     pub fn get(&self, id: &str) -> Option<&T> {
         self.actions.get(id)
-    }
-
-    /// Returns all registered IDs.
-    pub fn ids(&self) -> Vec<&str> {
-        self.actions.keys().map(|s| s.as_str()).collect()
-    }
-
-    /// Checks if the registry contains the given ID.
-    pub fn contains(&self, id: &str) -> bool {
-        self.actions.contains_key(id)
     }
 
     pub fn clear(&mut self) {
@@ -144,76 +98,9 @@ impl<T> ActionRegistry<T> {
     }
 }
 
-/// Core view primitive that provides Discord I/O operations.
-///
-/// This is a low-level building block. Views should embed this and provide
-/// higher-level orchestration methods.
-pub struct ViewCore<'a, T = ()> {
-    pub ctx: ViewContext<'a>,
-    pub registry: ActionRegistry<T>,
-}
-
-impl<'a, T> ViewCore<'a, T> {
-    /// Creates a new view core.
-    pub fn new(ctx: &'a Context<'a>, timeout: Duration) -> Self {
-        Self {
-            ctx: ViewContext::new(ctx, timeout),
-            registry: ActionRegistry::new(),
-        }
-    }
-
-    /// Sends a response as a new message.
-    pub async fn send<'b>(&mut self, reply: CreateReply<'b>) -> Result<(), Error> {
-        let handle = self.ctx.poise_ctx.send(reply).await?;
-        self.ctx.reply_handle = Some(handle);
-        Ok(())
-    }
-
-    /// Edits the stored message with a response.
-    pub async fn edit(&self, reply: CreateReply<'a>) -> Result<(), Error> {
-        if let Some(handle) = &self.ctx.reply_handle {
-            handle.edit(*self.ctx.poise_ctx, reply).await?;
-        }
-        Ok(())
-    }
-}
-
-#[async_trait::async_trait]
-pub trait View<'a, T = ()> {
-    fn core(&self) -> &ViewCore<'a, T>;
-    fn core_mut(&mut self) -> &mut ViewCore<'a, T>;
-    fn create_core(poise_ctx: &'a Context<'a>) -> ViewCore<'a, T>;
-}
-
-#[async_trait::async_trait]
-pub trait ResponseView<'a> {
-    fn create_response<'b>(&mut self) -> ResponseKind<'b>;
-    fn create_reply<'b>(&mut self) -> CreateReply<'b> {
-        self.create_response().into()
-    }
-}
-
-#[async_trait::async_trait]
-pub trait RenderExt<'a, T> {
-    /// Render content if not already rendered, otherwise edit the existing render with new render.
-    async fn render(&mut self) -> Result<(), Error>;
-}
-
-#[async_trait::async_trait]
-impl<'a, T, S> RenderExt<'a, T> for S
-where
-    S: View<'a, T> + ResponseView<'a> + Send,
-    T: Action + Send + Sync + 'a,
-{
-    async fn render(&mut self) -> Result<(), Error> {
-        let reply = self.create_reply();
-        if let Some(handle) = &self.core().ctx.reply_handle {
-            handle.edit(*self.core().ctx.poise_ctx, reply).await?;
-        } else {
-            let handle = self.core_mut().ctx.poise_ctx.send(reply).await?;
-            self.core_mut().ctx.reply_handle = Some(handle);
-        }
-        Ok(())
+impl<T> Default for ActionRegistry<T> {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -236,197 +123,287 @@ impl RegisteredAction {
     }
 }
 
-use futures::future::BoxFuture;
-
 /// Enum returned by controller callbacks to signal the next action for the view loop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ViewCommand {
     /// Re-render the view and continue listening.
     Render,
     /// Exit the view loop.
     Exit,
+    /// Continue the loop without re-rendering.
+    Continue,
+    /// Indicates the interaction was already responded to (e.g., a modal was opened),
+    /// so the engine should NOT auto-acknowledge it.
+    AlreadyResponded,
 }
 
-/// Trait implemented by views to handle interactions and timeouts.
-#[async_trait::async_trait]
-pub trait ViewHandler<T: Action>: Send + Sync {
-    /// Handles an action and returns the next action if any.
-    async fn handle(&mut self, action: &T, interaction: &ComponentInteraction) -> Option<T>;
+/// Trait for action types used in interactive views.
+pub trait Action: Send + Sync + Clone {
+    fn label(&self) -> &'static str;
+}
 
-    /// Callback to execute when the interaction is timed out.
-    async fn on_timeout(&mut self) -> Result<(), Error> {
-        Ok(())
+/// Represents an event that can wake up the View Loop.
+pub enum ViewEvent<T> {
+    Component(T, ComponentInteraction),
+    Modal(T, ModalInteraction),
+    Message(T, Message),
+    Async(T),
+    Timeout,
+}
+
+/// Passed to the handler so it knows WHAT triggered the action.
+pub enum Trigger<'a> {
+    Component(&'a ComponentInteraction),
+    Modal(&'a ModalInteraction),
+    Message(&'a Message),
+    Async,
+    Timeout,
+}
+
+pub trait ViewSender<T: Action>: Send + Sync {
+    fn send(&self, event: ViewEvent<T>);
+}
+
+impl<T: Action> ViewSender<T> for mpsc::UnboundedSender<ViewEvent<T>> {
+    fn send(&self, event: ViewEvent<T>) {
+        let _ = self.send(event);
     }
+}
 
-    /// Provides child view resolvers for action routing.
-    fn children(&mut self) -> Vec<Box<dyn ChildViewResolver<T> + '_>> {
-        vec![]
+pub struct MappedSender<C: Action, P: Action> {
+    parent_tx: Arc<dyn ViewSender<P>>,
+    wrap: fn(C) -> P,
+}
+
+impl<C: Action, P: Action> ViewSender<C> for MappedSender<C, P> {
+    fn send(&self, event: ViewEvent<C>) {
+        let mapped_event = match event {
+            ViewEvent::Component(c, i) => ViewEvent::Component((self.wrap)(c), i),
+            ViewEvent::Modal(c, i) => ViewEvent::Modal((self.wrap)(c), i),
+            ViewEvent::Message(c, m) => ViewEvent::Message((self.wrap)(c), m),
+            ViewEvent::Async(c) => ViewEvent::Async((self.wrap)(c)),
+            ViewEvent::Timeout => ViewEvent::Timeout,
+        };
+        self.parent_tx.send(mapped_event);
     }
 }
 
-/// Base implementation of interactive view logic.
-pub struct InteractiveViewBase<'a, T: Action + 'a> {
-    pub core: ViewCore<'a, T>,
-    pub should_acknowledge: bool,
+/// Context passed to the handler.
+pub struct ViewContext<'a, T> {
+    pub poise: &'a Context<'a>,
+    pub tx: Arc<dyn ViewSender<T>>,
 }
 
-impl<'a, T: Action + 'a> InteractiveViewBase<'a, T> {
-    pub fn new(core: ViewCore<'a, T>) -> Self {
-        Self {
-            core,
-            should_acknowledge: true,
+impl<'a, T: Action + Send + 'static> ViewContext<'a, T> {
+    pub fn map<C: Action + Send + 'static>(&self, wrap: fn(C) -> T) -> ViewContext<'a, C> {
+        ViewContext {
+            poise: self.poise,
+            tx: Arc::new(MappedSender {
+                parent_tx: self.tx.clone(),
+                wrap,
+            }),
         }
     }
 
-    /// Configures whether to automatically acknowledge interactions.
+    pub fn spawn<F>(&self, future: F)
+    where
+        F: std::future::Future<Output = Option<T>> + Send + 'static,
+    {
+        let tx = self.tx.clone();
+        tokio::spawn(async move {
+            if let Some(action) = future.await {
+                tx.send(ViewEvent::Async(action));
+            }
+        });
+    }
+}
+
+/// The trait for Rendering UI
+pub trait ViewRender<T: Action> {
+    fn render(&self, registry: &mut ActionRegistry<T>) -> ResponseKind<'_>;
+
+    fn create_reply(&self, registry: &mut ActionRegistry<T>) -> CreateReply<'_> {
+        self.render(registry).into()
+    }
+}
+
+/// The trait for State Management & Logic
+#[async_trait::async_trait]
+pub trait ViewHandler<T: Action>: Send + Sync {
+    async fn handle(
+        &mut self,
+        action: T,
+        trigger: Trigger<'_>,
+        ctx: &ViewContext<'_, T>,
+    ) -> Result<ViewCommand, Error>;
+
+    async fn on_timeout(&mut self) -> Result<(), Error> {
+        Ok(())
+    }
+}
+
+/// The Engine that drives the entire View.
+pub struct ViewEngine<'a, T, H>
+where
+    T: Action + Send + Sync + 'static,
+    H: ViewHandler<T> + ViewRender<T>,
+{
+    pub ctx: &'a Context<'a>,
+    pub handler: H,
+    pub registry: ActionRegistry<T>,
+    pub timeout: Duration,
+    pub should_acknowledge: bool,
+    reply_handle: Option<ReplyHandle<'a>>,
+}
+
+impl<'a, T, H> ViewEngine<'a, T, H>
+where
+    T: Action + Send + Sync + 'static,
+    H: ViewHandler<T> + ViewRender<T>,
+{
+    pub fn new(ctx: &'a Context<'a>, handler: H, timeout: Duration) -> Self {
+        Self {
+            ctx,
+            handler,
+            registry: ActionRegistry::new(),
+            timeout,
+            should_acknowledge: true,
+            reply_handle: None,
+        }
+    }
+
     pub fn acknowledge(mut self, should_acknowledge: bool) -> Self {
         self.should_acknowledge = should_acknowledge;
         self
     }
 
-    /// Collects a single interaction and dispatches it to the handler.
-    pub async fn listen_once<H: ViewHandler<T>>(
-        &mut self,
-        handler: &mut H,
-    ) -> Result<Option<(T, ComponentInteraction)>, Error> {
-        let mut collector = self.create_collector(handler).await;
+    pub async fn render_view(&mut self) -> Result<(), Error> {
+        self.registry.clear();
+        let reply = self.handler.create_reply(&mut self.registry);
 
-        if let Some(msg_id) = self.core.ctx.message_id().await {
-            collector = collector.message_id(msg_id);
+        if let Some(handle) = &self.reply_handle {
+            handle.edit(*self.ctx, reply).await?;
+        } else {
+            let handle = self.ctx.send(reply).await?;
+            self.reply_handle = Some(handle);
         }
+        Ok(())
+    }
 
-        let interaction = match collector.next().await {
-            Some(i) => i,
-            None => return Ok(None),
+    pub async fn run<F>(&mut self, mut on_action: F) -> Result<(), Error>
+    where
+        F: FnMut(T) -> BoxFuture<'a, ViewCommand> + Send + Sync,
+    {
+        self.render_view().await?;
+
+        let (tx, mut rx) = mpsc::unbounded_channel::<ViewEvent<T>>();
+
+        let msg_id = self.reply_handle.as_ref().unwrap().message().await?.id;
+        let collector = ComponentInteractionCollector::new(self.ctx.serenity_context())
+            .author_id(self.ctx.author().id)
+            .message_id(msg_id)
+            .timeout(self.timeout);
+
+        let mut stream = collector.stream();
+
+        let ctx_wrapper = ViewContext {
+            poise: self.ctx,
+            tx: Arc::new(tx.clone()),
         };
 
-        if self.should_acknowledge {
-            interaction
-                .create_response(
-                    self.core.ctx.poise_ctx.http(),
-                    CreateInteractionResponse::Acknowledge,
-                )
-                .await
-                .ok();
-        }
+        loop {
+            tokio::select! {
+                interaction = stream.next() => {
+                    let interaction = match interaction {
+                        Some(i) => i,
+                        None => {
+                            let _ = tx.send(ViewEvent::Timeout);
+                            continue;
+                        }
+                    };
 
-        let action = match self.resolve_action(&interaction.data.custom_id, handler) {
-            Some(action) => action,
-            None => return Ok(None),
-        };
+                    if let Some(action) = self.registry.get(&interaction.data.custom_id).cloned() {
+                        let cmd = self.handler.handle(action.clone(), Trigger::Component(&interaction), &ctx_wrapper).await?;
+                        debug!("Handle returned {:?}", cmd);
 
-        let action = match handler.handle(&action, &interaction).await {
-            Some(action) => action,
-            None => return Ok(None),
-        };
+                        if self.should_acknowledge && !matches!(cmd, ViewCommand::AlreadyResponded) {
+                            interaction.create_response(
+                                self.ctx.http(),
+                                CreateInteractionResponse::Acknowledge,
+                            ).await.ok();
+                        }
 
-        self.clear_registry(handler);
-        Ok(Some((action, interaction)))
-    }
+                        if let ViewCommand::Render = cmd {
+                            self.render_view().await?;
+                        } else if let ViewCommand::Exit = cmd {
+                            break;
+                        }
 
-    /// Registers an action and returns a unique ID for it.
-    pub fn register(&mut self, action: T) -> RegisteredAction {
-        let label = action.label();
-        let id = self.core.registry.register(action);
-        RegisteredAction { id, label }
-    }
+                        let callback_cmd = on_action(action).await;
+                        if let ViewCommand::Render = callback_cmd {
+                            self.render_view().await?;
+                        } else if let ViewCommand::Exit = callback_cmd {
+                            break;
+                        }
+                    } else if self.should_acknowledge {
+                        interaction.create_response(
+                            self.ctx.http(),
+                            CreateInteractionResponse::Acknowledge,
+                        ).await.ok();
+                    }
+                }
 
-    async fn create_collector<H: ViewHandler<T>>(
-        &mut self,
-        handler: &mut H,
-    ) -> ComponentInteractionCollector<'a> {
-        let filter_ids = self.collector_filter(handler);
-        ComponentInteractionCollector::new(self.core.ctx.poise_ctx.serenity_context())
-            .author_id(self.core.ctx.poise_ctx.author().id)
-            .timeout(self.core.ctx.timeout)
-            .filter(move |i| filter_ids.contains(&i.data.custom_id.to_string()))
-    }
+                async_action = rx.recv() => {
+                    let event = match async_action {
+                        Some(e) => e,
+                        None => break,
+                    };
 
-    fn clear_registry<H: ViewHandler<T>>(&mut self, handler: &mut H) {
-        self.core.registry.clear();
-        for mut child in handler.children() {
-            child.clear()
-        }
-    }
+                    let mut action_taken = None;
 
-    fn collector_filter<H: ViewHandler<T>>(&mut self, handler: &mut H) -> Vec<String> {
-        let mut ids: Vec<String> = self
-            .core
-            .registry
-            .ids()
-            .into_iter()
-            .map(|s| s.to_string())
-            .collect();
-        for child in handler.children() {
-            ids.extend(child.filter_ids());
-        }
-        ids
-    }
+                    let cmd = match event {
+                        ViewEvent::Component(action, interaction) => {
+                            action_taken = Some(action.clone());
+                            self.handler.handle(action, Trigger::Component(&interaction), &ctx_wrapper).await?
+                        }
+                        ViewEvent::Modal(action, interaction) => {
+                            action_taken = Some(action.clone());
+                            self.handler.handle(action, Trigger::Modal(&interaction), &ctx_wrapper).await?
+                        }
+                        ViewEvent::Message(action, msg) => {
+                            action_taken = Some(action.clone());
+                            self.handler.handle(action, Trigger::Message(&msg), &ctx_wrapper).await?
+                        }
+                        ViewEvent::Async(action) => {
+                            action_taken = Some(action.clone());
+                            self.handler.handle(action, Trigger::Async, &ctx_wrapper).await?
+                        }
+                        ViewEvent::Timeout => {
+                            self.handler.on_timeout().await?;
+                            ViewCommand::Render
+                        }
+                    };
 
-    fn resolve_action<H: ViewHandler<T>>(&mut self, custom_id: &str, handler: &mut H) -> Option<T> {
-        if let Some(action) = self.core.registry.get(custom_id) {
-            return Some(action.clone());
-        }
-        for child in handler.children() {
-            if let Some(action) = child.resolve(custom_id) {
-                return Some(action);
+                    if let ViewCommand::Render = cmd {
+                        self.render_view().await?;
+                    } else if let ViewCommand::Exit = cmd {
+                        break;
+                    }
+
+                    if let Some(action) = action_taken {
+                        let callback_cmd = on_action(action).await;
+                        if let ViewCommand::Render = callback_cmd {
+                            self.render_view().await?;
+                        } else if let ViewCommand::Exit = callback_cmd {
+                            break;
+                        }
+                    }
+                }
             }
         }
-        None
+
+        Ok(())
     }
-}
-
-/// Trait for interactive views that handle actions.
-#[async_trait::async_trait]
-pub trait InteractiveView<'a, T: Action + 'a>: ResponseView<'a> + Send + Sync {
-    type Handler: ViewHandler<T> + Send + Sync;
-
-    fn handler(&mut self) -> &mut Self::Handler;
-
-    /// Runs the view event loop.
-    async fn run<F>(&mut self, on_action: F) -> Result<(), Error>
-    where
-        F: FnMut(T) -> BoxFuture<'a, ViewCommand> + Send + Sync;
-}
-
-pub fn child<'a, 'b, C, S, T>(
-    view: &'b mut S,
-    wrap: fn(C) -> T,
-) -> Box<dyn ChildViewResolver<T> + 'b>
-where
-    S: View<'a, C>,
-    C: Action + Clone + 'a,
-    T: Action + 'b,
-    'a: 'b,
-{
-    Box::new((&mut view.core_mut().registry, wrap))
-}
-
-pub trait ChildViewResolver<T> {
-    fn filter_ids(&self) -> Vec<String>;
-    fn resolve(&self, custom_id: &str) -> Option<T>;
-    fn clear(&mut self);
-}
-
-impl<T, C: Clone> ChildViewResolver<T> for (&mut ActionRegistry<C>, fn(C) -> T) {
-    fn filter_ids(&self) -> Vec<String> {
-        self.0.ids().into_iter().map(|s| s.to_string()).collect()
-    }
-    fn resolve(&self, custom_id: &str) -> Option<T> {
-        self.0.get(custom_id).cloned().map(self.1)
-    }
-    fn clear(&mut self) {
-        self.0.clear();
-    }
-}
-
-/// Trait for action types used in interactive views.
-///
-/// Actions are registered in an ActionRegistry and mapped to unique IDs.
-/// When an interaction comes in, the registry is used to look up the
-/// original action instance.
-pub trait Action: Send + Sync + Clone {
-    /// Returns a human-readable label for this action.
-    fn label(&self) -> &'static str;
 }
 
 #[cfg(test)]
