@@ -27,7 +27,7 @@ graph TB
         subgraph MVC["MVC-C Pattern"]
             Coordinator["Coordinator<br/>context + state"]
             Controllers["Controllers<br/>run() → NavigationResult"]
-            Views["Views<br/>ResponseView / InteractiveView"]
+            Views["Views<br/>ViewRender / ViewHandler / ViewEngine"]
             Coordinator --> Controllers --> Views
         end
 

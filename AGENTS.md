@@ -66,14 +66,15 @@ For commands with subcommands, use the `subcommands` attribute:
 pub async fn parent_command(_ctx: Context<'_>) -> Result<(), Error> { Ok(()) }
 ```
 
-## Creating UI Views (MVC-C pattern)
+## Creating UI Views (ViewEngine architecture)
 
-Views use the three-trait system in `src/bot/views.rs`:
-- `View<'a, T>` - Core trait providing access to `ViewCore` via `view_core!` macro
-- `ResponseView<'a>` - Creates Discord components via `create_response()`
-- `InteractiveView<'a, T>` - Handles user interactions via a handler
+Views use the `ViewEngine` system in `src/bot/views.rs`:
+- `Action` - Trait for the action enum.
+- `ViewRender<T>` - Renders components/embeds using `ActionRegistry`.
+- `ViewHandler<T>` - Handles logic and returns `ViewCommand`.
+- `ViewEngine<T, H>` - Runs the event loop.
 
-See [`.opencode/skills/ui-views/SKILL.md`](.opencode/skills/ui-views/SKILL.md) for detailed documentation.
+See [`.opencode/skills/ui-views/SKILL.md`](.opencode/skills/ui-views/SKILL.md) for detailed documentation and patterns.
 
 ## Database Schema Changes
 

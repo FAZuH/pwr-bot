@@ -46,39 +46,41 @@ Commands are organized by domain. Each top-level module is a command group; subc
 
 Interactive commands follow a **Coordinator → Controller → View** flow:
 
-- **`Coordinator<S>`** — receives the Poise context, owns navigation state, drives controllers
-- **`Controller<S>`** — fetches data via services, constructs views, mediates between view actions and service calls, returns `NavigationResult`
-- **`NavigationResult`** — enum signalling the next navigation step (e.g. `Back`, `Exit`, `SettingsMain`)
+- **`Coordinator<S>`** — receives the Poise context, owns navigation state, drives controllers.
+- **`Controller<S>`** — fetches data via services, constructs views, mediates between view actions and service calls, returns `NavigationResult`.
+- **`NavigationResult`** — enum signalling the next navigation step (e.g. `Back`, `Exit`, `SettingsMain`).
+- **`ViewEngine`** — the event loop runner that drives the view life cycle.
 
-### View System (`bot/views.rs`)
+### View System (`src/bot/views.rs`)
 
-Views are built on three traits:
+The view system is built on a trait-based architecture driven by the **ViewEngine**.
 
-| Trait | Responsibility |
-|-------|---------------|
-| `View<T>` | Access to `ViewCore` (Discord I/O primitives) |
-| `ResponseView` | Builds Discord components/embeds via `create_response()` |
-| `InteractiveView<T>` | Exposes `run(on_action)` to controllers; extends `ResponseView` |
+| Component | Responsibility |
+|-----------|---------------|
+| `Action` | Trait for enums representing user actions (buttons, select menus). |
+| `ViewRender<T>` | Trait defining how to translate state into Discord UI components. |
+| `ViewHandler<T>` | Trait for business logic and state mutations in response to actions. |
+| `ViewEngine<T, H>` | The event loop runner that multiplexes interactions, async events, and timeouts. |
+| `ViewContext<T>` | Context passed to handlers, allowing for async task spawning and child view mapping. |
 
-`RenderExt` is a blanket impl over anything that is `View + ResponseView`, providing `render()` (send-or-edit).
+#### View Lifecycle
 
-**`InteractiveView`** is intentionally minimal — it exposes only `handler()` and `run()`. All internal machinery lives in `InteractiveViewBase`:
+1. **Initialization**: `ViewEngine::new(ctx, handler, timeout)` is created with a handler that implements both `ViewRender` and `ViewHandler`.
+2. **Rendering**: The engine calls `handler.render(&mut registry)` to build the Discord message. The `ActionRegistry` maps Discord `custom_id`s to `Action` variants.
+3. **Event Loop**: `ViewEngine::run()` starts a `tokio::select!` loop listening for:
+   - **Component Interactions**: Matches `custom_id` back to an `Action`.
+   - **Async Events**: Dispatched via `ctx.spawn()` or `ctx.tx.send()`.
+   - **Modals/Messages**: Can be integrated into the same event stream.
+   - **Timeouts**: Triggers `on_timeout()` on the handler.
+4. **Command Processing**: Handlers return a `ViewCommand` to control the loop:
+   - `Render`: Re-renders the view and updates the message.
+   - `Continue`: Continues the loop without re-rendering.
+   - `Exit`: Breaks the loop.
+   - `AlreadyResponded`: Prevents auto-acknowledgment (essential for opening modals).
 
-- `listen_once(handler)` — collects a single interaction, calls `ViewHandler::handle()`, returns the processed action
-- `register(action)` — registers an action in `ActionRegistry` and returns a `RegisteredAction` for building Discord components
-- `should_acknowledge` — feature flag controlling whether interactions are auto-acknowledged
-- Child view delegation via `ViewHandler::children()`
+#### Delegation Pattern
 
-**`ViewHandler<T>`** is the extension point for implementors. Interaction-mutable state is extracted into a separate handler struct, avoiding self-referential borrows that closures stored on the view struct would create:
-
-```
-PaginationView
-  ├── core: ViewCore              ← Discord I/O, ActionRegistry
-  ├── base: InteractiveViewBase   ← listen_once, register, machinery
-  └── handler: PaginationHandler  ← mutable state, handle(), on_timeout(), children()
-```
-
-The `impl_interactive_view!` macro generates the `InteractiveView` impl, wiring `self.base` and `self.handler` as disjoint fields. The `view_core!` macro generates the `View` impl. The `action_enum!` macro generates the `Action` impl.
+Child views are integrated using `ctx.map(ParentAction::Child)`. This creates a sub-context that wraps child actions into parent actions, allowing child views to be handled independently within a parent's `handle` method. This allows composition without the parent needing to know the child's internal state or action structure.
 
 ---
 
@@ -188,15 +190,13 @@ Discord interaction
   → Coordinator::new(ctx)
   → Controller::run(coordinator)
       → Service::fetch(...)          fetch required data
-      → View::new(ctx, data)         construct view with data
-      → view.run(|action| { ... })   start interaction loop
-          → View::render()           send Discord message
-          → [listen_once loop]
-              → Discord component interaction
-              → ViewHandler::handle()     preprocess → domain action
-              → controller callback(action)
-                  → Service::save(...)    call business layer
-                  → ViewCommand::Render   re-render
+      → ViewHandler::new(...)        construct handler state
+      → ViewEngine::run(...)         start event loop (tokio::select!)
+          → ViewRender::render()     build Discord components
+          → [Event Loop]
+              → Discord interaction / Async event / Modal
+              → ViewHandler::handle()     process action → state mutation
+              → ViewCommand::Render       re-render view
           → ViewCommand::Exit
       → NavigationResult
   → Coordinator routes to next Controller or exits

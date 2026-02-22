@@ -11,11 +11,11 @@
 }}%%
 classDiagram
     %% ── Core structs ──────────────────────────────────────────────
-    class ViewContext {
-        poise_ctx: Context
-        timeout: Duration
-        reply_handle: Option~ReplyHandle~
-        message_id() Option~MessageId~
+    class ViewContext~T~ {
+        poise: Context
+        tx: Arc~dyn ViewSender~T~~
+        map(wrap) ViewContext~C~
+        spawn(future)
     }
 
     class ActionRegistry~T~ {
@@ -24,16 +24,17 @@ classDiagram
         counter: usize
         register(action: T) String
         get(id: str) Option~T~
-        ids() Vec~str~
-        contains(id: str) bool
         clear()
     }
 
-    class ViewCore~T~ {
-        ctx: ViewContext
+    class ViewEngine~T, H~ {
+        ctx: Context
+        handler: H
         registry: ActionRegistry~T~
-        send(reply) Result
-        edit(reply) Result
+        timeout: Duration
+        should_acknowledge: bool
+        render_view() Result
+        run(on_action) Result
     }
 
     class RegisteredAction {
@@ -42,13 +43,6 @@ classDiagram
         as_button() CreateButton
         as_select(kind) CreateSelectMenu
         as_select_option() CreateSelectMenuOption
-    }
-
-    class InteractiveViewBase~T~ {
-        core: ViewCore~T~
-        should_acknowledge: bool
-        listen_once(handler) Result~Option~(T, ComponentInteraction)~~
-        register(action: T) RegisteredAction
     }
 
     class Coordinator~S~ {
@@ -61,66 +55,45 @@ classDiagram
 
     class NavigationResult {
         <<enum>>
-        SettingsMain
-        SettingsFeeds
-        SettingsVoice
-        SettingsAbout
-        FeedSubscriptions
-        FeedSubscribe
-        FeedUnsubscribe
-        FeedList
-        VoiceLeaderboard
         Back
         Exit
+        SettingsMain
+        ...
     }
 
     class ViewCommand {
         <<enum>>
         Render
         Exit
+        Continue
+        AlreadyResponded
+    }
+
+    class Trigger {
+        <<enum>>
+        Component
+        Modal
+        Message
+        Async
+        Timeout
     }
 
     %% ── Traits ────────────────────────────────────────────────────
-    class View~T~ {
-        <<trait>>
-        core() ViewCore~T~
-        core_mut() ViewCore~T~
-    }
-
-    class ResponseView {
-        <<trait>>
-        create_response() ResponseKind
-        create_reply() CreateReply
-    }
-
-    class RenderExt {
-        <<trait>>
-        render() Result
-    }
-
     class Action {
         <<trait>>
         label() str
     }
 
+    class ViewRender~T: Action~ {
+        <<trait>>
+        render(registry) ResponseKind
+        create_reply(registry) CreateReply
+    }
+
     class ViewHandler~T: Action~ {
         <<trait>>
-        handle(action: T, interaction: ComponentInteraction) Option~T~
+        handle(action, trigger, ctx) Result~ViewCommand~
         on_timeout() Result
-        children() Vec~ChildViewResolver~T~~
-    }
-
-    class ChildViewResolver~T~ {
-        <<trait>>
-        filter_ids() Vec~String~
-        resolve(custom_id: str) Option~T~
-        clear()
-    }
-
-    class InteractiveView~T: Action~ {
-        <<trait>>
-        handler() ~mut Self::Handler~
-        run(on_action) Result
     }
 
     class Controller~S~ {
@@ -129,26 +102,13 @@ classDiagram
     }
 
     %% ── Trait relationships ───────────────────────────────────────
-    View <|-- ResponseView
-    View <|-- InteractiveView
-    ResponseView <|-- RenderExt : blanket impl
-    InteractiveView ..> Action : bound
-    InteractiveView ..> ViewHandler : bound
-    InteractiveView ..> RegisteredAction : produces
-    InteractiveViewBase --> ViewCore
-    ViewCore *-- ViewContext
-    ViewCore *-- ActionRegistry
+    ViewEngine --> ViewHandler : owns
+    ViewEngine --> ViewRender : owns
+    ViewEngine --> ActionRegistry : owns
+    ViewHandler ..> ViewCommand : returns
+    ViewHandler ..> Trigger : receives
+    ViewHandler ..> ViewContext : receives
+    ActionRegistry ..> Action : maps
+    ActionRegistry ..> RegisteredAction : produces
     Coordinator ..> Controller : drives
     Controller ..> NavigationResult : returns
-
-    %% ── Concrete implementations ───────────────────────────────────
-    class PaginationView {
-        core: ViewCore~PaginationAction~
-        state: PaginationModel
-        disabled: bool
-    }
-
-    InteractiveView <|.. PaginationView
-
-    note for View "view_core! macro generates impl"
-    note for Action "action_enum! macro generates impl"
