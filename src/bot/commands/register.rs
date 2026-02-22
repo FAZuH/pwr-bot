@@ -12,7 +12,7 @@ use crate::bot::commands::Error;
 use crate::bot::error::BotError;
 use crate::bot::views::ResponseKind;
 
-/// Registers guild slash commands
+/// Registers server slash commands
 ///
 /// Registers all bot slash commands to the current server.
 /// Requires server administrator permissions.
@@ -85,7 +85,7 @@ impl CommandRegistrationView {
             )
         } else {
             format!(
-                "### {}\nRegistering {} guild commands...",
+                "### {}\nRegistering {} server commands...",
                 title, self.num_commands
             )
         };

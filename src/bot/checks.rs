@@ -9,7 +9,7 @@ use crate::bot::commands::Context;
 use crate::bot::commands::Error;
 use crate::bot::error::BotError;
 
-/// Checks if the command author has guild administrator permissions.
+/// Checks if the command author has server administrator permissions.
 pub async fn is_author_guild_admin(ctx: Context<'_>) -> Result<(), Error> {
     let member = ctx
         .author_member()

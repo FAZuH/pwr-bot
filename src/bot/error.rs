@@ -15,6 +15,6 @@ pub enum BotError {
     #[error("You have to be in a server to use this command")]
     GuildOnlyCommand,
 
-    #[error("{0}")]
+    #[error("User not in server")]
     UserNotInGuild(String),
 }

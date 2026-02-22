@@ -29,7 +29,7 @@ pub async fn voice(_ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-/// Type of guild statistic to display.
+/// Type of server statistic to display.
 #[derive(ChoiceParameter, Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum GuildStatType {
     /// Average voice time per active user
