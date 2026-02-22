@@ -353,13 +353,14 @@ impl<'a> ViewHandlerV2<VoiceLeaderboardAction> for VoiceLeaderboardHandler<'a> {
                     if let Trigger::Component(interaction) = &_trigger
                         && let ComponentInteractionDataKind::StringSelect { values } =
                             &interaction.data.kind
-                            && let Some(time_range) = values
-                                .first()
-                                .and_then(|v| VoiceLeaderboardTimeRange::from_display_name(v))
-                                && self.time_range != time_range {
-                                    self.time_range = time_range;
-                                    fetch_new = true;
-                                }
+                        && let Some(time_range) = values
+                            .first()
+                            .and_then(|v| VoiceLeaderboardTimeRange::from_display_name(v))
+                        && self.time_range != time_range
+                    {
+                        self.time_range = time_range;
+                        fetch_new = true;
+                    }
                 }
                 ToggleMode => {
                     self.is_partner_mode = !self.is_partner_mode;
@@ -369,11 +370,12 @@ impl<'a> ViewHandlerV2<VoiceLeaderboardAction> for VoiceLeaderboardHandler<'a> {
                     if let Trigger::Component(interaction) = &_trigger
                         && let ComponentInteractionDataKind::UserSelect { values } =
                             &interaction.data.kind
-                            && let Some(user_id) = values.first()
-                                && let Ok(user) = user_id.to_user(&self.http).await {
-                                    self.target_user = Some(user);
-                                    fetch_new = true;
-                                }
+                        && let Some(user_id) = values.first()
+                        && let Ok(user) = user_id.to_user(&self.http).await
+                    {
+                        self.target_user = Some(user);
+                        fetch_new = true;
+                    }
                 }
                 _ => {}
             }

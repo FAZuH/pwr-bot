@@ -108,7 +108,9 @@ impl From<VoiceLeaderboardTimeRange> for DateTime<Utc> {
         let now = Utc::now();
 
         match range {
-            VoiceLeaderboardTimeRange::Today => now.date_naive().and_hms_opt(0, 0, 0).unwrap().and_utc(),
+            VoiceLeaderboardTimeRange::Today => {
+                now.date_naive().and_hms_opt(0, 0, 0).unwrap().and_utc()
+            }
             VoiceLeaderboardTimeRange::Past24Hours => now - Duration::hours(24),
             VoiceLeaderboardTimeRange::Past72Hours => now - Duration::hours(72),
             VoiceLeaderboardTimeRange::Past7Days => now - Duration::days(7),

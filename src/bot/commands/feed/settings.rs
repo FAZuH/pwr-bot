@@ -138,27 +138,27 @@ impl<'a> ViewHandlerV2<SettingsFeedAction> for SettingsFeedHandler<'a> {
                 if let Trigger::Component(interaction) = trigger
                     && let ComponentInteractionDataKind::ChannelSelect { values } =
                         &interaction.data.kind
-                    {
-                        settings.channel_id = values.first().map(|id| id.to_string());
-                    }
+                {
+                    settings.channel_id = values.first().map(|id| id.to_string());
+                }
                 Ok(ViewCommand::Render)
             }
             SettingsFeedAction::SubRole => {
                 if let Trigger::Component(interaction) = trigger
                     && let ComponentInteractionDataKind::RoleSelect { values } =
                         &interaction.data.kind
-                    {
-                        settings.subscribe_role_id = values.first().map(|v| v.to_string());
-                    }
+                {
+                    settings.subscribe_role_id = values.first().map(|v| v.to_string());
+                }
                 Ok(ViewCommand::Render)
             }
             SettingsFeedAction::UnsubRole => {
                 if let Trigger::Component(interaction) = trigger
                     && let ComponentInteractionDataKind::RoleSelect { values } =
                         &interaction.data.kind
-                    {
-                        settings.unsubscribe_role_id = values.first().map(|v| v.to_string());
-                    }
+                {
+                    settings.unsubscribe_role_id = values.first().map(|v| v.to_string());
+                }
                 Ok(ViewCommand::Render)
             }
             SettingsFeedAction::Back | SettingsFeedAction::About => Ok(ViewCommand::Continue),

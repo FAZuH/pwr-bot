@@ -457,17 +457,17 @@ impl ViewHandlerV2<SettingsMainAction> for SettingsMainHandler {
                 if let Trigger::Component(interaction) = trigger
                     && let ComponentInteractionDataKind::StringSelect { values } =
                         &interaction.data.kind
-                    {
-                        let mut features = Vec::new();
-                        for val in values {
-                            match val.as_str() {
-                                "feeds" => features.push(Feeds),
-                                "voice" => features.push(Voice),
-                                _ => {}
-                            }
+                {
+                    let mut features = Vec::new();
+                    for val in values {
+                        match val.as_str() {
+                            "feeds" => features.push(Feeds),
+                            "voice" => features.push(Voice),
+                            _ => {}
                         }
-                        self.toggle_features(features);
                     }
+                    self.toggle_features(features);
+                }
                 Ok(ViewCommand::Render)
             }
             ToggleState => {

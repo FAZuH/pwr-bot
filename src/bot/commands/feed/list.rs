@@ -219,9 +219,10 @@ impl FeedListHandler {
 
         CreateComponent::ActionRow(CreateActionRow::Buttons(buttons.into()))
     }
-    
+
     async fn update_subs(&mut self) -> Result<(), Error> {
-        let subs = self.service
+        let subs = self
+            .service
             .list_paginated_subscriptions(
                 &self.subscriber,
                 self.pagination.state.current_page,
@@ -299,7 +300,7 @@ impl ViewHandlerV2<FeedListAction> for FeedListHandler {
             Save => {
                 self.state = FeedListState::View;
                 for sub in &self.marked_unsub {
-                    self.service.unsubscribe(&sub, &self.subscriber).await?;
+                    self.service.unsubscribe(sub, &self.subscriber).await?;
                 }
                 self.marked_unsub.clear();
                 self.update_subs().await?;

@@ -511,13 +511,14 @@ impl ViewHandlerV2<VoiceStatsAction> for VoiceStatsHandler {
                 if let Trigger::Component(interaction) = _trigger
                     && let serenity::all::ComponentInteractionDataKind::UserSelect { values } =
                         &interaction.data.kind
-                        && let Some(user_id) = values.first() {
-                            // Fetch user object
-                            if let Ok(user) = user_id.to_user(_ctx.poise.http()).await {
-                                self.data.user = Some(user);
-                                changed = true;
-                            }
-                        }
+                    && let Some(user_id) = values.first()
+                {
+                    // Fetch user object
+                    if let Ok(user) = user_id.to_user(_ctx.poise.http()).await {
+                        self.data.user = Some(user);
+                        changed = true;
+                    }
+                }
             }
         }
 
