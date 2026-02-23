@@ -24,18 +24,7 @@ use log::error;
 use log::info;
 use poise::Framework;
 use poise::FrameworkOptions;
-use poise::serenity_prelude::Cache;
-use poise::serenity_prelude::Client;
-use poise::serenity_prelude::ClientBuilder;
-use poise::serenity_prelude::GatewayIntents;
-use poise::serenity_prelude::Http;
-use poise::serenity_prelude::UserId;
-use serenity::all::ActivityData;
-use serenity::all::ApplicationId;
-use serenity::all::FullEvent;
-use serenity::all::GuildId;
-use serenity::all::Token;
-use serenity::small_fixed_array::FixedString;
+use poise::serenity_prelude::*;
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
 
@@ -249,7 +238,7 @@ impl BotEventHandler {
         &self,
         ctx: &poise::serenity_prelude::Context,
         guild_id: GuildId,
-    ) -> Vec<(u64, u64, u64, FixedString)> {
+    ) -> Vec<(u64, u64, u64, small_fixed_array::FixedString)> {
         let guild = match ctx.cache.guild(guild_id) {
             Some(g) => g,
             None => return vec![],

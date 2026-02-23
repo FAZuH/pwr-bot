@@ -7,7 +7,7 @@ use anyhow::Result;
 use chrono::DateTime;
 use chrono::Utc;
 use log::debug;
-use serenity::all::ChannelId;
+use poise::serenity_prelude::ChannelId;
 use tokio::sync::Mutex;
 
 use crate::entity::VoiceSessionsEntity;
@@ -267,7 +267,7 @@ impl Subscriber<VoiceStateEvent> for VoiceStateSubscriber {
 
 #[cfg(test)]
 mod tests {
-    use serenity::all::VoiceState;
+    use poise::serenity_prelude::VoiceState;
 
     use super::*;
     use crate::feed::platforms::Platforms;

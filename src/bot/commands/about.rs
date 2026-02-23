@@ -5,18 +5,7 @@ use std::time::Duration;
 use chrono::Datelike;
 use chrono::Utc;
 use poise::Command;
-use poise::serenity_prelude::ButtonStyle;
-use poise::serenity_prelude::CreateActionRow;
-use poise::serenity_prelude::CreateButton;
-use poise::serenity_prelude::CreateComponent;
-use poise::serenity_prelude::CreateContainer;
-use poise::serenity_prelude::CreateContainerComponent;
-use poise::serenity_prelude::CreateSection;
-use poise::serenity_prelude::CreateSectionAccessory;
-use poise::serenity_prelude::CreateSectionComponent;
-use poise::serenity_prelude::CreateTextDisplay;
-use poise::serenity_prelude::CreateThumbnail;
-use poise::serenity_prelude::CreateUnfurledMediaItem;
+use poise::serenity_prelude::*;
 
 use crate::action_enum;
 use crate::bot::commands::Context;
@@ -206,14 +195,13 @@ impl AboutStats {
         let version = ctx.data().config.version.clone();
         let uptime = start_time.elapsed();
 
-        let guild_count = ctx.cache().guilds().len();
+        let guild_count = Context::cache(*ctx).guilds().len();
 
-        let user_count: usize = ctx
-            .cache()
+        let user_count: usize = Context::cache(*ctx)
             .guilds()
             .iter()
             .filter_map(|guild_id| {
-                ctx.cache()
+                Context::cache(*ctx)
                     .guild(*guild_id)
                     .map(|guild| guild.member_count as usize)
             })

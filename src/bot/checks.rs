@@ -2,8 +2,7 @@
 
 use std::borrow::Cow;
 
-use serenity::all::Permissions;
-use serenity::all::RoleId;
+use poise::serenity_prelude::*;
 
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;

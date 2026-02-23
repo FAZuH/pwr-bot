@@ -1,7 +1,6 @@
 //! Feed unsubscribe subcommand.
 
-use serenity::all::AutocompleteChoice;
-use serenity::all::CreateAutocompleteResponse;
+use poise::serenity_prelude::*;
 
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;

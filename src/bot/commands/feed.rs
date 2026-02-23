@@ -4,16 +4,7 @@ use std::time::Duration;
 use std::time::Instant;
 
 use poise::ChoiceParameter;
-use serenity::all::ButtonStyle;
-use serenity::all::CreateActionRow;
-use serenity::all::CreateButton;
-use serenity::all::CreateComponent;
-use serenity::all::CreateContainer;
-use serenity::all::CreateContainerComponent;
-use serenity::all::CreateTextDisplay;
-use serenity::all::GuildId;
-use serenity::all::RoleId;
-use serenity::all::UserId;
+use poise::serenity_prelude::*;
 
 use crate::action_enum;
 use crate::bot::checks::check_author_roles;
@@ -361,8 +352,8 @@ impl ViewRender<FeedSubscriptionBatchAction> for FeedSubscriptionBatchHandler {
 
 #[cfg(test)]
 mod tests {
-    use serenity::all::GuildId;
-    use serenity::all::UserId;
+    use poise::serenity_prelude::GuildId;
+    use poise::serenity_prelude::UserId;
 
     use super::*;
 

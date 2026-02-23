@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use log::trace;
-use serenity::all::UserId;
+use poise::serenity_prelude::UserId;
 
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;
@@ -31,7 +31,7 @@ pub struct PageGenerationResult {
 pub struct LeaderboardPageBuilder<'a> {
     ctx: &'a Context<'a>,
     image_gen: LeaderboardImageGenerator,
-    user_cache: HashMap<u64, serenity::all::User>,
+    user_cache: HashMap<u64, poise::serenity_prelude::User>,
 }
 
 impl<'a> LeaderboardPageBuilder<'a> {

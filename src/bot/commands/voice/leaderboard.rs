@@ -6,19 +6,7 @@ use std::time::Instant;
 
 use log::trace;
 use poise::ChoiceParameter;
-use serenity::all::ComponentInteractionDataKind;
-use serenity::all::CreateActionRow;
-use serenity::all::CreateAttachment;
-use serenity::all::CreateComponent;
-use serenity::all::CreateContainer;
-use serenity::all::CreateContainerComponent;
-use serenity::all::CreateMediaGallery;
-use serenity::all::CreateMediaGalleryItem;
-use serenity::all::CreateSelectMenuKind;
-use serenity::all::CreateSelectMenuOption;
-use serenity::all::CreateSeparator;
-use serenity::all::CreateTextDisplay;
-use serenity::all::CreateUnfurledMediaItem;
+use poise::serenity_prelude::*;
 
 use crate::action_extends;
 use crate::bot::commands::Context;
@@ -134,7 +122,7 @@ impl<'a> VoiceLeaderboardController<'a> {
         ctx: &Context<'_>,
         time_range: VoiceLeaderboardTimeRange,
         is_partner_mode: bool,
-        target_user: Option<serenity::all::UserId>,
+        target_user: Option<poise::serenity_prelude::UserId>,
     ) -> Result<LeaderboardSessionData, Error> {
         let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?.get();
         let (since, until) = time_range.to_range();
@@ -242,11 +230,11 @@ pub struct VoiceLeaderboardHandler<'a> {
     pub page_builder: LeaderboardPageBuilder<'a>,
     pub current_page_bytes: Option<Vec<u8>>,
     pub is_partner_mode: bool,
-    pub target_user: Option<serenity::all::User>,
+    pub target_user: Option<poise::serenity_prelude::User>,
     pub service: std::sync::Arc<crate::service::voice_tracking_service::VoiceTrackingService>,
     pub guild_id: u64,
     pub author_id: u64,
-    pub http: std::sync::Arc<serenity::all::Http>,
+    pub http: std::sync::Arc<poise::serenity_prelude::Http>,
 }
 
 impl<'a> VoiceLeaderboardHandler<'a> {
@@ -465,15 +453,15 @@ impl<'a> ViewRender<VoiceLeaderboardAction> for VoiceLeaderboardHandler<'a> {
         } else {
             "Show Voice Partners"
         };
-        let toggle_button = serenity::all::CreateButton::new(registry.register(ToggleMode))
+        let toggle_button = poise::serenity_prelude::CreateButton::new(registry.register(ToggleMode))
             .label(toggle_label)
-            .style(serenity::all::ButtonStyle::Primary);
+            .style(poise::serenity_prelude::ButtonStyle::Primary);
 
         container.push(CreateContainerComponent::ActionRow(
             CreateActionRow::Buttons(vec![toggle_button].into()),
         ));
 
-        let time_range_menu = serenity::all::CreateSelectMenu::new(
+        let time_range_menu = poise::serenity_prelude::CreateSelectMenu::new(
             registry.register(TimeRange),
             CreateSelectMenuKind::String {
                 options: vec![
@@ -502,7 +490,7 @@ impl<'a> ViewRender<VoiceLeaderboardAction> for VoiceLeaderboardHandler<'a> {
                 .target_user
                 .clone()
                 .map(|u| std::borrow::Cow::Owned(vec![u.id]));
-            let user_select = serenity::all::CreateSelectMenu::new(
+            let user_select = poise::serenity_prelude::CreateSelectMenu::new(
                 registry.register(SelectUser),
                 CreateSelectMenuKind::User { default_users },
             )

@@ -5,7 +5,7 @@ use chrono::Datelike;
 use chrono::Duration;
 use chrono::Utc;
 use poise::ChoiceParameter;
-use serenity::all::CreateSelectMenuOption;
+use poise::serenity_prelude::*;
 
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;

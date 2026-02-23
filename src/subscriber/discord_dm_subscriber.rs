@@ -8,7 +8,7 @@ use log::debug;
 use log::error;
 use log::info;
 use poise::serenity_prelude::UserId;
-use serenity::all::CreateMessage;
+use poise::serenity_prelude::CreateMessage;
 
 use crate::bot::Bot;
 use crate::entity::SubscriberEntity;

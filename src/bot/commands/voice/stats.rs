@@ -9,19 +9,7 @@ use contribution_grid::ContributionGraph;
 use contribution_grid::builtins::Strategy;
 use contribution_grid::builtins::Theme;
 use log::trace;
-use serenity::all::ButtonStyle;
-use serenity::all::CreateActionRow;
-use serenity::all::CreateAttachment;
-use serenity::all::CreateButton;
-use serenity::all::CreateComponent;
-use serenity::all::CreateContainer;
-use serenity::all::CreateContainerComponent;
-use serenity::all::CreateMediaGallery;
-use serenity::all::CreateMediaGalleryItem;
-use serenity::all::CreateSeparator;
-use serenity::all::CreateTextDisplay;
-use serenity::all::CreateUnfurledMediaItem;
-use serenity::all::User;
+use poise::serenity_prelude::*;
 
 use crate::action_enum;
 use crate::bot::commands::Context;
@@ -58,7 +46,7 @@ pub async fn stats(
         VoiceStatsTimeRange,
     >,
     #[description = "User to show stats for (defaults to server stats in server, yourself in DM)"]
-    user: Option<serenity::all::User>,
+    user: Option<poise::serenity_prelude::User>,
     #[description = "Statistic to display for server view"] statistic: Option<GuildStatType>,
 ) -> Result<(), Error> {
     command(ctx, time_range, user, statistic).await
@@ -508,7 +496,7 @@ impl ViewHandler<VoiceStatsAction> for VoiceStatsHandler {
             }
             SelectUser => {
                 if let Trigger::Component(interaction) = _trigger
-                    && let serenity::all::ComponentInteractionDataKind::UserSelect { values } =
+                    && let poise::serenity_prelude::ComponentInteractionDataKind::UserSelect { values } =
                         &interaction.data.kind
                     && let Some(user_id) = values.first()
                 {
@@ -654,9 +642,9 @@ impl ViewRender<VoiceStatsAction> for VoiceStatsHandler {
                 .user
                 .clone()
                 .map(|u| std::borrow::Cow::Owned(vec![u.id]));
-            let user_select = serenity::all::CreateSelectMenu::new(
+            let user_select = poise::serenity_prelude::CreateSelectMenu::new(
                 registry.register(SelectUser),
-                serenity::all::CreateSelectMenuKind::User { default_users },
+                poise::serenity_prelude::CreateSelectMenuKind::User { default_users },
             );
             components.push(CreateComponent::ActionRow(CreateActionRow::SelectMenu(
                 user_select,

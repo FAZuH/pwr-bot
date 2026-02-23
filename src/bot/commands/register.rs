@@ -1,10 +1,7 @@
 //! Admin register command.
 
 use poise::samples::create_application_commands;
-use serenity::all::CreateComponent;
-use serenity::all::CreateContainer;
-use serenity::all::CreateContainerComponent;
-use serenity::all::CreateTextDisplay;
+use poise::serenity_prelude::*;
 
 use crate::bot::checks::is_author_guild_admin;
 use crate::bot::commands::Context;

@@ -1,7 +1,7 @@
 //! Owner dump_db command.
 
 use poise::CreateReply;
-use serenity::all::CreateAttachment;
+use poise::serenity_prelude::*;
 
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;

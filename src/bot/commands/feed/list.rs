@@ -3,17 +3,7 @@
 use std::collections::HashSet;
 use std::time::Duration;
 
-use serenity::all::ButtonStyle;
-use serenity::all::CreateActionRow;
-use serenity::all::CreateComponent;
-use serenity::all::CreateContainer;
-use serenity::all::CreateContainerComponent;
-use serenity::all::CreateSection;
-use serenity::all::CreateSectionAccessory;
-use serenity::all::CreateSectionComponent;
-use serenity::all::CreateTextDisplay;
-use serenity::all::CreateThumbnail;
-use serenity::all::CreateUnfurledMediaItem;
+use poise::serenity_prelude::*;
 
 use crate::action_extends;
 use crate::bot::commands::Context;
