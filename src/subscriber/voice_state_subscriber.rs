@@ -7,7 +7,7 @@ use anyhow::Result;
 use chrono::DateTime;
 use chrono::Utc;
 use log::debug;
-use serenity::all::ChannelId;
+use poise::serenity_prelude::ChannelId;
 use tokio::sync::Mutex;
 
 use crate::entity::VoiceSessionsEntity;
@@ -67,6 +67,7 @@ impl VoiceStateSubscriber {
                 channel_id,
                 join_time: now,
                 leave_time: now,
+                is_active: true,
                 ..Default::default()
             };
 
@@ -115,6 +116,7 @@ impl VoiceStateSubscriber {
             channel_id: channel_id.get(),
             join_time,
             leave_time: join_time,
+            is_active: true,
             ..Default::default()
         };
 
@@ -135,18 +137,19 @@ impl VoiceStateSubscriber {
         let session = self.active_sessions.lock().await.remove(&session_id);
 
         if let Some(session) = session {
-            let model = VoiceSessionsEntity {
-                user_id: old_state.user_id.get(),
-                guild_id: old_state
-                    .guild_id
-                    .ok_or(anyhow::anyhow!("Missing guild_id"))?
-                    .get(),
-                channel_id: old_channel_id.get(),
-                join_time: session.join_time,
-                leave_time,
-                ..Default::default()
-            };
-            self.services.voice_tracking.replace(&model).await?;
+            let _guild_id = old_state
+                .guild_id
+                .ok_or(anyhow::anyhow!("Missing guild_id"))?
+                .get();
+            self.services
+                .voice_tracking
+                .close_session(
+                    old_state.user_id.get(),
+                    old_channel_id.get(),
+                    &session.join_time,
+                    &leave_time,
+                )
+                .await?;
         }
         Ok(())
     }
@@ -169,18 +172,19 @@ impl VoiceStateSubscriber {
 
         // Close old session
         if let Some(session) = self.active_sessions.lock().await.remove(&session_id) {
-            let model = VoiceSessionsEntity {
-                user_id: old_state.user_id.get(),
-                guild_id: old_state
-                    .guild_id
-                    .ok_or(anyhow::anyhow!("Missing guild_id"))?
-                    .get(),
-                channel_id: old_channel_id.get(),
-                join_time: session.join_time,
-                leave_time: now,
-                ..Default::default()
-            };
-            self.services.voice_tracking.replace(&model).await?;
+            let _guild_id = old_state
+                .guild_id
+                .ok_or(anyhow::anyhow!("Missing guild_id"))?
+                .get();
+            self.services
+                .voice_tracking
+                .close_session(
+                    old_state.user_id.get(),
+                    old_channel_id.get(),
+                    &session.join_time,
+                    &now,
+                )
+                .await?;
         }
 
         // Start new session
@@ -209,6 +213,7 @@ impl VoiceStateSubscriber {
             channel_id: new_channel_id.get(),
             join_time: now,
             leave_time: now,
+            is_active: true,
             ..Default::default()
         };
 
@@ -267,7 +272,7 @@ impl Subscriber<VoiceStateEvent> for VoiceStateSubscriber {
 
 #[cfg(test)]
 mod tests {
-    use serenity::all::VoiceState;
+    use poise::serenity_prelude::VoiceState;
 
     use super::*;
     use crate::feed::platforms::Platforms;

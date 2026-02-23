@@ -7,9 +7,7 @@ use anyhow::Result;
 use log::debug;
 use log::error;
 use log::info;
-use serenity::all::ChannelId;
-use serenity::all::CreateMessage;
-use serenity::all::GuildId;
+use poise::serenity_prelude::*;
 
 use crate::bot::Bot;
 use crate::entity::SubscriberEntity;

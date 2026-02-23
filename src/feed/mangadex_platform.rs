@@ -15,12 +15,12 @@ use governor::state::direct::NotKeyed;
 use log::debug;
 use log::info;
 use log::warn;
-use reqwest::Client;
-use reqwest::header::HeaderMap;
-use reqwest::header::HeaderValue;
-use reqwest::header::USER_AGENT;
 use serde_json::Map;
 use serde_json::Value;
+use wreq::Client;
+use wreq::header::HeaderMap;
+use wreq::header::HeaderValue;
+use wreq::header::USER_AGENT;
 
 use crate::feed::BasePlatform;
 use crate::feed::FeedItem;
@@ -35,7 +35,7 @@ type Json<'a> = &'a Map<String, Value>;
 /// MangaDex platform implementation.
 pub struct MangaDexPlatform {
     pub base: BasePlatform,
-    client: reqwest::Client,
+    client: wreq::Client,
     limiter: RateLimiter<NotKeyed, InMemoryState, QuantaClock>,
 }
 
@@ -256,10 +256,7 @@ impl MangaDexPlatform {
         Ok(())
     }
 
-    async fn send(
-        &self,
-        request: reqwest::RequestBuilder,
-    ) -> Result<reqwest::Response, reqwest::Error> {
+    async fn send(&self, request: wreq::RequestBuilder) -> Result<wreq::Response, wreq::Error> {
         if self.limiter.check().is_err() {
             info!("Source {} is ratelimited. Waiting...", self.base.info.name);
         }
@@ -272,7 +269,7 @@ impl MangaDexPlatform {
 
     async fn send_get_json(
         &self,
-        request: reqwest::RequestBuilder,
+        request: wreq::RequestBuilder,
     ) -> Result<serde_json::Value, FeedError> {
         let response = self.send(request).await?;
 

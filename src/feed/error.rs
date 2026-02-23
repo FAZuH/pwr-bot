@@ -59,12 +59,6 @@ pub enum FeedError {
     UrlParseFailed(#[from] UrlParseError),
 }
 
-impl From<reqwest::Error> for FeedError {
-    fn from(e: reqwest::Error) -> Self {
-        FeedError::RequestFailed(Box::new(e))
-    }
-}
-
 impl From<wreq::Error> for FeedError {
     fn from(e: wreq::Error) -> Self {
         FeedError::RequestFailed(Box::new(e))

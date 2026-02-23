@@ -1,10 +1,7 @@
 //! Admin register command.
 
 use poise::samples::create_application_commands;
-use serenity::all::CreateComponent;
-use serenity::all::CreateContainer;
-use serenity::all::CreateContainerComponent;
-use serenity::all::CreateTextDisplay;
+use poise::serenity_prelude::*;
 
 use crate::bot::checks::is_author_guild_admin;
 use crate::bot::commands::Context;
@@ -12,7 +9,7 @@ use crate::bot::commands::Error;
 use crate::bot::error::BotError;
 use crate::bot::views::ResponseKind;
 
-/// Registers guild slash commands
+/// Registers server slash commands
 ///
 /// Registers all bot slash commands to the current server.
 /// Requires server administrator permissions.
@@ -85,7 +82,7 @@ impl CommandRegistrationView {
             )
         } else {
             format!(
-                "### {}\nRegistering {} guild commands...",
+                "### {}\nRegistering {} server commands...",
                 title, self.num_commands
             )
         };

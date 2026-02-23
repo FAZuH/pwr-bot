@@ -3,20 +3,7 @@
 use std::str::FromStr;
 use std::time::Duration;
 
-use serenity::all::ButtonStyle;
-use serenity::all::ChannelId;
-use serenity::all::ChannelType;
-use serenity::all::ComponentInteractionDataKind;
-use serenity::all::CreateActionRow;
-use serenity::all::CreateButton;
-use serenity::all::CreateComponent;
-use serenity::all::CreateContainer;
-use serenity::all::CreateContainerComponent;
-use serenity::all::CreateSelectMenu;
-use serenity::all::CreateSelectMenuKind;
-use serenity::all::CreateTextDisplay;
-use serenity::all::GenericChannelId;
-use serenity::all::RoleId;
+use poise::serenity_prelude::*;
 
 use crate::action_enum;
 use crate::bot::commands::Context;

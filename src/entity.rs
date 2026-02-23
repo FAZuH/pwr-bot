@@ -193,6 +193,8 @@ pub struct VoiceSessionsEntity {
     pub join_time: DateTime<Utc>,
     #[serde(default)]
     pub leave_time: DateTime<Utc>,
+    #[serde(default)]
+    pub is_active: bool,
 }
 
 use derive_builder::Builder;

@@ -1,9 +1,6 @@
 //! Admin unregister command.
 
-use serenity::all::CreateComponent;
-use serenity::all::CreateContainer;
-use serenity::all::CreateContainerComponent;
-use serenity::all::CreateTextDisplay;
+use poise::serenity_prelude::*;
 
 use crate::bot::checks::is_author_guild_admin;
 use crate::bot::commands::Context;
@@ -11,7 +8,7 @@ use crate::bot::commands::Error;
 use crate::bot::error::BotError;
 use crate::bot::views::ResponseKind;
 
-/// Unregisters guild slash commands
+/// Unregisters server slash commands
 ///
 /// Removes all bot slash commands from the current server.
 /// Requires server administrator permissions.
@@ -76,7 +73,7 @@ impl CommandUnregistrationView {
                 self.duration_ms.unwrap_or(0)
             )
         } else {
-            format!("### {}\nUnregistering all guild commands...", title)
+            format!("### {}\nUnregistering all server commands...", title)
         };
 
         let container = CreateComponent::Container(CreateContainer::new(vec![

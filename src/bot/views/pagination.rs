@@ -1,9 +1,6 @@
 //! Pagination component for Discord views.
 
-use serenity::all::ButtonStyle;
-use serenity::all::CreateActionRow;
-use serenity::all::CreateButton;
-use serenity::all::CreateComponent;
+use poise::serenity_prelude::*;
 
 use crate::action_enum;
 use crate::bot::Error;

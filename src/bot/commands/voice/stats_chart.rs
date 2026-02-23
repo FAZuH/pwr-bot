@@ -294,6 +294,7 @@ mod tests {
             channel_id: 1,
             join_time: now - Duration::days(30),
             leave_time: now - Duration::days(30), // active ghost
+            is_active: true,
         };
         // It shouldn't sum 30 days of seconds, it should cap at 86400 (24h)
         assert_eq!(duration_secs(&session, now), 86400);
@@ -306,6 +307,7 @@ mod tests {
             channel_id: 1,
             join_time: now - Duration::hours(3),
             leave_time: now - Duration::hours(1),
+            is_active: false,
         };
         assert_eq!(duration_secs(&session2, now), 7200);
     }

@@ -2,20 +2,7 @@
 
 use std::sync::Arc;
 
-use serenity::all::CreateComponent;
-use serenity::all::CreateContainer;
-use serenity::all::CreateContainerComponent;
-use serenity::all::CreateMediaGallery;
-use serenity::all::CreateMediaGalleryItem;
-use serenity::all::CreateMessage;
-use serenity::all::CreateSection;
-use serenity::all::CreateSectionAccessory;
-use serenity::all::CreateSectionComponent;
-use serenity::all::CreateSeparator;
-use serenity::all::CreateTextDisplay;
-use serenity::all::CreateThumbnail;
-use serenity::all::CreateUnfurledMediaItem;
-use serenity::all::MessageFlags;
+use poise::serenity_prelude::*;
 
 use crate::entity::FeedEntity;
 use crate::entity::FeedItemEntity;

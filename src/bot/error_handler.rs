@@ -3,11 +3,7 @@
 use log::error;
 use poise::CreateReply;
 use poise::FrameworkError;
-use serenity::all::CreateComponent;
-use serenity::all::CreateContainer;
-use serenity::all::CreateContainerComponent;
-use serenity::all::CreateTextDisplay;
-use serenity::all::MessageFlags;
+use poise::serenity_prelude::*;
 
 use crate::bot::Data;
 use crate::bot::Error;

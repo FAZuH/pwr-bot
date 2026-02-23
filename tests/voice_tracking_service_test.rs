@@ -124,6 +124,7 @@ async fn test_insert_and_replace_voice_session() {
         channel_id: 333333,
         join_time: now,
         leave_time: now + Duration::hours(1),
+        is_active: false,
     };
 
     // Insert the session
@@ -150,6 +151,7 @@ async fn test_insert_and_replace_voice_session() {
         channel_id: 333333,
         join_time: now,
         leave_time: now + Duration::hours(2), // Changed duration
+        is_active: false,
     };
     service
         .replace(&updated_session)
@@ -238,6 +240,7 @@ async fn test_get_leaderboard() {
             channel_id: 9001,
             join_time: now,
             leave_time: now + Duration::hours(1), // 3600 seconds
+            is_active: false,
         },
         VoiceSessionsEntity {
             id: 0,
@@ -246,6 +249,7 @@ async fn test_get_leaderboard() {
             channel_id: 9001,
             join_time: now + Duration::hours(2),
             leave_time: now + Duration::hours(4), // 7200 seconds, total: 10800
+            is_active: false,
         },
         VoiceSessionsEntity {
             id: 0,
@@ -254,6 +258,7 @@ async fn test_get_leaderboard() {
             channel_id: 9001,
             join_time: now,
             leave_time: now + Duration::minutes(30), // 1800 seconds
+            is_active: false,
         },
         VoiceSessionsEntity {
             id: 0,
@@ -262,6 +267,7 @@ async fn test_get_leaderboard() {
             channel_id: 9001,
             join_time: now,
             leave_time: now + Duration::hours(2), // 7200 seconds
+            is_active: false,
         },
     ];
 
@@ -315,6 +321,7 @@ async fn test_get_leaderboard_with_limit() {
             channel_id: 9001,
             join_time: now,
             leave_time: now + Duration::hours(i as i64), // Each user has different duration
+            is_active: false,
         };
         service
             .insert(&session)
@@ -357,6 +364,7 @@ async fn test_get_leaderboard_with_offset() {
             channel_id: 9001,
             join_time: now,
             leave_time: now + Duration::hours(i as i64),
+            is_active: false,
         };
         service
             .insert(&session)
@@ -452,7 +460,7 @@ async fn test_get_leaderboard_includes_active_sessions() {
     let now = Utc::now();
 
     // Insert a mix of completed and active sessions
-    // Active session: leave_time == join_time
+    // Active session: is_active = true
     let sessions = vec![
         VoiceSessionsEntity {
             id: 0,
@@ -461,6 +469,7 @@ async fn test_get_leaderboard_includes_active_sessions() {
             channel_id: 9001,
             join_time: now - Duration::hours(2),
             leave_time: now, // Completed: 2 hours (7200 seconds)
+            is_active: false,
         },
         VoiceSessionsEntity {
             id: 0,
@@ -469,6 +478,7 @@ async fn test_get_leaderboard_includes_active_sessions() {
             channel_id: 9001,
             join_time: now - Duration::hours(1),
             leave_time: now - Duration::hours(1), // Active: 1 hour so far
+            is_active: true,
         },
         VoiceSessionsEntity {
             id: 0,
@@ -477,6 +487,7 @@ async fn test_get_leaderboard_includes_active_sessions() {
             channel_id: 9001,
             join_time: now - Duration::minutes(30),
             leave_time: now - Duration::minutes(30), // Active: 30 minutes so far
+            is_active: true,
         },
     ];
 
@@ -540,6 +551,7 @@ async fn test_get_leaderboard_active_and_completed_mixed() {
             channel_id: 9001,
             join_time: now - Duration::hours(3),
             leave_time: now - Duration::hours(2),
+            is_active: false,
         },
         // User 3001: Active session (30 minutes so far)
         VoiceSessionsEntity {
@@ -549,6 +561,7 @@ async fn test_get_leaderboard_active_and_completed_mixed() {
             channel_id: 9001,
             join_time: now - Duration::minutes(30),
             leave_time: now - Duration::minutes(30),
+            is_active: true,
         },
         // User 3002: Only completed sessions (2 hours total)
         VoiceSessionsEntity {
@@ -558,6 +571,7 @@ async fn test_get_leaderboard_active_and_completed_mixed() {
             channel_id: 9001,
             join_time: now - Duration::hours(4),
             leave_time: now - Duration::hours(3),
+            is_active: false,
         },
         VoiceSessionsEntity {
             id: 0,
@@ -566,6 +580,7 @@ async fn test_get_leaderboard_active_and_completed_mixed() {
             channel_id: 9001,
             join_time: now - Duration::hours(2),
             leave_time: now - Duration::hours(1),
+            is_active: false,
         },
     ];
 

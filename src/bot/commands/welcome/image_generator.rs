@@ -28,15 +28,14 @@ pub struct WelcomeCardData {
 }
 
 pub struct WelcomeImageGenerator {
-    pub http_client: reqwest::Client,
+    pub http_client: wreq::Client,
     jinja_env: Environment<'static>,
 }
 
 impl WelcomeImageGenerator {
     pub fn new() -> Self {
-        let http_client = reqwest::Client::builder()
-            .pool_idle_timeout(std::time::Duration::from_secs(30))
-            .pool_max_idle_per_host(10)
+        let http_client = wreq::Client::builder()
+            .emulation(wreq_util::Emulation::Chrome137)
             .build()
             .expect("Failed to build HTTP client");
 

@@ -9,19 +9,7 @@ use contribution_grid::ContributionGraph;
 use contribution_grid::builtins::Strategy;
 use contribution_grid::builtins::Theme;
 use log::trace;
-use serenity::all::ButtonStyle;
-use serenity::all::CreateActionRow;
-use serenity::all::CreateAttachment;
-use serenity::all::CreateButton;
-use serenity::all::CreateComponent;
-use serenity::all::CreateContainer;
-use serenity::all::CreateContainerComponent;
-use serenity::all::CreateMediaGallery;
-use serenity::all::CreateMediaGalleryItem;
-use serenity::all::CreateSeparator;
-use serenity::all::CreateTextDisplay;
-use serenity::all::CreateUnfurledMediaItem;
-use serenity::all::User;
+use poise::serenity_prelude::*;
 
 use crate::action_enum;
 use crate::bot::commands::Context;
@@ -48,18 +36,17 @@ use crate::entity::VoiceDailyActivity;
 use crate::entity::VoiceSessionsEntity;
 use crate::error::AppError;
 
-/// Display voice activity statistics with contribution graph
+/// Show voice activity statistics
 ///
-/// Shows a GitHub-style contribution heatmap of voice activity over time.
-/// Can display stats for yourself, another user, or the entire server.
+/// Display daily voice activity for a user or the entire server.
 #[poise::command(slash_command)]
 pub async fn stats(
     ctx: Context<'_>,
     #[description = "Time period to display. Defaults to \"This month\""] time_range: Option<
         VoiceStatsTimeRange,
     >,
-    #[description = "User to show stats for (defaults to server stats in guild, yourself in DM)"]
-    user: Option<serenity::all::User>,
+    #[description = "User to show stats for (defaults to server stats in server, yourself in DM)"]
+    user: Option<poise::serenity_prelude::User>,
     #[description = "Statistic to display for server view"] statistic: Option<GuildStatType>,
 ) -> Result<(), Error> {
     command(ctx, time_range, user, statistic).await
@@ -142,13 +129,13 @@ action_enum! {
 pub struct VoiceStatsData {
     /// The user this data is for (None for guild stats)
     pub user: Option<User>,
-    /// The guild name (for display purposes)
+    /// The server name (for display purposes)
     pub guild_name: String,
     /// Daily activity data for users
     pub user_activity: Vec<VoiceDailyActivity>,
     /// Daily stats for guild (either average time or user count)
     pub guild_stats: Vec<GuildDailyStats>,
-    /// Current stat type being displayed (for guild view)
+    /// Current stat type being displayed (for server view)
     pub stat_type: GuildStatType,
     /// Time range for the data
     pub time_range: VoiceStatsTimeRange,
@@ -444,7 +431,7 @@ impl VoiceStatsHandler {
             };
 
             format!(
-                "### Voice Stats\n{}\n\n**Guild:** {}\n**{}:** {}\n**{}:**{}",
+                "### Voice Stats\n{}\n\n**Server:** {}\n**{}:** {}\n**{}:**{}",
                 time_range_text,
                 self.data.guild_name,
                 first_label,
@@ -509,8 +496,9 @@ impl ViewHandler<VoiceStatsAction> for VoiceStatsHandler {
             }
             SelectUser => {
                 if let Trigger::Component(interaction) = _trigger
-                    && let serenity::all::ComponentInteractionDataKind::UserSelect { values } =
-                        &interaction.data.kind
+                    && let poise::serenity_prelude::ComponentInteractionDataKind::UserSelect {
+                        values,
+                    } = &interaction.data.kind
                     && let Some(user_id) = values.first()
                 {
                     // Fetch user object
@@ -561,9 +549,9 @@ impl ViewRender<VoiceStatsAction> for VoiceStatsHandler {
 
         // Add Data Mode Toggle to bottom of Container
         let toggle_label = if self.data.is_user_stats() {
-            format!("Show stats for {}", self.data.guild_name)
+            "Show server stats".to_string()
         } else {
-            "Show stats for users".to_string()
+            "Show user stats".to_string()
         };
 
         let toggle_button = CreateButton::new(registry.register(ToggleDataMode))
@@ -655,9 +643,9 @@ impl ViewRender<VoiceStatsAction> for VoiceStatsHandler {
                 .user
                 .clone()
                 .map(|u| std::borrow::Cow::Owned(vec![u.id]));
-            let user_select = serenity::all::CreateSelectMenu::new(
+            let user_select = poise::serenity_prelude::CreateSelectMenu::new(
                 registry.register(SelectUser),
-                serenity::all::CreateSelectMenuKind::User { default_users },
+                poise::serenity_prelude::CreateSelectMenuKind::User { default_users },
             );
             components.push(CreateComponent::ActionRow(CreateActionRow::SelectMenu(
                 user_select,

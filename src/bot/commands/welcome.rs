@@ -11,16 +11,7 @@ use std::time::Duration;
 use log::debug;
 use poise::Command;
 use poise::Modal;
-use serenity::all::ButtonStyle;
-use serenity::all::ChannelType;
-use serenity::all::ComponentInteractionDataKind;
-use serenity::all::CreateActionRow;
-use serenity::all::CreateButton;
-use serenity::all::CreateComponent;
-use serenity::all::CreateContainer;
-use serenity::all::CreateContainerComponent;
-use serenity::all::CreateSelectMenuKind;
-use serenity::all::CreateTextDisplay;
+use poise::serenity_prelude::*;
 
 use crate::action_enum;
 use crate::bot::Data;
@@ -47,7 +38,7 @@ use crate::entity::ServerSettings;
 
 const WELCOME_FILE: &str = "welcome_preview.png";
 
-/// Server welcome configuration.
+/// Configure welcome cards for new members
 #[poise::command(slash_command)]
 pub async fn welcome(ctx: Context<'_>) -> Result<(), Error> {
     run_settings(ctx, Some(SettingsPage::Welcome)).await
@@ -87,7 +78,7 @@ pub struct SettingsWelcomeHandler {
     service: Arc<crate::service::feed_subscription_service::FeedSubscriptionService>,
     generator: Arc<WelcomeImageGenerator>,
     guild_id: u64,
-    ctx_serenity: serenity::all::Context,
+    ctx_serenity: poise::serenity_prelude::Context,
 }
 
 #[async_trait::async_trait]
@@ -291,7 +282,10 @@ impl ViewRender<SettingsWelcomeAction> for SettingsWelcomeHandler {
 
         let templates: Vec<_> = (1..=12)
             .map(|i| {
-                serenity::all::CreateSelectMenuOption::new(format!("Template {}", i), i.to_string())
+                poise::serenity_prelude::CreateSelectMenuOption::new(
+                    format!("Template {}", i),
+                    i.to_string(),
+                )
             })
             .collect();
         let template_action = RegisteredAction {
@@ -372,7 +366,8 @@ impl ViewRender<SettingsWelcomeAction> for SettingsWelcomeHandler {
                     } else {
                         msg.clone()
                     };
-                    let mut opt = serenity::all::CreateSelectMenuOption::new(label, i.to_string());
+                    let mut opt =
+                        poise::serenity_prelude::CreateSelectMenuOption::new(label, i.to_string());
                     if self.marked_removal.contains(&i) {
                         opt = opt.default_selection(true);
                     }

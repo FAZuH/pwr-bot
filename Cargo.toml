@@ -17,10 +17,8 @@ async-trait = "0.1.89"
 chrono = "0.4.43"
 dotenv = "0.15.0"
 poise = { git = "https://github.com/serenity-rs/poise", branch = "serenity-next" }
-reqwest = { version = "0.12.28", default-features = false, features = ["rustls-tls", "json"] }
 serde = "1.0.228"
 serde_json = "1.0.149"
-serenity = { git = "https://github.com/serenity-rs/serenity", branch = "next" }
 sqlx = { version = "0.8.6", features = ["chrono", "runtime-tokio", "sqlite"] }
 tokio = { version = "1.49.0", features = ["rt-multi-thread", "macros", "signal"] }
 futures = "0.3.32"

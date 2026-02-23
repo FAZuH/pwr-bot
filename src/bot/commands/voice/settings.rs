@@ -2,13 +2,7 @@
 
 use std::time::Duration;
 
-use serenity::all::ButtonStyle;
-use serenity::all::CreateActionRow;
-use serenity::all::CreateButton;
-use serenity::all::CreateComponent;
-use serenity::all::CreateContainer;
-use serenity::all::CreateContainerComponent;
-use serenity::all::CreateTextDisplay;
+use poise::serenity_prelude::*;
 
 use crate::action_enum;
 use crate::bot::commands::Context;

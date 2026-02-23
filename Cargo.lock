@@ -3594,11 +3594,9 @@ dependencies = [
  "mockall",
  "plotters",
  "poise",
- "reqwest",
  "resvg",
  "serde",
  "serde_json",
- "serenity",
  "serial_test",
  "sqlx",
  "sysinfo",
@@ -4363,7 +4361,6 @@ dependencies = [
  "typesize",
  "url",
  "zeroize",
- "zstd-safe",
 ]
 
 [[package]]
