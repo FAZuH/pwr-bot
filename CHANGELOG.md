@@ -1,3 +1,11 @@
+## [0.2.14](https://github.com/FAZuH/pwr-bot/compare/v0.2.13...v0.2.14) (2026-02-23)
+
+
+### UI/UX Changes
+
+* Modify /welcome command description ([19eb4b7](https://github.com/FAZuH/pwr-bot/commit/19eb4b7b46c627fc7b7c18a537899c9f2f43c8f6))
+* Modify command descriptions ([b27eac6](https://github.com/FAZuH/pwr-bot/commit/b27eac636db2797bd447b107c8d47c63578cd9ef)), closes [#65](https://github.com/FAZuH/pwr-bot/issues/65)
+
 ## [0.2.13](https://github.com/FAZuH/pwr-bot/compare/v0.2.12...v0.2.13) (2026-02-22)
 
 
@@ -21,12 +29,4 @@
 ### New Features
 
 * Add voice partners option in /vc leaderboard ([c37eeb5](https://github.com/FAZuH/pwr-bot/commit/c37eeb5377d86f78a136ca776df39dda44be0316))
-
-## [0.2.9](https://github.com/FAZuH/pwr-bot/compare/v0.2.8...v0.2.9) (2026-02-20)
-
-
-### UI/UX Changes
-
-* Improve /vc stats results ([624a186](https://github.com/FAZuH/pwr-bot/commit/624a186787918447c1ff26a7f0ea6db1bd0f31cb))
-* Small improvement to bot activity ([840ac93](https://github.com/FAZuH/pwr-bot/commit/840ac9369cc91048de4aef813785842216c5b026))
 
