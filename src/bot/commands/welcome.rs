@@ -282,7 +282,10 @@ impl ViewRender<SettingsWelcomeAction> for SettingsWelcomeHandler {
 
         let templates: Vec<_> = (1..=12)
             .map(|i| {
-                poise::serenity_prelude::CreateSelectMenuOption::new(format!("Template {}", i), i.to_string())
+                poise::serenity_prelude::CreateSelectMenuOption::new(
+                    format!("Template {}", i),
+                    i.to_string(),
+                )
             })
             .collect();
         let template_action = RegisteredAction {
@@ -363,7 +366,8 @@ impl ViewRender<SettingsWelcomeAction> for SettingsWelcomeHandler {
                     } else {
                         msg.clone()
                     };
-                    let mut opt = poise::serenity_prelude::CreateSelectMenuOption::new(label, i.to_string());
+                    let mut opt =
+                        poise::serenity_prelude::CreateSelectMenuOption::new(label, i.to_string());
                     if self.marked_removal.contains(&i) {
                         opt = opt.default_selection(true);
                     }

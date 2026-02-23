@@ -496,8 +496,9 @@ impl ViewHandler<VoiceStatsAction> for VoiceStatsHandler {
             }
             SelectUser => {
                 if let Trigger::Component(interaction) = _trigger
-                    && let poise::serenity_prelude::ComponentInteractionDataKind::UserSelect { values } =
-                        &interaction.data.kind
+                    && let poise::serenity_prelude::ComponentInteractionDataKind::UserSelect {
+                        values,
+                    } = &interaction.data.kind
                     && let Some(user_id) = values.first()
                 {
                     // Fetch user object

@@ -453,9 +453,10 @@ impl<'a> ViewRender<VoiceLeaderboardAction> for VoiceLeaderboardHandler<'a> {
         } else {
             "Show Voice Partners"
         };
-        let toggle_button = poise::serenity_prelude::CreateButton::new(registry.register(ToggleMode))
-            .label(toggle_label)
-            .style(poise::serenity_prelude::ButtonStyle::Primary);
+        let toggle_button =
+            poise::serenity_prelude::CreateButton::new(registry.register(ToggleMode))
+                .label(toggle_label)
+                .style(poise::serenity_prelude::ButtonStyle::Primary);
 
         container.push(CreateContainerComponent::ActionRow(
             CreateActionRow::Buttons(vec![toggle_button].into()),
