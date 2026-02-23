@@ -91,6 +91,7 @@ impl_bind_param!(&'q String);
 impl_bind_param!(&'q Option<String>);
 impl_bind_param!(&'q SubscriberType);
 impl_bind_param!(&'q chrono::DateTime<chrono::Utc>);
+impl_bind_param!(&'q bool);
 
 // For Json
 impl<'q, T: serde::Serialize + for<'a> serde::Deserialize<'a> + Send + Sync + 'static> BindParam<'q>
@@ -680,12 +681,15 @@ impl_table!(
         channel_id INTEGER NOT NULL,
         join_time TIMESTAMP NOT NULL,
         leave_time TIMESTAMP NOT NULL,
+        is_active INTEGER NOT NULL DEFAULT 0,
         UNIQUE(user_id, channel_id, join_time)
     );"#,
-    "user_id, guild_id, channel_id, join_time, leave_time",
-    "?, ?, ?, ?, ?",
-    "user_id = ?, guild_id = ?, channel_id = ?, join_time = ?, leave_time = ?",
-    [user_id, guild_id, channel_id, join_time, leave_time]
+    "user_id, guild_id, channel_id, join_time, leave_time, is_active",
+    "?, ?, ?, ?, ?, ?",
+    "user_id = ?, guild_id = ?, channel_id = ?, join_time = ?, leave_time = ?, is_active = ?",
+    [
+        user_id, guild_id, channel_id, join_time, leave_time, is_active
+    ]
 );
 
 impl VoiceSessionsTable {
@@ -703,7 +707,7 @@ impl VoiceSessionsTable {
                 user_id, 
                 SUM(
                     CASE 
-                        WHEN leave_time = join_time 
+                        WHEN is_active = 1 
                         THEN strftime('%s', 'now') - strftime('%s', join_time)
                         ELSE strftime('%s', leave_time) - strftime('%s', join_time)
                     END
@@ -782,8 +786,8 @@ impl VoiceSessionsTable {
                 v2.user_id, 
                 SUM(
                     strftime('%s', MIN(
-                        CASE WHEN v1.leave_time = v1.join_time THEN CURRENT_TIMESTAMP ELSE v1.leave_time END, 
-                        CASE WHEN v2.leave_time = v2.join_time THEN CURRENT_TIMESTAMP ELSE v2.leave_time END
+                        CASE WHEN v1.is_active = 1 THEN CURRENT_TIMESTAMP ELSE v1.leave_time END, 
+                        CASE WHEN v2.is_active = 1 THEN CURRENT_TIMESTAMP ELSE v2.leave_time END
                     )) - 
                     strftime('%s', MAX(v1.join_time, v2.join_time))
                 ) as total_duration
@@ -793,8 +797,8 @@ impl VoiceSessionsTable {
                 AND v1.channel_id = v2.channel_id 
                 AND v1.user_id != v2.user_id 
                 AND MAX(v1.join_time, v2.join_time) < MIN(
-                    CASE WHEN v1.leave_time = v1.join_time THEN CURRENT_TIMESTAMP ELSE v1.leave_time END, 
-                    CASE WHEN v2.leave_time = v2.join_time THEN CURRENT_TIMESTAMP ELSE v2.leave_time END
+                    CASE WHEN v1.is_active = 1 THEN CURRENT_TIMESTAMP ELSE v1.leave_time END, 
+                    CASE WHEN v2.is_active = 1 THEN CURRENT_TIMESTAMP ELSE v2.leave_time END
                 )
             WHERE v1.user_id = ? AND v1.guild_id = ?
             "#,
@@ -849,12 +853,36 @@ impl VoiceSessionsTable {
         Ok(())
     }
 
-    /// Find all active sessions (where leave_time equals join_time)
+    /// Close a session by setting leave_time and is_active = 0 atomically
+    pub async fn close_session(
+        &self,
+        user_id: u64,
+        channel_id: u64,
+        join_time: &chrono::DateTime<chrono::Utc>,
+        leave_time: &chrono::DateTime<chrono::Utc>,
+    ) -> Result<(), DatabaseError> {
+        sqlx::query(
+            r#"
+            UPDATE voice_sessions 
+            SET leave_time = ?, is_active = 0
+            WHERE user_id = ? AND channel_id = ? AND join_time = ?
+            "#,
+        )
+        .bind(leave_time)
+        .bind(user_id as i64)
+        .bind(channel_id as i64)
+        .bind(join_time)
+        .execute(&self.base.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Find all active sessions (where is_active = 1)
     pub async fn find_active_sessions(&self) -> Result<Vec<VoiceSessionsEntity>, DatabaseError> {
         Ok(sqlx::query_as::<_, VoiceSessionsEntity>(
             r#"
             SELECT * FROM voice_sessions
-            WHERE leave_time = join_time
+            WHERE is_active = 1
             "#,
         )
         .fetch_all(&self.base.pool)
@@ -916,7 +944,7 @@ impl VoiceSessionsTable {
                 date(join_time) as day,
                 SUM(
                     CASE 
-                        WHEN leave_time = join_time 
+                        WHEN is_active = 1 
                         THEN strftime('%s', 'now') - strftime('%s', join_time)
                         ELSE strftime('%s', leave_time) - strftime('%s', join_time)
                     END
@@ -953,7 +981,7 @@ impl VoiceSessionsTable {
                     date(join_time) as day,
                     SUM(
                         CASE 
-                            WHEN leave_time = join_time 
+                            WHEN is_active = 1 
                             THEN strftime('%s', 'now') - strftime('%s', join_time)
                             ELSE strftime('%s', leave_time) - strftime('%s', join_time)
                         END
@@ -991,7 +1019,7 @@ impl VoiceSessionsTable {
                     date(join_time) as day,
                     SUM(
                         CASE 
-                            WHEN leave_time = join_time 
+                            WHEN is_active = 1 
                             THEN strftime('%s', 'now') - strftime('%s', join_time)
                             ELSE strftime('%s', leave_time) - strftime('%s', join_time)
                         END

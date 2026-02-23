@@ -128,8 +128,9 @@ impl VoiceHeartbeatManager {
         for session in active_sessions {
             // Use the last known heartbeat as the leave_time
             // This represents the last time the bot was known to be running
+            // Also set is_active = 0 to properly close the session
             self.service
-                .update_session_leave_time(
+                .close_session(
                     session.user_id,
                     session.channel_id,
                     &session.join_time,

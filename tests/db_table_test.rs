@@ -105,6 +105,7 @@ macro_rules! create_voice_session {
                 channel_id: $chan,
                 join_time: Utc::now(),
                 leave_time: Utc::now() + Duration::hours(1),
+                is_active: false,
                 ..Default::default()
             })
             .await
@@ -511,6 +512,7 @@ mod voice_sessions_table_tests {
             channel_id: 300,
             join_time,
             leave_time: join_time, // Active session
+            is_active: true,
         };
         db.voice_sessions
             .insert(&session)
@@ -546,6 +548,7 @@ mod voice_sessions_table_tests {
             channel_id: 300,
             join_time: now - Duration::hours(1),
             leave_time: now - Duration::hours(1), // Active
+            is_active: true,
         };
         db.voice_sessions
             .insert(&active_session)
@@ -559,6 +562,7 @@ mod voice_sessions_table_tests {
             channel_id: 301,
             join_time: now - Duration::hours(2),
             leave_time: now - Duration::hours(1), // Completed
+            is_active: false,
         };
         db.voice_sessions
             .insert(&completed_session)
@@ -572,6 +576,7 @@ mod voice_sessions_table_tests {
             channel_id: 302,
             join_time: now - Duration::minutes(30),
             leave_time: now - Duration::minutes(30), // Active
+            is_active: true,
         };
         db.voice_sessions
             .insert(&another_active)
@@ -642,6 +647,7 @@ mod voice_sessions_table_tests {
             channel_id: 300,
             join_time: now,
             leave_time: now + Duration::hours(2), // 2 hours today
+            is_active: false,
         };
         db.voice_sessions
             .insert(&session1)
@@ -655,6 +661,7 @@ mod voice_sessions_table_tests {
             channel_id: 301,
             join_time: now - Duration::days(1),
             leave_time: now - Duration::days(1) + Duration::hours(1), // 1 hour yesterday
+            is_active: false,
         };
         db.voice_sessions
             .insert(&session2)
@@ -669,6 +676,7 @@ mod voice_sessions_table_tests {
             channel_id: 302,
             join_time: now,
             leave_time: now + Duration::minutes(30),
+            is_active: false,
         };
         db.voice_sessions
             .insert(&session3)
@@ -737,6 +745,7 @@ mod voice_sessions_table_tests {
             channel_id: 300,
             join_time: now,
             leave_time: now + Duration::hours(2),
+            is_active: false,
         };
         db.voice_sessions
             .insert(&session1)
@@ -751,6 +760,7 @@ mod voice_sessions_table_tests {
             channel_id: 301,
             join_time: now,
             leave_time: now + Duration::hours(1),
+            is_active: false,
         };
         db.voice_sessions
             .insert(&session2)
@@ -765,6 +775,7 @@ mod voice_sessions_table_tests {
             channel_id: 302,
             join_time: now,
             leave_time: now + Duration::minutes(30),
+            is_active: false,
         };
         db.voice_sessions
             .insert(&session3)
@@ -797,6 +808,7 @@ mod voice_sessions_table_tests {
             channel_id: 300,
             join_time: now,
             leave_time: now + Duration::hours(1),
+            is_active: false,
         };
         db.voice_sessions
             .insert(&session1)
@@ -811,6 +823,7 @@ mod voice_sessions_table_tests {
             channel_id: 301,
             join_time: now,
             leave_time: now + Duration::hours(2),
+            is_active: false,
         };
         db.voice_sessions
             .insert(&session2)
@@ -825,6 +838,7 @@ mod voice_sessions_table_tests {
             channel_id: 302,
             join_time: now + Duration::minutes(30),
             leave_time: now + Duration::minutes(90),
+            is_active: false,
         };
         db.voice_sessions
             .insert(&session3)
