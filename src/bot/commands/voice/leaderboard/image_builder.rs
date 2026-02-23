@@ -122,7 +122,7 @@ impl<'a> LeaderboardPageBuilder<'a> {
     async fn fetch_missing_avatars(
         &self,
         entries: &[VoiceLeaderboardEntry],
-        http_client: &reqwest::Client,
+        http_client: &wreq::Client,
     ) -> HashMap<u64, image::DynamicImage> {
         let avatar_futures: Vec<_> = entries
             .iter()

@@ -26,7 +26,7 @@ use crate::feed::error::FeedError;
 /// AniList GraphQL API platform for anime tracking.
 pub struct AniListPlatform {
     pub base: BasePlatform,
-    client: reqwest::Client,
+    client: wreq::Client,
     limiter: RateLimiter<NotKeyed, InMemoryState, QuantaClock>,
 }
 
@@ -48,9 +48,14 @@ impl AniListPlatform {
         // We will use the ratelimit headers `X-RateLimit-Limit` and `X-RateLimit-Remaining` when
         // the API is fully restored.
         let limiter = RateLimiter::direct(Quota::per_minute(NonZeroU32::new(30).unwrap()));
+        let client = wreq::Client::builder()
+            .emulation(wreq_util::Emulation::Chrome137)
+            .build()
+            .unwrap();
+
         Self {
             base: BasePlatform::new(info),
-            client: reqwest::Client::new(),
+            client,
             limiter,
         }
     }
@@ -62,9 +67,13 @@ impl AniListPlatform {
             "variables": { "id": source_id_num }
         });
 
-        let request = self.client.post(&self.base.info.api_url).json(&json);
+        let request = self
+            .client
+            .post(&self.base.info.api_url)
+            .body(json.to_string());
         let response = self.send(request).await?;
-        let response_json = response.json::<serde_json::Value>().await?; // Automatically converts to SourceError::JsonParseFailed
+        let body = response.text().await?;
+        let response_json: serde_json::Value = serde_json::from_str(&body)?;
 
         self.check_api_errors(&response_json)?;
 
@@ -172,10 +181,7 @@ impl AniListPlatform {
             })
     }
 
-    async fn send(
-        &self,
-        request: reqwest::RequestBuilder,
-    ) -> Result<reqwest::Response, reqwest::Error> {
+    async fn send(&self, request: wreq::RequestBuilder) -> Result<wreq::Response, wreq::Error> {
         if self.limiter.check().is_err() {
             info!("Source {} is ratelimited. Waiting...", self.base.info.name);
         }
