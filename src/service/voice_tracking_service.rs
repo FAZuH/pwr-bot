@@ -154,6 +154,21 @@ impl VoiceTrackingService {
         Ok(())
     }
 
+    /// Close a session by setting leave_time and is_active = 0 atomically
+    pub async fn close_session(
+        &self,
+        user_id: u64,
+        channel_id: u64,
+        join_time: &DateTime<Utc>,
+        leave_time: &DateTime<Utc>,
+    ) -> anyhow::Result<()> {
+        self.db
+            .voice_sessions
+            .close_session(user_id, channel_id, join_time, leave_time)
+            .await?;
+        Ok(())
+    }
+
     /// Find all active sessions from database
     pub async fn find_active_sessions(&self) -> anyhow::Result<Vec<VoiceSessionsEntity>> {
         Ok(self.db.voice_sessions.find_active_sessions().await?)

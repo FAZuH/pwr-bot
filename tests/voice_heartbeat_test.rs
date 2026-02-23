@@ -83,6 +83,7 @@ async fn test_heartbeat_crash_recovery_with_active_sessions() {
             channel_id: 9001,
             join_time: now - Duration::hours(2),
             leave_time: now - Duration::hours(2), // Active session
+            is_active: true,
         },
         VoiceSessionsEntity {
             id: 0,
@@ -91,6 +92,7 @@ async fn test_heartbeat_crash_recovery_with_active_sessions() {
             channel_id: 9001,
             join_time: now - Duration::minutes(30),
             leave_time: now - Duration::minutes(30), // Active session
+            is_active: true,
         },
     ];
 
@@ -164,6 +166,7 @@ async fn test_heartbeat_crash_recovery_no_heartbeat() {
         channel_id: 9001,
         join_time: now - Duration::hours(1),
         leave_time: now - Duration::hours(1),
+        is_active: true,
     };
 
     service
@@ -215,6 +218,7 @@ async fn test_find_active_sessions() {
             channel_id: 9001,
             join_time: now - Duration::hours(2),
             leave_time: now - Duration::hours(2), // Active
+            is_active: true,
         },
         VoiceSessionsEntity {
             id: 0,
@@ -223,6 +227,7 @@ async fn test_find_active_sessions() {
             channel_id: 9001,
             join_time: now - Duration::hours(3),
             leave_time: now - Duration::hours(1), // Completed (2 hours)
+            is_active: false,
         },
         VoiceSessionsEntity {
             id: 0,
@@ -231,6 +236,7 @@ async fn test_find_active_sessions() {
             channel_id: 9001,
             join_time: now - Duration::minutes(30),
             leave_time: now - Duration::minutes(30), // Active
+            is_active: true,
         },
     ];
 
@@ -276,6 +282,7 @@ async fn test_update_session_leave_time() {
         channel_id: 9001,
         join_time,
         leave_time: join_time, // Active
+        is_active: true,
     };
 
     service
