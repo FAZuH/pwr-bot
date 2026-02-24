@@ -1,6 +1,8 @@
 [package]
 name = "pwr-bot"
 default-run = "pwr-bot"
+# Version will be updated by CI in `release` branch.
+# Avoid modifying version manually or it will break CI
 
 
 version = "0.1.0"
