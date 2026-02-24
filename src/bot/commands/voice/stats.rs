@@ -18,7 +18,7 @@ use crate::bot::commands::voice::GuildStatType;
 use crate::bot::commands::voice::TimeRange;
 use crate::bot::commands::voice::VoiceStatsTimeRange;
 use crate::bot::controller::Controller;
-use crate::bot::controller::Coordinator;
+use crate::bot::coordinator::Coordinator;
 use crate::bot::error::BotError;
 use crate::bot::navigation::NavigationResult;
 use crate::bot::utils::format_duration;
@@ -93,9 +93,13 @@ pub async fn command(
         Some(ctx.author().clone())
     };
 
-    let mut coordinator = Coordinator::new(ctx);
-    let mut controller = VoiceStatsController::new(&ctx, time_range, target_user, stat_type);
-    let _result = controller.run(&mut coordinator).await?;
+    Coordinator::new(ctx)
+        .run(NavigationResult::VoiceStats {
+            time_range,
+            target_user: Box::new(target_user),
+            stat_type,
+        })
+        .await?;
     Ok(())
 }
 
@@ -762,10 +766,7 @@ impl<'a> VoiceStatsController<'a> {
 
 #[async_trait::async_trait]
 impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceStatsController<'a> {
-    async fn run(
-        &mut self,
-        coordinator: &mut Coordinator<'_, S>,
-    ) -> Result<NavigationResult, Error> {
+    async fn run(&mut self, coordinator: std::sync::Arc<Coordinator<'_, S>>) -> Result<(), Error> {
         let ctx = *coordinator.context();
         ctx.defer().await?;
 
@@ -803,6 +804,6 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceStatsController<'a> {
             .run(|_action| Box::pin(async move { ViewCommand::Render }))
             .await?;
 
-        Ok(NavigationResult::Exit)
+        Ok(())
     }
 }

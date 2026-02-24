@@ -7,10 +7,8 @@ use poise::serenity_prelude::*;
 use crate::action_enum;
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;
-use crate::bot::commands::settings::SettingsPage;
-use crate::bot::commands::settings::run_settings;
 use crate::bot::controller::Controller;
-use crate::bot::controller::Coordinator;
+use crate::bot::coordinator::Coordinator;
 use crate::bot::error::BotError;
 use crate::bot::navigation::NavigationResult;
 use crate::bot::views::Action;
@@ -34,17 +32,17 @@ use crate::entity::ServerSettings;
     default_member_permissions = "ADMINISTRATOR | MANAGE_GUILD"
 )]
 pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
-    run_settings(ctx, Some(SettingsPage::Voice)).await
+    Coordinator::new(ctx)
+        .run(NavigationResult::SettingsVoice)
+        .await?;
+    Ok(())
 }
 
 controller! { pub struct VoiceSettingsController<'a> {} }
 
 #[async_trait::async_trait]
 impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceSettingsController<'a> {
-    async fn run(
-        &mut self,
-        coordinator: &mut Coordinator<'_, S>,
-    ) -> Result<NavigationResult, Error> {
+    async fn run(&mut self, coordinator: std::sync::Arc<Coordinator<'_, S>>) -> Result<(), Error> {
         let ctx = *coordinator.context();
         ctx.defer().await?;
         let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?.get();
@@ -60,19 +58,17 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceSettingsController<'a>
 
         let mut engine = ViewEngine::new(&ctx, view, Duration::from_secs(120));
 
-        let nav = std::sync::Arc::new(std::sync::Mutex::new(NavigationResult::Exit));
-
         engine
             .run(|action| {
-                let nav = nav.clone();
+                let cor = coordinator.clone();
                 Box::pin(async move {
                     match action {
                         SettingsVoiceAction::Back => {
-                            *nav.lock().unwrap() = NavigationResult::Back;
+                            cor.navigate(NavigationResult::SettingsMain);
                             ViewCommand::Exit
                         }
                         SettingsVoiceAction::About => {
-                            *nav.lock().unwrap() = NavigationResult::SettingsAbout;
+                            cor.navigate(NavigationResult::SettingsAbout);
                             ViewCommand::Exit
                         }
                         SettingsVoiceAction::ToggleEnabled => ViewCommand::Render,
@@ -87,8 +83,7 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceSettingsController<'a>
             .await
             .map_err(Error::from)?;
 
-        let res = nav.lock().unwrap().clone();
-        Ok(res)
+        Ok(())
     }
 }
 

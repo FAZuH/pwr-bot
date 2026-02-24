@@ -1,5 +1,6 @@
 //! Feed subscription management commands.
 
+use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -10,8 +11,7 @@ use crate::action_enum;
 use crate::bot::checks::check_author_roles;
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;
-use crate::bot::commands::settings::SettingsPage;
-use crate::bot::commands::settings::run_settings;
+use crate::bot::coordinator::Coordinator;
 use crate::bot::error::BotError;
 use crate::bot::navigation::NavigationResult;
 use crate::bot::views::Action;
@@ -133,21 +133,17 @@ impl From<UnsubscribeResult> for String {
     }
 }
 
-/// Legacy function for feed settings command.
-pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
-    run_settings(ctx, Some(SettingsPage::Feeds)).await
-}
-
 /// Processes a batch of subscription/unsubscription operations.
-async fn process_subscription_batch(
-    ctx: Context<'_>,
+async fn process_subscription_batch<S: Send + Sync + 'static>(
+    coordinator: Arc<Coordinator<'_, S>>,
     urls: &[&str],
     subscriber: &SubscriberEntity,
     is_subscribe: bool,
-) -> Result<NavigationResult, Error> {
+) -> Result<(), Error> {
     let mut states: Vec<String> = vec!["⏳ Processing...".to_string(); urls.len()];
     let mut last_send = Instant::now();
     let mut handler: Option<FeedSubscriptionBatchHandler> = None;
+    let ctx = coordinator.context();
     let service = ctx.data().service.feed_subscription.clone();
 
     for (i, url) in urls.iter().enumerate() {
@@ -175,7 +171,7 @@ async fn process_subscription_batch(
             // To render without waiting for interaction, we could run the engine for 0 seconds
             // but we can also just use ViewEngine::render_standalone if it exists, or
             // construct an engine and exit immediately. In V2, the recommended way to just render is:
-            let mut engine = ViewEngine::new(&ctx, batch_handler, Duration::from_millis(1));
+            let mut engine = ViewEngine::new(ctx, batch_handler, Duration::from_millis(1));
 
             if !is_final {
                 // Just render and exit since it's an intermediate step
@@ -191,12 +187,11 @@ async fn process_subscription_batch(
 
     // Listen for "View Subscriptions" button click after final message
     if let Some(handler) = handler {
-        let nav = std::sync::Arc::new(std::sync::Mutex::new(NavigationResult::Exit));
-        let mut engine = ViewEngine::new(&ctx, handler, Duration::from_secs(120));
+        let mut engine = ViewEngine::new(ctx, handler, Duration::from_secs(120));
 
         engine
             .run(|action| {
-                let nav = nav.clone();
+                let cor = coordinator.clone();
                 let subscriber_type = subscriber.r#type;
                 Box::pin(async move {
                     if action == FeedSubscriptionBatchAction::ViewSubscriptions {
@@ -205,19 +200,15 @@ async fn process_subscription_batch(
                             SubscriberType::Guild => SendInto::Server,
                             SubscriberType::Dm => SendInto::DM,
                         };
-                        *nav.lock().unwrap() = NavigationResult::FeedList(Some(send_into));
+                        cor.navigate(NavigationResult::FeedList(Some(send_into)));
                         return ViewCommand::Exit;
                     }
                     ViewCommand::Render
                 })
             })
             .await?;
-
-        let res = nav.lock().unwrap().clone();
-        Ok(res)
-    } else {
-        Ok(NavigationResult::Exit)
     }
+    Ok(())
 }
 
 /// Verifies server configuration is valid for the operation.

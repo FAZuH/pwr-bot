@@ -93,7 +93,7 @@ macro_rules! with_data {
 /// // Then implement the run method:
 /// #[async_trait::async_trait]
 /// impl<S: Send + Sync + 'static> Controller<S> for MySettingsController<'_> {
-///     async fn run(&mut self, coordinator: &mut Coordinator<'_, S>) -> Result<NavigationResult, Error> {
+///     async fn run(&mut self, coordinator: std::sync::Arc<Coordinator<'_, S>>) -> Result<(), Error> {
 ///         let ctx = *coordinator.context();
 ///         ctx.defer().await?;
 ///         

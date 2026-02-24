@@ -11,14 +11,12 @@ use poise::serenity_prelude::*;
 use crate::action_extends;
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;
-use crate::bot::commands::settings::SettingsPage;
-use crate::bot::commands::settings::run_settings;
 use crate::bot::commands::voice::TimeRange;
 use crate::bot::commands::voice::VoiceLeaderboardTimeRange;
 use crate::bot::commands::voice::leaderboard::image_builder::LeaderboardPageBuilder;
 use crate::bot::commands::voice::leaderboard::image_builder::PageGenerationResult;
 use crate::bot::controller::Controller;
-use crate::bot::controller::Coordinator;
+use crate::bot::coordinator::Coordinator;
 use crate::bot::error::BotError;
 use crate::bot::navigation::NavigationResult;
 use crate::bot::utils::format_duration;
@@ -55,17 +53,11 @@ pub async fn leaderboard(
     #[description = "Time period to filter voice activity. Defaults to \"This month\""]
     time_range: Option<VoiceLeaderboardTimeRange>,
 ) -> Result<(), Error> {
-    command(
-        ctx,
-        time_range.unwrap_or(VoiceLeaderboardTimeRange::ThisMonth),
-    )
-    .await
-}
-
-pub async fn command(ctx: Context<'_>, time_range: VoiceLeaderboardTimeRange) -> Result<(), Error> {
-    let mut coordinator = Coordinator::new(ctx);
-    let mut controller = VoiceLeaderboardController::new(&ctx, time_range);
-    let _result = controller.run(&mut coordinator).await?;
+    Coordinator::new(ctx)
+        .run(NavigationResult::VoiceLeaderboard {
+            time_range: time_range.unwrap_or(VoiceLeaderboardTimeRange::ThisMonth),
+        })
+        .await?;
     Ok(())
 }
 
@@ -159,10 +151,7 @@ impl<'a> VoiceLeaderboardController<'a> {
 
 #[async_trait::async_trait]
 impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceLeaderboardController<'a> {
-    async fn run(
-        &mut self,
-        coordinator: &mut Coordinator<'_, S>,
-    ) -> Result<NavigationResult, Error> {
+    async fn run(&mut self, coordinator: std::sync::Arc<Coordinator<'_, S>>) -> Result<(), Error> {
         let controller_start = Instant::now();
 
         let ctx = *coordinator.context();
@@ -192,7 +181,7 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceLeaderboardController<
             engine
                 .run(|_| Box::pin(async { ViewCommand::Exit }))
                 .await?;
-            return Ok(NavigationResult::Exit);
+            return Ok(());
         }
 
         // Generate and send initial page
@@ -214,13 +203,8 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceLeaderboardController<
             "controller_total {} ms",
             controller_start.elapsed().as_millis()
         );
-        Ok(NavigationResult::Exit)
+        Ok(())
     }
-}
-
-/// Legacy function for voice settings command.
-pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
-    run_settings(ctx, Some(SettingsPage::Voice)).await
 }
 
 pub struct VoiceLeaderboardHandler<'a> {

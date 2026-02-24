@@ -10,10 +10,8 @@ use poise::serenity_prelude::*;
 use crate::action_enum;
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;
-use crate::bot::commands::settings::SettingsPage;
-use crate::bot::commands::settings::run_settings;
 use crate::bot::controller::Controller;
-use crate::bot::controller::Coordinator;
+use crate::bot::coordinator::Coordinator;
 use crate::bot::navigation::NavigationResult;
 use crate::bot::views::ActionRegistry;
 use crate::bot::views::ResponseKind;
@@ -28,17 +26,17 @@ use crate::controller;
 /// Show information about the bot
 #[poise::command(slash_command)]
 pub async fn about(ctx: Context<'_>) -> Result<(), Error> {
-    run_settings(ctx, Some(SettingsPage::About)).await
+    Coordinator::new(ctx)
+        .run(NavigationResult::SettingsAbout)
+        .await?;
+    Ok(())
 }
 
 controller! { pub struct AboutController<'a> {} }
 
 #[async_trait::async_trait]
 impl<S: Send + Sync + 'static> Controller<S> for AboutController<'_> {
-    async fn run(
-        &mut self,
-        coordinator: &mut Coordinator<'_, S>,
-    ) -> Result<NavigationResult, Error> {
+    async fn run(&mut self, coordinator: std::sync::Arc<Coordinator<'_, S>>) -> Result<(), Error> {
         let ctx = *coordinator.context();
         ctx.defer().await?;
 
@@ -49,15 +47,13 @@ impl<S: Send + Sync + 'static> Controller<S> for AboutController<'_> {
 
         let mut engine = ViewEngine::new(&ctx, view, Duration::from_secs(120));
 
-        let nav = std::sync::Arc::new(std::sync::Mutex::new(NavigationResult::Exit));
-
         engine
             .run(|action| {
-                let nav = nav.clone();
+                let cor = coordinator.clone();
                 Box::pin(async move {
                     match action {
                         AboutAction::Back => {
-                            *nav.lock().unwrap() = NavigationResult::Back;
+                            cor.navigate(NavigationResult::SettingsMain);
                             ViewCommand::Exit
                         }
                     }
@@ -65,8 +61,7 @@ impl<S: Send + Sync + 'static> Controller<S> for AboutController<'_> {
             })
             .await?;
 
-        let res = nav.lock().unwrap().clone();
-        Ok(res)
+        Ok(())
     }
 }
 

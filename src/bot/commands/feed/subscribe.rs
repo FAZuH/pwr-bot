@@ -9,7 +9,7 @@ use crate::bot::commands::feed::get_or_create_subscriber;
 use crate::bot::commands::feed::process_subscription_batch;
 use crate::bot::commands::feed::verify_server_config;
 use crate::bot::controller::Controller;
-use crate::bot::controller::Coordinator;
+use crate::bot::coordinator::Coordinator;
 use crate::bot::navigation::NavigationResult;
 use crate::bot::utils::parse_and_validate_urls;
 use crate::controller;
@@ -28,9 +28,9 @@ pub async fn subscribe(
         SendInto,
     >,
 ) -> Result<(), Error> {
-    let mut coordinator = Coordinator::new(ctx);
-    let mut controller = FeedSubscribeController::new(&ctx, links, send_into);
-    let _result = controller.run(&mut coordinator).await?;
+    Coordinator::new(ctx)
+        .run(NavigationResult::FeedSubscribe { links, send_into })
+        .await?;
     Ok(())
 }
 
@@ -41,10 +41,7 @@ controller! { pub struct FeedSubscribeController<'a> {
 
 #[async_trait::async_trait]
 impl<'a, S: Send + Sync + 'static> Controller<S> for FeedSubscribeController<'a> {
-    async fn run(
-        &mut self,
-        coordinator: &mut Coordinator<'_, S>,
-    ) -> Result<NavigationResult, Error> {
+    async fn run(&mut self, coordinator: std::sync::Arc<Coordinator<'_, S>>) -> Result<(), Error> {
         let ctx = *coordinator.context();
         ctx.defer().await?;
 
@@ -54,7 +51,7 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for FeedSubscribeController<'a>
         verify_server_config(ctx, &send_into, true).await?;
 
         let subscriber = get_or_create_subscriber(ctx, &send_into).await?;
-        Ok(process_subscription_batch(ctx, &urls, &subscriber, true).await?)
+        Ok(process_subscription_batch(coordinator, &urls, &subscriber, true).await?)
     }
 }
 

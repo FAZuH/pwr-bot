@@ -5,23 +5,18 @@ pub mod image_generator;
 use std::borrow::Cow;
 use std::collections::HashSet;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::time::Duration;
 
 use log::debug;
-use poise::Command;
 use poise::Modal;
 use poise::serenity_prelude::*;
 
 use crate::action_enum;
-use crate::bot::Data;
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;
-use crate::bot::commands::settings::SettingsPage;
-use crate::bot::commands::settings::run_settings;
 use crate::bot::commands::welcome::image_generator::WelcomeImageGenerator;
 use crate::bot::controller::Controller;
-use crate::bot::controller::Coordinator;
+use crate::bot::coordinator::Coordinator;
 use crate::bot::error::BotError;
 use crate::bot::navigation::NavigationResult;
 use crate::bot::views::ActionRegistry;
@@ -41,11 +36,10 @@ const WELCOME_FILE: &str = "welcome_preview.png";
 /// Configure welcome cards for new members
 #[poise::command(slash_command)]
 pub async fn welcome(ctx: Context<'_>) -> Result<(), Error> {
-    run_settings(ctx, Some(SettingsPage::Welcome)).await
-}
-
-pub fn welcome_commands() -> Command<Data, Error> {
-    welcome()
+    Coordinator::new(ctx)
+        .run(NavigationResult::SettingsWelcome)
+        .await?;
+    Ok(())
 }
 
 #[derive(Debug, Modal, Clone, PartialEq, Eq)]
@@ -507,10 +501,7 @@ impl<'a> WelcomeSettingsController<'a> {
 
 #[async_trait::async_trait]
 impl<'a, S: Send + Sync + 'static> Controller<S> for WelcomeSettingsController<'a> {
-    async fn run(
-        &mut self,
-        coordinator: &mut Coordinator<'_, S>,
-    ) -> Result<NavigationResult, Error> {
+    async fn run(&mut self, coordinator: std::sync::Arc<Coordinator<'_, S>>) -> Result<(), Error> {
         let ctx = *coordinator.context();
         ctx.defer().await?;
 
@@ -537,22 +528,20 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for WelcomeSettingsController<'
 
         let mut engine = ViewEngine::new(&ctx, view, Duration::from_secs(120));
 
-        let nav = Arc::new(Mutex::new(NavigationResult::Exit));
-
         engine
             .run(|action| {
-                let nav = nav.clone();
+                let cor = coordinator.clone();
                 Box::pin(async move {
                     use SettingsWelcomeAction::*;
                     debug!("on_action for {:?}", action);
                     match action {
                         Back => {
-                            *nav.lock().unwrap() = NavigationResult::Back;
+                            cor.navigate(NavigationResult::SettingsMain);
                             debug!("Setting nav to Back");
                             ViewCommand::Exit
                         }
                         About => {
-                            *nav.lock().unwrap() = NavigationResult::SettingsAbout;
+                            cor.navigate(NavigationResult::SettingsAbout);
                             ViewCommand::Exit
                         }
                         _ => ViewCommand::Render,
@@ -561,10 +550,7 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for WelcomeSettingsController<'
             })
             .await?;
 
-        let nav = Arc::try_unwrap(nav).unwrap().into_inner().unwrap();
-        debug!("{:?}", nav);
-
-        Ok(nav)
+        Ok(())
     }
 }
 

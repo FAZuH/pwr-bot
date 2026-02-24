@@ -11,7 +11,7 @@ use crate::bot::commands::Error;
 use crate::bot::commands::feed::SendInto;
 use crate::bot::commands::feed::get_or_create_subscriber;
 use crate::bot::controller::Controller;
-use crate::bot::controller::Coordinator;
+use crate::bot::coordinator::Coordinator;
 use crate::bot::navigation::NavigationResult;
 use crate::bot::views::ActionRegistry;
 use crate::bot::views::ResponseKind;
@@ -39,14 +39,10 @@ pub async fn list(
         SendInto,
     >,
 ) -> Result<(), Error> {
-    command(ctx, sent_into).await
-}
-
-pub async fn command(ctx: Context<'_>, sent_into: Option<SendInto>) -> Result<(), Error> {
     let sent_into = sent_into.unwrap_or(SendInto::DM);
-    let mut coordinator = Coordinator::new(ctx);
-    let mut controller = FeedListController::new(&ctx, sent_into);
-    let _ = controller.run(&mut coordinator).await?;
+    Coordinator::new(ctx)
+        .run(NavigationResult::FeedList(Some(sent_into)))
+        .await?;
     Ok(())
 }
 
@@ -56,10 +52,7 @@ controller! { pub struct FeedListController<'a> {
 
 #[async_trait::async_trait]
 impl<'a, S: Send + Sync + 'static> Controller<S> for FeedListController<'a> {
-    async fn run(
-        &mut self,
-        coordinator: &mut Coordinator<'_, S>,
-    ) -> Result<NavigationResult, Error> {
+    async fn run(&mut self, coordinator: std::sync::Arc<Coordinator<'_, S>>) -> Result<(), Error> {
         let ctx = *coordinator.context();
         ctx.defer().await?;
 
@@ -86,11 +79,8 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for FeedListController<'a> {
 
         let mut engine = ViewEngine::new(&ctx, view, Duration::from_secs(120));
 
-        let mut exit_nav = NavigationResult::Exit;
-
         engine
             .run(|action| {
-                let _nav_ref = &mut exit_nav;
                 Box::pin(async move {
                     match action {
                         FeedListAction::Exit => ViewCommand::Exit,
@@ -100,7 +90,7 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for FeedListController<'a> {
             })
             .await?;
 
-        Ok(exit_nav)
+        Ok(())
     }
 }
 

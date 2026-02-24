@@ -2,7 +2,12 @@
 //!
 //! Provides unified navigation enum for cross-domain controller navigation.
 
+use poise::serenity_prelude::User;
+
 use crate::bot::commands::feed::SendInto;
+use crate::bot::commands::voice::GuildStatType;
+use crate::bot::commands::voice::VoiceLeaderboardTimeRange;
+use crate::bot::commands::voice::VoiceStatsTimeRange;
 
 /// Result type for controller navigation.
 ///
@@ -39,8 +44,16 @@ pub enum NavigationResult {
     FeedList(Option<SendInto>),
 
     // Voice commands section
-    /// Show voice leaderboard
-    VoiceLeaderboard,
+    VoiceLeaderboard {
+        time_range: VoiceLeaderboardTimeRange,
+    },
+
+    // /vc stats
+    VoiceStats {
+        time_range: VoiceStatsTimeRange,
+        target_user: Box<Option<User>>,
+        stat_type: GuildStatType,
+    },
 
     // Universal navigation
     /// Go back to previous controller (uses coordinator's stack)

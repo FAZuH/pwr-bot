@@ -10,12 +10,8 @@ use crate::action_enum;
 use crate::bot::checks::is_author_guild_admin;
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;
-use crate::bot::commands::about::AboutController;
-use crate::bot::commands::feed::settings::FeedSettingsController;
-use crate::bot::commands::voice::settings::VoiceSettingsController;
-use crate::bot::commands::welcome::WelcomeSettingsController;
 use crate::bot::controller::Controller;
-use crate::bot::controller::Coordinator;
+use crate::bot::coordinator::Coordinator;
 use crate::bot::error::BotError;
 use crate::bot::navigation::NavigationResult;
 use crate::bot::views::Action;
@@ -37,17 +33,17 @@ use crate::error::AppError;
 /// Requires server administrator permissions.
 #[poise::command(slash_command)]
 pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
-    run_settings(ctx, None).await
+    Coordinator::new(ctx)
+        .run(NavigationResult::SettingsMain)
+        .await?;
+    Ok(())
 }
 
 controller! { pub struct SettingsMainController<'a> {} }
 
 #[async_trait::async_trait]
 impl<'a, S: Send + Sync + 'static> Controller<S> for SettingsMainController<'a> {
-    async fn run(
-        &mut self,
-        coordinator: &mut Coordinator<'_, S>,
-    ) -> Result<NavigationResult, Error> {
+    async fn run(&mut self, coordinator: std::sync::Arc<Coordinator<'_, S>>) -> Result<(), Error> {
         let ctx = *coordinator.context();
         is_author_guild_admin(ctx).await?;
         let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?;
@@ -72,27 +68,25 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for SettingsMainController<'a> 
 
         let mut engine = ViewEngine::new(&ctx, view, Duration::from_secs(120));
 
-        let nav = std::sync::Arc::new(std::sync::Mutex::new(NavigationResult::Exit));
-
         engine
             .run(|action| {
-                let nav = nav.clone();
+                let cor = coordinator.clone();
                 Box::pin(async move {
                     match action {
                         SettingsMainAction::Feeds => {
-                            *nav.lock().unwrap() = NavigationResult::SettingsFeeds;
+                            cor.navigate(NavigationResult::SettingsFeeds);
                             ViewCommand::Exit
                         }
                         SettingsMainAction::Voice => {
-                            *nav.lock().unwrap() = NavigationResult::SettingsVoice;
+                            cor.navigate(NavigationResult::SettingsVoice);
                             ViewCommand::Exit
                         }
                         SettingsMainAction::About => {
-                            *nav.lock().unwrap() = NavigationResult::SettingsAbout;
+                            cor.navigate(NavigationResult::SettingsAbout);
                             ViewCommand::Exit
                         }
                         SettingsMainAction::Welcome => {
-                            *nav.lock().unwrap() = NavigationResult::SettingsWelcome;
+                            cor.navigate(NavigationResult::SettingsWelcome);
                             ViewCommand::Exit
                         }
                         _ => ViewCommand::Render,
@@ -113,86 +107,8 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for SettingsMainController<'a> 
             engine.handler.done_update_settings()?;
         }
 
-        let res = nav.lock().unwrap().clone();
-        Ok(res)
+        Ok(())
     }
-}
-/// Tracks the current settings page for navigation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SettingsPage {
-    /// Main settings page
-    Main,
-    /// Feed settings page
-    Feeds,
-    /// Voice settings page
-    Voice,
-    /// Welcome settings page
-    Welcome,
-    /// About page
-    About,
-}
-
-/// Runs the settings coordinator loop.
-///
-/// This is the entry point for the settings command. It creates a coordinator
-/// and runs controllers in a loop based on their NavigationResult.
-///
-/// # Parameters
-///
-/// - `ctx`: The Discord command context
-/// - `current_page`: Initial page to show. If None, defaults to [`SettingsPage::Main`]
-pub async fn run_settings(
-    ctx: Context<'_>,
-    initial_page: Option<SettingsPage>,
-) -> Result<(), Error> {
-    let mut coordinator = Coordinator::new(ctx);
-    let mut current_page = initial_page.unwrap_or(SettingsPage::Main);
-
-    loop {
-        // Create controller based on current page
-        // Clone the context to avoid borrow checker issues
-        let ctx_clone = *coordinator.context();
-        let result = match current_page {
-            SettingsPage::Main => {
-                let mut controller = SettingsMainController::new(&ctx_clone);
-                controller.run(&mut coordinator).await?
-            }
-            SettingsPage::Feeds => {
-                let mut controller = FeedSettingsController::new(&ctx_clone);
-                controller.run(&mut coordinator).await?
-            }
-            SettingsPage::Voice => {
-                let mut controller = VoiceSettingsController::new(&ctx_clone);
-                controller.run(&mut coordinator).await?
-            }
-            SettingsPage::Welcome => {
-                let mut controller = WelcomeSettingsController::new(&ctx_clone);
-                controller.run(&mut coordinator).await?
-            }
-            SettingsPage::About => {
-                let mut controller = AboutController::new(&ctx_clone);
-                controller.run(&mut coordinator).await?
-            }
-        };
-
-        // Update current page based on navigation result
-        match result {
-            NavigationResult::SettingsMain => current_page = SettingsPage::Main,
-            NavigationResult::SettingsFeeds => current_page = SettingsPage::Feeds,
-            NavigationResult::SettingsVoice => current_page = SettingsPage::Voice,
-            NavigationResult::SettingsWelcome => current_page = SettingsPage::Welcome,
-            NavigationResult::SettingsAbout => current_page = SettingsPage::About,
-            NavigationResult::Back => {
-                // Go back to main from any sub-page
-                current_page = SettingsPage::Main;
-            }
-            NavigationResult::Exit => break,
-            // Other navigation variants not valid from settings
-            _ => continue,
-        }
-    }
-
-    Ok(())
 }
 
 pub enum SettingsMainState {

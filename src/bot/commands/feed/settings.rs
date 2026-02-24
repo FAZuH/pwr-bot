@@ -8,10 +8,8 @@ use poise::serenity_prelude::*;
 use crate::action_enum;
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;
-use crate::bot::commands::settings::SettingsPage;
-use crate::bot::commands::settings::run_settings;
 use crate::bot::controller::Controller;
-use crate::bot::controller::Coordinator;
+use crate::bot::coordinator::Coordinator;
 use crate::bot::error::BotError;
 use crate::bot::navigation::NavigationResult;
 use crate::bot::views::Action;
@@ -35,17 +33,17 @@ use crate::entity::ServerSettings;
     default_member_permissions = "ADMINISTRATOR | MANAGE_GUILD"
 )]
 pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
-    run_settings(ctx, Some(SettingsPage::Feeds)).await
+    Coordinator::new(ctx)
+        .run(NavigationResult::SettingsFeeds)
+        .await?;
+    Ok(())
 }
 
 controller! { pub struct FeedSettingsController<'a> {} }
 
 #[async_trait::async_trait]
 impl<'a, S: Send + Sync + 'static> Controller<S> for FeedSettingsController<'a> {
-    async fn run(
-        &mut self,
-        coordinator: &mut Coordinator<'_, S>,
-    ) -> Result<NavigationResult, Error> {
+    async fn run(&mut self, coordinator: std::sync::Arc<Coordinator<'_, S>>) -> Result<(), Error> {
         let ctx = *coordinator.context();
         ctx.defer().await?;
         let service = ctx.data().service.feed_subscription.clone();
@@ -60,17 +58,15 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for FeedSettingsController<'a> 
 
         let mut engine = ViewEngine::new(&ctx, view, Duration::from_secs(120));
 
-        let nav = std::sync::Arc::new(std::sync::Mutex::new(NavigationResult::Exit));
-
         engine
             .run(|action| {
-                let nav = nav.clone();
+                let cor = coordinator.clone();
                 Box::pin(async move {
                     if action == SettingsFeedAction::Back {
-                        *nav.lock().unwrap() = NavigationResult::Back;
+                        cor.navigate(NavigationResult::SettingsMain);
                         return ViewCommand::Exit;
                     } else if action == SettingsFeedAction::About {
-                        *nav.lock().unwrap() = NavigationResult::SettingsAbout;
+                        cor.navigate(NavigationResult::SettingsAbout);
                         return ViewCommand::Exit;
                     }
 
@@ -85,8 +81,7 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for FeedSettingsController<'a> 
             .await
             .ok();
 
-        let res = nav.lock().unwrap().clone();
-        Ok(res)
+        Ok(())
     }
 }
 
