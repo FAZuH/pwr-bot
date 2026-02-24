@@ -11,6 +11,7 @@ use tokio::time::Duration;
 use tokio::time::interval;
 
 use crate::entity::BotMetaKey;
+use crate::entity::VoiceSessionsEntity;
 use crate::service::internal_service::InternalService;
 use crate::service::voice_tracking_service::VoiceTrackingService;
 
@@ -45,58 +46,13 @@ impl VoiceHeartbeatManager {
     }
 
     /// Starts the heartbeat task.
-    pub async fn start(&self) {
-        let internal = self.internal.clone();
-        let service = self.service.clone();
-
+    pub async fn start(self: Arc<Self>) {
         tokio::spawn(async move {
             let mut interval = interval(Duration::from_secs(HEARTBEAT_INTERVAL_SECS));
 
             loop {
                 interval.tick().await;
-                let now = Utc::now();
-
-                // Update all active sessions with current time as leave_time
-                match service.find_active_sessions().await {
-                    Ok(sessions) => {
-                        let mut updated = 0;
-                        for session in sessions {
-                            if let Err(e) = service
-                                .update_session_leave_time(
-                                    session.user_id,
-                                    session.channel_id,
-                                    &session.join_time,
-                                    &now,
-                                )
-                                .await
-                            {
-                                error!(
-                                    "Failed to update heartbeat for user {}: {}",
-                                    session.user_id, e
-                                );
-                            } else {
-                                updated += 1;
-                            }
-                        }
-
-                        if updated > 0 {
-                            debug!("Heartbeat: Updated {} active voice sessions", updated);
-                        }
-                    }
-                    Err(e) => {
-                        error!("Failed to find active sessions for heartbeat: {}", e);
-                    }
-                }
-
-                // Write heartbeat timestamp to database
-                if let Err(e) = internal
-                    .set_meta(BotMetaKey::VoiceHeartbeat, &now.to_rfc3339())
-                    .await
-                {
-                    error!("Failed to write heartbeat to database: {}", e);
-                } else {
-                    debug!("Heartbeat written to database: {}", now);
-                }
+                self.update().await;
             }
         });
 
@@ -152,5 +108,62 @@ impl VoiceHeartbeatManager {
             closed
         );
         Ok(closed)
+    }
+
+    pub async fn update(&self) {
+        let internal = self.internal.clone();
+        let service = self.service.clone();
+
+        let now = Utc::now();
+        match service.find_active_sessions().await {
+            Ok(sessions) => {
+                self.update_sessions(sessions, &now).await;
+            }
+            Err(e) => {
+                error!("Failed to find active sessions for heartbeat: {}", e);
+            }
+        }
+
+        // Write heartbeat timestamp to database
+        if let Err(e) = internal
+            .set_meta(BotMetaKey::VoiceHeartbeat, &now.to_rfc3339())
+            .await
+        {
+            error!("Failed to write heartbeat to database: {}", e);
+        } else {
+            debug!("Heartbeat written to database: {}", now);
+        }
+    }
+
+    async fn update_sessions(
+        &self,
+        sessions: impl IntoIterator<Item = VoiceSessionsEntity>,
+        now: &DateTime<Utc>,
+    ) {
+        let mut updated = 0;
+        for session in sessions {
+            let res = self
+                .service
+                .clone()
+                .update_session_leave_time(
+                    session.user_id,
+                    session.channel_id,
+                    &session.join_time,
+                    now,
+                )
+                .await;
+
+            match res {
+                Ok(_) => updated += 1,
+                Err(e) => error!(
+                    "Failed to update heartbeat for user {}: {}",
+                    session.user_id, e
+                ),
+            }
+        }
+
+        if updated > 0 {
+            debug!("Heartbeat: Updated {} active voice sessions", updated);
+        }
     }
 }
