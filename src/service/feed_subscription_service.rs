@@ -9,6 +9,7 @@ use sqlx::error::ErrorKind;
 use crate::entity::FeedEntity;
 use crate::entity::FeedItemEntity;
 use crate::entity::FeedSubscriptionEntity;
+use crate::entity::FeedWithLatestItemRow;
 use crate::entity::ServerSettings;
 use crate::entity::SubscriberEntity;
 use crate::entity::SubscriberType;
@@ -16,22 +17,20 @@ use crate::error::AppError;
 use crate::feed::PlatformInfo;
 use crate::feed::error::FeedError;
 use crate::feed::platforms::Platforms;
-use crate::repository::Repository;
 use crate::repository::error::DatabaseError;
-use crate::repository::table::Table;
 use crate::service::error::ServiceError;
 use crate::service::settings_service::SettingsService;
 
 /// Service for managing feed subscriptions and updates.
 pub struct FeedSubscriptionService {
-    pub db: Arc<Repository>,
+    pub db: Arc<crate::repository::Repository>,
     pub platforms: Arc<Platforms>,
     settings: Arc<SettingsService>,
 }
 
 impl FeedSubscriptionService {
     /// Creates a new feed subscription service.
-    pub fn new(db: Arc<Repository>, platforms: Arc<Platforms>) -> Self {
+    pub fn new(db: Arc<crate::repository::Repository>, platforms: Arc<Platforms>) -> Self {
         let settings = Arc::new(SettingsService::new(db.clone()));
         Self {
             db,
@@ -153,7 +152,8 @@ impl FeedSubscriptionService {
         }
 
         // Get the latest known version for this feed
-        let old_latest = self.db.feed_item.select_latest_by_feed_id(feed.id).await?;
+        let old_latest: Option<FeedItemEntity> =
+            self.db.feed_item.select_latest_by_feed_id(feed.id).await?;
 
         let platform = self
             .platforms
@@ -250,9 +250,10 @@ impl FeedSubscriptionService {
         per_page: impl Into<u32>,
     ) -> Result<Vec<Subscription>, ServiceError> {
         let page = page.into() - 1;
+        let per_page = per_page.into();
 
         // DB 1
-        let rows = self
+        let rows: Vec<FeedWithLatestItemRow> = self
             .db
             .feed_subscription
             .select_paginated_with_latest_by_subscriber_id(subscriber.id, page, per_page)
@@ -318,7 +319,7 @@ impl FeedSubscriptionService {
         Ok(self
             .db
             .feed
-            .select_by_name_and_subscriber_id(&subscriber.id, partial, 25)
+            .select_by_name_and_subscriber_id(&subscriber.id, partial, Some(25))
             .await?)
     }
 

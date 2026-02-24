@@ -7,28 +7,23 @@ use log::info;
 use sqlx::SqlitePool;
 use sqlx::sqlite::SqliteConnectOptions;
 
-use crate::repository::table::BotMetaTable;
-use crate::repository::table::FeedItemTable;
-use crate::repository::table::FeedSubscriptionTable;
-use crate::repository::table::FeedTable;
-use crate::repository::table::ServerSettingsTable;
-use crate::repository::table::SubscriberTable;
-use crate::repository::table::TableBase;
-use crate::repository::table::VoiceSessionsTable;
+use crate::repository::table::*;
+use crate::repository::traits::*;
 
 pub mod error;
 pub mod table;
+pub mod traits;
 
 /// Main database struct containing all table handlers.
 pub struct Repository {
     pool: SqlitePool,
-    pub feed: FeedTable,
-    pub feed_item: FeedItemTable,
-    pub subscriber: SubscriberTable,
-    pub feed_subscription: FeedSubscriptionTable,
-    pub server_settings: ServerSettingsTable,
-    pub voice_sessions: VoiceSessionsTable,
-    pub bot_meta: BotMetaTable,
+    pub feed: Box<dyn FeedRepository>,
+    pub feed_item: Box<dyn FeedItemRepository>,
+    pub subscriber: Box<dyn SubscriberRepository>,
+    pub feed_subscription: Box<dyn FeedSubscriptionRepository>,
+    pub server_settings: Box<dyn ServerSettingsRepository>,
+    pub voice_sessions: Box<dyn VoiceSessionsRepository>,
+    pub bot_meta: Box<dyn BotMetaRepository>,
 }
 
 impl Repository {
@@ -49,13 +44,13 @@ impl Repository {
         let pool = SqlitePool::connect_with(opts).await?;
         log::log!(log::Level::Info, "Connected to db.");
 
-        let feed = FeedTable::new(pool.clone());
-        let feed_item = FeedItemTable::new(pool.clone());
-        let subscriber = SubscriberTable::new(pool.clone());
-        let feed_subscription = FeedSubscriptionTable::new(pool.clone());
-        let server_settings = ServerSettingsTable::new(pool.clone());
-        let voice_sessions = VoiceSessionsTable::new(pool.clone());
-        let bot_meta = BotMetaTable::new(pool.clone());
+        let feed = Box::new(FeedTable::new(pool.clone()));
+        let feed_item = Box::new(FeedItemTable::new(pool.clone()));
+        let subscriber = Box::new(SubscriberTable::new(pool.clone()));
+        let feed_subscription = Box::new(FeedSubscriptionTable::new(pool.clone()));
+        let server_settings = Box::new(ServerSettingsTable::new(pool.clone()));
+        let voice_sessions = Box::new(VoiceSessionsTable::new(pool.clone()));
+        let bot_meta = Box::new(BotMetaTable::new(pool.clone()));
 
         Ok(Self {
             pool,

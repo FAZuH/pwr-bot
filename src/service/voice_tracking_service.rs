@@ -10,12 +10,12 @@ use tokio::sync::RwLock;
 use crate::bot::commands::voice::GuildStatType;
 use crate::entity::GuildDailyStats;
 use crate::entity::ServerSettings;
+use crate::entity::ServerSettingsEntity;
 use crate::entity::VoiceDailyActivity;
 use crate::entity::VoiceLeaderboardEntry;
 use crate::entity::VoiceLeaderboardOpt;
 use crate::entity::VoiceSessionsEntity;
 use crate::repository::Repository;
-use crate::repository::table::Table;
 use crate::service::settings_service::SettingsService;
 
 /// Service for tracking voice channel activity.
@@ -34,7 +34,7 @@ impl VoiceTrackingService {
             settings: settings.clone(),
             disabled_guilds: Arc::new(RwLock::new(HashSet::new())),
         };
-        let all_settings = _self.db.server_settings.select_all().await?;
+        let all_settings: Vec<ServerSettingsEntity> = _self.db.server_settings.select_all().await?;
         let mut disabled = _self.disabled_guilds.write().await;
 
         for model in all_settings {
@@ -230,11 +230,3 @@ impl VoiceTrackingService {
         }
     }
 }
-
-// pub struct VoiceTotalMemberData {
-//     user_id: UserId,
-//     name: String,
-//     duration: Duration,
-//     from: DateTime<Utc>,
-//     until: DateTime<Utc>,
-// }

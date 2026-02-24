@@ -6,7 +6,6 @@ use chrono::Duration;
 use chrono::Utc;
 use pwr_bot::entity::BotMetaKey;
 use pwr_bot::entity::VoiceSessionsEntity;
-use pwr_bot::repository::table::Table;
 use pwr_bot::service::internal_service::InternalService;
 use pwr_bot::service::voice_tracking_service::VoiceTrackingService;
 use pwr_bot::task::voice_heartbeat::VoiceHeartbeatManager;

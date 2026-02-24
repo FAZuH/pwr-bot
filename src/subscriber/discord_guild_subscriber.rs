@@ -10,12 +10,12 @@ use log::info;
 use poise::serenity_prelude::*;
 
 use crate::bot::Bot;
+use crate::entity::ServerSettingsEntity;
 use crate::entity::SubscriberEntity;
 use crate::entity::SubscriberType;
 use crate::event::Event;
 use crate::event::FeedUpdateEvent;
 use crate::repository::Repository;
-use crate::repository::table::Table;
 use crate::subscriber::Subscriber;
 
 /// Subscriber that sends feed updates to guild channels.
@@ -61,12 +61,10 @@ impl DiscordGuildSubscriber {
     ) -> anyhow::Result<()> {
         let guild_id = GuildId::from_str(&sub.target_id)?;
 
-        let settings = self
-            .db
-            .server_settings
-            .select(&guild_id.get())
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("Settings not found"))?;
+        let result: Option<ServerSettingsEntity> =
+            self.db.server_settings.select(&guild_id.get()).await?;
+
+        let settings = result.ok_or_else(|| anyhow::anyhow!("Settings not found"))?;
         let channel_id_str =
             settings.settings.0.feeds.channel_id.ok_or_else(|| {
                 anyhow::anyhow!("No channel configured for guild {}", &sub.target_id)

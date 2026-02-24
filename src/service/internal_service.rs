@@ -10,7 +10,6 @@ use crate::entity::FeedSubscriptionEntity;
 use crate::entity::SubscriberEntity;
 use crate::repository::Repository;
 use crate::repository::error::DatabaseError;
-use crate::repository::table::Table;
 
 /// Internal service for metadata and maintenance operations.
 pub struct InternalService {
@@ -25,7 +24,7 @@ impl InternalService {
 
     /// Get a metadata value by key.
     pub async fn get_meta(&self, key: BotMetaKey) -> Result<Option<String>, DatabaseError> {
-        let result = self.db.bot_meta.select(&key.into()).await?;
+        let result: Option<BotMetaEntity> = self.db.bot_meta.select(&key.into()).await?;
         Ok(result.map(|m| m.value))
     }
 

@@ -5,7 +5,6 @@ use std::sync::Arc;
 use crate::entity::ServerSettings;
 use crate::entity::ServerSettingsEntity;
 use crate::repository::Repository;
-use crate::repository::table::Table;
 use crate::service::error::ServiceError;
 
 /// Service for managing server settings.
@@ -26,7 +25,9 @@ impl SettingsService {
     /// # Performance
     /// * DB calls: 1
     pub async fn get_server_settings(&self, guild_id: u64) -> Result<ServerSettings, ServiceError> {
-        match self.db.server_settings.select(&guild_id).await? {
+        let result: Option<ServerSettingsEntity> =
+            self.db.server_settings.select(&guild_id).await?;
+        match result {
             Some(model) => Ok(model.settings.0),
             None => Ok(ServerSettings::default()),
         }
