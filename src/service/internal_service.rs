@@ -60,6 +60,7 @@ impl InternalService {
 }
 
 /// Container for a full database dump.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DatabaseDump {
     pub feeds: Vec<FeedEntity>,
     pub feed_items: Vec<FeedItemEntity>,

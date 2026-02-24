@@ -10,7 +10,7 @@ use log::info;
 use crate::error::AppError;
 
 /// Bot configuration loaded from environment variables.
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub struct Config {
     pub poll_interval: Duration,
     pub db_url: String,
@@ -25,7 +25,7 @@ pub struct Config {
 }
 
 /// Feature flags for optional bot components.
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub struct Features {
     pub voice_tracking: bool,
     pub feed_publisher: bool,

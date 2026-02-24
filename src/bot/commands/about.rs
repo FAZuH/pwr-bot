@@ -172,6 +172,7 @@ impl ViewRender<AboutAction> for AboutView {
 }
 
 /// Statistics displayed in the about command.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AboutStats {
     version: String,
     uptime: Duration,

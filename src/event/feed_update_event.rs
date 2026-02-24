@@ -3,6 +3,8 @@
 use std::sync::Arc;
 
 use poise::serenity_prelude::*;
+use serde::Deserialize;
+use serde::Serialize;
 
 use crate::entity::FeedEntity;
 use crate::entity::FeedItemEntity;
@@ -10,7 +12,7 @@ use crate::event::Event;
 use crate::feed::PlatformInfo;
 
 /// Event fired when a new version/episode of a feed is published.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FeedUpdateEvent {
     pub feed: Arc<FeedEntity>,
     pub data: Arc<FeedUpdateData>,
@@ -27,7 +29,7 @@ impl FeedUpdateEvent {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FeedUpdateData {
     pub feed: Arc<FeedEntity>,
     pub feed_info: Arc<PlatformInfo>,

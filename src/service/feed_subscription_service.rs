@@ -487,12 +487,13 @@ pub enum UnsubscribeResult {
     NoneSubscribed { url: String },
 }
 
+#[derive(Debug, Clone)]
 pub struct SubscriberTarget {
     pub subscriber_type: SubscriberType, // Guild or Dm
     pub target_id: String,               // "guild_id:channel_id" or "user_id"
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Subscription {
     pub feed: FeedEntity,
     pub feed_latest: Option<FeedItemEntity>,

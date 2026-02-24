@@ -6,7 +6,7 @@ use crate::action_enum;
 use crate::bot::Error;
 
 /// Model for tracking pagination state.
-#[derive(Clone)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct PaginationModel {
     pub current_page: u32,
     pub pages: u32,

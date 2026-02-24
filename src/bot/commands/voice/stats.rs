@@ -130,6 +130,7 @@ action_enum! {
 }
 
 /// Data for voice stats display.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct VoiceStatsData {
     /// The user this data is for (None for guild stats)
     pub user: Option<User>,

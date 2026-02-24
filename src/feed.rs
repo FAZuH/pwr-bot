@@ -18,11 +18,13 @@ pub mod platforms;
 use async_trait::async_trait;
 use chrono::DateTime;
 use chrono::Utc;
+use serde::Deserialize;
+use serde::Serialize;
 
 use crate::feed::error::FeedError;
 use crate::feed::error::UrlParseError;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct PlatformInfo {
     /// The name of the platform, e.g., "MangaDex", "AniList Anime"
     pub name: String,
@@ -94,7 +96,7 @@ pub enum PlatformResult {
     FeedItem(FeedItem),
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct FeedItem {
     /// Identifier for this feed item.
     pub id: String,
@@ -104,7 +106,7 @@ pub struct FeedItem {
     pub published: DateTime<Utc>,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct FeedSource {
     /// Identifier for this feed source.
     pub id: String,

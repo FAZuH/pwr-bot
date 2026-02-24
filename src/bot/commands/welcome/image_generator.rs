@@ -8,12 +8,13 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use image::DynamicImage;
 use image::imageops::FilterType;
 use minijinja::Environment;
+use serde::Deserialize;
 use serde::Serialize;
 
 const AVATAR_SIZE: u32 = 128; // Adjust based on templates, using a larger one is safe
 
 /// Defines the exact data structure expected by the Minijinja SVG template.
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct WelcomeCardData {
     pub template_id: String,
     pub username: String,

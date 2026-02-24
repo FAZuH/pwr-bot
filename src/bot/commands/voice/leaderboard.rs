@@ -62,6 +62,7 @@ pub async fn leaderboard(
 }
 
 /// Data for a leaderboard session.
+#[derive(Debug, Clone, Default)]
 pub struct LeaderboardSessionData {
     pub entries: Vec<VoiceLeaderboardEntry>,
     pub user_rank: Option<u32>,
