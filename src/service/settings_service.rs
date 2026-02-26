@@ -6,6 +6,22 @@ use crate::entity::ServerSettings;
 use crate::entity::ServerSettingsEntity;
 use crate::repository::Repository;
 use crate::service::error::ServiceError;
+use crate::service::traits::SettingsProvider;
+
+#[async_trait::async_trait]
+impl SettingsProvider for SettingsService {
+    async fn get_server_settings(&self, guild_id: u64) -> Result<ServerSettings, ServiceError> {
+        self.get_server_settings(guild_id).await
+    }
+
+    async fn update_server_settings(
+        &self,
+        guild_id: u64,
+        settings: ServerSettings,
+    ) -> Result<(), ServiceError> {
+        self.update_server_settings(guild_id, settings).await
+    }
+}
 
 /// Service for managing server settings.
 /// Provides a single source of truth for all server configuration.

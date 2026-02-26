@@ -12,21 +12,21 @@ use tokio::time::interval;
 
 use crate::entity::BotMetaKey;
 use crate::entity::VoiceSessionsEntity;
-use crate::service::internal_service::InternalService;
-use crate::service::voice_tracking_service::VoiceTrackingService;
+use crate::service::traits::InternalOps;
+use crate::service::traits::VoiceTracker;
 
 /// Interval between heartbeats
 const HEARTBEAT_INTERVAL_SECS: u64 = 10;
 
 /// Manages heartbeat for voice tracking to prevent data loss on crashes.
 pub struct VoiceHeartbeatManager {
-    internal: Arc<InternalService>,
-    service: Arc<VoiceTrackingService>,
+    internal: Arc<dyn InternalOps>,
+    service: Arc<dyn VoiceTracker>,
 }
 
 impl VoiceHeartbeatManager {
     /// Creates a new heartbeat manager with the given service.
-    pub fn new(internal: Arc<InternalService>, service: Arc<VoiceTrackingService>) -> Self {
+    pub fn new(internal: Arc<dyn InternalOps>, service: Arc<dyn VoiceTracker>) -> Self {
         Self { internal, service }
     }
 
@@ -126,7 +126,7 @@ impl VoiceHeartbeatManager {
 
         // Write heartbeat timestamp to database
         if let Err(e) = internal
-            .set_meta(BotMetaKey::VoiceHeartbeat, &now.to_rfc3339())
+            .set_meta(BotMetaKey::VoiceHeartbeat, now.to_rfc3339())
             .await
         {
             error!("Failed to write heartbeat to database: {}", e);

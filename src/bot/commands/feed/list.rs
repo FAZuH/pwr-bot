@@ -105,7 +105,7 @@ pub struct FeedListHandler {
     pub pagination: PaginationView,
     pub state: FeedListState,
     pub marked_unsub: HashSet<String>,
-    pub service: std::sync::Arc<crate::service::feed_subscription_service::FeedSubscriptionService>,
+    pub service: std::sync::Arc<dyn crate::service::traits::FeedSubscriptionProvider>,
     pub subscriber: crate::entity::SubscriberEntity,
 }
 

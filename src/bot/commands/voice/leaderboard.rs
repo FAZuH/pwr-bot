@@ -216,7 +216,7 @@ pub struct VoiceLeaderboardHandler<'a> {
     pub current_page_bytes: Option<Vec<u8>>,
     pub is_partner_mode: bool,
     pub target_user: Option<poise::serenity_prelude::User>,
-    pub service: std::sync::Arc<crate::service::voice_tracking_service::VoiceTrackingService>,
+    pub service: std::sync::Arc<dyn crate::service::traits::VoiceTracker>,
     pub guild_id: u64,
     pub author_id: u64,
     pub http: std::sync::Arc<poise::serenity_prelude::Http>,

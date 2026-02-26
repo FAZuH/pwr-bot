@@ -233,7 +233,7 @@ impl VoiceStatsData {
 pub struct VoiceStatsHandler {
     pub data: VoiceStatsData,
     pub image_bytes: Option<Vec<u8>>,
-    pub service: std::sync::Arc<crate::service::voice_tracking_service::VoiceTrackingService>,
+    pub service: std::sync::Arc<dyn crate::service::traits::VoiceTracker>,
     pub guild_id: u64,
     pub original_target_user: Option<User>,
 }

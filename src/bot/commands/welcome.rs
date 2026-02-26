@@ -69,7 +69,7 @@ pub struct SettingsWelcomeHandler {
     pub settings: ServerSettings,
     pub marked_removal: HashSet<usize>,
     pub current_image_bytes: Option<Vec<u8>>,
-    service: Arc<crate::service::feed_subscription_service::FeedSubscriptionService>,
+    service: Arc<dyn crate::service::traits::FeedSubscriptionProvider>,
     generator: Arc<WelcomeImageGenerator>,
     guild_id: u64,
     ctx_serenity: poise::serenity_prelude::Context,

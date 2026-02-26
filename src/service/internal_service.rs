@@ -10,6 +10,22 @@ use crate::entity::FeedSubscriptionEntity;
 use crate::entity::SubscriberEntity;
 use crate::repository::Repository;
 use crate::repository::error::DatabaseError;
+use crate::service::traits::InternalOps;
+
+#[async_trait::async_trait]
+impl InternalOps for InternalService {
+    async fn get_meta(&self, key: BotMetaKey) -> Result<Option<String>, DatabaseError> {
+        self.get_meta(key).await
+    }
+
+    async fn set_meta(&self, key: BotMetaKey, value: String) -> Result<(), DatabaseError> {
+        self.set_meta(key, value).await
+    }
+
+    async fn dump_database(&self) -> anyhow::Result<DatabaseDump> {
+        self.dump_database().await
+    }
+}
 
 /// Internal service for metadata and maintenance operations.
 pub struct InternalService {
