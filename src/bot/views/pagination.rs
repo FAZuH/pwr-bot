@@ -1,9 +1,10 @@
 //! Pagination component for Discord views.
-
 use poise::serenity_prelude::*;
 
 use crate::action_enum;
 use crate::bot::Error;
+use crate::bot::views::Action;
+use crate::bot::views::RegisteredAction;
 
 /// Model for tracking pagination state.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -91,7 +92,7 @@ impl PaginationView {
         self.state.current_page
     }
 
-    pub fn attach_if_multipage<'b, T: crate::bot::views::Action>(
+    pub fn attach_if_multipage<'b, T: Action>(
         &self,
         registry: &mut ActionRegistry<T>,
         components: &mut Vec<CreateComponent<'b>>,
@@ -102,18 +103,18 @@ impl PaginationView {
         }
     }
 
-    pub fn create_component<'b, T: crate::bot::views::Action>(
+    pub fn create_component<'b, T: Action>(
         &self,
         registry: &mut ActionRegistry<T>,
         wrap: fn(PaginationAction) -> T,
     ) -> CreateComponent<'b> {
-        let mut first = crate::bot::views::RegisteredAction {
+        let mut first = RegisteredAction {
             id: registry.register(wrap(PaginationAction::First)),
             label: "⏮",
         }
         .as_button()
         .style(ButtonStyle::Primary);
-        let mut prev = crate::bot::views::RegisteredAction {
+        let mut prev = RegisteredAction {
             id: registry.register(wrap(PaginationAction::Prev)),
             label: "◀",
         }
@@ -123,13 +124,13 @@ impl PaginationView {
             .label(format!("{}/{}", self.state.current_page, self.state.pages))
             .style(ButtonStyle::Secondary)
             .disabled(true);
-        let mut next = crate::bot::views::RegisteredAction {
+        let mut next = RegisteredAction {
             id: registry.register(wrap(PaginationAction::Next)),
             label: "▶",
         }
         .as_button()
         .style(ButtonStyle::Primary);
-        let mut last = crate::bot::views::RegisteredAction {
+        let mut last = RegisteredAction {
             id: registry.register(wrap(PaginationAction::Last)),
             label: "⏭",
         }

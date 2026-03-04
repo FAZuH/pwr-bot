@@ -1,4 +1,6 @@
 //! Welcome commands module.
+use crate::bot::commands::welcome::image_generator::WelcomeCardData;
+use crate::service::traits::FeedSubscriptionProvider;
 
 pub mod image_generator;
 
@@ -69,7 +71,7 @@ pub struct SettingsWelcomeHandler {
     pub settings: ServerSettings,
     pub marked_removal: HashSet<usize>,
     pub current_image_bytes: Option<Vec<u8>>,
-    service: Arc<dyn crate::service::traits::FeedSubscriptionProvider>,
+    service: Arc<dyn FeedSubscriptionProvider>,
     generator: Arc<WelcomeImageGenerator>,
     guild_id: u64,
     ctx_serenity: poise::serenity_prelude::Context,
@@ -469,7 +471,7 @@ impl<'a> WelcomeSettingsController<'a> {
             return None;
         }
         // Preview uses placeholder data since we don't have a real member context here
-        let data = crate::bot::commands::welcome::image_generator::WelcomeCardData {
+        let data = WelcomeCardData {
             template_id: settings
                 .welcome
                 .template_id

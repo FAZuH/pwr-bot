@@ -18,6 +18,7 @@ use crate::feed::PlatformInfo;
 use crate::feed::error::FeedError;
 use crate::feed::platforms::Platforms;
 use crate::repository::error::DatabaseError;
+use crate::service::Repository;
 use crate::service::error::ServiceError;
 use crate::service::settings_service::SettingsService;
 use crate::service::traits::FeedSubscriptionProvider;
@@ -124,14 +125,14 @@ impl FeedSubscriptionProvider for FeedSubscriptionService {
 
 /// Service for managing feed subscriptions and updates.
 pub struct FeedSubscriptionService {
-    pub db: Arc<crate::repository::Repository>,
+    pub db: Arc<Repository>,
     pub platforms: Arc<Platforms>,
     settings: Arc<SettingsService>,
 }
 
 impl FeedSubscriptionService {
     /// Creates a new feed subscription service.
-    pub fn new(db: Arc<crate::repository::Repository>, platforms: Arc<Platforms>) -> Self {
+    pub fn new(db: Arc<Repository>, platforms: Arc<Platforms>) -> Self {
         let settings = Arc::new(SettingsService::new(db.clone()));
         Self {
             db,

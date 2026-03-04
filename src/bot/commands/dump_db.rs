@@ -8,7 +8,7 @@ use crate::bot::commands::Error;
 
 #[poise::command(prefix_command, owners_only, hide_in_help)]
 pub async fn dump_db(ctx: Context<'_>) -> Result<(), Error> {
-    crate::bot::commands::dump_db::command(ctx).await
+    command(ctx).await
 }
 
 pub async fn command(ctx: Context<'_>) -> Result<(), Error> {

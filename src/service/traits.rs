@@ -10,8 +10,10 @@ use crate::repository::error::DatabaseError;
 use crate::service::error::ServiceError;
 use crate::service::feed_subscription_service::FeedUpdateResult;
 use crate::service::feed_subscription_service::SubscribeResult;
+use crate::service::feed_subscription_service::SubscriberTarget;
 use crate::service::feed_subscription_service::Subscription;
 use crate::service::feed_subscription_service::UnsubscribeResult;
+use crate::service::internal_service::DatabaseDump;
 
 #[async_trait]
 pub trait FeedSubscriptionProvider: Send + Sync {
@@ -56,7 +58,7 @@ pub trait FeedSubscriptionProvider: Send + Sync {
     async fn get_or_create_feed(&self, source_url: &str) -> Result<FeedEntity, ServiceError>;
     async fn get_or_create_subscriber(
         &self,
-        target: &crate::service::feed_subscription_service::SubscriberTarget,
+        target: &SubscriberTarget,
     ) -> Result<SubscriberEntity, ServiceError>;
     async fn get_feed_by_source_url(
         &self,
@@ -153,6 +155,5 @@ pub trait SettingsProvider: Send + Sync {
 pub trait InternalOps: Send + Sync {
     async fn get_meta(&self, key: BotMetaKey) -> Result<Option<String>, DatabaseError>;
     async fn set_meta(&self, key: BotMetaKey, value: String) -> Result<(), DatabaseError>;
-    async fn dump_database(&self)
-    -> anyhow::Result<crate::service::internal_service::DatabaseDump>;
+    async fn dump_database(&self) -> anyhow::Result<DatabaseDump>;
 }

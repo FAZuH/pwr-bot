@@ -1,5 +1,4 @@
 //! Feed list subcommand.
-
 use std::collections::HashSet;
 use std::time::Duration;
 
@@ -14,6 +13,7 @@ use crate::bot::controller::Controller;
 use crate::bot::coordinator::Coordinator;
 use crate::bot::navigation::NavigationResult;
 use crate::bot::views::ActionRegistry;
+use crate::bot::views::RegisteredAction;
 use crate::bot::views::ResponseKind;
 use crate::bot::views::Trigger;
 use crate::bot::views::ViewCommand;
@@ -24,7 +24,9 @@ use crate::bot::views::ViewRender;
 use crate::bot::views::pagination::PaginationAction;
 use crate::bot::views::pagination::PaginationView;
 use crate::controller;
+use crate::entity::SubscriberEntity;
 use crate::service::feed_subscription_service::Subscription;
+use crate::service::traits::FeedSubscriptionProvider;
 
 /// Number of items per page for subscriptions list.
 const SUBSCRIPTIONS_PER_PAGE: u32 = 10;
@@ -105,8 +107,8 @@ pub struct FeedListHandler {
     pub pagination: PaginationView,
     pub state: FeedListState,
     pub marked_unsub: HashSet<String>,
-    pub service: std::sync::Arc<dyn crate::service::traits::FeedSubscriptionProvider>,
-    pub subscriber: crate::entity::SubscriberEntity,
+    pub service: std::sync::Arc<dyn FeedSubscriptionProvider>,
+    pub subscriber: SubscriberEntity,
 }
 
 impl FeedListHandler {
@@ -150,13 +152,13 @@ impl FeedListHandler {
             FeedListState::Edit => {
                 let source_url = sub.feed.source_url;
                 let button = if self.marked_unsub.contains(&source_url) {
-                    let action = crate::bot::views::RegisteredAction {
+                    let action = RegisteredAction {
                         id: registry.register(UndoUnsub { source_url }),
                         label: "↶ Undo",
                     };
                     action.as_button().style(ButtonStyle::Secondary)
                 } else {
-                    let action = crate::bot::views::RegisteredAction {
+                    let action = RegisteredAction {
                         id: registry.register(Unsubscribe { source_url }),
                         label: "🗑 Unsubscribe",
                     };
@@ -179,13 +181,13 @@ impl FeedListHandler {
             FeedListState::View => FeedListAction::Edit,
         };
 
-        let state_action = crate::bot::views::RegisteredAction {
+        let state_action = RegisteredAction {
             id: registry.register(action.clone()),
             label: crate::bot::views::Action::label(&action),
         };
         let state_button = state_action.as_button().style(ButtonStyle::Primary);
 
-        let save_action = crate::bot::views::RegisteredAction {
+        let save_action = RegisteredAction {
             id: registry.register(FeedListAction::Save),
             label: "Save",
         };

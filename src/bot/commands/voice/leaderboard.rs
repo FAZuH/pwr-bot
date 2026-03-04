@@ -1,5 +1,4 @@
 //! Voice leaderboard subcommand.
-
 use std::ops::Deref;
 use std::time::Duration;
 use std::time::Instant;
@@ -33,6 +32,7 @@ use crate::bot::views::pagination::PaginationView;
 use crate::entity::VoiceLeaderboardEntry;
 use crate::entity::VoiceLeaderboardOptBuilder;
 use crate::error::AppError;
+use crate::service::traits::VoiceTracker;
 
 pub mod image_builder;
 pub mod image_generator;
@@ -216,7 +216,7 @@ pub struct VoiceLeaderboardHandler<'a> {
     pub current_page_bytes: Option<Vec<u8>>,
     pub is_partner_mode: bool,
     pub target_user: Option<poise::serenity_prelude::User>,
-    pub service: std::sync::Arc<dyn crate::service::traits::VoiceTracker>,
+    pub service: std::sync::Arc<dyn VoiceTracker>,
     pub guild_id: u64,
     pub author_id: u64,
     pub http: std::sync::Arc<poise::serenity_prelude::Http>,

@@ -1,5 +1,4 @@
 //! Database table operations and implementations.
-
 use sqlx::SqlitePool;
 use sqlx::sqlite::SqliteArguments;
 
@@ -8,12 +7,15 @@ use crate::entity::FeedEntity;
 use crate::entity::FeedItemEntity;
 use crate::entity::FeedSubscriptionEntity;
 use crate::entity::FeedWithLatestItemRow;
+use crate::entity::GuildDailyStats;
 use crate::entity::ServerSettingsEntity;
 use crate::entity::SubscriberEntity;
 use crate::entity::SubscriberType;
+use crate::entity::VoiceDailyActivity;
 use crate::entity::VoiceLeaderboardEntry;
 use crate::entity::VoiceLeaderboardOpt;
 use crate::entity::VoiceLeaderboardOptBuilder;
+use crate::entity::VoiceLeaderboardOptBuilderError;
 use crate::entity::VoiceSessionsEntity;
 use crate::error::AppError;
 use crate::repository::error::DatabaseError;
@@ -911,8 +913,8 @@ impl VoiceSessionsRepository for VoiceSessionsTable {
         guild_id: u64,
         since: &chrono::DateTime<chrono::Utc>,
         until: &chrono::DateTime<chrono::Utc>,
-    ) -> Result<Vec<crate::entity::VoiceDailyActivity>, DatabaseError> {
-        Ok(sqlx::query_as::<_, crate::entity::VoiceDailyActivity>(
+    ) -> Result<Vec<VoiceDailyActivity>, DatabaseError> {
+        Ok(sqlx::query_as::<_, VoiceDailyActivity>(
             r#"
             SELECT 
                 date(join_time) as day,
@@ -943,8 +945,8 @@ impl VoiceSessionsRepository for VoiceSessionsTable {
         guild_id: u64,
         since: &chrono::DateTime<chrono::Utc>,
         until: &chrono::DateTime<chrono::Utc>,
-    ) -> Result<Vec<crate::entity::GuildDailyStats>, DatabaseError> {
-        Ok(sqlx::query_as::<_, crate::entity::GuildDailyStats>(
+    ) -> Result<Vec<GuildDailyStats>, DatabaseError> {
+        Ok(sqlx::query_as::<_, GuildDailyStats>(
             r#"
             SELECT 
                 day,
@@ -981,8 +983,8 @@ impl VoiceSessionsRepository for VoiceSessionsTable {
         guild_id: u64,
         since: &chrono::DateTime<chrono::Utc>,
         until: &chrono::DateTime<chrono::Utc>,
-    ) -> Result<Vec<crate::entity::GuildDailyStats>, DatabaseError> {
-        Ok(sqlx::query_as::<_, crate::entity::GuildDailyStats>(
+    ) -> Result<Vec<GuildDailyStats>, DatabaseError> {
+        Ok(sqlx::query_as::<_, GuildDailyStats>(
             r#"
             SELECT 
                 day,
@@ -1019,8 +1021,8 @@ impl VoiceSessionsRepository for VoiceSessionsTable {
         guild_id: u64,
         since: &chrono::DateTime<chrono::Utc>,
         until: &chrono::DateTime<chrono::Utc>,
-    ) -> Result<Vec<crate::entity::GuildDailyStats>, DatabaseError> {
-        Ok(sqlx::query_as::<_, crate::entity::GuildDailyStats>(
+    ) -> Result<Vec<GuildDailyStats>, DatabaseError> {
+        Ok(sqlx::query_as::<_, GuildDailyStats>(
             r#"
             SELECT 
                 date(join_time) as day,
@@ -1039,8 +1041,8 @@ impl VoiceSessionsRepository for VoiceSessionsTable {
     }
 }
 
-impl From<crate::entity::VoiceLeaderboardOptBuilderError> for AppError {
-    fn from(value: crate::entity::VoiceLeaderboardOptBuilderError) -> Self {
+impl From<VoiceLeaderboardOptBuilderError> for AppError {
+    fn from(value: VoiceLeaderboardOptBuilderError) -> Self {
         AppError::internal_with_ref(value)
     }
 }

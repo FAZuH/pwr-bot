@@ -1,5 +1,4 @@
 //! Voice stats subcommand.
-
 use std::collections::HashMap;
 use std::time::Duration;
 use std::time::Instant;
@@ -17,6 +16,7 @@ use crate::bot::commands::Error;
 use crate::bot::commands::voice::GuildStatType;
 use crate::bot::commands::voice::TimeRange;
 use crate::bot::commands::voice::VoiceStatsTimeRange;
+use crate::bot::commands::voice::stats_chart::generate_line_chart;
 use crate::bot::controller::Controller;
 use crate::bot::coordinator::Coordinator;
 use crate::bot::error::BotError;
@@ -35,6 +35,7 @@ use crate::entity::GuildDailyStats;
 use crate::entity::VoiceDailyActivity;
 use crate::entity::VoiceSessionsEntity;
 use crate::error::AppError;
+use crate::service::traits::VoiceTracker;
 
 /// Show voice activity statistics
 ///
@@ -71,7 +72,7 @@ pub async fn command(
                     .unwrap_or(false);
 
                 if !is_member {
-                    return Err(crate::bot::error::BotError::UserNotInGuild(
+                    return Err(BotError::UserNotInGuild(
                         "The specified user is not a member of this server.".to_string(),
                     )
                     .into());
@@ -83,7 +84,7 @@ pub async fn command(
         }
     } else if let Some(ref target) = user {
         if target.id != ctx.author().id {
-            return Err(crate::bot::error::BotError::UserNotInGuild(
+            return Err(BotError::UserNotInGuild(
                 "In direct messages, you can only view your own voice stats.".to_string(),
             )
             .into());
@@ -233,7 +234,7 @@ impl VoiceStatsData {
 pub struct VoiceStatsHandler {
     pub data: VoiceStatsData,
     pub image_bytes: Option<Vec<u8>>,
-    pub service: std::sync::Arc<dyn crate::service::traits::VoiceTracker>,
+    pub service: std::sync::Arc<dyn VoiceTracker>,
     pub guild_id: u64,
     pub original_target_user: Option<User>,
 }
@@ -282,7 +283,7 @@ impl VoiceStatsHandler {
     /// Generates the contribution grid image.
     pub fn generate_image(&self) -> anyhow::Result<Vec<u8>> {
         if self.data.time_range != VoiceStatsTimeRange::Yearly {
-            return crate::bot::commands::voice::stats_chart::generate_line_chart(
+            return generate_line_chart(
                 &self.data.raw_sessions,
                 self.data.time_range,
                 self.data.stat_type,
