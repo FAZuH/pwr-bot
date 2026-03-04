@@ -114,6 +114,15 @@ impl FeedSubscriptionProvider for FeedSubscriptionService {
         self.get_server_settings(guild_id).await
     }
 
+    async fn get_subscribers_by_type_and_feed(
+        &self,
+        subscriber_type: SubscriberType,
+        feed_id: i32,
+    ) -> Result<Vec<SubscriberEntity>, ServiceError> {
+        self.get_subscribers_by_type_and_feed(subscriber_type, feed_id)
+            .await
+    }
+
     async fn update_server_settings(
         &self,
         guild_id: u64,
@@ -542,6 +551,22 @@ impl FeedSubscriptionService {
     /// * DB calls: 1
     pub async fn get_server_settings(&self, guild_id: u64) -> Result<ServerSettings, ServiceError> {
         self.settings.get_server_settings(guild_id).await
+    }
+
+    /// Get all subscribers of a specific type for a given feed.
+    ///
+    /// # Performance
+    /// * DB calls: 1
+    pub async fn get_subscribers_by_type_and_feed(
+        &self,
+        subscriber_type: SubscriberType,
+        feed_id: i32,
+    ) -> Result<Vec<SubscriberEntity>, ServiceError> {
+        Ok(self
+            .db
+            .subscriber
+            .select_all_by_type_and_feed(subscriber_type, feed_id)
+            .await?)
     }
 
     /// # Performance

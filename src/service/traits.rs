@@ -65,6 +65,11 @@ pub trait FeedSubscriptionProvider: Send + Sync {
         source_url: &str,
     ) -> Result<Option<FeedEntity>, ServiceError>;
     async fn get_server_settings(&self, guild_id: u64) -> Result<ServerSettings, ServiceError>;
+    async fn get_subscribers_by_type_and_feed(
+        &self,
+        subscriber_type: SubscriberType,
+        feed_id: i32,
+    ) -> Result<Vec<SubscriberEntity>, ServiceError>;
     async fn update_server_settings(
         &self,
         guild_id: u64,

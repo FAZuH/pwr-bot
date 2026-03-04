@@ -63,7 +63,13 @@ async fn main() -> Result<()> {
     )
     .await?;
 
-    setup_subscribers(event_bus.clone(), bot.clone(), db.clone(), voice_subscriber).await?;
+    setup_subscribers(
+        event_bus.clone(),
+        bot.clone(),
+        services.clone(),
+        voice_subscriber,
+    )
+    .await?;
     setup_publishers(&config, &services, event_bus.clone(), init_start)?;
 
     info!(
@@ -161,13 +167,13 @@ async fn setup_bot(
 async fn setup_subscribers(
     event_bus: Arc<EventBus>,
     bot: Arc<Bot>,
-    db: Arc<Repository>,
+    services: Arc<Services>,
     voice_subscriber: Arc<VoiceStateSubscriber>,
 ) -> Result<()> {
     debug!("Setting up Subscribers...");
 
-    let discord_dm_subscriber = Arc::new(DiscordDmSubscriber::new(bot.clone(), db.clone()));
-    let discord_channel_subscriber = Arc::new(DiscordGuildSubscriber::new(bot, db));
+    let discord_dm_subscriber = Arc::new(DiscordDmSubscriber::new(bot.clone(), services.clone()));
+    let discord_channel_subscriber = Arc::new(DiscordGuildSubscriber::new(bot, services));
 
     event_bus
         .register_subcriber::<FeedUpdateEvent, _>(discord_dm_subscriber)
