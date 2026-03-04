@@ -70,6 +70,7 @@ impl AniListPlatform {
         let request = self
             .client
             .post(&self.base.info.api_url)
+            .header("Content-Type", "application/json")
             .body(json.to_string());
         let response = self.send(request).await?;
         let body = response.text().await?;
