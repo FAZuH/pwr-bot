@@ -129,13 +129,11 @@ The only layer that enforces business rules. Controllers call services; services
 
 ---
 
-## Domain Layer (`src/feed/`, `src/model.rs`)
+## Domain Layer (`src/feed/`, `src/entity.rs`)
 
 Plain domain objects and platform abstractions. Entities have no database concerns beyond `FromRow` (an acceptable tradeoff). Platform implementations depend on domain types, not the other way around.
 
-### Entities (`model.rs`)
-
-> **Note:** Will be renamed to `entity.rs` in a future refactor.
+### Entities (`src/entity.rs`)
 
 | Entity | Description |
 |--------|-------------|
