@@ -680,7 +680,7 @@ impl ViewRender<VoiceStatsAction> for VoiceStatsHandler {
 /// Controller for voice stats display and interaction.
 pub struct VoiceStatsController<'a> {
     #[allow(dead_code)]
-    ctx: &'a Context<'a>,
+    ctx: Context<'a>,
     pub time_range: VoiceStatsTimeRange,
     pub target_user: Option<User>,
     pub stat_type: GuildStatType,
@@ -689,7 +689,7 @@ pub struct VoiceStatsController<'a> {
 impl<'a> VoiceStatsController<'a> {
     /// Creates a new stats controller.
     pub fn new(
-        ctx: &'a Context<'a>,
+        ctx: Context<'a>,
         time_range: VoiceStatsTimeRange,
         target_user: Option<User>,
         stat_type: GuildStatType,
@@ -795,7 +795,12 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceStatsController<'a> {
             view.image_bytes = Some(bytes);
         }
 
-        let mut engine = ViewEngine::new(&ctx, view, Duration::from_secs(120));
+        let mut engine = ViewEngine::new(
+            ctx,
+            view,
+            Duration::from_secs(120),
+            coordinator.reply_handle.clone(),
+        );
 
         trace!(
             "stats_controller_initial_response {} ms",

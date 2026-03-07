@@ -45,7 +45,12 @@ impl<S: Send + Sync + 'static> Controller<S> for AboutController<'_> {
 
         let view = AboutView { stats, avatar_url };
 
-        let mut engine = ViewEngine::new(&ctx, view, Duration::from_secs(120));
+        let mut engine = ViewEngine::new(
+            ctx,
+            view,
+            Duration::from_secs(120),
+            coordinator.reply_handle.clone(),
+        );
 
         engine
             .run(|action| {

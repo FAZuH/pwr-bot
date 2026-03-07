@@ -100,13 +100,13 @@ impl Deref for LeaderboardSessionData {
 /// Controller for voice leaderboard display and interaction.
 pub struct VoiceLeaderboardController<'a> {
     #[allow(dead_code)]
-    ctx: &'a Context<'a>,
+    ctx: Context<'a>,
     pub time_range: VoiceLeaderboardTimeRange,
 }
 
 impl<'a> VoiceLeaderboardController<'a> {
     /// Creates a new leaderboard controller.
-    pub fn new(ctx: &'a Context<'a>, time_range: VoiceLeaderboardTimeRange) -> Self {
+    pub fn new(ctx: Context<'a>, time_range: VoiceLeaderboardTimeRange) -> Self {
         Self { ctx, time_range }
     }
 
@@ -178,7 +178,12 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceLeaderboardController<
         };
 
         if view.leaderboard_data.is_empty() {
-            let mut engine = ViewEngine::new(&ctx, view, Duration::from_millis(1));
+            let mut engine = ViewEngine::new(
+                ctx,
+                view,
+                Duration::from_millis(1),
+                coordinator.reply_handle.clone(),
+            );
             engine
                 .run(|_| Box::pin(async { ViewCommand::Exit }))
                 .await?;
@@ -189,7 +194,12 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceLeaderboardController<
         let page_result = view.generate_current_page().await?;
         view.set_current_page_bytes(Some(page_result.image_bytes));
 
-        let mut engine = ViewEngine::new(&ctx, view, Duration::from_secs(120));
+        let mut engine = ViewEngine::new(
+            ctx,
+            view,
+            Duration::from_secs(120),
+            coordinator.reply_handle.clone(),
+        );
 
         trace!(
             "controller_initial_response {} ms",

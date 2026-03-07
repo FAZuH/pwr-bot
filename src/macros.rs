@@ -117,9 +117,9 @@ macro_rules! controller {
         $(#[$meta])*
         $vis struct $name<$lt> {
             #[allow(dead_code)]
-            ctx: &$lt $crate::bot::commands::Context<$lt>,
+            ctx: $crate::bot::commands::Context<$lt>,
             $(
-                $(#[$field_meta])*
+                $(#[$field_meta:meta])*
                 pub $field: $field_type,
             )*
         }
@@ -127,7 +127,7 @@ macro_rules! controller {
         impl<$lt> $name<$lt> {
             /// Creates a new controller instance.
             pub fn new(
-                ctx: &$lt $crate::bot::commands::Context<$lt>,
+                ctx: $crate::bot::commands::Context<$lt>,
                 $($field: $field_type),*
             ) -> Self {
                 Self {

@@ -66,7 +66,12 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for SettingsMainController<'a> 
             is_settings_modified: false,
         };
 
-        let mut engine = ViewEngine::new(&ctx, view, Duration::from_secs(120));
+        let mut engine = ViewEngine::new(
+            ctx,
+            view,
+            Duration::from_secs(120),
+            coordinator.reply_handle.clone(),
+        );
 
         engine
             .run(|action| {
