@@ -21,6 +21,7 @@ use crate::bot::commands::voice::stats::VoiceStatsController;
 use crate::bot::commands::welcome::WelcomeSettingsController;
 use crate::bot::controller::Controller;
 use crate::bot::navigation::NavigationResult;
+use crate::bot::views::SharedReplyHandle;
 
 /// Maximum number of navigation steps to keep in history.
 const MAX_NAV_HISTORY: usize = 10;
@@ -36,6 +37,8 @@ pub struct Coordinator<'a, S = ()> {
     state: S,
     /// Stack of navigation steps for history tracking.
     nav_queue: Mutex<VecDeque<NavigationResult>>,
+    /// Shared handle to the active message.
+    pub reply_handle: SharedReplyHandle<'a>,
 }
 
 impl<'a> Coordinator<'a, ()> {
@@ -45,6 +48,7 @@ impl<'a> Coordinator<'a, ()> {
             ctx,
             state: (),
             nav_queue: Mutex::new(VecDeque::new()),
+            reply_handle: Arc::new(tokio::sync::Mutex::new(None)),
         })
     }
 }
@@ -56,6 +60,7 @@ impl<'a, S: Send + Sync + 'static> Coordinator<'a, S> {
             ctx,
             state,
             nav_queue: Mutex::new(VecDeque::new()),
+            reply_handle: Arc::new(tokio::sync::Mutex::new(None)),
         })
     }
 
@@ -91,8 +96,7 @@ impl<'a, S: Send + Sync + 'static> Coordinator<'a, S> {
     /// stopping when [`NavigationResult::Exit`] is reached or the history stack is empty.
     pub async fn run(self: Arc<Self>, initial: NavigationResult) -> Result<(), Error> {
         self.navigate(initial);
-        let ctx = self.context();
-        while let Some(mut controller) = self.next_controller(ctx) {
+        while let Some(mut controller) = self.next_controller() {
             controller.run(self.clone()).await?;
         }
         Ok(())
@@ -104,8 +108,9 @@ impl<'a, S: Send + Sync + 'static> Coordinator<'a, S> {
     }
 
     /// Instantiates the next controller based on the current navigation state.
-    fn next_controller(&self, ctx: &'a Context<'a>) -> Option<Box<dyn Controller<S> + 'a>> {
+    fn next_controller(&self) -> Option<Box<dyn Controller<S> + 'a>> {
         use NavigationResult::*;
+        let ctx = self.ctx;
 
         loop {
             let nav = self.pop_next()?;

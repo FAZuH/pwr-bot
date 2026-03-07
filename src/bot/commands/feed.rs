@@ -171,7 +171,12 @@ async fn process_subscription_batch<S: Send + Sync + 'static>(
             // To render without waiting for interaction, we could run the engine for 0 seconds
             // but we can also just use ViewEngine::render_standalone if it exists, or
             // construct an engine and exit immediately. In V2, the recommended way to just render is:
-            let mut engine = ViewEngine::new(ctx, batch_handler, Duration::from_millis(1));
+            let mut engine = ViewEngine::new(
+                *ctx,
+                batch_handler,
+                Duration::from_millis(1),
+                coordinator.reply_handle.clone(),
+            );
 
             if !is_final {
                 // Just render and exit since it's an intermediate step
@@ -187,7 +192,12 @@ async fn process_subscription_batch<S: Send + Sync + 'static>(
 
     // Listen for "View Subscriptions" button click after final message
     if let Some(handler) = handler {
-        let mut engine = ViewEngine::new(ctx, handler, Duration::from_secs(120));
+        let mut engine = ViewEngine::new(
+            *ctx,
+            handler,
+            Duration::from_secs(120),
+            coordinator.reply_handle.clone(),
+        );
 
         engine
             .run(|action| {

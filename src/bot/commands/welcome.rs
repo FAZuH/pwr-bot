@@ -528,7 +528,12 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for WelcomeSettingsController<'
 
         view.current_image_bytes = Self::generate_preview_from(&view.settings, &generator).await;
 
-        let mut engine = ViewEngine::new(&ctx, view, Duration::from_secs(120));
+        let mut engine = ViewEngine::new(
+            ctx,
+            view,
+            Duration::from_secs(120),
+            coordinator.reply_handle.clone(),
+        );
 
         engine
             .run(|action| {

@@ -28,6 +28,9 @@ use tokio::sync::mpsc;
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;
 
+/// Type alias for a thread-safe, shared handle to a Discord message.
+pub type SharedReplyHandle<'a> = Arc<tokio::sync::Mutex<Option<ReplyHandle<'a>>>>;
+
 pub mod pagination;
 
 /// Enum representing the type of response content.
@@ -233,7 +236,7 @@ impl<C: Action, P: Action> ViewSender<C> for MappedSender<C, P> {
 /// new actions asynchronously.
 pub struct ViewContext<'a, T> {
     /// The underlying Poise command context.
-    pub poise: &'a Context<'a>,
+    pub poise: Context<'a>,
     /// The channel used to send events back to the view loop.
     pub tx: Arc<dyn ViewSender<T>>,
 }
@@ -310,7 +313,7 @@ where
     H: ViewHandler<T> + ViewRender<T>,
 {
     /// Poise command context.
-    pub ctx: &'a Context<'a>,
+    pub ctx: Context<'a>,
     /// The combined handler and renderer.
     pub handler: H,
     /// Registry for mapping custom IDs to actions.
@@ -319,8 +322,8 @@ where
     pub timeout: Duration,
     /// Whether the engine should auto-acknowledge component interactions.
     pub should_acknowledge: bool,
-    /// Handle to the active message.
-    reply_handle: Option<ReplyHandle<'a>>,
+    /// Shared handle to the active message.
+    shared_handle: SharedReplyHandle<'a>,
 }
 
 impl<'a, T, H> ViewEngine<'a, T, H>
@@ -328,15 +331,20 @@ where
     T: Action + Send + Sync + 'static,
     H: ViewHandler<T> + ViewRender<T>,
 {
-    /// Creates a new `ViewEngine` with the given context, handler, and timeout.
-    pub fn new(ctx: &'a Context<'a>, handler: H, timeout: Duration) -> Self {
+    /// Creates a new `ViewEngine` with the given context, handler, timeout and shared handle.
+    pub fn new(
+        ctx: Context<'a>,
+        handler: H,
+        timeout: Duration,
+        shared_handle: SharedReplyHandle<'a>,
+    ) -> Self {
         Self {
             ctx,
             handler,
             registry: ActionRegistry::new(),
             timeout,
             should_acknowledge: true,
-            reply_handle: None,
+            shared_handle,
         }
     }
 
@@ -354,11 +362,17 @@ where
         self.registry.clear();
         let reply = self.handler.create_reply(&mut self.registry);
 
-        if let Some(handle) = &self.reply_handle {
-            handle.edit(*self.ctx, reply).await?;
+        let handle_to_edit = {
+            let lock = self.shared_handle.lock().await;
+            lock.as_ref().cloned()
+        };
+
+        if let Some(handle) = handle_to_edit {
+            handle.edit(self.ctx, reply).await?;
         } else {
             let handle = self.ctx.send(reply).await?;
-            self.reply_handle = Some(handle);
+            let mut lock = self.shared_handle.lock().await;
+            *lock = Some(handle);
         }
         Ok(())
     }
@@ -375,7 +389,16 @@ where
 
         let (tx, mut rx) = mpsc::unbounded_channel::<ViewEvent<T>>();
 
-        let msg_id = self.reply_handle.as_ref().unwrap().message().await?.id;
+        let msg_id = {
+            let lock = self.shared_handle.lock().await;
+            lock.as_ref()
+                .cloned()
+                .expect("ReplyHandle should be present after render_view")
+                .message()
+                .await?
+                .id
+        };
+
         let collector = ComponentInteractionCollector::new(self.ctx.serenity_context())
             .author_id(self.ctx.author().id)
             .message_id(msg_id)
