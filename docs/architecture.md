@@ -46,8 +46,8 @@ Commands are organized by domain. Each top-level module is a command group; subc
 
 Interactive commands follow a **Coordinator → Controller → View** flow:
 
-- **`Coordinator<S>`** — receives the Poise context, owns navigation state, drives controllers.
-- **`Controller<S>`** — fetches data via services, constructs views, mediates between view actions and service calls, returns `NavigationResult`.
+- **`Coordinator`** — receives the Poise context, owns navigation state, drives controllers.
+- **`Controller`** — fetches data via services, constructs views, mediates between view actions and service calls.
 - **`NavigationResult`** — enum signalling the next navigation step (e.g. `Back`, `Exit`, `SettingsMain`).
 - **`ViewEngine`** — the event loop runner that drives the view life cycle.
 
@@ -59,28 +59,29 @@ The view system is built on a trait-based architecture driven by the **ViewEngin
 |-----------|---------------|
 | `Action` | Trait for enums representing user actions (buttons, select menus). |
 | `ViewRender<T>` | Trait defining how to translate state into Discord UI components. |
-| `ViewHandler<T>` | Trait for business logic and state mutations in response to actions. |
+| `ViewHandler<T, S>` | Trait for business logic and state mutations in response to actions. `S` is optional shared state (default `()`). |
 | `ViewEngine<T, H>` | The event loop runner that multiplexes interactions, async events, and timeouts. |
-| `ViewContext<T>` | Context passed to handlers, allowing for async task spawning and child view mapping. |
+| `ViewContext<T>` | Context passed to handlers, containing the event, action, sender, and coordinator. |
 
 #### View Lifecycle
 
-1. **Initialization**: `ViewEngine::new(ctx, handler, timeout)` is created with a handler that implements both `ViewRender` and `ViewHandler`.
-2. **Rendering**: The engine calls `handler.render(&mut registry)` to build the Discord message. The `ActionRegistry` maps Discord `custom_id`s to `Action` variants.
+1. **Initialization**: `ViewEngine::new(ctx, handler, timeout, coordinator)` is created with a handler that implements `ViewRender` and `ViewHandler`.
+2. **Rendering**: The engine calls `handler.render(&mut registry)` to build the Discord message. The `ActionRegistry::register` method returns a `RegisteredAction` which provides helper methods like `.as_button()` or `.as_select()` to create Discord components.
 3. **Event Loop**: `ViewEngine::run()` starts a `tokio::select!` loop listening for:
    - **Component Interactions**: Matches `custom_id` back to an `Action`.
    - **Async Events**: Dispatched via `ctx.spawn()` or `ctx.tx.send()`.
-   - **Modals/Messages**: Can be integrated into the same event stream.
+   - **Modals/Messages**: Can be integrated into the same event stream via `ViewEvent`.
    - **Timeouts**: Triggers `on_timeout()` on the handler.
 4. **Command Processing**: Handlers return a `ViewCommand` to control the loop:
    - `Render`: Re-renders the view and updates the message.
+   - `RenderOnce`: Renders once and exits immediately (useful for intermediate states).
    - `Continue`: Continues the loop without re-rendering.
    - `Exit`: Breaks the loop.
    - `AlreadyResponded`: Prevents auto-acknowledgment (essential for opening modals).
 
 #### Delegation Pattern
 
-Child views are integrated using `ctx.map(ParentAction::Child)`. This creates a sub-context that wraps child actions into parent actions, allowing child views to be handled independently within a parent's `handle` method. This allows composition without the parent needing to know the child's internal state or action structure.
+Child views are integrated using `ctx.map(child_action, ParentAction::Child)`. This creates a sub-context that wraps child actions into parent actions, allowing child views to be handled independently within a parent's `handle` method. This allows composition without the parent needing to know the child's internal state or action structure.
 
 ---
 
@@ -186,18 +187,19 @@ Each table struct is responsible for CRUD operations on its domain area.
 Discord interaction
   → Poise routes to command entry function
   → Coordinator::new(ctx)
-  → Controller::run(coordinator)
-      → Service::fetch(...)          fetch required data
-      → ViewHandler::new(...)        construct handler state
-      → ViewEngine::run(...)         start event loop (tokio::select!)
-          → ViewRender::render()     build Discord components
-          → [Event Loop]
-              → Discord interaction / Async event / Modal
-              → ViewHandler::handle()     process action → state mutation
-              → ViewCommand::Render       re-render view
-          → ViewCommand::Exit
-      → NavigationResult
-  → Coordinator routes to next Controller or exits
+  → Coordinator::run(initial_route)   starts navigation loop
+      → Controller::run(coordinator)
+          → Service::fetch(...)          fetch required data
+          → ViewHandler::new(...)        construct handler state
+          → ViewEngine::run(...)         start event loop (tokio::select!)
+              → ViewRender::render()     build Discord components
+              → [Event Loop]
+                  → Discord interaction / Async event / Modal
+                  → ViewHandler::handle(ctx)  process action → state mutation
+                  → ViewCommand::Render       re-render view
+              → ViewCommand::Exit
+          → coordinator.navigate(next)   signal next navigation step
+      → Coordinator routes to next Controller or exits
 ```
 
 ### Background Feed Update

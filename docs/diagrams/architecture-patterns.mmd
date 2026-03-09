@@ -24,14 +24,14 @@ graph LR
     subgraph MVCC["MVC-C Pattern"]
         direction TB
         Entry["Entry fn<br/>command handler"]
-        Coord["Coordinator<br/>context + state"]
+        Coord["Coordinator<br/>navigation loop"]
         Ctrl["Controller<br/>run()"]
         View2["ViewEngine<br/>run()"]
         Nav["NavigationResult<br/>Back · Exit · Settings*"]
-        Entry --> Coord --> Ctrl
+        Entry --> Coord -->|drives| Ctrl
         Ctrl --> View2
-        Ctrl --> Nav
-        Nav -.->|next controller| Coord
+        Ctrl -->|calls navigate| Nav
+        Nav -.->|queued in| Coord
     end
 
     subgraph PubSub2["Pub/Sub"]
