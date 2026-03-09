@@ -16,7 +16,6 @@ use crate::bot::error::BotError;
 use crate::bot::navigation::NavigationResult;
 use crate::bot::views::ActionRegistry;
 use crate::bot::views::ResponseKind;
-use crate::bot::views::Trigger;
 use crate::bot::views::ViewCommand;
 use crate::bot::views::ViewContext;
 use crate::bot::views::ViewEngine;
@@ -133,8 +132,8 @@ impl From<UnsubscribeResult> for String {
 }
 
 /// Processes a batch of subscription/unsubscription operations.
-async fn process_subscription_batch<S: Send + Sync + 'static>(
-    coordinator: Arc<Coordinator<'_, S>>,
+async fn process_subscription_batch(
+    coordinator: Arc<Coordinator<'_>>,
     urls: &[&str],
     subscriber: &SubscriberEntity,
     is_subscribe: bool,
@@ -165,23 +164,20 @@ async fn process_subscription_batch<S: Send + Sync + 'static>(
             let batch_handler = FeedSubscriptionBatchHandler {
                 states: states.clone(),
                 is_final,
+                subscriber_type: subscriber.r#type,
             };
 
             // To render without waiting for interaction, we could run the engine for 0 seconds
-            // but we can also just use ViewEngine::render_standalone if it exists, or
-            // construct an engine and exit immediately. In V2, the recommended way to just render is:
             let mut engine = ViewEngine::new(
                 *ctx,
                 batch_handler,
                 Duration::from_millis(1),
-                coordinator.reply_handle.clone(),
+                coordinator.clone(),
             );
 
             if !is_final {
                 // Just render and exit since it's an intermediate step
-                engine
-                    .run(|_| Box::pin(async { ViewCommand::Exit }))
-                    .await?;
+                engine.run().await?;
             } else {
                 handler = Some(engine.handler); // take it back for the final loop
             }
@@ -191,31 +187,10 @@ async fn process_subscription_batch<S: Send + Sync + 'static>(
 
     // Listen for "View Subscriptions" button click after final message
     if let Some(handler) = handler {
-        let mut engine = ViewEngine::new(
-            *ctx,
-            handler,
-            Duration::from_secs(120),
-            coordinator.reply_handle.clone(),
-        );
+        let mut engine =
+            ViewEngine::new(*ctx, handler, Duration::from_secs(120), coordinator.clone());
 
-        engine
-            .run(|action| {
-                let cor = coordinator.clone();
-                let subscriber_type = subscriber.r#type;
-                Box::pin(async move {
-                    if action == FeedSubscriptionBatchAction::ViewSubscriptions {
-                        // Convert subscriber type back to SendInto
-                        let send_into = match subscriber_type {
-                            SubscriberType::Guild => SendInto::Server,
-                            SubscriberType::Dm => SendInto::DM,
-                        };
-                        cor.navigate(NavigationResult::FeedList(Some(send_into)));
-                        return ViewCommand::Exit;
-                    }
-                    ViewCommand::Render
-                })
-            })
-            .await?;
+        engine.run().await?;
     }
     Ok(())
 }
@@ -303,18 +278,27 @@ action_enum! { FeedSubscriptionBatchAction {
 pub struct FeedSubscriptionBatchHandler {
     pub states: Vec<String>,
     pub is_final: bool,
+    subscriber_type: SubscriberType,
 }
 
 #[async_trait::async_trait]
 impl ViewHandler<FeedSubscriptionBatchAction> for FeedSubscriptionBatchHandler {
     async fn handle(
         &mut self,
-        action: FeedSubscriptionBatchAction,
-        _trigger: Trigger<'_>,
-        _ctx: &ViewContext<'_, FeedSubscriptionBatchAction>,
+        ctx: ViewContext<'_, FeedSubscriptionBatchAction>,
     ) -> Result<ViewCommand, Error> {
-        match action {
-            FeedSubscriptionBatchAction::ViewSubscriptions => Ok(ViewCommand::Continue),
+        use FeedSubscriptionBatchAction as Action;
+        match ctx.action() {
+            Action::ViewSubscriptions => {
+                // Convert subscriber type back to SendInto
+                let send_into = match self.subscriber_type {
+                    SubscriberType::Guild => SendInto::Server,
+                    SubscriberType::Dm => SendInto::DM,
+                };
+                ctx.coordinator
+                    .navigate(NavigationResult::FeedList(Some(send_into)));
+                Ok(ViewCommand::Exit)
+            }
         }
     }
 }
@@ -335,7 +319,8 @@ impl ViewRender<FeedSubscriptionBatchAction> for FeedSubscriptionBatchHandler {
         ))];
 
         if self.is_final {
-            let nav_button = registry.register(FeedSubscriptionBatchAction::ViewSubscriptions)
+            let nav_button = registry
+                .register(FeedSubscriptionBatchAction::ViewSubscriptions)
                 .as_button()
                 .style(ButtonStyle::Secondary);
 

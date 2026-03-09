@@ -1,5 +1,6 @@
 //! Welcome commands module.
 use crate::bot::commands::welcome::image_generator::WelcomeCardData;
+use crate::bot::views::ViewEvent;
 use crate::service::traits::FeedSubscriptionProvider;
 
 pub mod image_generator;
@@ -9,7 +10,6 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
-use log::debug;
 use poise::Modal;
 use poise::serenity_prelude::*;
 
@@ -23,7 +23,6 @@ use crate::bot::error::BotError;
 use crate::bot::navigation::NavigationResult;
 use crate::bot::views::ActionRegistry;
 use crate::bot::views::ResponseKind;
-use crate::bot::views::Trigger;
 use crate::bot::views::ViewCommand;
 use crate::bot::views::ViewContext;
 use crate::bot::views::ViewEngine;
@@ -80,15 +79,14 @@ pub struct SettingsWelcomeHandler {
 impl ViewHandler<SettingsWelcomeAction> for SettingsWelcomeHandler {
     async fn handle(
         &mut self,
-        action: SettingsWelcomeAction,
-        trigger: Trigger<'_>,
-        ctx: &ViewContext<'_, SettingsWelcomeAction>,
+        ctx: ViewContext<'_, SettingsWelcomeAction>,
     ) -> Result<ViewCommand, Error> {
         use SettingsWelcomeAction::*;
 
+        let action = ctx.action();
         match action {
             AddMessage(None) => {
-                if let Trigger::Component(interaction) = trigger {
+                if let ViewEvent::Component(_, ref interaction) = ctx.event {
                     let interaction = interaction.clone();
                     let ctx_serenity = self.ctx_serenity.clone();
 
@@ -111,7 +109,7 @@ impl ViewHandler<SettingsWelcomeAction> for SettingsWelcomeHandler {
                 return Ok(ViewCommand::AlreadyResponded);
             }
             SetColor(None) => {
-                if let Trigger::Component(interaction) = trigger {
+                if let ViewEvent::Component(_, ref interaction) = ctx.event {
                     let interaction = interaction.clone();
                     let ctx_serenity = self.ctx_serenity.clone();
 
@@ -142,7 +140,7 @@ impl ViewHandler<SettingsWelcomeAction> for SettingsWelcomeHandler {
                 self.settings.welcome.enabled = Some(!current);
             }
             ChannelSelect => {
-                if let Trigger::Component(interaction) = trigger
+                if let ViewEvent::Component(_, interaction) = ctx.event
                     && let ComponentInteractionDataKind::ChannelSelect { values } =
                         &interaction.data.kind
                     && let Some(channel) = values.first()
@@ -151,7 +149,7 @@ impl ViewHandler<SettingsWelcomeAction> for SettingsWelcomeHandler {
                 }
             }
             TemplateSelect => {
-                if let Trigger::Component(interaction) = trigger
+                if let ViewEvent::Component(_, interaction) = ctx.event
                     && let ComponentInteractionDataKind::StringSelect { values } =
                         &interaction.data.kind
                     && let Some(template) = values.first()
@@ -160,7 +158,7 @@ impl ViewHandler<SettingsWelcomeAction> for SettingsWelcomeHandler {
                 }
             }
             MarkRemoval => {
-                if let Trigger::Component(interaction) = trigger
+                if let ViewEvent::Component(_, interaction) = ctx.event
                     && let ComponentInteractionDataKind::StringSelect { values } =
                         &interaction.data.kind
                 {
@@ -172,7 +170,7 @@ impl ViewHandler<SettingsWelcomeAction> for SettingsWelcomeHandler {
                     }
                 }
             }
-            AddMessage(Some(ref modal)) => {
+            AddMessage(Some(modal)) => {
                 let msg = modal.message.trim().to_string();
                 if !msg.is_empty() {
                     let msgs = self.settings.welcome.messages.get_or_insert_with(Vec::new);
@@ -181,7 +179,7 @@ impl ViewHandler<SettingsWelcomeAction> for SettingsWelcomeHandler {
                     }
                 }
             }
-            SetColor(Some(ref modal)) => {
+            SetColor(Some(modal)) => {
                 let color = modal.color.trim().to_string();
                 if color.starts_with('#') {
                     self.settings.welcome.primary_color = Some(color);
@@ -201,7 +199,14 @@ impl ViewHandler<SettingsWelcomeAction> for SettingsWelcomeHandler {
             CancelRemoval => {
                 self.marked_removal.clear();
             }
-            Back | About => return Ok(ViewCommand::Continue),
+            About => {
+                ctx.coordinator.navigate(NavigationResult::SettingsAbout);
+                return Ok(ViewCommand::Exit);
+            }
+            Back => {
+                ctx.coordinator.navigate(NavigationResult::SettingsMain);
+                return Ok(ViewCommand::Exit);
+            }
             _ => {}
         }
 
@@ -241,7 +246,8 @@ impl ViewRender<SettingsWelcomeAction> for SettingsWelcomeHandler {
         );
 
         let enabled_label = if is_enabled { "Disable" } else { "Enable" };
-        let enabled_button = registry.register(SettingsWelcomeAction::ToggleEnabled)
+        let enabled_button = registry
+            .register(SettingsWelcomeAction::ToggleEnabled)
             .as_button()
             .label(enabled_label)
             .style(if is_enabled {
@@ -257,7 +263,8 @@ impl ViewRender<SettingsWelcomeAction> for SettingsWelcomeHandler {
             )),
         ];
 
-        let channel_select = registry.register(SettingsWelcomeAction::ChannelSelect)
+        let channel_select = registry
+            .register(SettingsWelcomeAction::ChannelSelect)
             .as_select(CreateSelectMenuKind::Channel {
                 channel_types: Some(Cow::Owned(vec![ChannelType::Text])),
                 default_channels: None,
@@ -275,7 +282,8 @@ impl ViewRender<SettingsWelcomeAction> for SettingsWelcomeHandler {
                 )
             })
             .collect();
-        let template_select = registry.register(SettingsWelcomeAction::TemplateSelect)
+        let template_select = registry
+            .register(SettingsWelcomeAction::TemplateSelect)
             .as_select(CreateSelectMenuKind::String {
                 options: templates.into(),
             })
@@ -292,13 +300,15 @@ impl ViewRender<SettingsWelcomeAction> for SettingsWelcomeHandler {
         ));
 
         let mut button_row = vec![
-            registry.register(SettingsWelcomeAction::SetColor(None))
+            registry
+                .register(SettingsWelcomeAction::SetColor(None))
                 .as_button()
                 .style(ButtonStyle::Primary),
         ];
         if msgs < 25 {
             button_row.push(
-                registry.register(SettingsWelcomeAction::AddMessage(None))
+                registry
+                    .register(SettingsWelcomeAction::AddMessage(None))
                     .as_button()
                     .style(ButtonStyle::Primary),
             );
@@ -348,7 +358,8 @@ impl ViewRender<SettingsWelcomeAction> for SettingsWelcomeHandler {
                 })
                 .collect();
 
-            let select = registry.register(SettingsWelcomeAction::MarkRemoval)
+            let select = registry
+                .register(SettingsWelcomeAction::MarkRemoval)
                 .as_select(CreateSelectMenuKind::String {
                     options: options.into(),
                 })
@@ -363,10 +374,12 @@ impl ViewRender<SettingsWelcomeAction> for SettingsWelcomeHandler {
                 components.push(CreateContainerComponent::ActionRow(
                     CreateActionRow::Buttons(
                         vec![
-                            registry.register(SettingsWelcomeAction::SaveRemoval)
+                            registry
+                                .register(SettingsWelcomeAction::SaveRemoval)
                                 .as_button()
                                 .style(ButtonStyle::Danger),
-                            registry.register(SettingsWelcomeAction::CancelRemoval)
+                            registry
+                                .register(SettingsWelcomeAction::CancelRemoval)
                                 .as_button()
                                 .style(ButtonStyle::Secondary),
                         ]
@@ -379,10 +392,12 @@ impl ViewRender<SettingsWelcomeAction> for SettingsWelcomeHandler {
         let container = CreateComponent::Container(CreateContainer::new(components));
         let nav_buttons = CreateComponent::ActionRow(CreateActionRow::Buttons(
             vec![
-                registry.register(SettingsWelcomeAction::Back)
+                registry
+                    .register(SettingsWelcomeAction::Back)
                     .as_button()
                     .style(ButtonStyle::Secondary),
-                registry.register(SettingsWelcomeAction::About)
+                registry
+                    .register(SettingsWelcomeAction::About)
                     .as_button()
                     .style(ButtonStyle::Secondary),
             ]
@@ -455,8 +470,8 @@ impl<'a> WelcomeSettingsController<'a> {
 }
 
 #[async_trait::async_trait]
-impl<'a, S: Send + Sync + 'static> Controller<S> for WelcomeSettingsController<'a> {
-    async fn run(&mut self, coordinator: std::sync::Arc<Coordinator<'_, S>>) -> Result<(), Error> {
+impl Controller for WelcomeSettingsController<'_> {
+    async fn run(&mut self, coordinator: std::sync::Arc<Coordinator<'_>>) -> Result<(), Error> {
         let ctx = *coordinator.context();
         ctx.defer().await?;
 
@@ -481,40 +496,13 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for WelcomeSettingsController<'
 
         view.current_image_bytes = Self::generate_preview_from(&view.settings, &generator).await;
 
-        let mut engine = ViewEngine::new(
-            ctx,
-            view,
-            Duration::from_secs(120),
-            coordinator.reply_handle.clone(),
-        );
+        let mut engine = ViewEngine::new(ctx, view, Duration::from_secs(120), coordinator.clone());
 
-        engine
-            .run(|action| {
-                let cor = coordinator.clone();
-                Box::pin(async move {
-                    use SettingsWelcomeAction::*;
-                    debug!("on_action for {:?}", action);
-                    match action {
-                        Back => {
-                            cor.navigate(NavigationResult::SettingsMain);
-                            debug!("Setting nav to Back");
-                            ViewCommand::Exit
-                        }
-                        About => {
-                            cor.navigate(NavigationResult::SettingsAbout);
-                            ViewCommand::Exit
-                        }
-                        _ => ViewCommand::Render,
-                    }
-                })
-            })
-            .await?;
+        engine.run().await?;
 
         Ok(())
     }
 }
-
-// ── Actions ───────────────────────────────────────────────────────────────────
 
 action_enum! {
     SettingsWelcomeAction {

@@ -2,7 +2,6 @@
 
 use std::borrow::Cow;
 use std::slice::from_ref;
-use std::str::FromStr;
 use std::time::Duration;
 
 use poise::serenity_prelude::*;
@@ -18,10 +17,10 @@ use crate::bot::navigation::NavigationResult;
 use crate::bot::views::Action;
 use crate::bot::views::ActionRegistry;
 use crate::bot::views::ResponseKind;
-use crate::bot::views::Trigger;
 use crate::bot::views::ViewCommand;
 use crate::bot::views::ViewContext;
 use crate::bot::views::ViewEngine;
+use crate::bot::views::ViewEvent;
 use crate::bot::views::ViewHandler;
 use crate::bot::views::ViewRender;
 use crate::controller;
@@ -43,8 +42,8 @@ pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
 controller! { pub struct SettingsMainController<'a> {} }
 
 #[async_trait::async_trait]
-impl<'a, S: Send + Sync + 'static> Controller<S> for SettingsMainController<'a> {
-    async fn run(&mut self, coordinator: std::sync::Arc<Coordinator<'_, S>>) -> Result<(), Error> {
+impl Controller for SettingsMainController<'_> {
+    async fn run(&mut self, coordinator: std::sync::Arc<Coordinator<'_>>) -> Result<(), Error> {
         let ctx = *coordinator.context();
         is_author_guild_admin(ctx).await?;
         let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?;
@@ -67,39 +66,9 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for SettingsMainController<'a> 
             is_settings_modified: false,
         };
 
-        let mut engine = ViewEngine::new(
-            ctx,
-            view,
-            Duration::from_secs(120),
-            coordinator.reply_handle.clone(),
-        );
+        let mut engine = ViewEngine::new(ctx, view, Duration::from_secs(120), coordinator.clone());
 
-        engine
-            .run(|action| {
-                let cor = coordinator.clone();
-                Box::pin(async move {
-                    match action {
-                        SettingsMainAction::Feeds => {
-                            cor.navigate(NavigationResult::SettingsFeeds);
-                            ViewCommand::Exit
-                        }
-                        SettingsMainAction::Voice => {
-                            cor.navigate(NavigationResult::SettingsVoice);
-                            ViewCommand::Exit
-                        }
-                        SettingsMainAction::About => {
-                            cor.navigate(NavigationResult::SettingsAbout);
-                            ViewCommand::Exit
-                        }
-                        SettingsMainAction::Welcome => {
-                            cor.navigate(NavigationResult::SettingsWelcome);
-                            ViewCommand::Exit
-                        }
-                        _ => ViewCommand::Render,
-                    }
-                })
-            })
-            .await?;
+        engine.run().await?;
 
         // Save settings if modified
         if engine.handler.is_settings_modified {
@@ -161,17 +130,17 @@ impl SettingsMainHandler {
         let features = features.into();
         for feat in features.iter() {
             match feat {
-                SettingsMainAction::Feeds => {
+                SettingsMainAction::FeedsFeature => {
                     self.settings_mut().feeds.enabled =
                         Some(!self.settings_mut().feeds.enabled.unwrap_or(false));
                     self.is_settings_modified = true;
                 }
-                SettingsMainAction::Voice => {
+                SettingsMainAction::VoiceFeature => {
                     self.settings_mut().voice.enabled =
                         Some(!self.settings_mut().voice.enabled.unwrap_or(false));
                     self.is_settings_modified = true;
                 }
-                SettingsMainAction::Welcome => {
+                SettingsMainAction::WelcomeFeature => {
                     self.settings_mut().welcome.enabled =
                         Some(!self.settings_mut().welcome.enabled.unwrap_or(false));
                     self.is_settings_modified = true;
@@ -184,13 +153,13 @@ impl SettingsMainHandler {
     fn get_active_features(&self) -> Vec<SettingsMainAction> {
         let mut features = Vec::new();
         if self.settings().voice.enabled.unwrap_or(false) {
-            features.push(SettingsMainAction::Voice);
+            features.push(SettingsMainAction::VoiceFeature);
         }
         if self.settings().feeds.enabled.unwrap_or(false) {
-            features.push(SettingsMainAction::Feeds);
+            features.push(SettingsMainAction::FeedsFeature);
         }
         if self.settings().welcome.enabled.unwrap_or(false) {
-            features.push(SettingsMainAction::Welcome);
+            features.push(SettingsMainAction::WelcomeFeature);
         }
         features
     }
@@ -198,13 +167,13 @@ impl SettingsMainHandler {
     fn get_inactive_features(&self) -> Vec<SettingsMainAction> {
         let mut features = Vec::new();
         if !self.settings().voice.enabled.unwrap_or(false) {
-            features.push(SettingsMainAction::Voice);
+            features.push(SettingsMainAction::VoiceFeature);
         }
         if !self.settings().feeds.enabled.unwrap_or(false) {
-            features.push(SettingsMainAction::Feeds);
+            features.push(SettingsMainAction::FeedsFeature);
         }
         if !self.settings().welcome.enabled.unwrap_or(false) {
-            features.push(SettingsMainAction::Welcome);
+            features.push(SettingsMainAction::WelcomeFeature);
         }
         features
     }
@@ -248,7 +217,8 @@ impl ViewRender<SettingsMainAction> for SettingsMainHandler {
                 active_features
                     .into_iter()
                     .map(|feat| {
-                        registry.register(feat)
+                        registry
+                            .register(feat)
                             .as_button()
                             .style(match &self.state {
                                 SettingsMainState::FeatureSettings => ButtonStyle::Primary,
@@ -262,7 +232,8 @@ impl ViewRender<SettingsMainAction> for SettingsMainHandler {
 
         let button_toggle_state = CreateActionRow::Buttons(
             vec![
-                registry.register(SettingsMainAction::ToggleState)
+                registry
+                    .register(SettingsMainAction::ToggleState)
                     .as_button()
                     .label(match &self.state {
                         SettingsMainState::FeatureSettings => "Deactivate Features",
@@ -300,23 +271,15 @@ impl ViewRender<SettingsMainAction> for SettingsMainHandler {
             )
         } else {
             CreateActionRow::SelectMenu(
-                registry.register(SettingsMainAction::AddFeatures)
-                    .as_select(
-                CreateSelectMenuKind::String {
-                    options: inactive_features
-                        .into_iter()
-                        .map(|feat| {
-                            let label = feat.label();
-                            let val = match feat {
-                                SettingsMainAction::Feeds => "feeds",
-                                SettingsMainAction::Voice => "voice",
-                                _ => "unknown",
-                            };
-                            CreateSelectMenuOption::new(label, val)
-                        })
-                        .collect(),
-                },
-            ))
+                registry
+                    .register(SettingsMainAction::AddFeatures)
+                    .as_select(CreateSelectMenuKind::String {
+                        options: inactive_features
+                            .into_iter()
+                            .map(|feat| CreateSelectMenuOption::new(feat.label(), feat.label()))
+                            .collect(),
+                    }),
+            )
         };
         components.push(CreateContainerComponent::ActionRow(selectmenu_add_features));
 
@@ -324,7 +287,8 @@ impl ViewRender<SettingsMainAction> for SettingsMainHandler {
 
         let bottom_buttons = CreateComponent::ActionRow(CreateActionRow::Buttons(
             vec![
-                registry.register(SettingsMainAction::About)
+                registry
+                    .register(SettingsMainAction::About)
                     .as_button()
                     .style(ButtonStyle::Secondary),
             ]
@@ -337,9 +301,12 @@ impl ViewRender<SettingsMainAction> for SettingsMainHandler {
 
 action_enum! {
     SettingsMainAction {
-        Feeds,
-        Voice,
-        Welcome,
+        #[label = "Feeds"]
+        FeedsFeature,
+        #[label = "Voice"]
+        VoiceFeature,
+        #[label = "Welcome"]
+        WelcomeFeature,
         AddFeatures,
         ToggleState,
         #[label = "🛈 About"]
@@ -347,45 +314,60 @@ action_enum! {
     }
 }
 
-impl FromStr for SettingsMainAction {
-    type Err = ();
-
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        let ret = match s {
-            "Feeds" => Self::Feeds,
-            "Voice" => Self::Voice,
-            "Welcome" => Self::Welcome,
-            _ => return Err(())
+impl SettingsMainAction {
+    pub fn from_label(label: &str) -> Option<Self> {
+        let ret = match label {
+            "Feeds" => Self::FeedsFeature,
+            "Voice" => Self::VoiceFeature,
+            "Welcome" => Self::WelcomeFeature,
+            _ => return None,
         };
-        Ok(ret)
+        Some(ret)
     }
 }
 
 #[async_trait::async_trait]
-impl ViewHandler<SettingsMainAction> for SettingsMainHandler {
+impl ViewHandler<SettingsMainAction, ()> for SettingsMainHandler {
     async fn handle(
         &mut self,
-        action: SettingsMainAction,
-        trigger: Trigger<'_>,
-        _ctx: &ViewContext<'_, SettingsMainAction>,
+        ctx: ViewContext<'_, SettingsMainAction>,
     ) -> Result<ViewCommand, Error> {
         use SettingsMainAction::*;
-        use SettingsMainState::*;
+        use SettingsMainState as State;
 
+        let cor = ctx.coordinator.clone();
+        let action = ctx.action();
         match action {
-            Feeds | Voice | Welcome => match self.state {
-                FeatureSettings => Ok(ViewCommand::Continue),
-                DeactivateFeatures => {
-                    self.toggle_features(from_ref(&action));
+            FeedsFeature | VoiceFeature | WelcomeFeature => match self.state {
+                State::FeatureSettings => match action {
+                    FeedsFeature => {
+                        cor.navigate(NavigationResult::SettingsFeeds);
+                        Ok(ViewCommand::Exit)
+                    }
+                    VoiceFeature => {
+                        cor.navigate(NavigationResult::SettingsVoice);
+                        Ok(ViewCommand::Exit)
+                    }
+                    WelcomeFeature => {
+                        cor.navigate(NavigationResult::SettingsWelcome);
+                        Ok(ViewCommand::Exit)
+                    }
+                    _ => Ok(ViewCommand::Render),
+                },
+                State::DeactivateFeatures => {
+                    self.toggle_features(from_ref(action));
                     Ok(ViewCommand::Render)
                 }
             },
             AddFeatures => {
-                if let Trigger::Component(interaction) = trigger
+                if let ViewEvent::Component(_, interaction) = ctx.event
                     && let ComponentInteractionDataKind::StringSelect { values } =
                         &interaction.data.kind
                 {
-                    let features: Vec<_> = values.iter().filter_map(|v| SettingsMainAction::from_str(&v).ok()).collect();
+                    let features: Vec<_> = values
+                        .iter()
+                        .filter_map(|v| SettingsMainAction::from_label(v))
+                        .collect();
                     self.toggle_features(features);
                 }
                 Ok(ViewCommand::Render)
@@ -394,7 +376,10 @@ impl ViewHandler<SettingsMainAction> for SettingsMainHandler {
                 self.state.toggle();
                 Ok(ViewCommand::Render)
             }
-            About => Ok(ViewCommand::Continue),
+            About => {
+                cor.navigate(NavigationResult::SettingsAbout);
+                Ok(ViewCommand::Exit)
+            }
         }
     }
 }

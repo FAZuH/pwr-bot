@@ -14,10 +14,10 @@ use crate::bot::error::BotError;
 use crate::bot::navigation::NavigationResult;
 use crate::bot::views::ActionRegistry;
 use crate::bot::views::ResponseKind;
-use crate::bot::views::Trigger;
 use crate::bot::views::ViewCommand;
 use crate::bot::views::ViewContext;
 use crate::bot::views::ViewEngine;
+use crate::bot::views::ViewEvent;
 use crate::bot::views::ViewHandler;
 use crate::bot::views::ViewRender;
 use crate::controller;
@@ -41,8 +41,8 @@ pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
 controller! { pub struct FeedSettingsController<'a> {} }
 
 #[async_trait::async_trait]
-impl<'a, S: Send + Sync + 'static> Controller<S> for FeedSettingsController<'a> {
-    async fn run(&mut self, coordinator: std::sync::Arc<Coordinator<'_, S>>) -> Result<(), Error> {
+impl Controller for FeedSettingsController<'_> {
+    async fn run(&mut self, coordinator: std::sync::Arc<Coordinator<'_>>) -> Result<(), Error> {
         let ctx = *coordinator.context();
         ctx.defer().await?;
         let service = ctx.data().service.feed_subscription.clone();
@@ -55,29 +55,9 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for FeedSettingsController<'a> 
             settings: &mut settings,
         };
 
-        let mut engine = ViewEngine::new(
-            ctx,
-            view,
-            Duration::from_secs(120),
-            coordinator.reply_handle.clone(),
-        );
+        let mut engine = ViewEngine::new(ctx, view, Duration::from_secs(120), coordinator.clone());
 
-        engine
-            .run(|action| {
-                let cor = coordinator.clone();
-                Box::pin(async move {
-                    if action == SettingsFeedAction::Back {
-                        cor.navigate(NavigationResult::SettingsMain);
-                        return ViewCommand::Exit;
-                    } else if action == SettingsFeedAction::About {
-                        cor.navigate(NavigationResult::SettingsAbout);
-                        return ViewCommand::Exit;
-                    }
-
-                    ViewCommand::Render
-                })
-            })
-            .await?;
+        engine.run().await?;
 
         // Save settings after the view loop completes
         service
@@ -108,20 +88,18 @@ pub struct SettingsFeedHandler<'a> {
 impl<'a> ViewHandler<SettingsFeedAction> for SettingsFeedHandler<'a> {
     async fn handle(
         &mut self,
-        action: SettingsFeedAction,
-        trigger: Trigger<'_>,
-        _ctx: &ViewContext<'_, SettingsFeedAction>,
+        ctx: ViewContext<'_, SettingsFeedAction>,
     ) -> Result<ViewCommand, Error> {
         let settings = &mut self.settings.feeds;
 
-        match action {
+        match ctx.action() {
             SettingsFeedAction::Enabled => {
                 let current = settings.enabled.unwrap_or(true);
                 settings.enabled = Some(!current);
                 Ok(ViewCommand::Render)
             }
             SettingsFeedAction::Channel => {
-                if let Trigger::Component(interaction) = trigger
+                if let ViewEvent::Component(_, ref interaction) = ctx.event
                     && let ComponentInteractionDataKind::ChannelSelect { values } =
                         &interaction.data.kind
                 {
@@ -130,7 +108,7 @@ impl<'a> ViewHandler<SettingsFeedAction> for SettingsFeedHandler<'a> {
                 Ok(ViewCommand::Render)
             }
             SettingsFeedAction::SubRole => {
-                if let Trigger::Component(interaction) = trigger
+                if let ViewEvent::Component(_, ref interaction) = ctx.event
                     && let ComponentInteractionDataKind::RoleSelect { values } =
                         &interaction.data.kind
                 {
@@ -139,7 +117,7 @@ impl<'a> ViewHandler<SettingsFeedAction> for SettingsFeedHandler<'a> {
                 Ok(ViewCommand::Render)
             }
             SettingsFeedAction::UnsubRole => {
-                if let Trigger::Component(interaction) = trigger
+                if let ViewEvent::Component(_, ref interaction) = ctx.event
                     && let ComponentInteractionDataKind::RoleSelect { values } =
                         &interaction.data.kind
                 {
@@ -147,7 +125,14 @@ impl<'a> ViewHandler<SettingsFeedAction> for SettingsFeedHandler<'a> {
                 }
                 Ok(ViewCommand::Render)
             }
-            SettingsFeedAction::Back | SettingsFeedAction::About => Ok(ViewCommand::Continue),
+            SettingsFeedAction::Back => {
+                ctx.coordinator.navigate(NavigationResult::SettingsMain);
+                Ok(ViewCommand::Exit)
+            }
+            SettingsFeedAction::About => {
+                ctx.coordinator.navigate(NavigationResult::SettingsAbout);
+                Ok(ViewCommand::Exit)
+            }
         }
     }
 }
@@ -184,7 +169,8 @@ impl<'a> ViewRender<SettingsFeedAction> for SettingsFeedHandler<'a> {
             }
         );
 
-        let enabled_button = registry.register(SettingsFeedAction::Enabled)
+        let enabled_button = registry
+            .register(SettingsFeedAction::Enabled)
             .as_button()
             .label(if is_enabled { "Disable" } else { "Enable" })
             .style(if is_enabled {
@@ -196,7 +182,8 @@ impl<'a> ViewRender<SettingsFeedAction> for SettingsFeedHandler<'a> {
         let channel_text =
             "### Notification Channel\n\n> 🛈  Choose where feed updates will be posted.";
 
-        let channel_select = registry.register(SettingsFeedAction::Channel)
+        let channel_select = registry
+            .register(SettingsFeedAction::Channel)
             .as_select(CreateSelectMenuKind::Channel {
                 channel_types: Some(vec![ChannelType::Text, ChannelType::News].into()),
                 default_channels: Some(
@@ -210,34 +197,34 @@ impl<'a> ViewRender<SettingsFeedAction> for SettingsFeedHandler<'a> {
             });
 
         let sub_role_text = "### Subscribe Permission\n\n> 🛈  Who can add new feeds to this server. Leave empty to allow users with \"Manage Server\" permission.";
-        let sub_role_select = registry.register(SettingsFeedAction::SubRole)
+        let sub_role_select = registry
+            .register(SettingsFeedAction::SubRole)
             .as_select(CreateSelectMenuKind::Role {
-                    default_roles: Some(
-                        Self::parse_role_id(self.settings.feeds.subscribe_role_id.as_ref()).into(),
-                    ),
-                },
-            )
-        .min_values(0)
-        .placeholder(if self.settings.feeds.subscribe_role_id.is_some() {
-            "Change subscribe role"
-        } else {
-            "Optional: Select role for subscribe permission"
-        });
+                default_roles: Some(
+                    Self::parse_role_id(self.settings.feeds.subscribe_role_id.as_ref()).into(),
+                ),
+            })
+            .min_values(0)
+            .placeholder(if self.settings.feeds.subscribe_role_id.is_some() {
+                "Change subscribe role"
+            } else {
+                "Optional: Select role for subscribe permission"
+            });
 
         let unsub_role_text = "### Unsubscribe Permission\n\n> 🛈  Who can remove feeds from this server. Leave empty to allow users with \"Manage Server\" permission.";
-        let unsub_role_select = registry.register(SettingsFeedAction::UnsubRole)
+        let unsub_role_select = registry
+            .register(SettingsFeedAction::UnsubRole)
             .as_select(CreateSelectMenuKind::Role {
-                    default_roles: Some(
-                        Self::parse_role_id(self.settings.feeds.unsubscribe_role_id.as_ref()).into(),
-                    ),
-                },
-            )
-        .min_values(0)
-        .placeholder(if self.settings.feeds.unsubscribe_role_id.is_some() {
-            "Change unsubscribe role"
-        } else {
-            "Optional: Select role for unsubscribe permission"
-        });
+                default_roles: Some(
+                    Self::parse_role_id(self.settings.feeds.unsubscribe_role_id.as_ref()).into(),
+                ),
+            })
+            .min_values(0)
+            .placeholder(if self.settings.feeds.unsubscribe_role_id.is_some() {
+                "Change unsubscribe role"
+            } else {
+                "Optional: Select role for unsubscribe permission"
+            });
 
         let container = CreateComponent::Container(CreateContainer::new(vec![
             CreateContainerComponent::TextDisplay(CreateTextDisplay::new(status_text)),
@@ -252,8 +239,14 @@ impl<'a> ViewRender<SettingsFeedAction> for SettingsFeedHandler<'a> {
             CreateContainerComponent::ActionRow(CreateActionRow::SelectMenu(unsub_role_select)),
         ]));
 
-        let back_button = registry.register(SettingsFeedAction::Back).as_button().style(ButtonStyle::Secondary);
-        let about_button = registry.register(SettingsFeedAction::About).as_button().style(ButtonStyle::Secondary);
+        let back_button = registry
+            .register(SettingsFeedAction::Back)
+            .as_button()
+            .style(ButtonStyle::Secondary);
+        let about_button = registry
+            .register(SettingsFeedAction::About)
+            .as_button()
+            .style(ButtonStyle::Secondary);
 
         let nav_buttons = CreateComponent::ActionRow(CreateActionRow::Buttons(
             vec![back_button, about_button].into(),

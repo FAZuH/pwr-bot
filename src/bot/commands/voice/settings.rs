@@ -13,7 +13,6 @@ use crate::bot::error::BotError;
 use crate::bot::navigation::NavigationResult;
 use crate::bot::views::ActionRegistry;
 use crate::bot::views::ResponseKind;
-use crate::bot::views::Trigger;
 use crate::bot::views::ViewCommand;
 use crate::bot::views::ViewContext;
 use crate::bot::views::ViewEngine;
@@ -40,8 +39,8 @@ pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
 controller! { pub struct VoiceSettingsController<'a> {} }
 
 #[async_trait::async_trait]
-impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceSettingsController<'a> {
-    async fn run(&mut self, coordinator: std::sync::Arc<Coordinator<'_, S>>) -> Result<(), Error> {
+impl Controller for VoiceSettingsController<'_> {
+    async fn run(&mut self, coordinator: std::sync::Arc<Coordinator<'_>>) -> Result<(), Error> {
         let ctx = *coordinator.context();
         ctx.defer().await?;
         let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?.get();
@@ -55,31 +54,9 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceSettingsController<'a>
 
         let view = SettingsVoiceHandler { settings };
 
-        let mut engine = ViewEngine::new(
-            ctx,
-            view,
-            Duration::from_secs(120),
-            coordinator.reply_handle.clone(),
-        );
+        let mut engine = ViewEngine::new(ctx, view, Duration::from_secs(120), coordinator.clone());
 
-        engine
-            .run(|action| {
-                let cor = coordinator.clone();
-                Box::pin(async move {
-                    match action {
-                        SettingsVoiceAction::Back => {
-                            cor.navigate(NavigationResult::SettingsMain);
-                            ViewCommand::Exit
-                        }
-                        SettingsVoiceAction::About => {
-                            cor.navigate(NavigationResult::SettingsAbout);
-                            ViewCommand::Exit
-                        }
-                        SettingsVoiceAction::ToggleEnabled => ViewCommand::Render,
-                    }
-                })
-            })
-            .await?;
+        engine.run().await?;
 
         // Save the settings once the run exits
         service
@@ -109,18 +86,24 @@ pub struct SettingsVoiceHandler {
 impl ViewHandler<SettingsVoiceAction> for SettingsVoiceHandler {
     async fn handle(
         &mut self,
-        action: SettingsVoiceAction,
-        _trigger: Trigger<'_>,
-        _ctx: &ViewContext<'_, SettingsVoiceAction>,
+        ctx: ViewContext<'_, SettingsVoiceAction>,
     ) -> Result<ViewCommand, Error> {
-        match action {
+        let ret = match ctx.action() {
             SettingsVoiceAction::ToggleEnabled => {
                 let current = self.settings.voice.enabled.unwrap_or(true);
                 self.settings.voice.enabled = Some(!current);
-                Ok(ViewCommand::Render)
+                ViewCommand::Render
             }
-            SettingsVoiceAction::Back | SettingsVoiceAction::About => Ok(ViewCommand::Continue),
-        }
+            SettingsVoiceAction::Back => {
+                ctx.coordinator.navigate(NavigationResult::SettingsMain);
+                ViewCommand::Exit
+            }
+            SettingsVoiceAction::About => {
+                ctx.coordinator.navigate(NavigationResult::SettingsAbout);
+                ViewCommand::Exit
+            }
+        };
+        Ok(ret)
     }
 }
 
@@ -137,15 +120,15 @@ impl ViewRender<SettingsVoiceAction> for SettingsVoiceHandler {
             }
         );
 
-        let enabled_button =
-            registry.register(SettingsVoiceAction::ToggleEnabled)
-                .as_button()
-                .label(if is_enabled { "Disable" } else { "Enable" })
-                .style(if is_enabled {
-                    ButtonStyle::Danger
-                } else {
-                    ButtonStyle::Success
-                });
+        let enabled_button = registry
+            .register(SettingsVoiceAction::ToggleEnabled)
+            .as_button()
+            .label(if is_enabled { "Disable" } else { "Enable" })
+            .style(if is_enabled {
+                ButtonStyle::Danger
+            } else {
+                ButtonStyle::Success
+            });
 
         let container = CreateComponent::Container(CreateContainer::new(vec![
             CreateContainerComponent::TextDisplay(CreateTextDisplay::new(status_text)),
@@ -156,10 +139,12 @@ impl ViewRender<SettingsVoiceAction> for SettingsVoiceHandler {
 
         let nav_buttons = CreateComponent::ActionRow(CreateActionRow::Buttons(
             vec![
-                registry.register(SettingsVoiceAction::Back)
+                registry
+                    .register(SettingsVoiceAction::Back)
                     .as_button()
                     .style(ButtonStyle::Secondary),
-                registry.register(SettingsVoiceAction::About)
+                registry
+                    .register(SettingsVoiceAction::About)
                     .as_button()
                     .style(ButtonStyle::Secondary),
             ]

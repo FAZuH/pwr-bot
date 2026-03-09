@@ -4,6 +4,10 @@ use poise::serenity_prelude::*;
 use crate::action_enum;
 use crate::bot::Error;
 use crate::bot::views::Action;
+use crate::bot::views::ActionRegistry;
+use crate::bot::views::ViewCommand;
+use crate::bot::views::ViewContext;
+use crate::bot::views::ViewHandler;
 
 /// Model for tracking pagination state.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -52,23 +56,20 @@ impl PaginationModel {
     }
 }
 
-action_enum!(PaginationAction {
-    #[label = "⏮"]
-    First,
-    #[label = "◀"]
-    Prev,
-    Page,
-    #[label = "▶"]
-    Next,
-    #[label = "⏭"]
-    Last,
-});
-
-use crate::bot::views::ActionRegistry;
-use crate::bot::views::Trigger;
-use crate::bot::views::ViewCommand;
-use crate::bot::views::ViewContext;
-use crate::bot::views::ViewHandler;
+action_enum!(
+    #[derive(Copy)]
+    PaginationAction {
+        #[label = "⏮"]
+        First,
+        #[label = "◀"]
+        Prev,
+        Page,
+        #[label = "▶"]
+        Next,
+        #[label = "⏭"]
+        Last,
+    }
+);
 
 #[derive(Clone)]
 pub struct PaginationView {
@@ -107,11 +108,13 @@ impl PaginationView {
         registry: &mut ActionRegistry<T>,
         wrap: fn(PaginationAction) -> T,
     ) -> CreateComponent<'b> {
-        let mut first = registry.register(wrap(PaginationAction::First))
+        let mut first = registry
+            .register(wrap(PaginationAction::First))
             .as_button()
             .style(ButtonStyle::Primary);
 
-        let mut prev = registry.register(wrap(PaginationAction::Prev))
+        let mut prev = registry
+            .register(wrap(PaginationAction::Prev))
             .as_button()
             .style(ButtonStyle::Primary);
 
@@ -120,11 +123,13 @@ impl PaginationView {
             .style(ButtonStyle::Secondary)
             .disabled(true);
 
-        let mut next = registry.register(wrap(PaginationAction::Next))
+        let mut next = registry
+            .register(wrap(PaginationAction::Next))
             .as_button()
             .style(ButtonStyle::Primary);
 
-        let mut last =registry.register(wrap(PaginationAction::Last))
+        let mut last = registry
+            .register(wrap(PaginationAction::Last))
             .as_button()
             .style(ButtonStyle::Primary);
 
@@ -147,11 +152,9 @@ impl PaginationView {
 impl ViewHandler<PaginationAction> for PaginationView {
     async fn handle(
         &mut self,
-        action: PaginationAction,
-        _trigger: Trigger<'_>,
-        _ctx: &ViewContext<'_, PaginationAction>,
+        ctx: ViewContext<'_, PaginationAction>,
     ) -> Result<ViewCommand, Error> {
-        match action {
+        match ctx.action() {
             PaginationAction::First => self.state.first_page(),
             PaginationAction::Prev => self.state.prev_page(),
             PaginationAction::Next => self.state.next_page(),
@@ -161,9 +164,13 @@ impl ViewHandler<PaginationAction> for PaginationView {
         Ok(ViewCommand::Render)
     }
 
-    async fn on_timeout(&mut self) -> Result<(), Error> {
+    async fn on_timeout(&mut self) -> Result<ViewCommand, Error> {
         self.disabled = true;
-        Ok(())
+        if self.state.pages > 1 {
+            Ok(ViewCommand::RenderOnce)
+        } else {
+            Ok(ViewCommand::Exit)
+        }
     }
 }
 

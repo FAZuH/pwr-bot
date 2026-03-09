@@ -24,10 +24,10 @@ use crate::bot::navigation::NavigationResult;
 use crate::bot::utils::format_duration;
 use crate::bot::views::ActionRegistry;
 use crate::bot::views::ResponseKind;
-use crate::bot::views::Trigger;
 use crate::bot::views::ViewCommand;
 use crate::bot::views::ViewContext;
 use crate::bot::views::ViewEngine;
+use crate::bot::views::ViewEvent;
 use crate::bot::views::ViewHandler;
 use crate::bot::views::ViewRender;
 use crate::entity::GuildDailyStats;
@@ -452,15 +452,13 @@ impl VoiceStatsHandler {
 impl ViewHandler<VoiceStatsAction> for VoiceStatsHandler {
     async fn handle(
         &mut self,
-        action: VoiceStatsAction,
-        _trigger: Trigger<'_>,
-        _ctx: &ViewContext<'_, VoiceStatsAction>,
+        ctx: ViewContext<'_, VoiceStatsAction>,
     ) -> Result<ViewCommand, Error> {
         use VoiceStatsAction::*;
 
         let mut changed = false;
 
-        match action {
+        match ctx.action() {
             TimeYearly => {
                 self.data.time_range = VoiceStatsTimeRange::Yearly;
                 changed = true;
@@ -500,14 +498,14 @@ impl ViewHandler<VoiceStatsAction> for VoiceStatsHandler {
                 changed = true;
             }
             SelectUser => {
-                if let Trigger::Component(interaction) = _trigger
+                if let ViewEvent::Component(_, ref interaction) = ctx.event
                     && let poise::serenity_prelude::ComponentInteractionDataKind::UserSelect {
                         values,
                     } = &interaction.data.kind
                     && let Some(user_id) = values.first()
                 {
                     // Fetch user object
-                    if let Ok(user) = user_id.to_user(_ctx.poise.http()).await {
+                    if let Ok(user) = user_id.to_user(ctx.poise.http()).await {
                         self.data.user = Some(user);
                         changed = true;
                     }
@@ -559,7 +557,8 @@ impl ViewRender<VoiceStatsAction> for VoiceStatsHandler {
             "Show user stats".to_string()
         };
 
-        let toggle_button = registry.register(ToggleDataMode)
+        let toggle_button = registry
+            .register(ToggleDataMode)
             .as_button()
             .label(toggle_label)
             .style(ButtonStyle::Primary);
@@ -574,34 +573,34 @@ impl ViewRender<VoiceStatsAction> for VoiceStatsHandler {
 
         // 1. Time Range Row
         let time_buttons = vec![
-            registry.register(TimeYearly)
-                .as_button()
-                .style(if self.data.time_range == VoiceStatsTimeRange::Yearly {
+            registry.register(TimeYearly).as_button().style(
+                if self.data.time_range == VoiceStatsTimeRange::Yearly {
                     ButtonStyle::Primary
                 } else {
                     ButtonStyle::Secondary
-                }),
-            registry.register(TimeMonthly)
-                .as_button()
-                .style(if self.data.time_range == VoiceStatsTimeRange::Monthly {
+                },
+            ),
+            registry.register(TimeMonthly).as_button().style(
+                if self.data.time_range == VoiceStatsTimeRange::Monthly {
                     ButtonStyle::Primary
                 } else {
                     ButtonStyle::Secondary
-                }),
-            registry.register(TimeWeekly)
-                .as_button()
-                .style(if self.data.time_range == VoiceStatsTimeRange::Weekly {
+                },
+            ),
+            registry.register(TimeWeekly).as_button().style(
+                if self.data.time_range == VoiceStatsTimeRange::Weekly {
                     ButtonStyle::Primary
                 } else {
                     ButtonStyle::Secondary
-                }),
-            registry.register(TimeHourly)
-                .as_button()
-                .style(if self.data.time_range == VoiceStatsTimeRange::Hourly {
+                },
+            ),
+            registry.register(TimeHourly).as_button().style(
+                if self.data.time_range == VoiceStatsTimeRange::Hourly {
                     ButtonStyle::Primary
                 } else {
                     ButtonStyle::Secondary
-                }),
+                },
+            ),
         ];
         components.push(CreateComponent::ActionRow(CreateActionRow::Buttons(
             time_buttons.into(),
@@ -610,34 +609,28 @@ impl ViewRender<VoiceStatsAction> for VoiceStatsHandler {
         // 2. Aggregation Row (Only for Guild)
         let mut stat_buttons = vec![];
         if !self.data.is_user_stats() {
-            stat_buttons.push(
-                registry.register(StatUniqueUsers)
-                    .as_button()
-                    .style(if self.data.stat_type == GuildStatType::ActiveUserCount {
-                        ButtonStyle::Primary
-                    } else {
-                        ButtonStyle::Secondary
-                    }),
-            );
+            stat_buttons.push(registry.register(StatUniqueUsers).as_button().style(
+                if self.data.stat_type == GuildStatType::ActiveUserCount {
+                    ButtonStyle::Primary
+                } else {
+                    ButtonStyle::Secondary
+                },
+            ));
         }
-        stat_buttons.push(
-            registry.register(StatTotalTime)
-                .as_button()
-                .style(if self.data.stat_type == GuildStatType::TotalTime {
-                    ButtonStyle::Primary
-                } else {
-                    ButtonStyle::Secondary
-                }),
-        );
-        stat_buttons.push(
-            registry.register(StatAverageTime)
-                .as_button()
-                .style(if self.data.stat_type == GuildStatType::AverageTime {
-                    ButtonStyle::Primary
-                } else {
-                    ButtonStyle::Secondary
-                }),
-        );
+        stat_buttons.push(registry.register(StatTotalTime).as_button().style(
+            if self.data.stat_type == GuildStatType::TotalTime {
+                ButtonStyle::Primary
+            } else {
+                ButtonStyle::Secondary
+            },
+        ));
+        stat_buttons.push(registry.register(StatAverageTime).as_button().style(
+            if self.data.stat_type == GuildStatType::AverageTime {
+                ButtonStyle::Primary
+            } else {
+                ButtonStyle::Secondary
+            },
+        ));
         components.push(CreateComponent::ActionRow(CreateActionRow::Buttons(
             stat_buttons.into(),
         )));
@@ -649,7 +642,8 @@ impl ViewRender<VoiceStatsAction> for VoiceStatsHandler {
                 .user
                 .clone()
                 .map(|u| std::borrow::Cow::Owned(vec![u.id]));
-            let user_select = registry.register(SelectUser)
+            let user_select = registry
+                .register(SelectUser)
                 .as_select(CreateSelectMenuKind::User { default_users });
             components.push(CreateComponent::ActionRow(CreateActionRow::SelectMenu(
                 user_select,
@@ -765,8 +759,8 @@ impl<'a> VoiceStatsController<'a> {
 }
 
 #[async_trait::async_trait]
-impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceStatsController<'a> {
-    async fn run(&mut self, coordinator: std::sync::Arc<Coordinator<'_, S>>) -> Result<(), Error> {
+impl Controller for VoiceStatsController<'_> {
+    async fn run(&mut self, coordinator: std::sync::Arc<Coordinator<'_>>) -> Result<(), Error> {
         let ctx = *coordinator.context();
         ctx.defer().await?;
 
@@ -793,21 +787,14 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceStatsController<'a> {
             view.image_bytes = Some(bytes);
         }
 
-        let mut engine = ViewEngine::new(
-            ctx,
-            view,
-            Duration::from_secs(120),
-            coordinator.reply_handle.clone(),
-        );
+        let mut engine = ViewEngine::new(ctx, view, Duration::from_secs(120), coordinator.clone());
 
         trace!(
             "stats_controller_initial_response {} ms",
             controller_start.elapsed().as_millis()
         );
 
-        engine
-            .run(|_action| Box::pin(async move { ViewCommand::Render }))
-            .await?;
+        engine.run().await?;
 
         Ok(())
     }

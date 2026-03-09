@@ -28,37 +28,22 @@ const MAX_NAV_HISTORY: usize = 10;
 
 /// Orchestrator for controller navigation and shared state.
 ///
-/// The `Coordinator` owns the Poise command context and an optional shared state `S`.
+/// The `Coordinator` owns the Poise command context
 /// It maintains a history of [`NavigationResult`]s to support "Back" navigation.
-pub struct Coordinator<'a, S = ()> {
+pub struct Coordinator<'a> {
     /// Poise command context.
     ctx: Context<'a>,
-    /// Optional shared state accessible to all controllers.
-    state: S,
     /// Stack of navigation steps for history tracking.
     nav_queue: Mutex<VecDeque<NavigationResult>>,
     /// Shared handle to the active message.
     pub reply_handle: SharedReplyHandle<'a>,
 }
 
-impl<'a> Coordinator<'a, ()> {
+impl<'a> Coordinator<'a> {
     /// Creates a new coordinator without shared state.
     pub fn new(ctx: Context<'a>) -> Arc<Self> {
         Arc::new(Self {
             ctx,
-            state: (),
-            nav_queue: Mutex::new(VecDeque::new()),
-            reply_handle: Arc::new(tokio::sync::Mutex::new(None)),
-        })
-    }
-}
-
-impl<'a, S: Send + Sync + 'static> Coordinator<'a, S> {
-    /// Creates a new coordinator with an initial shared state.
-    pub fn with_state(ctx: Context<'a>, state: S) -> Arc<Self> {
-        Arc::new(Self {
-            ctx,
-            state,
             nav_queue: Mutex::new(VecDeque::new()),
             reply_handle: Arc::new(tokio::sync::Mutex::new(None)),
         })
@@ -67,16 +52,6 @@ impl<'a, S: Send + Sync + 'static> Coordinator<'a, S> {
     /// Returns the Poise context.
     pub fn context(&self) -> &Context<'a> {
         &self.ctx
-    }
-
-    /// Returns a reference to the shared state.
-    pub fn state(&self) -> &S {
-        &self.state
-    }
-
-    /// Returns a mutable reference to the shared state.
-    pub fn state_mut(&mut self) -> &mut S {
-        &mut self.state
     }
 
     /// Pushes a new navigation target onto the stack.
@@ -108,13 +83,13 @@ impl<'a, S: Send + Sync + 'static> Coordinator<'a, S> {
     }
 
     /// Instantiates the next controller based on the current navigation state.
-    fn next_controller(&self) -> Option<Box<dyn Controller<S> + 'a>> {
+    fn next_controller(&self) -> Option<Box<dyn Controller + 'a>> {
         use NavigationResult::*;
         let ctx = self.ctx;
 
         loop {
             let nav = self.pop_next()?;
-            let res: Box<dyn Controller<S>> = match nav {
+            let res: Box<dyn Controller> = match nav {
                 SettingsMain => Box::new(SettingsMainController::new(ctx)),
                 SettingsFeeds => Box::new(FeedSettingsController::new(ctx)),
                 SettingsVoice => Box::new(VoiceSettingsController::new(ctx)),
@@ -133,8 +108,6 @@ impl<'a, S: Send + Sync + 'static> Coordinator<'a, S> {
                 VoiceLeaderboard { time_range } => {
                     Box::new(VoiceLeaderboardController::new(ctx, time_range))
                 }
-                Back => continue,
-                Exit => return None,
                 VoiceStats {
                     time_range,
                     target_user,
@@ -145,6 +118,8 @@ impl<'a, S: Send + Sync + 'static> Coordinator<'a, S> {
                     *target_user,
                     stat_type,
                 )),
+                Back => continue,
+                Exit => return None,
             };
             return Some(res);
         }

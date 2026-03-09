@@ -14,7 +14,6 @@ use crate::bot::coordinator::Coordinator;
 use crate::bot::navigation::NavigationResult;
 use crate::bot::views::ActionRegistry;
 use crate::bot::views::ResponseKind;
-use crate::bot::views::Trigger;
 use crate::bot::views::ViewCommand;
 use crate::bot::views::ViewContext;
 use crate::bot::views::ViewEngine;
@@ -34,8 +33,8 @@ pub async fn about(ctx: Context<'_>) -> Result<(), Error> {
 controller! { pub struct AboutController<'a> {} }
 
 #[async_trait::async_trait]
-impl<S: Send + Sync + 'static> Controller<S> for AboutController<'_> {
-    async fn run(&mut self, coordinator: std::sync::Arc<Coordinator<'_, S>>) -> Result<(), Error> {
+impl Controller for AboutController<'_> {
+    async fn run(&mut self, coordinator: std::sync::Arc<Coordinator<'_>>) -> Result<(), Error> {
         let ctx = *coordinator.context();
         ctx.defer().await?;
 
@@ -44,26 +43,9 @@ impl<S: Send + Sync + 'static> Controller<S> for AboutController<'_> {
 
         let view = AboutView { stats, avatar_url };
 
-        let mut engine = ViewEngine::new(
-            ctx,
-            view,
-            Duration::from_secs(120),
-            coordinator.reply_handle.clone(),
-        );
+        let mut engine = ViewEngine::new(ctx, view, Duration::from_secs(120), coordinator.clone());
 
-        engine
-            .run(|action| {
-                let cor = coordinator.clone();
-                Box::pin(async move {
-                    match action {
-                        AboutAction::Back => {
-                            cor.navigate(NavigationResult::SettingsMain);
-                            ViewCommand::Exit
-                        }
-                    }
-                })
-            })
-            .await?;
+        engine.run().await?;
 
         Ok(())
     }
@@ -84,14 +66,12 @@ pub struct AboutView {
 
 #[async_trait::async_trait]
 impl ViewHandler<AboutAction> for AboutView {
-    async fn handle(
-        &mut self,
-        action: AboutAction,
-        _trigger: Trigger<'_>,
-        _ctx: &ViewContext<'_, AboutAction>,
-    ) -> Result<ViewCommand, Error> {
-        match action {
-            AboutAction::Back => Ok(ViewCommand::Continue),
+    async fn handle(&mut self, ctx: ViewContext<'_, AboutAction>) -> Result<ViewCommand, Error> {
+        match ctx.action() {
+            AboutAction::Back => {
+                ctx.coordinator.navigate(NavigationResult::SettingsMain);
+                Ok(ViewCommand::Exit)
+            }
         }
     }
 }
