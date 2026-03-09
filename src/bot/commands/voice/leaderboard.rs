@@ -449,7 +449,8 @@ impl<'a> ViewRender<VoiceLeaderboardAction> for VoiceLeaderboardHandler<'a> {
             "Show Voice Partners"
         };
         let toggle_button =
-            poise::serenity_prelude::CreateButton::new(registry.register(ToggleMode))
+            registry.register(ToggleMode)
+                .as_button()
                 .label(toggle_label)
                 .style(poise::serenity_prelude::ButtonStyle::Primary);
 
@@ -457,8 +458,7 @@ impl<'a> ViewRender<VoiceLeaderboardAction> for VoiceLeaderboardHandler<'a> {
             CreateActionRow::Buttons(vec![toggle_button].into()),
         ));
 
-        let time_range_menu = poise::serenity_prelude::CreateSelectMenu::new(
-            registry.register(TimeRange),
+        let time_range_menu = registry.register(TimeRange).as_select(
             CreateSelectMenuKind::String {
                 options: vec![
                     Past24Hours.into(),
@@ -486,8 +486,7 @@ impl<'a> ViewRender<VoiceLeaderboardAction> for VoiceLeaderboardHandler<'a> {
                 .target_user
                 .clone()
                 .map(|u| std::borrow::Cow::Owned(vec![u.id]));
-            let user_select = poise::serenity_prelude::CreateSelectMenu::new(
-                registry.register(SelectUser),
+            let user_select = registry.register(SelectUser).as_select(
                 CreateSelectMenuKind::User { default_users },
             )
             .placeholder("Select a user to view their voice partners");

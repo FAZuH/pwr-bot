@@ -13,7 +13,6 @@ use crate::bot::controller::Controller;
 use crate::bot::coordinator::Coordinator;
 use crate::bot::navigation::NavigationResult;
 use crate::bot::views::ActionRegistry;
-use crate::bot::views::RegisteredAction;
 use crate::bot::views::ResponseKind;
 use crate::bot::views::Trigger;
 use crate::bot::views::ViewCommand;
@@ -157,17 +156,9 @@ impl FeedListHandler {
             FeedListState::Edit => {
                 let source_url = sub.feed.source_url;
                 let button = if self.marked_unsub.contains(&source_url) {
-                    let action = RegisteredAction {
-                        id: registry.register(UndoUnsub { source_url }),
-                        label: "↶ Undo",
-                    };
-                    action.as_button().style(ButtonStyle::Secondary)
+                    registry.register(UndoUnsub { source_url }).as_button().style(ButtonStyle::Secondary)
                 } else {
-                    let action = RegisteredAction {
-                        id: registry.register(Unsubscribe { source_url }),
-                        label: "🗑 Unsubscribe",
-                    };
-                    action.as_button().style(ButtonStyle::Danger)
+                    registry.register(Unsubscribe { source_url }).as_button().style(ButtonStyle::Danger)
                 };
                 CreateSectionAccessory::Button(button)
             }
@@ -186,17 +177,8 @@ impl FeedListHandler {
             FeedListState::View => FeedListAction::Edit,
         };
 
-        let state_action = RegisteredAction {
-            id: registry.register(action.clone()),
-            label: crate::bot::views::Action::label(&action),
-        };
-        let state_button = state_action.as_button().style(ButtonStyle::Primary);
-
-        let save_action = RegisteredAction {
-            id: registry.register(FeedListAction::Save),
-            label: "Save",
-        };
-        let mut save_button = save_action.as_button().style(ButtonStyle::Success);
+        let state_button = registry.register(action.clone()).as_button().style(ButtonStyle::Primary);
+        let mut save_button = registry.register(FeedListAction::Save).as_button().style(ButtonStyle::Success);
 
         if self.marked_unsub.is_empty() {
             save_button = save_button.disabled(true)

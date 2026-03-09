@@ -14,7 +14,6 @@ use crate::bot::commands::Error;
 use crate::bot::coordinator::Coordinator;
 use crate::bot::error::BotError;
 use crate::bot::navigation::NavigationResult;
-use crate::bot::views::Action;
 use crate::bot::views::ActionRegistry;
 use crate::bot::views::ResponseKind;
 use crate::bot::views::Trigger;
@@ -336,11 +335,9 @@ impl ViewRender<FeedSubscriptionBatchAction> for FeedSubscriptionBatchHandler {
         ))];
 
         if self.is_final {
-            let nav_button = CreateButton::new(
-                registry.register(FeedSubscriptionBatchAction::ViewSubscriptions),
-            )
-            .label(FeedSubscriptionBatchAction::ViewSubscriptions.label())
-            .style(ButtonStyle::Secondary);
+            let nav_button = registry.register(FeedSubscriptionBatchAction::ViewSubscriptions)
+                .as_button()
+                .style(ButtonStyle::Secondary);
 
             components.push(CreateComponent::ActionRow(CreateActionRow::Buttons(
                 vec![nav_button].into(),

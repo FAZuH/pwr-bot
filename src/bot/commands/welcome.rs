@@ -22,7 +22,6 @@ use crate::bot::coordinator::Coordinator;
 use crate::bot::error::BotError;
 use crate::bot::navigation::NavigationResult;
 use crate::bot::views::ActionRegistry;
-use crate::bot::views::RegisteredAction;
 use crate::bot::views::ResponseKind;
 use crate::bot::views::Trigger;
 use crate::bot::views::ViewCommand;
@@ -242,11 +241,7 @@ impl ViewRender<SettingsWelcomeAction> for SettingsWelcomeHandler {
         );
 
         let enabled_label = if is_enabled { "Disable" } else { "Enable" };
-        let enabled_action = RegisteredAction {
-            id: registry.register(SettingsWelcomeAction::ToggleEnabled),
-            label: "",
-        };
-        let enabled_button = enabled_action
+        let enabled_button = registry.register(SettingsWelcomeAction::ToggleEnabled)
             .as_button()
             .label(enabled_label)
             .style(if is_enabled {
@@ -262,11 +257,7 @@ impl ViewRender<SettingsWelcomeAction> for SettingsWelcomeHandler {
             )),
         ];
 
-        let channel_action = RegisteredAction {
-            id: registry.register(SettingsWelcomeAction::ChannelSelect),
-            label: "",
-        };
-        let channel_select = channel_action
+        let channel_select = registry.register(SettingsWelcomeAction::ChannelSelect)
             .as_select(CreateSelectMenuKind::Channel {
                 channel_types: Some(Cow::Owned(vec![ChannelType::Text])),
                 default_channels: None,
@@ -284,11 +275,7 @@ impl ViewRender<SettingsWelcomeAction> for SettingsWelcomeHandler {
                 )
             })
             .collect();
-        let template_action = RegisteredAction {
-            id: registry.register(SettingsWelcomeAction::TemplateSelect),
-            label: "",
-        };
-        let template_select = template_action
+        let template_select = registry.register(SettingsWelcomeAction::TemplateSelect)
             .as_select(CreateSelectMenuKind::String {
                 options: templates.into(),
             })
@@ -304,25 +291,15 @@ impl ViewRender<SettingsWelcomeAction> for SettingsWelcomeHandler {
             CreateActionRow::SelectMenu(template_select),
         ));
 
-        let color_action = RegisteredAction {
-            id: registry.register(SettingsWelcomeAction::SetColor(None)),
-            label: "",
-        };
         let mut button_row = vec![
-            color_action
+            registry.register(SettingsWelcomeAction::SetColor(None))
                 .as_button()
-                .label("Set Color")
                 .style(ButtonStyle::Primary),
         ];
         if msgs < 25 {
-            let add_msg_action = RegisteredAction {
-                id: registry.register(SettingsWelcomeAction::AddMessage(None)),
-                label: "",
-            };
             button_row.push(
-                add_msg_action
+                registry.register(SettingsWelcomeAction::AddMessage(None))
                     .as_button()
-                    .label("Add Message")
                     .style(ButtonStyle::Primary),
             );
         }
@@ -371,11 +348,7 @@ impl ViewRender<SettingsWelcomeAction> for SettingsWelcomeHandler {
                 })
                 .collect();
 
-            let mark_action = RegisteredAction {
-                id: registry.register(SettingsWelcomeAction::MarkRemoval),
-                label: "",
-            };
-            let select = mark_action
+            let select = registry.register(SettingsWelcomeAction::MarkRemoval)
                 .as_select(CreateSelectMenuKind::String {
                     options: options.into(),
                 })
@@ -387,24 +360,14 @@ impl ViewRender<SettingsWelcomeAction> for SettingsWelcomeHandler {
             ));
 
             if !self.marked_removal.is_empty() {
-                let save_removal = RegisteredAction {
-                    id: registry.register(SettingsWelcomeAction::SaveRemoval),
-                    label: "",
-                };
-                let cancel_removal = RegisteredAction {
-                    id: registry.register(SettingsWelcomeAction::CancelRemoval),
-                    label: "",
-                };
                 components.push(CreateContainerComponent::ActionRow(
                     CreateActionRow::Buttons(
                         vec![
-                            save_removal
+                            registry.register(SettingsWelcomeAction::SaveRemoval)
                                 .as_button()
-                                .label("Save Removals")
                                 .style(ButtonStyle::Danger),
-                            cancel_removal
+                            registry.register(SettingsWelcomeAction::CancelRemoval)
                                 .as_button()
-                                .label("Cancel")
                                 .style(ButtonStyle::Secondary),
                         ]
                         .into(),
@@ -414,23 +377,13 @@ impl ViewRender<SettingsWelcomeAction> for SettingsWelcomeHandler {
         }
 
         let container = CreateComponent::Container(CreateContainer::new(components));
-        let back_action = RegisteredAction {
-            id: registry.register(SettingsWelcomeAction::Back),
-            label: "",
-        };
-        let about_action = RegisteredAction {
-            id: registry.register(SettingsWelcomeAction::About),
-            label: "",
-        };
         let nav_buttons = CreateComponent::ActionRow(CreateActionRow::Buttons(
             vec![
-                back_action
+                registry.register(SettingsWelcomeAction::Back)
                     .as_button()
-                    .label("❮ Back")
                     .style(ButtonStyle::Secondary),
-                about_action
+                registry.register(SettingsWelcomeAction::About)
                     .as_button()
-                    .label("🛈 About")
                     .style(ButtonStyle::Secondary),
             ]
             .into(),
@@ -568,8 +521,10 @@ action_enum! {
         ToggleEnabled,
         ChannelSelect,
         TemplateSelect,
+        #[label = "Set Color"]
         SetColor(Option<SetPrimaryColorModal>),
         MarkRemoval,
+        #[label = "Add Message"]
         AddMessage(Option<AddWelcomeMessageModal>),
         #[label = "Save Removals"]
         SaveRemoval,

@@ -22,7 +22,6 @@ use crate::bot::coordinator::Coordinator;
 use crate::bot::error::BotError;
 use crate::bot::navigation::NavigationResult;
 use crate::bot::utils::format_duration;
-use crate::bot::views::Action;
 use crate::bot::views::ActionRegistry;
 use crate::bot::views::ResponseKind;
 use crate::bot::views::Trigger;
@@ -560,7 +559,8 @@ impl ViewRender<VoiceStatsAction> for VoiceStatsHandler {
             "Show user stats".to_string()
         };
 
-        let toggle_button = CreateButton::new(registry.register(ToggleDataMode))
+        let toggle_button = registry.register(ToggleDataMode)
+            .as_button()
             .label(toggle_label)
             .style(ButtonStyle::Primary);
 
@@ -574,29 +574,29 @@ impl ViewRender<VoiceStatsAction> for VoiceStatsHandler {
 
         // 1. Time Range Row
         let time_buttons = vec![
-            CreateButton::new(registry.register(TimeYearly))
-                .label(TimeYearly.label())
+            registry.register(TimeYearly)
+                .as_button()
                 .style(if self.data.time_range == VoiceStatsTimeRange::Yearly {
                     ButtonStyle::Primary
                 } else {
                     ButtonStyle::Secondary
                 }),
-            CreateButton::new(registry.register(TimeMonthly))
-                .label(TimeMonthly.label())
+            registry.register(TimeMonthly)
+                .as_button()
                 .style(if self.data.time_range == VoiceStatsTimeRange::Monthly {
                     ButtonStyle::Primary
                 } else {
                     ButtonStyle::Secondary
                 }),
-            CreateButton::new(registry.register(TimeWeekly))
-                .label(TimeWeekly.label())
+            registry.register(TimeWeekly)
+                .as_button()
                 .style(if self.data.time_range == VoiceStatsTimeRange::Weekly {
                     ButtonStyle::Primary
                 } else {
                     ButtonStyle::Secondary
                 }),
-            CreateButton::new(registry.register(TimeHourly))
-                .label(TimeHourly.label())
+            registry.register(TimeHourly)
+                .as_button()
                 .style(if self.data.time_range == VoiceStatsTimeRange::Hourly {
                     ButtonStyle::Primary
                 } else {
@@ -611,8 +611,8 @@ impl ViewRender<VoiceStatsAction> for VoiceStatsHandler {
         let mut stat_buttons = vec![];
         if !self.data.is_user_stats() {
             stat_buttons.push(
-                CreateButton::new(registry.register(StatUniqueUsers))
-                    .label(StatUniqueUsers.label())
+                registry.register(StatUniqueUsers)
+                    .as_button()
                     .style(if self.data.stat_type == GuildStatType::ActiveUserCount {
                         ButtonStyle::Primary
                     } else {
@@ -621,8 +621,8 @@ impl ViewRender<VoiceStatsAction> for VoiceStatsHandler {
             );
         }
         stat_buttons.push(
-            CreateButton::new(registry.register(StatTotalTime))
-                .label(StatTotalTime.label())
+            registry.register(StatTotalTime)
+                .as_button()
                 .style(if self.data.stat_type == GuildStatType::TotalTime {
                     ButtonStyle::Primary
                 } else {
@@ -630,8 +630,8 @@ impl ViewRender<VoiceStatsAction> for VoiceStatsHandler {
                 }),
         );
         stat_buttons.push(
-            CreateButton::new(registry.register(StatAverageTime))
-                .label(StatAverageTime.label())
+            registry.register(StatAverageTime)
+                .as_button()
                 .style(if self.data.stat_type == GuildStatType::AverageTime {
                     ButtonStyle::Primary
                 } else {
@@ -649,10 +649,8 @@ impl ViewRender<VoiceStatsAction> for VoiceStatsHandler {
                 .user
                 .clone()
                 .map(|u| std::borrow::Cow::Owned(vec![u.id]));
-            let user_select = poise::serenity_prelude::CreateSelectMenu::new(
-                registry.register(SelectUser),
-                poise::serenity_prelude::CreateSelectMenuKind::User { default_users },
-            );
+            let user_select = registry.register(SelectUser)
+                .as_select(CreateSelectMenuKind::User { default_users });
             components.push(CreateComponent::ActionRow(CreateActionRow::SelectMenu(
                 user_select,
             )));

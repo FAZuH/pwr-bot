@@ -4,7 +4,6 @@ use poise::serenity_prelude::*;
 use crate::action_enum;
 use crate::bot::Error;
 use crate::bot::views::Action;
-use crate::bot::views::RegisteredAction;
 
 /// Model for tracking pagination state.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -108,34 +107,26 @@ impl PaginationView {
         registry: &mut ActionRegistry<T>,
         wrap: fn(PaginationAction) -> T,
     ) -> CreateComponent<'b> {
-        let mut first = RegisteredAction {
-            id: registry.register(wrap(PaginationAction::First)),
-            label: "⏮",
-        }
-        .as_button()
-        .style(ButtonStyle::Primary);
-        let mut prev = RegisteredAction {
-            id: registry.register(wrap(PaginationAction::Prev)),
-            label: "◀",
-        }
-        .as_button()
-        .style(ButtonStyle::Primary);
+        let mut first = registry.register(wrap(PaginationAction::First))
+            .as_button()
+            .style(ButtonStyle::Primary);
+
+        let mut prev = registry.register(wrap(PaginationAction::Prev))
+            .as_button()
+            .style(ButtonStyle::Primary);
+
         let current = CreateButton::new("current")
             .label(format!("{}/{}", self.state.current_page, self.state.pages))
             .style(ButtonStyle::Secondary)
             .disabled(true);
-        let mut next = RegisteredAction {
-            id: registry.register(wrap(PaginationAction::Next)),
-            label: "▶",
-        }
-        .as_button()
-        .style(ButtonStyle::Primary);
-        let mut last = RegisteredAction {
-            id: registry.register(wrap(PaginationAction::Last)),
-            label: "⏭",
-        }
-        .as_button()
-        .style(ButtonStyle::Primary);
+
+        let mut next = registry.register(wrap(PaginationAction::Next))
+            .as_button()
+            .style(ButtonStyle::Primary);
+
+        let mut last =registry.register(wrap(PaginationAction::Last))
+            .as_button()
+            .style(ButtonStyle::Primary);
 
         if self.state.current_page == 1 || self.disabled {
             first = first.disabled(true);

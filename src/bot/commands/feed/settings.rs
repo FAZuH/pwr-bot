@@ -12,7 +12,6 @@ use crate::bot::controller::Controller;
 use crate::bot::coordinator::Coordinator;
 use crate::bot::error::BotError;
 use crate::bot::navigation::NavigationResult;
-use crate::bot::views::Action;
 use crate::bot::views::ActionRegistry;
 use crate::bot::views::ResponseKind;
 use crate::bot::views::Trigger;
@@ -185,7 +184,8 @@ impl<'a> ViewRender<SettingsFeedAction> for SettingsFeedHandler<'a> {
             }
         );
 
-        let enabled_button = CreateButton::new(registry.register(SettingsFeedAction::Enabled))
+        let enabled_button = registry.register(SettingsFeedAction::Enabled)
+            .as_button()
             .label(if is_enabled { "Disable" } else { "Enable" })
             .style(if is_enabled {
                 ButtonStyle::Danger
@@ -196,30 +196,27 @@ impl<'a> ViewRender<SettingsFeedAction> for SettingsFeedHandler<'a> {
         let channel_text =
             "### Notification Channel\n\n> 🛈  Choose where feed updates will be posted.";
 
-        let channel_select = CreateSelectMenu::new(
-            registry.register(SettingsFeedAction::Channel),
-            CreateSelectMenuKind::Channel {
+        let channel_select = registry.register(SettingsFeedAction::Channel)
+            .as_select(CreateSelectMenuKind::Channel {
                 channel_types: Some(vec![ChannelType::Text, ChannelType::News].into()),
                 default_channels: Some(
                     Self::parse_channel_id(self.settings.feeds.channel_id.as_ref()).into(),
                 ),
-            },
-        )
-        .placeholder(if self.settings.feeds.channel_id.is_some() {
-            "Change notification channel"
-        } else {
-            "⚠️ Required: Select a notification channel"
-        });
+            })
+            .placeholder(if self.settings.feeds.channel_id.is_some() {
+                "Change notification channel"
+            } else {
+                "⚠️ Required: Select a notification channel"
+            });
 
         let sub_role_text = "### Subscribe Permission\n\n> 🛈  Who can add new feeds to this server. Leave empty to allow users with \"Manage Server\" permission.";
-        let sub_role_select = CreateSelectMenu::new(
-            registry.register(SettingsFeedAction::SubRole),
-            CreateSelectMenuKind::Role {
-                default_roles: Some(
-                    Self::parse_role_id(self.settings.feeds.subscribe_role_id.as_ref()).into(),
-                ),
-            },
-        )
+        let sub_role_select = registry.register(SettingsFeedAction::SubRole)
+            .as_select(CreateSelectMenuKind::Role {
+                    default_roles: Some(
+                        Self::parse_role_id(self.settings.feeds.subscribe_role_id.as_ref()).into(),
+                    ),
+                },
+            )
         .min_values(0)
         .placeholder(if self.settings.feeds.subscribe_role_id.is_some() {
             "Change subscribe role"
@@ -228,14 +225,13 @@ impl<'a> ViewRender<SettingsFeedAction> for SettingsFeedHandler<'a> {
         });
 
         let unsub_role_text = "### Unsubscribe Permission\n\n> 🛈  Who can remove feeds from this server. Leave empty to allow users with \"Manage Server\" permission.";
-        let unsub_role_select = CreateSelectMenu::new(
-            registry.register(SettingsFeedAction::UnsubRole),
-            CreateSelectMenuKind::Role {
-                default_roles: Some(
-                    Self::parse_role_id(self.settings.feeds.unsubscribe_role_id.as_ref()).into(),
-                ),
-            },
-        )
+        let unsub_role_select = registry.register(SettingsFeedAction::UnsubRole)
+            .as_select(CreateSelectMenuKind::Role {
+                    default_roles: Some(
+                        Self::parse_role_id(self.settings.feeds.unsubscribe_role_id.as_ref()).into(),
+                    ),
+                },
+            )
         .min_values(0)
         .placeholder(if self.settings.feeds.unsubscribe_role_id.is_some() {
             "Change unsubscribe role"
@@ -256,19 +252,11 @@ impl<'a> ViewRender<SettingsFeedAction> for SettingsFeedHandler<'a> {
             CreateContainerComponent::ActionRow(CreateActionRow::SelectMenu(unsub_role_select)),
         ]));
 
-        let back_id = registry.register(SettingsFeedAction::Back);
-        let about_id = registry.register(SettingsFeedAction::About);
+        let back_button = registry.register(SettingsFeedAction::Back).as_button().style(ButtonStyle::Secondary);
+        let about_button = registry.register(SettingsFeedAction::About).as_button().style(ButtonStyle::Secondary);
 
         let nav_buttons = CreateComponent::ActionRow(CreateActionRow::Buttons(
-            vec![
-                CreateButton::new(back_id)
-                    .label(SettingsFeedAction::Back.label())
-                    .style(ButtonStyle::Secondary),
-                CreateButton::new(about_id)
-                    .label(SettingsFeedAction::About.label())
-                    .style(ButtonStyle::Secondary),
-            ]
-            .into(),
+            vec![back_button, about_button].into(),
         ));
 
         vec![container, nav_buttons].into()

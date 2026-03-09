@@ -13,7 +13,6 @@ use crate::bot::controller::Controller;
 use crate::bot::coordinator::Coordinator;
 use crate::bot::navigation::NavigationResult;
 use crate::bot::views::ActionRegistry;
-use crate::bot::views::RegisteredAction;
 use crate::bot::views::ResponseKind;
 use crate::bot::views::Trigger;
 use crate::bot::views::ViewCommand;
@@ -156,10 +155,7 @@ impl ViewRender<AboutAction> for AboutView {
             CreateButton::new_link("https://github.com/FAZuH/pwr-bot/blob/main/LICENSE")
                 .label("License");
 
-        let back_action = RegisteredAction {
-            id: registry.register(AboutAction::Back),
-            label: "< Back",
-        };
+        let back_action = registry.register(AboutAction::Back);
 
         let back_button = CreateComponent::ActionRow(CreateActionRow::Buttons(
             vec![back_action.as_button().style(ButtonStyle::Secondary)].into(),

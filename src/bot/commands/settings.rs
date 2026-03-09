@@ -2,6 +2,7 @@
 
 use std::borrow::Cow;
 use std::slice::from_ref;
+use std::str::FromStr;
 use std::time::Duration;
 
 use poise::serenity_prelude::*;
@@ -247,9 +248,8 @@ impl ViewRender<SettingsMainAction> for SettingsMainHandler {
                 active_features
                     .into_iter()
                     .map(|feat| {
-                        let id = registry.register(feat.clone());
-                        CreateButton::new(id)
-                            .label(feat.label())
+                        registry.register(feat)
+                            .as_button()
                             .style(match &self.state {
                                 SettingsMainState::FeatureSettings => ButtonStyle::Primary,
                                 SettingsMainState::DeactivateFeatures => ButtonStyle::Danger,
@@ -262,7 +262,8 @@ impl ViewRender<SettingsMainAction> for SettingsMainHandler {
 
         let button_toggle_state = CreateActionRow::Buttons(
             vec![
-                CreateButton::new(registry.register(SettingsMainAction::ToggleState))
+                registry.register(SettingsMainAction::ToggleState)
+                    .as_button()
                     .label(match &self.state {
                         SettingsMainState::FeatureSettings => "Deactivate Features",
                         SettingsMainState::DeactivateFeatures => "Feature Settings",
@@ -298,8 +299,9 @@ impl ViewRender<SettingsMainAction> for SettingsMainHandler {
                 .disabled(true),
             )
         } else {
-            CreateActionRow::SelectMenu(CreateSelectMenu::new(
-                registry.register(SettingsMainAction::AddFeatures),
+            CreateActionRow::SelectMenu(
+                registry.register(SettingsMainAction::AddFeatures)
+                    .as_select(
                 CreateSelectMenuKind::String {
                     options: inactive_features
                         .into_iter()
@@ -322,8 +324,8 @@ impl ViewRender<SettingsMainAction> for SettingsMainHandler {
 
         let bottom_buttons = CreateComponent::ActionRow(CreateActionRow::Buttons(
             vec![
-                CreateButton::new(registry.register(SettingsMainAction::About))
-                    .label(SettingsMainAction::About.label())
+                registry.register(SettingsMainAction::About)
+                    .as_button()
                     .style(ButtonStyle::Secondary),
             ]
             .into(),
@@ -342,6 +344,20 @@ action_enum! {
         ToggleState,
         #[label = "🛈 About"]
         About,
+    }
+}
+
+impl FromStr for SettingsMainAction {
+    type Err = ();
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        let ret = match s {
+            "Feeds" => Self::Feeds,
+            "Voice" => Self::Voice,
+            "Welcome" => Self::Welcome,
+            _ => return Err(())
+        };
+        Ok(ret)
     }
 }
 
@@ -369,14 +385,7 @@ impl ViewHandler<SettingsMainAction> for SettingsMainHandler {
                     && let ComponentInteractionDataKind::StringSelect { values } =
                         &interaction.data.kind
                 {
-                    let mut features = Vec::new();
-                    for val in values {
-                        match val.as_str() {
-                            "feeds" => features.push(Feeds),
-                            "voice" => features.push(Voice),
-                            _ => {}
-                        }
-                    }
+                    let features: Vec<_> = values.iter().filter_map(|v| SettingsMainAction::from_str(&v).ok()).collect();
                     self.toggle_features(features);
                 }
                 Ok(ViewCommand::Render)

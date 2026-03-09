@@ -11,7 +11,6 @@ use crate::bot::controller::Controller;
 use crate::bot::coordinator::Coordinator;
 use crate::bot::error::BotError;
 use crate::bot::navigation::NavigationResult;
-use crate::bot::views::Action;
 use crate::bot::views::ActionRegistry;
 use crate::bot::views::ResponseKind;
 use crate::bot::views::Trigger;
@@ -139,7 +138,8 @@ impl ViewRender<SettingsVoiceAction> for SettingsVoiceHandler {
         );
 
         let enabled_button =
-            CreateButton::new(registry.register(SettingsVoiceAction::ToggleEnabled))
+            registry.register(SettingsVoiceAction::ToggleEnabled)
+                .as_button()
                 .label(if is_enabled { "Disable" } else { "Enable" })
                 .style(if is_enabled {
                     ButtonStyle::Danger
@@ -156,11 +156,11 @@ impl ViewRender<SettingsVoiceAction> for SettingsVoiceHandler {
 
         let nav_buttons = CreateComponent::ActionRow(CreateActionRow::Buttons(
             vec![
-                CreateButton::new(registry.register(SettingsVoiceAction::Back))
-                    .label(SettingsVoiceAction::Back.label())
+                registry.register(SettingsVoiceAction::Back)
+                    .as_button()
                     .style(ButtonStyle::Secondary),
-                CreateButton::new(registry.register(SettingsVoiceAction::About))
-                    .label(SettingsVoiceAction::About.label())
+                registry.register(SettingsVoiceAction::About)
+                    .as_button()
                     .style(ButtonStyle::Secondary),
             ]
             .into(),
