@@ -7,6 +7,7 @@ pub mod image_generator;
 
 use std::borrow::Cow;
 use std::collections::HashSet;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -237,7 +238,7 @@ impl ViewRender<SettingsWelcomeAction> for SettingsWelcomeHandler {
             .unwrap_or(0);
 
         let status_text = format!(
-            "-# **Settings > Welcome Cards**\n## Welcome Settings\n\n> 🛈  {}",
+            "-# **Settings > Welcome**\n## Welcome Settings\n\n> 🛈  {}",
             if is_enabled {
                 "Welcome cards are **active**."
             } else {
@@ -263,11 +264,18 @@ impl ViewRender<SettingsWelcomeAction> for SettingsWelcomeHandler {
             )),
         ];
 
+        let default_channels = self
+            .settings
+            .welcome
+            .channel_id
+            .as_deref()
+            .and_then(|id| GenericChannelId::from_str(id).ok())
+            .map(|id| Cow::Owned(vec![id]));
         let channel_select = registry
             .register(SettingsWelcomeAction::ChannelSelect)
             .as_select(CreateSelectMenuKind::Channel {
                 channel_types: Some(Cow::Owned(vec![ChannelType::Text])),
-                default_channels: None,
+                default_channels,
             })
             .placeholder("Select Welcome Channel");
         components.push(CreateContainerComponent::ActionRow(
