@@ -1,7 +1,6 @@
 //! Admin settings command.
 
 use std::borrow::Cow;
-use std::slice::from_ref;
 use std::time::Duration;
 
 use poise::serenity_prelude::*;
@@ -61,7 +60,6 @@ impl Controller for SettingsMainController<'_> {
         };
 
         let view = SettingsMainHandler {
-            state: SettingsMainState::FeatureSettings,
             settings,
             is_settings_modified: false,
         };
@@ -86,22 +84,7 @@ impl Controller for SettingsMainController<'_> {
     }
 }
 
-pub enum SettingsMainState {
-    FeatureSettings,
-    DeactivateFeatures,
-}
-
-impl SettingsMainState {
-    pub fn toggle(&mut self) {
-        *self = match self {
-            SettingsMainState::FeatureSettings => SettingsMainState::DeactivateFeatures,
-            SettingsMainState::DeactivateFeatures => SettingsMainState::FeatureSettings,
-        };
-    }
-}
-
 pub struct SettingsMainHandler {
-    pub state: SettingsMainState,
     pub settings: ServerSettingsEntity,
     pub is_settings_modified: bool,
 }
@@ -149,119 +132,51 @@ impl SettingsMainHandler {
             }
         }
     }
-
-    fn get_active_features(&self) -> Vec<SettingsMainAction> {
-        let mut features = Vec::new();
-        if self.settings().voice.enabled.unwrap_or(false) {
-            features.push(SettingsMainAction::VoiceFeature);
-        }
-        if self.settings().feeds.enabled.unwrap_or(false) {
-            features.push(SettingsMainAction::FeedsFeature);
-        }
-        if self.settings().welcome.enabled.unwrap_or(false) {
-            features.push(SettingsMainAction::WelcomeFeature);
-        }
-        features
-    }
-
-    fn get_inactive_features(&self) -> Vec<SettingsMainAction> {
-        let mut features = Vec::new();
-        if !self.settings().voice.enabled.unwrap_or(false) {
-            features.push(SettingsMainAction::VoiceFeature);
-        }
-        if !self.settings().feeds.enabled.unwrap_or(false) {
-            features.push(SettingsMainAction::FeedsFeature);
-        }
-        if !self.settings().welcome.enabled.unwrap_or(false) {
-            features.push(SettingsMainAction::WelcomeFeature);
-        }
-        features
-    }
 }
 
 impl ViewRender<SettingsMainAction> for SettingsMainHandler {
     fn render(&self, registry: &mut ActionRegistry<SettingsMainAction>) -> ResponseKind<'_> {
-        let text_active_features_description = match &self.state {
-            SettingsMainState::FeatureSettings => {
-                "You can **configure** a feature by clicking the buttons below"
-            }
-            SettingsMainState::DeactivateFeatures => {
-                "You can **disable** a feature by clicking the buttons below"
-            }
-        };
-        let text_active_features = CreateTextDisplay::new(format!(
+        let text_features = CreateTextDisplay::new(
             "-# **Settings**
-### Active Features
-> 🛈  List of features currently active for this server.
-> {text_active_features_description}."
-        ));
-
-        let active_features = self.get_active_features();
-        let inactive_features = self.get_inactive_features();
-
-        let mut components = vec![CreateContainerComponent::TextDisplay(text_active_features)];
-
-        // Add button row - show disabled placeholder if empty
-        let button_active_features = if active_features.is_empty() {
-            CreateActionRow::Buttons(
-                vec![
-                    CreateButton::new("placeholder_no_features")
-                        .label("No features enabled")
-                        .style(ButtonStyle::Secondary)
-                        .disabled(true),
-                ]
-                .into(),
-            )
-        } else {
-            CreateActionRow::Buttons(
-                active_features
-                    .into_iter()
-                    .map(|feat| {
-                        registry
-                            .register(feat)
-                            .as_button()
-                            .style(match &self.state {
-                                SettingsMainState::FeatureSettings => ButtonStyle::Primary,
-                                SettingsMainState::DeactivateFeatures => ButtonStyle::Danger,
-                            })
-                    })
-                    .collect(),
-            )
-        };
-        components.push(CreateContainerComponent::ActionRow(button_active_features));
-
-        let button_toggle_state = CreateActionRow::Buttons(
-            vec![
-                registry
-                    .register(SettingsMainAction::ToggleState)
-                    .as_button()
-                    .label(match &self.state {
-                        SettingsMainState::FeatureSettings => "Deactivate Features",
-                        SettingsMainState::DeactivateFeatures => "Feature Settings",
-                    })
-                    .style(match &self.state {
-                        SettingsMainState::FeatureSettings => ButtonStyle::Danger,
-                        SettingsMainState::DeactivateFeatures => ButtonStyle::Primary,
-                    }),
-            ]
-            .into(),
+### Features
+> 🛈  Select a feature to toggle its enabled/disabled state. Checkmark indicates enabled features.",
         );
-        components.push(CreateContainerComponent::ActionRow(button_toggle_state));
 
-        let text_add_features = CreateTextDisplay::new(
-            "### Add Features
-> 🛈  List of inactive features that are available for this server.",
-        );
-        components.push(CreateContainerComponent::TextDisplay(text_add_features));
+        let mut components = vec![CreateContainerComponent::TextDisplay(text_features)];
 
-        // Add select menu - show disabled placeholder if empty
-        let selectmenu_add_features = if inactive_features.is_empty() {
+        // Get all features
+        let all_features = vec![
+            SettingsMainAction::FeedsFeature,
+            SettingsMainAction::VoiceFeature,
+            SettingsMainAction::WelcomeFeature,
+        ];
+
+        // Build select menu options with emoji indicators
+        let select_options: Vec<_> = all_features
+            .into_iter()
+            .map(|feat| {
+                let is_enabled = match &feat {
+                    SettingsMainAction::FeedsFeature => self.settings().feeds.enabled.unwrap_or(false),
+                    SettingsMainAction::VoiceFeature => self.settings().voice.enabled.unwrap_or(false),
+                    SettingsMainAction::WelcomeFeature => self.settings().welcome.enabled.unwrap_or(false),
+                    _ => false,
+                };
+                let emoji = if is_enabled { "✅" } else { "⬜" };
+                CreateSelectMenuOption::new(
+                    format!("{} {}", emoji, feat.label()),
+                    feat.label(),
+                )
+            })
+            .collect();
+
+        // Add select menu - show disabled placeholder if empty (should never happen)
+        let select_menu = if select_options.is_empty() {
             CreateActionRow::SelectMenu(
                 CreateSelectMenu::new(
-                    "placeholder_no_inactive_features",
+                    "placeholder_no_features",
                     CreateSelectMenuKind::String {
                         options: vec![CreateSelectMenuOption::new(
-                            "All features enabled",
+                            "No features available",
                             "placeholder",
                         )]
                         .into(),
@@ -272,16 +187,13 @@ impl ViewRender<SettingsMainAction> for SettingsMainHandler {
         } else {
             CreateActionRow::SelectMenu(
                 registry
-                    .register(SettingsMainAction::AddFeatures)
+                    .register(SettingsMainAction::ToggleFeature)
                     .as_select(CreateSelectMenuKind::String {
-                        options: inactive_features
-                            .into_iter()
-                            .map(|feat| CreateSelectMenuOption::new(feat.label(), feat.label()))
-                            .collect(),
+                        options: select_options.into(),
                     }),
             )
         };
-        components.push(CreateContainerComponent::ActionRow(selectmenu_add_features));
+        components.push(CreateContainerComponent::ActionRow(select_menu));
 
         let container = CreateComponent::Container(CreateContainer::new(components));
 
@@ -307,8 +219,7 @@ action_enum! {
         VoiceFeature,
         #[label = "Welcome"]
         WelcomeFeature,
-        AddFeatures,
-        ToggleState,
+        ToggleFeature,
         #[label = "🛈 About"]
         About,
     }
@@ -333,33 +244,23 @@ impl ViewHandler<SettingsMainAction, ()> for SettingsMainHandler {
         ctx: ViewContext<'_, SettingsMainAction>,
     ) -> Result<ViewCommand, Error> {
         use SettingsMainAction::*;
-        use SettingsMainState as State;
 
         let cor = ctx.coordinator.clone();
         let action = ctx.action();
         match action {
-            FeedsFeature | VoiceFeature | WelcomeFeature => match self.state {
-                State::FeatureSettings => match action {
-                    FeedsFeature => {
-                        cor.navigate(NavigationResult::SettingsFeeds);
-                        Ok(ViewCommand::Exit)
-                    }
-                    VoiceFeature => {
-                        cor.navigate(NavigationResult::SettingsVoice);
-                        Ok(ViewCommand::Exit)
-                    }
-                    WelcomeFeature => {
-                        cor.navigate(NavigationResult::SettingsWelcome);
-                        Ok(ViewCommand::Exit)
-                    }
-                    _ => Ok(ViewCommand::Render),
-                },
-                State::DeactivateFeatures => {
-                    self.toggle_features(from_ref(action));
-                    Ok(ViewCommand::Render)
-                }
-            },
-            AddFeatures => {
+            FeedsFeature => {
+                cor.navigate(NavigationResult::SettingsFeeds);
+                Ok(ViewCommand::Exit)
+            }
+            VoiceFeature => {
+                cor.navigate(NavigationResult::SettingsVoice);
+                Ok(ViewCommand::Exit)
+            }
+            WelcomeFeature => {
+                cor.navigate(NavigationResult::SettingsWelcome);
+                Ok(ViewCommand::Exit)
+            }
+            ToggleFeature => {
                 if let ViewEvent::Component(_, interaction) = ctx.event
                     && let ComponentInteractionDataKind::StringSelect { values } =
                         &interaction.data.kind
@@ -370,10 +271,6 @@ impl ViewHandler<SettingsMainAction, ()> for SettingsMainHandler {
                         .collect();
                     self.toggle_features(features);
                 }
-                Ok(ViewCommand::Render)
-            }
-            ToggleState => {
-                self.state.toggle();
                 Ok(ViewCommand::Render)
             }
             About => {
