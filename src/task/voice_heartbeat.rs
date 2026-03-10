@@ -11,7 +11,6 @@ use tokio::time::Duration;
 use tokio::time::interval;
 
 use crate::entity::BotMetaKey;
-use crate::entity::VoiceSessionsEntity;
 use crate::service::traits::InternalOps;
 use crate::service::traits::VoiceTracker;
 
@@ -112,18 +111,8 @@ impl VoiceHeartbeatManager {
 
     pub async fn update(&self) {
         let internal = self.internal.clone();
-        let service = self.service.clone();
 
         let now = Utc::now();
-        match service.find_active_sessions().await {
-            Ok(sessions) => {
-                self.update_sessions(sessions, &now).await;
-            }
-            Err(e) => {
-                error!("Failed to find active sessions for heartbeat: {}", e);
-            }
-        }
-
         // Write heartbeat timestamp to database
         if let Err(e) = internal
             .set_meta(BotMetaKey::VoiceHeartbeat, now.to_rfc3339())
@@ -132,38 +121,6 @@ impl VoiceHeartbeatManager {
             error!("Failed to write heartbeat to database: {}", e);
         } else {
             debug!("Heartbeat written to database: {}", now);
-        }
-    }
-
-    async fn update_sessions(
-        &self,
-        sessions: impl IntoIterator<Item = VoiceSessionsEntity>,
-        now: &DateTime<Utc>,
-    ) {
-        let mut updated = 0;
-        for session in sessions {
-            let res = self
-                .service
-                .clone()
-                .update_session_leave_time(
-                    session.user_id,
-                    session.channel_id,
-                    &session.join_time,
-                    now,
-                )
-                .await;
-
-            match res {
-                Ok(_) => updated += 1,
-                Err(e) => error!(
-                    "Failed to update heartbeat for user {}: {}",
-                    session.user_id, e
-                ),
-            }
-        }
-
-        if updated > 0 {
-            debug!("Heartbeat: Updated {} active voice sessions", updated);
         }
     }
 }

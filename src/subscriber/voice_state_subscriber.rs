@@ -168,10 +168,11 @@ impl VoiceStateSubscriber {
         );
         let old_state = event.old.as_ref().unwrap();
         let now = Utc::now();
-        let session_id = old_state.session_id.to_string();
+        let old_session_id = old_state.session_id.to_string();
+        let new_session_id = event.new.session_id.to_string();
 
         // Close old session
-        if let Some(session) = self.active_sessions.lock().await.remove(&session_id) {
+        if let Some(session) = self.active_sessions.lock().await.remove(&old_session_id) {
             let _guild_id = old_state
                 .guild_id
                 .ok_or(anyhow::anyhow!("Missing guild_id"))?
@@ -205,7 +206,7 @@ impl VoiceStateSubscriber {
         self.active_sessions
             .lock()
             .await
-            .insert(session_id.clone(), session);
+            .insert(new_session_id, session);
 
         let model = VoiceSessionsEntity {
             user_id,
