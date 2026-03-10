@@ -223,7 +223,7 @@ impl VoiceLeaderboardHandler<'_> {
     /// Check if target user is the author itself
     fn target_is_author(&self) -> bool {
         if let Some(user) = &self.target_user {
-            return self.author_id == user.id.get()
+            return self.author_id == user.id.get();
         }
         false
     }

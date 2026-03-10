@@ -239,8 +239,12 @@ pub struct VoiceStatsHandler {
 }
 
 impl VoiceStatsHandler {
-
-    fn new(data: VoiceStatsData, service: std::sync::Arc<dyn VoiceTracker>, guild_id: u64, user: User) -> Self {
+    fn new(
+        data: VoiceStatsData,
+        service: std::sync::Arc<dyn VoiceTracker>,
+        guild_id: u64,
+        user: User,
+    ) -> Self {
         Self {
             data,
             image_bytes: None,
@@ -780,11 +784,22 @@ impl Controller for VoiceStatsController<'_> {
 
         // Fetch initial data
         let data = self.fetch_data(&ctx).await?;
-        let guild_id = ctx.guild_id().map(|id| id.get()).ok_or(BotError::GuildOnlyCommand)?;
+        let guild_id = ctx
+            .guild_id()
+            .map(|id| id.get())
+            .ok_or(BotError::GuildOnlyCommand)?;
 
-        let user = self.target_user.clone().unwrap_or_else(|| ctx.author().clone());
+        let user = self
+            .target_user
+            .clone()
+            .unwrap_or_else(|| ctx.author().clone());
 
-        let mut view = VoiceStatsHandler::new(data, ctx.data().service.voice_tracking.clone(), guild_id, user);
+        let mut view = VoiceStatsHandler::new(
+            data,
+            ctx.data().service.voice_tracking.clone(),
+            guild_id,
+            user,
+        );
 
         // Generate and send the image
         if !view.data.user_activity.is_empty()

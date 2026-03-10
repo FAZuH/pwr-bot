@@ -13,7 +13,6 @@ use crate::bot::controller::Controller;
 use crate::bot::coordinator::Coordinator;
 use crate::bot::error::BotError;
 use crate::bot::navigation::NavigationResult;
-
 use crate::bot::views::ActionRegistry;
 use crate::bot::views::ResponseKind;
 use crate::bot::views::ViewCommand;
@@ -182,7 +181,7 @@ impl SettingsMainHandler {
         Ok(())
     }
 
-    pub fn toggle_features<'b>(&mut self, features: impl Into<Cow<'b, [ &'static Feature]>>) {
+    pub fn toggle_features<'b>(&mut self, features: impl Into<Cow<'b, [&'static Feature]>>) {
         let features = features.into();
         for feature in features.iter() {
             feature.toggle_enabled(self.settings_mut());
@@ -194,9 +193,7 @@ impl SettingsMainHandler {
 impl ViewRender<SettingsMainAction> for SettingsMainHandler {
     fn render(&self, registry: &mut ActionRegistry<SettingsMainAction>) -> ResponseKind<'_> {
         let text_settings = CreateTextDisplay::new("-# **Settings**");
-        let mut components = vec
-![CreateContainerComponent::TextDisplay(text_settings)
-];
+        let mut components = vec![CreateContainerComponent::TextDisplay(text_settings)];
 
         // Navigation section
         let text_configure = CreateTextDisplay::new(
@@ -238,10 +235,7 @@ impl ViewRender<SettingsMainAction> for SettingsMainHandler {
             .map(|feature| {
                 let is_enabled = feature.is_enabled(self.settings());
                 let emoji = if is_enabled { "✅" } else { "⬜" };
-                CreateSelectMenuOption::new(
-                    format!("{} {}", emoji, feature.label),
-                    feature.label,
-                )
+                CreateSelectMenuOption::new(format!("{} {}", emoji, feature.label), feature.label)
             })
             .collect();
 
@@ -251,8 +245,7 @@ impl ViewRender<SettingsMainAction> for SettingsMainHandler {
                 CreateSelectMenu::new(
                     "placeholder_no_features",
                     CreateSelectMenuKind::String {
-                        options: vec
-![CreateSelectMenuOption::new(
+                        options: vec![CreateSelectMenuOption::new(
                             "No features available",
                             "placeholder",
                         )]
@@ -275,8 +268,7 @@ impl ViewRender<SettingsMainAction> for SettingsMainHandler {
         let container = CreateComponent::Container(CreateContainer::new(components));
 
         let bottom_buttons = CreateComponent::ActionRow(CreateActionRow::Buttons(
-            vec
-![
+            vec![
                 registry
                     .register(SettingsMainAction::About)
                     .as_button()
@@ -285,8 +277,7 @@ impl ViewRender<SettingsMainAction> for SettingsMainHandler {
             .into(),
         ));
 
-        vec
-![container, bottom_buttons].into()
+        vec![container, bottom_buttons].into()
     }
 }
 
@@ -303,8 +294,6 @@ action_enum! {
         About,
     }
 }
-
-
 
 #[async_trait::async_trait]
 impl ViewHandler<SettingsMainAction, ()> for SettingsMainHandler {
