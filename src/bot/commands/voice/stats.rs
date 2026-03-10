@@ -235,11 +235,22 @@ pub struct VoiceStatsHandler {
     pub image_bytes: Option<Vec<u8>>,
     pub service: std::sync::Arc<dyn VoiceTracker>,
     pub guild_id: u64,
-    pub original_target_user: Option<User>,
+    pub user: User,
 }
 
 impl VoiceStatsHandler {
-    pub async fn refetch_data(&mut self) -> Result<(), Error> {
+
+    fn new(data: VoiceStatsData, service: std::sync::Arc<dyn VoiceTracker>, guild_id: u64, user: User) -> Self {
+        Self {
+            data,
+            image_bytes: None,
+            service,
+            guild_id,
+            user,
+        }
+    }
+
+    async fn refetch_data(&mut self) -> Result<(), Error> {
         let (since, until) = self.data.time_range.to_range();
 
         self.data.raw_sessions = if self.data.time_range != VoiceStatsTimeRange::Yearly {
@@ -280,7 +291,7 @@ impl VoiceStatsHandler {
     }
 
     /// Generates the contribution grid image.
-    pub fn generate_image(&self) -> anyhow::Result<Vec<u8>> {
+    fn generate_image(&self) -> anyhow::Result<Vec<u8>> {
         if self.data.time_range != VoiceStatsTimeRange::Yearly {
             return generate_line_chart(
                 &self.data.raw_sessions,
@@ -493,7 +504,7 @@ impl ViewHandler<VoiceStatsAction> for VoiceStatsHandler {
                 if self.data.is_user_stats() {
                     self.data.user = None;
                 } else {
-                    self.data.user = self.original_target_user.clone();
+                    self.data.user = Some(self.user.clone());
                 }
                 changed = true;
             }
@@ -506,7 +517,8 @@ impl ViewHandler<VoiceStatsAction> for VoiceStatsHandler {
                 {
                     // Fetch user object
                     if let Ok(user) = user_id.to_user(ctx.poise.http()).await {
-                        self.data.user = Some(user);
+                        self.user = user;
+                        self.data.user = Some(self.user.clone());
                         changed = true;
                     }
                 }
@@ -552,9 +564,9 @@ impl ViewRender<VoiceStatsAction> for VoiceStatsHandler {
 
         // Add Data Mode Toggle to bottom of Container
         let toggle_label = if self.data.is_user_stats() {
-            "Show server stats".to_string()
+            "Show server stats"
         } else {
-            "Show user stats".to_string()
+            "Show user stats"
         };
 
         let toggle_button = registry
@@ -768,15 +780,11 @@ impl Controller for VoiceStatsController<'_> {
 
         // Fetch initial data
         let data = self.fetch_data(&ctx).await?;
-        let guild_id = ctx.guild_id().map(|id| id.get()).unwrap_or(0);
+        let guild_id = ctx.guild_id().map(|id| id.get()).ok_or(BotError::GuildOnlyCommand)?;
 
-        let mut view = VoiceStatsHandler {
-            data,
-            image_bytes: None,
-            service: ctx.data().service.voice_tracking.clone(),
-            guild_id,
-            original_target_user: self.target_user.clone(),
-        };
+        let user = self.target_user.clone().unwrap_or_else(|| ctx.author().clone());
+
+        let mut view = VoiceStatsHandler::new(data, ctx.data().service.voice_tracking.clone(), guild_id, user);
 
         // Generate and send the image
         if !view.data.user_activity.is_empty()
