@@ -19,6 +19,8 @@ Use `./dev.sh` for most tasks:
 
 Standard `cargo` commands work as expected. Tests require `SQLX_OFFLINE=true` (handled in CI).
 
+**Important:** When checking for compilation errors during development, use `cargo check` instead of `./dev.sh build`. Building is expensive and time-consuming. Use `cargo check` to quickly verify code compiles correctly.
+
 ## Code Style Guidelines
 
 - **Imports**: Group `std`, external, then crate-local (see `rustfmt.toml`). No `use crate::module::*;`.
