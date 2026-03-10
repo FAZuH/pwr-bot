@@ -193,13 +193,44 @@ impl SettingsMainHandler {
 
 impl ViewRender<SettingsMainAction> for SettingsMainHandler {
     fn render(&self, registry: &mut ActionRegistry<SettingsMainAction>) -> ResponseKind<'_> {
-        let text_features = CreateTextDisplay::new(
-            "-# **Settings**
-### Features
-> 🛈  Select a feature to toggle its enabled/disabled state. Checkmark indicates enabled features.",
-        );
+        let text_settings = CreateTextDisplay::new("-# **Settings**");
+        let mut components = vec
+![CreateContainerComponent::TextDisplay(text_settings)
+];
 
-        let mut components = vec![CreateContainerComponent::TextDisplay(text_features)];
+        // Navigation section
+        let text_configure = CreateTextDisplay::new(
+            "### Configure Feature Settings
+> 🛈  Click a button to edit settings for a specific feature.",
+        );
+        components.push(CreateContainerComponent::TextDisplay(text_configure));
+
+        // Build navigation buttons for all features
+        let navigation_buttons = CreateActionRow::Buttons(
+            FeatureRegistry::all()
+                .iter()
+                .map(|feature| {
+                    registry
+                        .register(match feature.label {
+                            "Feeds" => SettingsMainAction::FeedsFeature,
+                            "Voice" => SettingsMainAction::VoiceFeature,
+                            "Welcome" => SettingsMainAction::WelcomeFeature,
+                            _ => SettingsMainAction::About, // Should never happen
+                        })
+                        .as_button()
+                        .label(feature.label)
+                        .style(ButtonStyle::Secondary)
+                })
+                .collect(),
+        );
+        components.push(CreateContainerComponent::ActionRow(navigation_buttons));
+
+        // Toggle section
+        let text_toggle = CreateTextDisplay::new(
+            "### Enable or Disable Features
+> 🛈  Turn features on or off. A checkmark means the feature is currently enabled.",
+        );
+        components.push(CreateContainerComponent::TextDisplay(text_toggle));
 
         // Build select menu options with emoji indicators using FeatureRegistry
         let select_options: Vec<_> = FeatureRegistry::all()
@@ -220,7 +251,8 @@ impl ViewRender<SettingsMainAction> for SettingsMainHandler {
                 CreateSelectMenu::new(
                     "placeholder_no_features",
                     CreateSelectMenuKind::String {
-                        options: vec![CreateSelectMenuOption::new(
+                        options: vec
+![CreateSelectMenuOption::new(
                             "No features available",
                             "placeholder",
                         )]
@@ -243,7 +275,8 @@ impl ViewRender<SettingsMainAction> for SettingsMainHandler {
         let container = CreateComponent::Container(CreateContainer::new(components));
 
         let bottom_buttons = CreateComponent::ActionRow(CreateActionRow::Buttons(
-            vec![
+            vec
+![
                 registry
                     .register(SettingsMainAction::About)
                     .as_button()
@@ -252,7 +285,8 @@ impl ViewRender<SettingsMainAction> for SettingsMainHandler {
             .into(),
         ));
 
-        vec![container, bottom_buttons].into()
+        vec
+![container, bottom_buttons].into()
     }
 }
 
