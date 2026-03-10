@@ -219,7 +219,15 @@ pub struct VoiceLeaderboardHandler<'a> {
     pub http: std::sync::Arc<poise::serenity_prelude::Http>,
 }
 
-impl<'a> VoiceLeaderboardHandler<'a> {
+impl VoiceLeaderboardHandler<'_> {
+    /// Check if target user is the author itself
+    fn target_is_author(&self) -> bool {
+        if let Some(user) = &self.target_user {
+            return self.author_id == user.id.get()
+        }
+        false
+    }
+
     /// Calculates the slice indices for the current page.
     fn current_page_indices(&self) -> (usize, usize) {
         if self.leaderboard_data.is_empty() {
@@ -236,7 +244,7 @@ impl<'a> VoiceLeaderboardHandler<'a> {
     }
 
     /// Generates the page image for the current page.
-    pub async fn generate_current_page(&mut self) -> Result<PageGenerationResult, Error> {
+    async fn generate_current_page(&mut self) -> Result<PageGenerationResult, Error> {
         let (offset, end) = self.current_page_indices();
         let entries = &self.leaderboard_data.entries[offset..end];
         let rank_offset = self.current_page_rank_offset();
@@ -244,11 +252,11 @@ impl<'a> VoiceLeaderboardHandler<'a> {
     }
 
     /// Sets the current page image bytes for attachment on edit.
-    pub fn set_current_page_bytes(&mut self, bytes: Option<Vec<u8>>) {
+    fn set_current_page_bytes(&mut self, bytes: Option<Vec<u8>>) {
         self.current_page_bytes = bytes;
     }
 
-    pub async fn refetch_data(&mut self) -> Result<(), Error> {
+    async fn refetch_data(&mut self) -> Result<(), Error> {
         let (since, until) = self.time_range.to_range();
 
         let voice_lb_opts = VoiceLeaderboardOptBuilder::default()
@@ -358,7 +366,7 @@ impl ViewHandler<VoiceLeaderboardAction> for VoiceLeaderboardHandler<'_> {
     }
 }
 
-impl<'a> ViewRender<VoiceLeaderboardAction> for VoiceLeaderboardHandler<'a> {
+impl ViewRender<VoiceLeaderboardAction> for VoiceLeaderboardHandler<'_> {
     fn render(&self, registry: &mut ActionRegistry<VoiceLeaderboardAction>) -> ResponseKind<'_> {
         use VoiceLeaderboardAction::*;
         use VoiceLeaderboardTimeRange::*;
@@ -389,7 +397,7 @@ impl<'a> ViewRender<VoiceLeaderboardAction> for VoiceLeaderboardHandler<'a> {
                     rank, duration_text
                 )),
             ));
-        } else {
+        } else if !self.target_is_author() {
             container.push(CreateContainerComponent::TextDisplay(
                 CreateTextDisplay::new("\nYou are not on the leaderboard for this time range."),
             ));
