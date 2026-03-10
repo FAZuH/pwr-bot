@@ -53,7 +53,7 @@ impl Controller for AboutController<'_> {
 
 action_enum! {
     AboutAction {
-        #[label = "< Back"]
+        #[label = "❮ Back"]
         Back,
     }
 }

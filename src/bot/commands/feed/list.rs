@@ -225,9 +225,9 @@ impl ViewRender<FeedListAction> for FeedListHandler {
 }
 
 action_extends! { FeedListAction extends PaginationAction {
-    #[label =  "✎ Edit"]
+    #[label = "✎ Edit Subscriptions"]
     Edit,
-    #[label = "👁 View"]
+    #[label = "👁 View Mode"]
     View,
     #[label = "🗑 Unsubscribe"]
     Unsubscribe { source_url: String },

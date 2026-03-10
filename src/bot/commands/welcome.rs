@@ -512,7 +512,7 @@ action_enum! {
         #[label = "Set Color"]
         SetColor(Option<SetPrimaryColorModal>),
         MarkRemoval,
-        #[label = "Add Message"]
+        #[label = "Add Welcome Message"]
         AddMessage(Option<AddWelcomeMessageModal>),
         #[label = "Save Removals"]
         SaveRemoval,
