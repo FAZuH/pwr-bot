@@ -1,3 +1,15 @@
+## [0.2.16](https://github.com/FAZuH/pwr-bot/compare/v0.2.15...v0.2.16) (2026-03-10)
+
+
+### Bug Fixes
+
+* **voice:** Fix /vc leaderboard showing incorrect voice durations ([1345b28](https://github.com/FAZuH/pwr-bot/commit/1345b28cd10c7f958ae4102c9fd71024dcd233e7)), closes [#81](https://github.com/FAZuH/pwr-bot/issues/81)
+
+
+### Reverts
+
+* **voice:** Stop periodically update leave time for active sessions ([eef9ff6](https://github.com/FAZuH/pwr-bot/commit/eef9ff69f76fa7ad7630bfcc6f1190af38b53038))
+
 ## [0.2.15](https://github.com/FAZuH/pwr-bot/compare/v0.2.14...v0.2.15) (2026-03-10)
 
 
@@ -36,6 +48,4 @@
 * Replace Today/Past 3 Days with rolling 24h/72h ranges in /vc leaderboard ([6896898](https://github.com/FAZuH/pwr-bot/commit/68968983c7179c8627675d5f95b3a280b4257632))
 
 ## [0.2.12](https://github.com/FAZuH/pwr-bot/compare/v0.2.11...v0.2.12) (2026-02-20)
-
-## [0.2.11](https://github.com/FAZuH/pwr-bot/compare/v0.2.10...v0.2.11) (2026-02-20)
 
