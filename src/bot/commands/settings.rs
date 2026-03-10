@@ -13,7 +13,7 @@ use crate::bot::controller::Controller;
 use crate::bot::coordinator::Coordinator;
 use crate::bot::error::BotError;
 use crate::bot::navigation::NavigationResult;
-use crate::bot::views::Action;
+
 use crate::bot::views::ActionRegistry;
 use crate::bot::views::ResponseKind;
 use crate::bot::views::ViewCommand;
@@ -26,6 +26,79 @@ use crate::controller;
 use crate::entity::ServerSettings;
 use crate::entity::ServerSettingsEntity;
 use crate::error::AppError;
+
+/// Model representing a configurable feature in the bot.
+///
+/// Encapsulates feature identity, state access, and configuration logic
+/// to decouple feature management from specific handler implementations.
+pub struct Feature {
+    /// Unique identifier for the feature (e.g., "feeds", "voice", "welcome")
+    pub id: &'static str,
+    /// Display label for the feature (e.g., "Feeds", "Voice", "Welcome")
+    pub label: &'static str,
+    /// Function to get the current enabled state from ServerSettings
+    pub get_enabled: fn(&ServerSettings) -> bool,
+    /// Function to set the enabled state in ServerSettings
+    pub set_enabled: fn(&mut ServerSettings, bool),
+    /// Navigation result when configuring this feature
+    pub navigate: NavigationResult,
+}
+
+impl Feature {
+    /// Get the current enabled state for this feature
+    pub fn is_enabled(&self, settings: &ServerSettings) -> bool {
+        (self.get_enabled)(settings)
+    }
+
+    /// Toggle the enabled state for this feature
+    pub fn toggle_enabled(&self, settings: &mut ServerSettings) {
+        let current = (self.get_enabled)(settings);
+        (self.set_enabled)(settings, !current);
+    }
+}
+
+/// Registry of all configurable features
+pub struct FeatureRegistry;
+
+impl FeatureRegistry {
+    /// Returns all available features
+    pub fn all() -> &'static [Feature] {
+        static FEATURES: &[Feature] = &[
+            Feature {
+                id: "feeds",
+                label: "Feeds",
+                get_enabled: |s| s.feeds.enabled.unwrap_or(false),
+                set_enabled: |s, v| s.feeds.enabled = Some(v),
+                navigate: NavigationResult::SettingsFeeds,
+            },
+            Feature {
+                id: "voice",
+                label: "Voice",
+                get_enabled: |s| s.voice.enabled.unwrap_or(false),
+                set_enabled: |s, v| s.voice.enabled = Some(v),
+                navigate: NavigationResult::SettingsVoice,
+            },
+            Feature {
+                id: "welcome",
+                label: "Welcome",
+                get_enabled: |s| s.welcome.enabled.unwrap_or(false),
+                set_enabled: |s, v| s.welcome.enabled = Some(v),
+                navigate: NavigationResult::SettingsWelcome,
+            },
+        ];
+        FEATURES
+    }
+
+    /// Find a feature by its ID
+    pub fn find_by_id(id: &str) -> Option<&'static Feature> {
+        Self::all().iter().find(|f| f.id == id)
+    }
+
+    /// Find a feature by its label
+    pub fn find_by_label(label: &str) -> Option<&'static Feature> {
+        Self::all().iter().find(|f| f.label == label)
+    }
+}
 
 /// Opens main server settings
 ///
@@ -109,27 +182,11 @@ impl SettingsMainHandler {
         Ok(())
     }
 
-    pub fn toggle_features<'b>(&mut self, features: impl Into<Cow<'b, [SettingsMainAction]>>) {
+    pub fn toggle_features<'b>(&mut self, features: impl Into<Cow<'b, [ &'static Feature]>>) {
         let features = features.into();
-        for feat in features.iter() {
-            match feat {
-                SettingsMainAction::FeedsFeature => {
-                    self.settings_mut().feeds.enabled =
-                        Some(!self.settings_mut().feeds.enabled.unwrap_or(false));
-                    self.is_settings_modified = true;
-                }
-                SettingsMainAction::VoiceFeature => {
-                    self.settings_mut().voice.enabled =
-                        Some(!self.settings_mut().voice.enabled.unwrap_or(false));
-                    self.is_settings_modified = true;
-                }
-                SettingsMainAction::WelcomeFeature => {
-                    self.settings_mut().welcome.enabled =
-                        Some(!self.settings_mut().welcome.enabled.unwrap_or(false));
-                    self.is_settings_modified = true;
-                }
-                _ => {}
-            }
+        for feature in features.iter() {
+            feature.toggle_enabled(self.settings_mut());
+            self.is_settings_modified = true;
         }
     }
 }
@@ -144,27 +201,15 @@ impl ViewRender<SettingsMainAction> for SettingsMainHandler {
 
         let mut components = vec![CreateContainerComponent::TextDisplay(text_features)];
 
-        // Get all features
-        let all_features = vec![
-            SettingsMainAction::FeedsFeature,
-            SettingsMainAction::VoiceFeature,
-            SettingsMainAction::WelcomeFeature,
-        ];
-
-        // Build select menu options with emoji indicators
-        let select_options: Vec<_> = all_features
-            .into_iter()
-            .map(|feat| {
-                let is_enabled = match &feat {
-                    SettingsMainAction::FeedsFeature => self.settings().feeds.enabled.unwrap_or(false),
-                    SettingsMainAction::VoiceFeature => self.settings().voice.enabled.unwrap_or(false),
-                    SettingsMainAction::WelcomeFeature => self.settings().welcome.enabled.unwrap_or(false),
-                    _ => false,
-                };
+        // Build select menu options with emoji indicators using FeatureRegistry
+        let select_options: Vec<_> = FeatureRegistry::all()
+            .iter()
+            .map(|feature| {
+                let is_enabled = feature.is_enabled(self.settings());
                 let emoji = if is_enabled { "✅" } else { "⬜" };
                 CreateSelectMenuOption::new(
-                    format!("{} {}", emoji, feat.label()),
-                    feat.label(),
+                    format!("{} {}", emoji, feature.label),
+                    feature.label,
                 )
             })
             .collect();
@@ -225,17 +270,7 @@ action_enum! {
     }
 }
 
-impl SettingsMainAction {
-    pub fn from_label(label: &str) -> Option<Self> {
-        let ret = match label {
-            "Feeds" => Self::FeedsFeature,
-            "Voice" => Self::VoiceFeature,
-            "Welcome" => Self::WelcomeFeature,
-            _ => return None,
-        };
-        Some(ret)
-    }
-}
+
 
 #[async_trait::async_trait]
 impl ViewHandler<SettingsMainAction, ()> for SettingsMainHandler {
@@ -249,15 +284,21 @@ impl ViewHandler<SettingsMainAction, ()> for SettingsMainHandler {
         let action = ctx.action();
         match action {
             FeedsFeature => {
-                cor.navigate(NavigationResult::SettingsFeeds);
+                if let Some(feature) = FeatureRegistry::find_by_label("Feeds") {
+                    cor.navigate(feature.navigate.clone());
+                }
                 Ok(ViewCommand::Exit)
             }
             VoiceFeature => {
-                cor.navigate(NavigationResult::SettingsVoice);
+                if let Some(feature) = FeatureRegistry::find_by_label("Voice") {
+                    cor.navigate(feature.navigate.clone());
+                }
                 Ok(ViewCommand::Exit)
             }
             WelcomeFeature => {
-                cor.navigate(NavigationResult::SettingsWelcome);
+                if let Some(feature) = FeatureRegistry::find_by_label("Welcome") {
+                    cor.navigate(feature.navigate.clone());
+                }
                 Ok(ViewCommand::Exit)
             }
             ToggleFeature => {
@@ -267,7 +308,7 @@ impl ViewHandler<SettingsMainAction, ()> for SettingsMainHandler {
                 {
                     let features: Vec<_> = values
                         .iter()
-                        .filter_map(|v| SettingsMainAction::from_label(v))
+                        .filter_map(|v| FeatureRegistry::find_by_label(v))
                         .collect();
                     self.toggle_features(features);
                 }
