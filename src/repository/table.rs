@@ -676,48 +676,40 @@ impl VoiceSessionsRepository for VoiceSessionsTable {
         let limit = opts.limit.unwrap_or(10) as i64;
         let offset = opts.offset.unwrap_or(0) as i64;
 
-        // Build query dynamically based on which filters are present
-        let mut query = String::from(
-            r#"
+        // Use boundaries for clipping. If not provided, we use a wide range.
+        let since_val = opts.since.unwrap_or(chrono::DateTime::UNIX_EPOCH);
+        // Default to far future if until is not provided to include all current sessions
+        let until_val = opts
+            .until
+            .unwrap_or_else(|| chrono::Utc::now() + chrono::Duration::days(365));
+
+        // This query clips session durations to the requested time window [since, until].
+        // 1. It filters sessions that overlap with the window: join_time <= until AND (is_active=1 OR leave_time >= since)
+        // 2. It calculates the duration within the window as: MIN(until, session_end) - MAX(since, join_time)
+        let query = r#"
             SELECT 
                 user_id, 
                 SUM(
-                    CASE 
-                        WHEN is_active = 1 
-                        THEN strftime('%s', 'now') - strftime('%s', join_time)
-                        ELSE strftime('%s', leave_time) - strftime('%s', join_time)
-                    END
+                    strftime('%s', MIN(?, CASE WHEN is_active = 1 THEN CURRENT_TIMESTAMP ELSE leave_time END)) - 
+                    strftime('%s', MAX(?, join_time))
                 ) as total_duration
             FROM voice_sessions
             WHERE guild_id = ?
-            "#,
-        );
+            AND join_time <= ?
+            AND (is_active = 1 OR leave_time >= ?)
+            GROUP BY user_id ORDER BY total_duration DESC LIMIT ? OFFSET ?
+        "#;
 
-        // Add time range filters if provided
-        if opts.since.is_some() {
-            query.push_str(" AND join_time >= ?");
-        }
-        if opts.until.is_some() {
-            query.push_str(" AND join_time <= ?");
-        }
-
-        query.push_str(" GROUP BY user_id ORDER BY total_duration DESC LIMIT ? OFFSET ?");
-
-        // Build the query
-        let mut q = sqlx::query_as::<_, VoiceLeaderboardEntry>(&query).bind(opts.guild_id as i64);
-
-        // Bind time filters
-        if let Some(since) = opts.since {
-            q = q.bind(since);
-        }
-        if let Some(until) = opts.until {
-            q = q.bind(until);
-        }
-
-        // Bind limit and offset
-        q = q.bind(limit).bind(offset);
-
-        Ok(q.fetch_all(&self.base.pool).await?)
+        Ok(sqlx::query_as::<_, VoiceLeaderboardEntry>(query)
+            .bind(until_val)
+            .bind(since_val)
+            .bind(opts.guild_id as i64)
+            .bind(until_val)
+            .bind(since_val)
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(&self.base.pool)
+            .await?)
     }
 
     async fn get_leaderboard(
