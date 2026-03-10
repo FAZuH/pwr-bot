@@ -11,13 +11,14 @@ use crate::entity::VoiceLeaderboardEntry;
 use crate::error::AppError;
 
 /// A single entry in the voice leaderboard.
-#[derive(Clone)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct LeaderboardEntry {
     pub rank: u32,
     pub user_id: u64,
     pub display_name: String,
     pub avatar_url: String,
     pub duration_seconds: i64,
+    #[serde(skip)]
     pub avatar_image: Option<image::DynamicImage>,
 }
 

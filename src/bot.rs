@@ -1,8 +1,13 @@
 //! Discord bot implementation and command handling.
+//!
+//! This module contains the main [`Bot`] struct which manages the Discord client,
+//! and the [`BotEventHandler`] which processes gateway events. It acts as the
+//! bridge between the Discord gateway and the application's internal services.
 
 pub mod checks;
 pub mod commands;
 pub mod controller;
+pub mod coordinator;
 pub mod error;
 pub mod error_handler;
 pub mod navigation;

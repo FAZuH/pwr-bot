@@ -1,12 +1,16 @@
 //! Pagination component for Discord views.
-
 use poise::serenity_prelude::*;
 
 use crate::action_enum;
 use crate::bot::Error;
+use crate::bot::views::Action;
+use crate::bot::views::ActionRegistry;
+use crate::bot::views::ViewCommand;
+use crate::bot::views::ViewContext;
+use crate::bot::views::ViewHandler;
 
 /// Model for tracking pagination state.
-#[derive(Clone)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct PaginationModel {
     pub current_page: u32,
     pub pages: u32,
@@ -52,23 +56,20 @@ impl PaginationModel {
     }
 }
 
-action_enum!(PaginationAction {
-    #[label = "⏮"]
-    First,
-    #[label = "◀"]
-    Prev,
-    Page,
-    #[label = "▶"]
-    Next,
-    #[label = "⏭"]
-    Last,
-});
-
-use crate::bot::views::ActionRegistry;
-use crate::bot::views::Trigger;
-use crate::bot::views::ViewCommand;
-use crate::bot::views::ViewContext;
-use crate::bot::views::ViewHandler;
+action_enum!(
+    #[derive(Copy)]
+    PaginationAction {
+        #[label = "⏮"]
+        First,
+        #[label = "◀"]
+        Prev,
+        Page,
+        #[label = "▶"]
+        Next,
+        #[label = "⏭"]
+        Last,
+    }
+);
 
 #[derive(Clone)]
 pub struct PaginationView {
@@ -91,7 +92,7 @@ impl PaginationView {
         self.state.current_page
     }
 
-    pub fn attach_if_multipage<'b, T: crate::bot::views::Action>(
+    pub fn attach_if_multipage<'b, T: Action>(
         &self,
         registry: &mut ActionRegistry<T>,
         components: &mut Vec<CreateComponent<'b>>,
@@ -102,39 +103,35 @@ impl PaginationView {
         }
     }
 
-    pub fn create_component<'b, T: crate::bot::views::Action>(
+    pub fn create_component<'b, T: Action>(
         &self,
         registry: &mut ActionRegistry<T>,
         wrap: fn(PaginationAction) -> T,
     ) -> CreateComponent<'b> {
-        let mut first = crate::bot::views::RegisteredAction {
-            id: registry.register(wrap(PaginationAction::First)),
-            label: "⏮",
-        }
-        .as_button()
-        .style(ButtonStyle::Primary);
-        let mut prev = crate::bot::views::RegisteredAction {
-            id: registry.register(wrap(PaginationAction::Prev)),
-            label: "◀",
-        }
-        .as_button()
-        .style(ButtonStyle::Primary);
+        let mut first = registry
+            .register(wrap(PaginationAction::First))
+            .as_button()
+            .style(ButtonStyle::Primary);
+
+        let mut prev = registry
+            .register(wrap(PaginationAction::Prev))
+            .as_button()
+            .style(ButtonStyle::Primary);
+
         let current = CreateButton::new("current")
             .label(format!("{}/{}", self.state.current_page, self.state.pages))
             .style(ButtonStyle::Secondary)
             .disabled(true);
-        let mut next = crate::bot::views::RegisteredAction {
-            id: registry.register(wrap(PaginationAction::Next)),
-            label: "▶",
-        }
-        .as_button()
-        .style(ButtonStyle::Primary);
-        let mut last = crate::bot::views::RegisteredAction {
-            id: registry.register(wrap(PaginationAction::Last)),
-            label: "⏭",
-        }
-        .as_button()
-        .style(ButtonStyle::Primary);
+
+        let mut next = registry
+            .register(wrap(PaginationAction::Next))
+            .as_button()
+            .style(ButtonStyle::Primary);
+
+        let mut last = registry
+            .register(wrap(PaginationAction::Last))
+            .as_button()
+            .style(ButtonStyle::Primary);
 
         if self.state.current_page == 1 || self.disabled {
             first = first.disabled(true);
@@ -155,11 +152,9 @@ impl PaginationView {
 impl ViewHandler<PaginationAction> for PaginationView {
     async fn handle(
         &mut self,
-        action: PaginationAction,
-        _trigger: Trigger<'_>,
-        _ctx: &ViewContext<'_, PaginationAction>,
+        ctx: ViewContext<'_, PaginationAction>,
     ) -> Result<ViewCommand, Error> {
-        match action {
+        match ctx.action() {
             PaginationAction::First => self.state.first_page(),
             PaginationAction::Prev => self.state.prev_page(),
             PaginationAction::Next => self.state.next_page(),
@@ -169,9 +164,13 @@ impl ViewHandler<PaginationAction> for PaginationView {
         Ok(ViewCommand::Render)
     }
 
-    async fn on_timeout(&mut self) -> Result<(), Error> {
+    async fn on_timeout(&mut self) -> Result<ViewCommand, Error> {
         self.disabled = true;
-        Ok(())
+        if self.state.pages > 1 {
+            Ok(ViewCommand::RenderOnce)
+        } else {
+            Ok(ViewCommand::Exit)
+        }
     }
 }
 

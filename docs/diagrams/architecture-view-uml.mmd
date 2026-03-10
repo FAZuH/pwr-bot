@@ -13,8 +13,10 @@ classDiagram
     %% ── Core structs ──────────────────────────────────────────────
     class ViewContext~T~ {
         poise: Context
+        event: ViewEvent~T~
         tx: Arc~dyn ViewSender~T~~
-        map(wrap) ViewContext~C~
+        coordinator: Arc~Coordinator~
+        map(action, wrap) ViewContext~C~
         spawn(future)
     }
 
@@ -22,7 +24,7 @@ classDiagram
         actions: HashMap~String, T~
         prefix: String
         counter: usize
-        register(action: T) String
+        register(action: T) RegisteredAction
         get(id: str) Option~T~
         clear()
     }
@@ -32,9 +34,10 @@ classDiagram
         handler: H
         registry: ActionRegistry~T~
         timeout: Duration
+        coordinator: Arc~Coordinator~
         should_acknowledge: bool
         render_view() Result
-        run(on_action) Result
+        run() Result
     }
 
     class RegisteredAction {
@@ -45,12 +48,13 @@ classDiagram
         as_select_option() CreateSelectMenuOption
     }
 
-    class Coordinator~S~ {
+    class Coordinator {
         ctx: Context
-        state: S
+        nav_queue: Mutex~VecDeque~NavigationResult~~
+        reply_handle: SharedReplyHandle
         context() Context
-        state() S
-        state_mut() S
+        navigate(next)
+        run(initial_route)
     }
 
     class NavigationResult {
@@ -64,12 +68,13 @@ classDiagram
     class ViewCommand {
         <<enum>>
         Render
+        RenderOnce
         Exit
         Continue
         AlreadyResponded
     }
 
-    class Trigger {
+    class ViewEvent {
         <<enum>>
         Component
         Modal
@@ -90,15 +95,15 @@ classDiagram
         create_reply(registry) CreateReply
     }
 
-    class ViewHandler~T: Action~ {
+    class ViewHandler~T: Action, S: Send + Sync~ {
         <<trait>>
-        handle(action, trigger, ctx) Result~ViewCommand~
-        on_timeout() Result
+        handle(ctx) Result~ViewCommand~
+        on_timeout() Result~ViewCommand~
     }
 
-    class Controller~S~ {
+    class Controller {
         <<trait>>
-        run(coordinator: Coordinator~S~) Result~NavigationResult~
+        run(coordinator: Arc~Coordinator~) Result
     }
 
     %% ── Trait relationships ───────────────────────────────────────
@@ -106,7 +111,7 @@ classDiagram
     ViewEngine --> ViewRender : owns
     ViewEngine --> ActionRegistry : owns
     ViewHandler ..> ViewCommand : returns
-    ViewHandler ..> Trigger : receives
+    ViewHandler ..> ViewEvent : receives
     ViewHandler ..> ViewContext : receives
     ActionRegistry ..> Action : maps
     ActionRegistry ..> RegisteredAction : produces

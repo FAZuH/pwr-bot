@@ -30,7 +30,17 @@ pub async fn voice(_ctx: Context<'_>) -> Result<(), Error> {
 }
 
 /// Type of server statistic to display.
-#[derive(ChoiceParameter, Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(
+    ChoiceParameter,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+)]
 pub enum GuildStatType {
     /// Average voice time per active user
     #[default]
@@ -141,7 +151,17 @@ impl From<VoiceLeaderboardTimeRange> for DateTime<Utc> {
 }
 
 /// Time range filter for voice stats.
-#[derive(ChoiceParameter, Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(
+    ChoiceParameter,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+)]
 pub enum VoiceStatsTimeRange {
     /// From 1 year ago until now
     #[default]

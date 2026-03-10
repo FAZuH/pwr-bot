@@ -10,7 +10,22 @@ use crate::entity::FeedSubscriptionEntity;
 use crate::entity::SubscriberEntity;
 use crate::repository::Repository;
 use crate::repository::error::DatabaseError;
-use crate::repository::table::Table;
+use crate::service::traits::InternalOps;
+
+#[async_trait::async_trait]
+impl InternalOps for InternalService {
+    async fn get_meta(&self, key: BotMetaKey) -> Result<Option<String>, DatabaseError> {
+        self.get_meta(key).await
+    }
+
+    async fn set_meta(&self, key: BotMetaKey, value: String) -> Result<(), DatabaseError> {
+        self.set_meta(key, value).await
+    }
+
+    async fn dump_database(&self) -> anyhow::Result<DatabaseDump> {
+        self.dump_database().await
+    }
+}
 
 /// Internal service for metadata and maintenance operations.
 pub struct InternalService {
@@ -25,7 +40,7 @@ impl InternalService {
 
     /// Get a metadata value by key.
     pub async fn get_meta(&self, key: BotMetaKey) -> Result<Option<String>, DatabaseError> {
-        let result = self.db.bot_meta.select(&key.into()).await?;
+        let result: Option<BotMetaEntity> = self.db.bot_meta.select(&key.into()).await?;
         Ok(result.map(|m| m.value))
     }
 
@@ -60,6 +75,7 @@ impl InternalService {
 }
 
 /// Container for a full database dump.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DatabaseDump {
     pub feeds: Vec<FeedEntity>,
     pub feed_items: Vec<FeedItemEntity>,

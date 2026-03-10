@@ -14,21 +14,20 @@ use crate::entity::SubscriberEntity;
 use crate::entity::SubscriberType;
 use crate::event::Event;
 use crate::event::FeedUpdateEvent;
-use crate::repository::Repository;
-use crate::repository::table::Table;
+use crate::service::Services;
 use crate::subscriber::Subscriber;
 
 /// Subscriber that sends feed updates to guild channels.
 pub struct DiscordGuildSubscriber {
     bot: Arc<Bot>,
-    db: Arc<Repository>,
+    services: Arc<Services>,
 }
 
 impl DiscordGuildSubscriber {
     /// Creates a new guild subscriber.
-    pub fn new(bot: Arc<Bot>, db: Arc<Repository>) -> Self {
+    pub fn new(bot: Arc<Bot>, services: Arc<Services>) -> Self {
         debug!("Initializing DiscordGuildSubscriber.");
-        Self { bot, db }
+        Self { bot, services }
     }
 
     /// Handles a feed update event by sending messages to guild channels.
@@ -36,9 +35,9 @@ impl DiscordGuildSubscriber {
         debug!("Received event `{}`", event.event_name());
 
         let subs = self
-            .db
-            .subscriber
-            .select_all_by_type_and_feed(SubscriberType::Guild, event.feed.id)
+            .services
+            .feed_subscription
+            .get_subscribers_by_type_and_feed(SubscriberType::Guild, event.feed.id)
             .await?;
 
         for sub in subs {
@@ -62,15 +61,15 @@ impl DiscordGuildSubscriber {
         let guild_id = GuildId::from_str(&sub.target_id)?;
 
         let settings = self
-            .db
-            .server_settings
-            .select(&guild_id.get())
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("Settings not found"))?;
-        let channel_id_str =
-            settings.settings.0.feeds.channel_id.ok_or_else(|| {
-                anyhow::anyhow!("No channel configured for guild {}", &sub.target_id)
-            })?;
+            .services
+            .settings
+            .get_server_settings(guild_id.get())
+            .await?;
+
+        let channel_id_str = settings
+            .feeds
+            .channel_id
+            .ok_or_else(|| anyhow::anyhow!("No channel configured for guild {}", &sub.target_id))?;
 
         let channel_id = ChannelId::from_str(&channel_id_str)?;
 

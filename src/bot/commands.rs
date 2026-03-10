@@ -1,4 +1,8 @@
 //! Bot command organization using the Cog pattern.
+//!
+//! This module provides a way to group and aggregate Discord commands using the
+//! [`Cog`] trait. This structure allows for modular command definitions across
+//! different files and domains.
 
 pub mod about;
 pub mod dump_db;
@@ -14,22 +18,29 @@ pub mod welcome;
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 
 /// Context type passed to command handlers.
+///
+/// Wraps the Poise context with application-specific [`Data`].
 pub type Context<'a> = poise::Context<'a, Data, Error>;
 
 use poise::Command;
 
 use crate::bot::Data;
 
-/// Trait for command modules that provide Discord commands.
+/// Trait for command modules (Cogs) that provide a set of Discord commands.
+///
+/// A "Cog" is a collection of related commands (e.g., all feed-related commands).
 pub trait Cog {
     /// Returns the list of commands provided by this cog.
     fn commands(&self) -> Vec<Command<Data, Error>>;
 }
 
-/// Aggregates all command cogs.
+/// Aggregator for all command cogs in the application.
+///
+/// Implements [`Cog`] by collecting commands from all sub-modules.
 pub struct Cogs;
 
 impl Cog for Cogs {
+    /// Collects and returns all registered commands for the bot.
     fn commands(&self) -> Vec<Command<Data, Error>> {
         vec![
             about::about(),

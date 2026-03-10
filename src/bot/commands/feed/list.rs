@@ -1,5 +1,4 @@
 //! Feed list subcommand.
-
 use std::collections::HashSet;
 use std::time::Duration;
 
@@ -11,11 +10,10 @@ use crate::bot::commands::Error;
 use crate::bot::commands::feed::SendInto;
 use crate::bot::commands::feed::get_or_create_subscriber;
 use crate::bot::controller::Controller;
-use crate::bot::controller::Coordinator;
+use crate::bot::coordinator::Coordinator;
 use crate::bot::navigation::NavigationResult;
 use crate::bot::views::ActionRegistry;
 use crate::bot::views::ResponseKind;
-use crate::bot::views::Trigger;
 use crate::bot::views::ViewCommand;
 use crate::bot::views::ViewContext;
 use crate::bot::views::ViewEngine;
@@ -24,7 +22,9 @@ use crate::bot::views::ViewRender;
 use crate::bot::views::pagination::PaginationAction;
 use crate::bot::views::pagination::PaginationView;
 use crate::controller;
+use crate::entity::SubscriberEntity;
 use crate::service::feed_subscription_service::Subscription;
+use crate::service::traits::FeedSubscriptionProvider;
 
 /// Number of items per page for subscriptions list.
 const SUBSCRIPTIONS_PER_PAGE: u32 = 10;
@@ -39,14 +39,10 @@ pub async fn list(
         SendInto,
     >,
 ) -> Result<(), Error> {
-    command(ctx, sent_into).await
-}
-
-pub async fn command(ctx: Context<'_>, sent_into: Option<SendInto>) -> Result<(), Error> {
     let sent_into = sent_into.unwrap_or(SendInto::DM);
-    let mut coordinator = Coordinator::new(ctx);
-    let mut controller = FeedListController::new(&ctx, sent_into);
-    let _ = controller.run(&mut coordinator).await?;
+    Coordinator::new(ctx)
+        .run(NavigationResult::FeedList(Some(sent_into)))
+        .await?;
     Ok(())
 }
 
@@ -55,11 +51,8 @@ controller! { pub struct FeedListController<'a> {
 } }
 
 #[async_trait::async_trait]
-impl<'a, S: Send + Sync + 'static> Controller<S> for FeedListController<'a> {
-    async fn run(
-        &mut self,
-        coordinator: &mut Coordinator<'_, S>,
-    ) -> Result<NavigationResult, Error> {
+impl Controller for FeedListController<'_> {
+    async fn run(&mut self, coordinator: std::sync::Arc<Coordinator<'_>>) -> Result<(), Error> {
         let ctx = *coordinator.context();
         ctx.defer().await?;
 
@@ -84,23 +77,11 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for FeedListController<'a> {
             subscriber: subscriber.clone(),
         };
 
-        let mut engine = ViewEngine::new(&ctx, view, Duration::from_secs(120));
+        let mut engine = ViewEngine::new(ctx, view, Duration::from_secs(120), coordinator.clone());
 
-        let mut exit_nav = NavigationResult::Exit;
+        engine.run().await?;
 
-        engine
-            .run(|action| {
-                let _nav_ref = &mut exit_nav;
-                Box::pin(async move {
-                    match action {
-                        FeedListAction::Exit => ViewCommand::Exit,
-                        _ => ViewCommand::Render,
-                    }
-                })
-            })
-            .await?;
-
-        Ok(exit_nav)
+        Ok(())
     }
 }
 
@@ -115,8 +96,8 @@ pub struct FeedListHandler {
     pub pagination: PaginationView,
     pub state: FeedListState,
     pub marked_unsub: HashSet<String>,
-    pub service: std::sync::Arc<crate::service::feed_subscription_service::FeedSubscriptionService>,
-    pub subscriber: crate::entity::SubscriberEntity,
+    pub service: std::sync::Arc<dyn FeedSubscriptionProvider>,
+    pub subscriber: SubscriberEntity,
 }
 
 impl FeedListHandler {
@@ -160,17 +141,15 @@ impl FeedListHandler {
             FeedListState::Edit => {
                 let source_url = sub.feed.source_url;
                 let button = if self.marked_unsub.contains(&source_url) {
-                    let action = crate::bot::views::RegisteredAction {
-                        id: registry.register(UndoUnsub { source_url }),
-                        label: "↶ Undo",
-                    };
-                    action.as_button().style(ButtonStyle::Secondary)
+                    registry
+                        .register(UndoUnsub { source_url })
+                        .as_button()
+                        .style(ButtonStyle::Secondary)
                 } else {
-                    let action = crate::bot::views::RegisteredAction {
-                        id: registry.register(Unsubscribe { source_url }),
-                        label: "🗑 Unsubscribe",
-                    };
-                    action.as_button().style(ButtonStyle::Danger)
+                    registry
+                        .register(Unsubscribe { source_url })
+                        .as_button()
+                        .style(ButtonStyle::Danger)
                 };
                 CreateSectionAccessory::Button(button)
             }
@@ -189,17 +168,14 @@ impl FeedListHandler {
             FeedListState::View => FeedListAction::Edit,
         };
 
-        let state_action = crate::bot::views::RegisteredAction {
-            id: registry.register(action.clone()),
-            label: crate::bot::views::Action::label(&action),
-        };
-        let state_button = state_action.as_button().style(ButtonStyle::Primary);
-
-        let save_action = crate::bot::views::RegisteredAction {
-            id: registry.register(FeedListAction::Save),
-            label: "Save",
-        };
-        let mut save_button = save_action.as_button().style(ButtonStyle::Success);
+        let state_button = registry
+            .register(action.clone())
+            .as_button()
+            .style(ButtonStyle::Primary);
+        let mut save_button = registry
+            .register(FeedListAction::Save)
+            .as_button()
+            .style(ButtonStyle::Success);
 
         if self.marked_unsub.is_empty() {
             save_button = save_button.disabled(true)
@@ -249,9 +225,9 @@ impl ViewRender<FeedListAction> for FeedListHandler {
 }
 
 action_extends! { FeedListAction extends PaginationAction {
-    #[label =  "✎ Edit"]
+    #[label = "✎ Edit Subscriptions"]
     Edit,
-    #[label = "👁 View"]
+    #[label = "👁 View Mode"]
     View,
     #[label = "🗑 Unsubscribe"]
     Unsubscribe { source_url: String },
@@ -263,16 +239,16 @@ action_extends! { FeedListAction extends PaginationAction {
 
 #[async_trait::async_trait]
 impl ViewHandler<FeedListAction> for FeedListHandler {
-    async fn handle(
-        &mut self,
-        action: FeedListAction,
-        _trigger: Trigger<'_>,
-        _ctx: &ViewContext<'_, FeedListAction>,
-    ) -> Result<ViewCommand, Error> {
+    async fn handle(&mut self, ctx: ViewContext<'_, FeedListAction>) -> Result<ViewCommand, Error> {
         use FeedListAction::*;
-        match &action {
-            Base(_) => {
-                // We handle pagination logic below
+        match ctx.action() {
+            Base(inner) => {
+                let cmd = self
+                    .pagination
+                    .handle(ctx.map(*inner, FeedListAction::Base))
+                    .await?;
+                self.update_subs().await?;
+                return Ok(cmd);
             }
             Edit => {
                 self.state = FeedListState::Edit;
@@ -297,22 +273,10 @@ impl ViewHandler<FeedListAction> for FeedListHandler {
             }
         };
 
-        if let Base(pagination_action) = action {
-            let cmd = self
-                .pagination
-                .handle(pagination_action, _trigger, &_ctx.map(FeedListAction::Base))
-                .await?;
-
-            self.update_subs().await?;
-
-            return Ok(cmd);
-        }
-
         Ok(ViewCommand::Render)
     }
 
-    async fn on_timeout(&mut self) -> Result<(), Error> {
-        self.pagination.disabled = true;
-        Ok(())
+    async fn on_timeout(&mut self) -> Result<ViewCommand, Error> {
+        self.pagination.on_timeout().await
     }
 }

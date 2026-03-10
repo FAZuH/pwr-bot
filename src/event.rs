@@ -26,7 +26,7 @@ pub trait Event: std::any::Any + Send + Sync + 'static {
 }
 
 /// Event fired when a user's voice state changes.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct VoiceStateEvent {
     pub old: Option<VoiceState>,
     pub new: VoiceState,

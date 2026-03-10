@@ -25,13 +25,15 @@ graph TB
         Modal["Modal Submission"]
         Timeout["Timeout Event"]
         
-        TriggerNode["Map to Trigger<br/>+ Action Enum"]
+        ActionEvent["ViewEvent Enum"]
         Handle["ViewHandler::handle"]
+        HandleTimeout["ViewHandler::on_timeout"]
         
-        CmdRender["ViewCommand::Render"]
+        CmdRender["ViewCommand::Render / RenderOnce"]
         CmdContinue["ViewCommand::Continue / AlreadyResponded"]
         CmdExit["ViewCommand::Exit"]
         
+        CmdRender -->|re-render| Render
         Start -->|engine.run| Render
         Render -->|loop| Select
         
@@ -40,14 +42,14 @@ graph TB
         Select -->|ModalSubmit| Modal
         Select -->|Collector Timeout| Timeout
         
-        Component & Async & Modal & Timeout -->|Trigger::from| TriggerNode
-        TriggerNode -->|handler.handle| Handle
+        Component & Async & Modal -->|Map to Action| ActionEvent
+        ActionEvent -->|"handler.handle(ctx)"| Handle
+        Timeout --> HandleTimeout
         
-        Handle -->|return| CmdRender
-        Handle -->|return| CmdContinue
-        Handle -->|return| CmdExit
+        Handle & HandleTimeout -->|return| CmdRender
+        Handle & HandleTimeout -->|return| CmdContinue
+        Handle & HandleTimeout -->|return| CmdExit
         
-        CmdRender -->|re-render| Render
         CmdContinue -->|next event| Select
         CmdExit -->|break| Stop[Stop Engine]
     end

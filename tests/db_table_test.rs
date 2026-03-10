@@ -11,7 +11,6 @@ use pwr_bot::entity::SubscriberEntity;
 use pwr_bot::entity::SubscriberType;
 use pwr_bot::entity::VoiceSessionsEntity;
 use pwr_bot::entity::WelcomeSettings;
-use pwr_bot::repository::table::Table;
 
 mod common;
 
@@ -205,7 +204,7 @@ mod feed_table_tests {
         // Test limit
         let res = db
             .feed
-            .select_by_name_and_subscriber_id(&sub_id, "One", 1u32)
+            .select_by_name_and_subscriber_id(&sub_id, "One", Some(1u32))
             .await
             .unwrap();
         assert_eq!(res.len(), 1);

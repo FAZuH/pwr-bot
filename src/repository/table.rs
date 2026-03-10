@@ -1,5 +1,4 @@
 //! Database table operations and implementations.
-
 use sqlx::SqlitePool;
 use sqlx::sqlite::SqliteArguments;
 
@@ -8,15 +7,19 @@ use crate::entity::FeedEntity;
 use crate::entity::FeedItemEntity;
 use crate::entity::FeedSubscriptionEntity;
 use crate::entity::FeedWithLatestItemRow;
+use crate::entity::GuildDailyStats;
 use crate::entity::ServerSettingsEntity;
 use crate::entity::SubscriberEntity;
 use crate::entity::SubscriberType;
+use crate::entity::VoiceDailyActivity;
 use crate::entity::VoiceLeaderboardEntry;
 use crate::entity::VoiceLeaderboardOpt;
 use crate::entity::VoiceLeaderboardOptBuilder;
+use crate::entity::VoiceLeaderboardOptBuilderError;
 use crate::entity::VoiceSessionsEntity;
 use crate::error::AppError;
 use crate::repository::error::DatabaseError;
+use crate::repository::traits::*;
 
 /// Base table struct providing database pool access.
 #[derive(Clone)]
@@ -29,28 +32,6 @@ impl BaseTable {
     pub fn new(pool: SqlitePool) -> Self {
         Self { pool }
     }
-}
-
-/// Base trait for table operations.
-#[async_trait::async_trait]
-pub trait TableBase {
-    /// Creates the table if it doesn't exist.
-    async fn create_table(&self) -> Result<(), DatabaseError>;
-    /// Drops the table.
-    async fn drop_table(&self) -> Result<(), DatabaseError>;
-    /// Deletes all rows from the table.
-    async fn delete_all(&self) -> Result<(), DatabaseError>;
-}
-
-/// Trait for tables with CRUD operations.
-#[async_trait::async_trait]
-pub trait Table<T, ID>: TableBase {
-    async fn select_all(&self) -> Result<Vec<T>, DatabaseError>;
-    async fn insert(&self, model: &T) -> Result<ID, DatabaseError>;
-    async fn select(&self, id: &ID) -> Result<Option<T>, DatabaseError>;
-    async fn update(&self, model: &T) -> Result<(), DatabaseError>;
-    async fn delete(&self, id: &ID) -> Result<(), DatabaseError>;
-    async fn replace(&self, model: &T) -> Result<ID, DatabaseError>;
 }
 
 /// Helper trait to handle binding parameters, especially for casting u64 to i64 for SQLite.
@@ -179,7 +160,7 @@ macro_rules! impl_table {
         }
 
         #[async_trait::async_trait]
-        impl Table<$model, $id_type> for $struct_name {
+        impl CrudTable<$model, $id_type> for $struct_name {
             async fn select_all(&self) -> Result<Vec<$model>, DatabaseError> {
                 Ok(sqlx::query_as::<_, $model>(concat!("SELECT * FROM ", $table))
                     .fetch_all(&self.base.pool)
@@ -285,8 +266,9 @@ impl_table!(
     ]
 );
 
-impl FeedTable {
-    pub async fn select_all_by_tag(&self, tag: &str) -> Result<Vec<FeedEntity>, DatabaseError> {
+#[async_trait::async_trait]
+impl FeedRepository for FeedTable {
+    async fn select_all_by_tag(&self, tag: &str) -> Result<Vec<FeedEntity>, DatabaseError> {
         Ok(
             sqlx::query_as::<_, FeedEntity>("SELECT * FROM feeds WHERE tags LIKE ?")
                 .bind(format!("%{}%", tag))
@@ -295,7 +277,7 @@ impl FeedTable {
         )
     }
 
-    pub async fn select_by_source_id(
+    async fn select_by_source_id(
         &self,
         platform_id: &str,
         source_id: &str,
@@ -309,13 +291,13 @@ impl FeedTable {
         .await?)
     }
 
-    pub async fn select_by_name_and_subscriber_id(
+    async fn select_by_name_and_subscriber_id(
         &self,
         subscriber_id: &i32,
         name_search: &str,
-        limit: impl Into<Option<u32>>,
+        limit: Option<u32>,
     ) -> Result<Vec<FeedEntity>, DatabaseError> {
-        let limit = limit.into().unwrap_or(25);
+        let limit = limit.unwrap_or(25);
         let search_pattern = format!("%{}%", name_search.to_lowercase());
         Ok(sqlx::query_as::<_, FeedEntity>(
             r#"
@@ -365,9 +347,10 @@ impl_table!(
     [feed_id, description, published]
 );
 
-impl FeedItemTable {
+#[async_trait::async_trait]
+impl FeedItemRepository for FeedItemTable {
     /// Get the latest version for a specific feed
-    pub async fn select_latest_by_feed_id(
+    async fn select_latest_by_feed_id(
         &self,
         feed_id: i32,
     ) -> Result<Option<FeedItemEntity>, DatabaseError> {
@@ -380,7 +363,7 @@ impl FeedItemTable {
     }
 
     /// Get all versions for a specific feed, ordered by published date
-    pub async fn select_all_by_feed_id(
+    async fn select_all_by_feed_id(
         &self,
         feed_id: i32,
     ) -> Result<Vec<FeedItemEntity>, DatabaseError> {
@@ -393,7 +376,7 @@ impl FeedItemTable {
     }
 
     /// Delete all versions for a specific feed
-    pub async fn delete_all_by_feed_id(&self, feed_id: i32) -> Result<(), DatabaseError> {
+    async fn delete_all_by_feed_id(&self, feed_id: i32) -> Result<(), DatabaseError> {
         sqlx::query("DELETE FROM feed_items WHERE feed_id = ?")
             .bind(feed_id)
             .execute(&self.base.pool)
@@ -425,8 +408,9 @@ impl_table!(
     [r#type, target_id]
 );
 
-impl SubscriberTable {
-    pub async fn select_all_by_type_and_feed(
+#[async_trait::async_trait]
+impl SubscriberRepository for SubscriberTable {
+    async fn select_all_by_type_and_feed(
         &self,
         r#type: SubscriberType,
         feed_id: i32,
@@ -448,7 +432,7 @@ impl SubscriberTable {
         .await?)
     }
 
-    pub async fn select_by_type_and_target(
+    async fn select_by_type_and_target(
         &self,
         r#type: &SubscriberType,
         target_id: &str,
@@ -492,9 +476,10 @@ impl_table!(
     [feed_id, subscriber_id]
 );
 
-impl FeedSubscriptionTable {
+#[async_trait::async_trait]
+impl FeedSubscriptionRepository for FeedSubscriptionTable {
     /// Get all subscribers for a specific feed
-    pub async fn select_all_by_feed_id(
+    async fn select_all_by_feed_id(
         &self,
         feed_id: i32,
     ) -> Result<Vec<FeedSubscriptionEntity>, DatabaseError> {
@@ -507,7 +492,7 @@ impl FeedSubscriptionTable {
     }
 
     /// Get all feeds a subscriber is following
-    pub async fn select_all_by_subscriber_id(
+    async fn select_all_by_subscriber_id(
         &self,
         subscriber_id: i32,
     ) -> Result<Vec<FeedSubscriptionEntity>, DatabaseError> {
@@ -520,7 +505,7 @@ impl FeedSubscriptionTable {
     }
 
     /// Get count of feeds a subscriber is following
-    pub async fn count_by_subscriber_id(&self, subscriber_id: i32) -> Result<u32, DatabaseError> {
+    async fn count_by_subscriber_id(&self, subscriber_id: i32) -> Result<u32, DatabaseError> {
         let count: (u32,) =
             sqlx::query_as("SELECT COUNT(*) FROM feed_subscriptions WHERE subscriber_id = ?")
                 .bind(subscriber_id)
@@ -534,15 +519,12 @@ impl FeedSubscriptionTable {
     /// # Arguments
     /// * `page` - n-th page to show. Starts at 0.
     /// * `per_page` - How many items to show per page.
-    pub async fn select_paginated_by_subscriber_id(
+    async fn select_paginated_by_subscriber_id(
         &self,
         subscriber_id: i32,
-        page: impl Into<u32>,
-        per_page: impl Into<u32>,
+        page: u32,
+        per_page: u32,
     ) -> Result<Vec<FeedSubscriptionEntity>, DatabaseError> {
-        let page: u32 = page.into();
-        let per_page: u32 = per_page.into();
-
         let limit = per_page;
         let offset = per_page * page;
 
@@ -561,15 +543,12 @@ impl FeedSubscriptionTable {
     /// # Arguments
     /// * `page` - n-th page to show. Starts at 0.
     /// * `per_page` - How many items to show per page.
-    pub async fn select_paginated_with_latest_by_subscriber_id(
+    async fn select_paginated_with_latest_by_subscriber_id(
         &self,
         subscriber_id: i32,
-        page: impl Into<u32>,
-        per_page: impl Into<u32>,
+        page: u32,
+        per_page: u32,
     ) -> Result<Vec<FeedWithLatestItemRow>, DatabaseError> {
-        let page: u32 = page.into();
-        let per_page: u32 = per_page.into();
-
         let limit = per_page;
         let offset = per_page * page;
 
@@ -596,7 +575,7 @@ impl FeedSubscriptionTable {
     }
 
     /// Check if a subscription exists
-    pub async fn exists_by_feed_id(&self, feed_id: i32) -> Result<bool, DatabaseError> {
+    async fn exists_by_feed_id(&self, feed_id: i32) -> Result<bool, DatabaseError> {
         let count: (i32,) =
             sqlx::query_as("SELECT COUNT(*) FROM feed_subscriptions WHERE feed_id = ?")
                 .bind(feed_id)
@@ -606,7 +585,7 @@ impl FeedSubscriptionTable {
     }
 
     /// Delete a specific subscription
-    pub async fn delete_subscription(
+    async fn delete_subscription(
         &self,
         feed_id: i32,
         subscriber_id: i32,
@@ -621,7 +600,7 @@ impl FeedSubscriptionTable {
     }
 
     /// Delete all subscriptions for a feed
-    pub async fn delete_all_by_feed_id(&self, feed_id: i32) -> Result<(), DatabaseError> {
+    async fn delete_all_by_feed_id(&self, feed_id: i32) -> Result<(), DatabaseError> {
         sqlx::query("DELETE FROM feed_subscriptions WHERE feed_id = ?")
             .bind(feed_id)
             .execute(&self.base.pool)
@@ -630,10 +609,7 @@ impl FeedSubscriptionTable {
     }
 
     /// Delete all subscriptions for a subscriber
-    pub async fn delete_all_by_subscriber_id(
-        &self,
-        subscriber_id: i32,
-    ) -> Result<(), DatabaseError> {
+    async fn delete_all_by_subscriber_id(&self, subscriber_id: i32) -> Result<(), DatabaseError> {
         sqlx::query("DELETE FROM feed_subscriptions WHERE subscriber_id = ?")
             .bind(subscriber_id)
             .execute(&self.base.pool)
@@ -642,9 +618,8 @@ impl FeedSubscriptionTable {
     }
 }
 
-// ============================================================================
-// ServerSettingsTable
-// ============================================================================
+#[async_trait::async_trait]
+impl ServerSettingsRepository for ServerSettingsTable {}
 
 impl_table!(
     ServerSettingsTable,
@@ -692,8 +667,9 @@ impl_table!(
     ]
 );
 
-impl VoiceSessionsTable {
-    pub async fn get_leaderboard_opt(
+#[async_trait::async_trait]
+impl VoiceSessionsRepository for VoiceSessionsTable {
+    async fn get_leaderboard_opt(
         &self,
         opts: &VoiceLeaderboardOpt,
     ) -> Result<Vec<VoiceLeaderboardEntry>, DatabaseError> {
@@ -744,7 +720,7 @@ impl VoiceSessionsTable {
         Ok(q.fetch_all(&self.base.pool).await?)
     }
 
-    pub async fn get_leaderboard(
+    async fn get_leaderboard(
         &self,
         guild_id: u64,
         limit: u32,
@@ -757,7 +733,7 @@ impl VoiceSessionsTable {
         self.get_leaderboard_opt(&opts).await
     }
 
-    pub async fn get_leaderboard_with_offset(
+    async fn get_leaderboard_with_offset(
         &self,
         guild_id: u64,
         offset: u32,
@@ -772,7 +748,7 @@ impl VoiceSessionsTable {
         self.get_leaderboard_opt(&opts).await
     }
 
-    pub async fn get_partner_leaderboard(
+    async fn get_partner_leaderboard(
         &self,
         opts: &VoiceLeaderboardOpt,
         target_user_id: u64,
@@ -830,7 +806,7 @@ impl VoiceSessionsTable {
     }
 
     /// Update leave_time for a specific session (user, channel, join_time combination)
-    pub async fn update_leave_time(
+    async fn update_leave_time(
         &self,
         user_id: u64,
         channel_id: u64,
@@ -854,7 +830,7 @@ impl VoiceSessionsTable {
     }
 
     /// Close a session by setting leave_time and is_active = 0 atomically
-    pub async fn close_session(
+    async fn close_session(
         &self,
         user_id: u64,
         channel_id: u64,
@@ -878,7 +854,7 @@ impl VoiceSessionsTable {
     }
 
     /// Find all active sessions (where is_active = 1)
-    pub async fn find_active_sessions(&self) -> Result<Vec<VoiceSessionsEntity>, DatabaseError> {
+    async fn find_active_sessions(&self) -> Result<Vec<VoiceSessionsEntity>, DatabaseError> {
         Ok(sqlx::query_as::<_, VoiceSessionsEntity>(
             r#"
             SELECT * FROM voice_sessions
@@ -890,7 +866,7 @@ impl VoiceSessionsTable {
     }
 
     /// Get all sessions for a specific user (if given) or guild within a time range
-    pub async fn get_sessions_in_range(
+    async fn get_sessions_in_range(
         &self,
         guild_id: u64,
         user_id: Option<u64>,
@@ -931,14 +907,14 @@ impl VoiceSessionsTable {
 
     /// Get daily voice activity for a specific user in a guild.
     /// Returns daily totals within the specified time range.
-    pub async fn get_user_daily_activity(
+    async fn get_user_daily_activity(
         &self,
         user_id: u64,
         guild_id: u64,
         since: &chrono::DateTime<chrono::Utc>,
         until: &chrono::DateTime<chrono::Utc>,
-    ) -> Result<Vec<crate::entity::VoiceDailyActivity>, DatabaseError> {
-        Ok(sqlx::query_as::<_, crate::entity::VoiceDailyActivity>(
+    ) -> Result<Vec<VoiceDailyActivity>, DatabaseError> {
+        Ok(sqlx::query_as::<_, VoiceDailyActivity>(
             r#"
             SELECT 
                 date(join_time) as day,
@@ -964,13 +940,13 @@ impl VoiceSessionsTable {
     }
 
     /// Get guild-wide daily statistics: total time.
-    pub async fn get_guild_daily_total_time(
+    async fn get_guild_daily_total_time(
         &self,
         guild_id: u64,
         since: &chrono::DateTime<chrono::Utc>,
         until: &chrono::DateTime<chrono::Utc>,
-    ) -> Result<Vec<crate::entity::GuildDailyStats>, DatabaseError> {
-        Ok(sqlx::query_as::<_, crate::entity::GuildDailyStats>(
+    ) -> Result<Vec<GuildDailyStats>, DatabaseError> {
+        Ok(sqlx::query_as::<_, GuildDailyStats>(
             r#"
             SELECT 
                 day,
@@ -1002,13 +978,13 @@ impl VoiceSessionsTable {
     }
 
     /// Get guild-wide daily statistics: average time per active user.
-    pub async fn get_guild_daily_average_time(
+    async fn get_guild_daily_average_time(
         &self,
         guild_id: u64,
         since: &chrono::DateTime<chrono::Utc>,
         until: &chrono::DateTime<chrono::Utc>,
-    ) -> Result<Vec<crate::entity::GuildDailyStats>, DatabaseError> {
-        Ok(sqlx::query_as::<_, crate::entity::GuildDailyStats>(
+    ) -> Result<Vec<GuildDailyStats>, DatabaseError> {
+        Ok(sqlx::query_as::<_, GuildDailyStats>(
             r#"
             SELECT 
                 day,
@@ -1040,13 +1016,13 @@ impl VoiceSessionsTable {
     }
 
     /// Get guild-wide daily statistics: count of unique active users.
-    pub async fn get_guild_daily_user_count(
+    async fn get_guild_daily_user_count(
         &self,
         guild_id: u64,
         since: &chrono::DateTime<chrono::Utc>,
         until: &chrono::DateTime<chrono::Utc>,
-    ) -> Result<Vec<crate::entity::GuildDailyStats>, DatabaseError> {
-        Ok(sqlx::query_as::<_, crate::entity::GuildDailyStats>(
+    ) -> Result<Vec<GuildDailyStats>, DatabaseError> {
+        Ok(sqlx::query_as::<_, GuildDailyStats>(
             r#"
             SELECT 
                 date(join_time) as day,
@@ -1065,8 +1041,8 @@ impl VoiceSessionsTable {
     }
 }
 
-impl From<crate::entity::VoiceLeaderboardOptBuilderError> for AppError {
-    fn from(value: crate::entity::VoiceLeaderboardOptBuilderError) -> Self {
+impl From<VoiceLeaderboardOptBuilderError> for AppError {
+    fn from(value: VoiceLeaderboardOptBuilderError) -> Self {
         AppError::internal_with_ref(value)
     }
 }
@@ -1092,9 +1068,10 @@ impl_table!(
     [key, value]
 );
 
-impl BotMetaTable {
+#[async_trait::async_trait]
+impl BotMetaRepository for BotMetaTable {
     /// Check if the bot_meta table exists
-    pub async fn table_exists(&self) -> bool {
+    async fn table_exists(&self) -> bool {
         sqlx::query("SELECT name FROM sqlite_master WHERE type='table' AND name='bot_meta'")
             .fetch_optional(&self.base.pool)
             .await

@@ -1,7 +1,6 @@
 //! Admin settings command.
 
 use std::borrow::Cow;
-use std::slice::from_ref;
 use std::time::Duration;
 
 use poise::serenity_prelude::*;
@@ -10,21 +9,16 @@ use crate::action_enum;
 use crate::bot::checks::is_author_guild_admin;
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;
-use crate::bot::commands::about::AboutController;
-use crate::bot::commands::feed::settings::FeedSettingsController;
-use crate::bot::commands::voice::settings::VoiceSettingsController;
-use crate::bot::commands::welcome::WelcomeSettingsController;
 use crate::bot::controller::Controller;
-use crate::bot::controller::Coordinator;
+use crate::bot::coordinator::Coordinator;
 use crate::bot::error::BotError;
 use crate::bot::navigation::NavigationResult;
-use crate::bot::views::Action;
 use crate::bot::views::ActionRegistry;
 use crate::bot::views::ResponseKind;
-use crate::bot::views::Trigger;
 use crate::bot::views::ViewCommand;
 use crate::bot::views::ViewContext;
 use crate::bot::views::ViewEngine;
+use crate::bot::views::ViewEvent;
 use crate::bot::views::ViewHandler;
 use crate::bot::views::ViewRender;
 use crate::controller;
@@ -32,22 +26,95 @@ use crate::entity::ServerSettings;
 use crate::entity::ServerSettingsEntity;
 use crate::error::AppError;
 
+/// Model representing a configurable feature in the bot.
+///
+/// Encapsulates feature identity, state access, and configuration logic
+/// to decouple feature management from specific handler implementations.
+pub struct Feature {
+    /// Unique identifier for the feature (e.g., "feeds", "voice", "welcome")
+    pub id: &'static str,
+    /// Display label for the feature (e.g., "Feeds", "Voice", "Welcome")
+    pub label: &'static str,
+    /// Function to get the current enabled state from ServerSettings
+    pub get_enabled: fn(&ServerSettings) -> bool,
+    /// Function to set the enabled state in ServerSettings
+    pub set_enabled: fn(&mut ServerSettings, bool),
+    /// Navigation result when configuring this feature
+    pub navigate: NavigationResult,
+}
+
+impl Feature {
+    /// Get the current enabled state for this feature
+    pub fn is_enabled(&self, settings: &ServerSettings) -> bool {
+        (self.get_enabled)(settings)
+    }
+
+    /// Toggle the enabled state for this feature
+    pub fn toggle_enabled(&self, settings: &mut ServerSettings) {
+        let current = (self.get_enabled)(settings);
+        (self.set_enabled)(settings, !current);
+    }
+}
+
+/// Registry of all configurable features
+pub struct FeatureRegistry;
+
+impl FeatureRegistry {
+    /// Returns all available features
+    pub fn all() -> &'static [Feature] {
+        static FEATURES: &[Feature] = &[
+            Feature {
+                id: "feeds",
+                label: "Feeds",
+                get_enabled: |s| s.feeds.enabled.unwrap_or(false),
+                set_enabled: |s, v| s.feeds.enabled = Some(v),
+                navigate: NavigationResult::SettingsFeeds,
+            },
+            Feature {
+                id: "voice",
+                label: "Voice",
+                get_enabled: |s| s.voice.enabled.unwrap_or(false),
+                set_enabled: |s, v| s.voice.enabled = Some(v),
+                navigate: NavigationResult::SettingsVoice,
+            },
+            Feature {
+                id: "welcome",
+                label: "Welcome",
+                get_enabled: |s| s.welcome.enabled.unwrap_or(false),
+                set_enabled: |s, v| s.welcome.enabled = Some(v),
+                navigate: NavigationResult::SettingsWelcome,
+            },
+        ];
+        FEATURES
+    }
+
+    /// Find a feature by its ID
+    pub fn find_by_id(id: &str) -> Option<&'static Feature> {
+        Self::all().iter().find(|f| f.id == id)
+    }
+
+    /// Find a feature by its label
+    pub fn find_by_label(label: &str) -> Option<&'static Feature> {
+        Self::all().iter().find(|f| f.label == label)
+    }
+}
+
 /// Opens main server settings
 ///
 /// Requires server administrator permissions.
 #[poise::command(slash_command)]
 pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
-    run_settings(ctx, None).await
+    Coordinator::new(ctx)
+        .run(NavigationResult::SettingsMain)
+        .await?;
+    Ok(())
 }
 
 controller! { pub struct SettingsMainController<'a> {} }
 
 #[async_trait::async_trait]
-impl<'a, S: Send + Sync + 'static> Controller<S> for SettingsMainController<'a> {
-    async fn run(
-        &mut self,
-        coordinator: &mut Coordinator<'_, S>,
-    ) -> Result<NavigationResult, Error> {
+impl Controller for SettingsMainController<'_> {
+    async fn run(&mut self, coordinator: std::sync::Arc<Coordinator<'_>>) -> Result<(), Error> {
         let ctx = *coordinator.context();
         is_author_guild_admin(ctx).await?;
         let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?;
@@ -65,41 +132,13 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for SettingsMainController<'a> 
         };
 
         let view = SettingsMainHandler {
-            state: SettingsMainState::FeatureSettings,
             settings,
             is_settings_modified: false,
         };
 
-        let mut engine = ViewEngine::new(&ctx, view, Duration::from_secs(120));
+        let mut engine = ViewEngine::new(ctx, view, Duration::from_secs(120), coordinator.clone());
 
-        let nav = std::sync::Arc::new(std::sync::Mutex::new(NavigationResult::Exit));
-
-        engine
-            .run(|action| {
-                let nav = nav.clone();
-                Box::pin(async move {
-                    match action {
-                        SettingsMainAction::Feeds => {
-                            *nav.lock().unwrap() = NavigationResult::SettingsFeeds;
-                            ViewCommand::Exit
-                        }
-                        SettingsMainAction::Voice => {
-                            *nav.lock().unwrap() = NavigationResult::SettingsVoice;
-                            ViewCommand::Exit
-                        }
-                        SettingsMainAction::About => {
-                            *nav.lock().unwrap() = NavigationResult::SettingsAbout;
-                            ViewCommand::Exit
-                        }
-                        SettingsMainAction::Welcome => {
-                            *nav.lock().unwrap() = NavigationResult::SettingsWelcome;
-                            ViewCommand::Exit
-                        }
-                        _ => ViewCommand::Render,
-                    }
-                })
-            })
-            .await?;
+        engine.run().await?;
 
         // Save settings if modified
         if engine.handler.is_settings_modified {
@@ -113,104 +152,11 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for SettingsMainController<'a> 
             engine.handler.done_update_settings()?;
         }
 
-        let res = nav.lock().unwrap().clone();
-        Ok(res)
-    }
-}
-/// Tracks the current settings page for navigation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SettingsPage {
-    /// Main settings page
-    Main,
-    /// Feed settings page
-    Feeds,
-    /// Voice settings page
-    Voice,
-    /// Welcome settings page
-    Welcome,
-    /// About page
-    About,
-}
-
-/// Runs the settings coordinator loop.
-///
-/// This is the entry point for the settings command. It creates a coordinator
-/// and runs controllers in a loop based on their NavigationResult.
-///
-/// # Parameters
-///
-/// - `ctx`: The Discord command context
-/// - `current_page`: Initial page to show. If None, defaults to [`SettingsPage::Main`]
-pub async fn run_settings(
-    ctx: Context<'_>,
-    initial_page: Option<SettingsPage>,
-) -> Result<(), Error> {
-    let mut coordinator = Coordinator::new(ctx);
-    let mut current_page = initial_page.unwrap_or(SettingsPage::Main);
-
-    loop {
-        // Create controller based on current page
-        // Clone the context to avoid borrow checker issues
-        let ctx_clone = *coordinator.context();
-        let result = match current_page {
-            SettingsPage::Main => {
-                let mut controller = SettingsMainController::new(&ctx_clone);
-                controller.run(&mut coordinator).await?
-            }
-            SettingsPage::Feeds => {
-                let mut controller = FeedSettingsController::new(&ctx_clone);
-                controller.run(&mut coordinator).await?
-            }
-            SettingsPage::Voice => {
-                let mut controller = VoiceSettingsController::new(&ctx_clone);
-                controller.run(&mut coordinator).await?
-            }
-            SettingsPage::Welcome => {
-                let mut controller = WelcomeSettingsController::new(&ctx_clone);
-                controller.run(&mut coordinator).await?
-            }
-            SettingsPage::About => {
-                let mut controller = AboutController::new(&ctx_clone);
-                controller.run(&mut coordinator).await?
-            }
-        };
-
-        // Update current page based on navigation result
-        match result {
-            NavigationResult::SettingsMain => current_page = SettingsPage::Main,
-            NavigationResult::SettingsFeeds => current_page = SettingsPage::Feeds,
-            NavigationResult::SettingsVoice => current_page = SettingsPage::Voice,
-            NavigationResult::SettingsWelcome => current_page = SettingsPage::Welcome,
-            NavigationResult::SettingsAbout => current_page = SettingsPage::About,
-            NavigationResult::Back => {
-                // Go back to main from any sub-page
-                current_page = SettingsPage::Main;
-            }
-            NavigationResult::Exit => break,
-            // Other navigation variants not valid from settings
-            _ => continue,
-        }
-    }
-
-    Ok(())
-}
-
-pub enum SettingsMainState {
-    FeatureSettings,
-    DeactivateFeatures,
-}
-
-impl SettingsMainState {
-    pub fn toggle(&mut self) {
-        *self = match self {
-            SettingsMainState::FeatureSettings => SettingsMainState::DeactivateFeatures,
-            SettingsMainState::DeactivateFeatures => SettingsMainState::FeatureSettings,
-        };
+        Ok(())
     }
 }
 
 pub struct SettingsMainHandler {
-    pub state: SettingsMainState,
     pub settings: ServerSettingsEntity,
     pub is_settings_modified: bool,
 }
@@ -235,140 +181,72 @@ impl SettingsMainHandler {
         Ok(())
     }
 
-    pub fn toggle_features<'b>(&mut self, features: impl Into<Cow<'b, [SettingsMainAction]>>) {
+    pub fn toggle_features<'b>(&mut self, features: impl Into<Cow<'b, [&'static Feature]>>) {
         let features = features.into();
-        for feat in features.iter() {
-            match feat {
-                SettingsMainAction::Feeds => {
-                    self.settings_mut().feeds.enabled =
-                        Some(!self.settings_mut().feeds.enabled.unwrap_or(false));
-                    self.is_settings_modified = true;
-                }
-                SettingsMainAction::Voice => {
-                    self.settings_mut().voice.enabled =
-                        Some(!self.settings_mut().voice.enabled.unwrap_or(false));
-                    self.is_settings_modified = true;
-                }
-                SettingsMainAction::Welcome => {
-                    self.settings_mut().welcome.enabled =
-                        Some(!self.settings_mut().welcome.enabled.unwrap_or(false));
-                    self.is_settings_modified = true;
-                }
-                _ => {}
-            }
+        for feature in features.iter() {
+            feature.toggle_enabled(self.settings_mut());
+            self.is_settings_modified = true;
         }
-    }
-
-    fn get_active_features(&self) -> Vec<SettingsMainAction> {
-        let mut features = Vec::new();
-        if self.settings().voice.enabled.unwrap_or(false) {
-            features.push(SettingsMainAction::Voice);
-        }
-        if self.settings().feeds.enabled.unwrap_or(false) {
-            features.push(SettingsMainAction::Feeds);
-        }
-        if self.settings().welcome.enabled.unwrap_or(false) {
-            features.push(SettingsMainAction::Welcome);
-        }
-        features
-    }
-
-    fn get_inactive_features(&self) -> Vec<SettingsMainAction> {
-        let mut features = Vec::new();
-        if !self.settings().voice.enabled.unwrap_or(false) {
-            features.push(SettingsMainAction::Voice);
-        }
-        if !self.settings().feeds.enabled.unwrap_or(false) {
-            features.push(SettingsMainAction::Feeds);
-        }
-        if !self.settings().welcome.enabled.unwrap_or(false) {
-            features.push(SettingsMainAction::Welcome);
-        }
-        features
     }
 }
 
 impl ViewRender<SettingsMainAction> for SettingsMainHandler {
     fn render(&self, registry: &mut ActionRegistry<SettingsMainAction>) -> ResponseKind<'_> {
-        let text_active_features_description = match &self.state {
-            SettingsMainState::FeatureSettings => {
-                "You can **configure** a feature by clicking the buttons below"
-            }
-            SettingsMainState::DeactivateFeatures => {
-                "You can **disable** a feature by clicking the buttons below"
-            }
-        };
-        let text_active_features = CreateTextDisplay::new(format!(
-            "-# **Settings**
-### Active Features
-> 🛈  List of features currently active for this server.
-> {text_active_features_description}."
-        ));
+        let text_settings = CreateTextDisplay::new("-# **Settings**");
+        let mut components = vec![CreateContainerComponent::TextDisplay(text_settings)];
 
-        let active_features = self.get_active_features();
-        let inactive_features = self.get_inactive_features();
+        // Navigation section
+        let text_configure = CreateTextDisplay::new(
+            "### Configure Feature Settings
+> 🛈  Click a button to edit settings for a specific feature.",
+        );
+        components.push(CreateContainerComponent::TextDisplay(text_configure));
 
-        let mut components = vec![CreateContainerComponent::TextDisplay(text_active_features)];
-
-        // Add button row - show disabled placeholder if empty
-        let button_active_features = if active_features.is_empty() {
-            CreateActionRow::Buttons(
-                vec![
-                    CreateButton::new("placeholder_no_features")
-                        .label("No features enabled")
+        // Build navigation buttons for all features
+        let navigation_buttons = CreateActionRow::Buttons(
+            FeatureRegistry::all()
+                .iter()
+                .map(|feature| {
+                    registry
+                        .register(match feature.label {
+                            "Feeds" => SettingsMainAction::FeedsFeature,
+                            "Voice" => SettingsMainAction::VoiceFeature,
+                            "Welcome" => SettingsMainAction::WelcomeFeature,
+                            _ => SettingsMainAction::About, // Should never happen
+                        })
+                        .as_button()
+                        .label(feature.label)
                         .style(ButtonStyle::Secondary)
-                        .disabled(true),
-                ]
-                .into(),
-            )
-        } else {
-            CreateActionRow::Buttons(
-                active_features
-                    .into_iter()
-                    .map(|feat| {
-                        let id = registry.register(feat.clone());
-                        CreateButton::new(id)
-                            .label(feat.label())
-                            .style(match &self.state {
-                                SettingsMainState::FeatureSettings => ButtonStyle::Primary,
-                                SettingsMainState::DeactivateFeatures => ButtonStyle::Danger,
-                            })
-                    })
-                    .collect(),
-            )
-        };
-        components.push(CreateContainerComponent::ActionRow(button_active_features));
-
-        let button_toggle_state = CreateActionRow::Buttons(
-            vec![
-                CreateButton::new(registry.register(SettingsMainAction::ToggleState))
-                    .label(match &self.state {
-                        SettingsMainState::FeatureSettings => "Deactivate Features",
-                        SettingsMainState::DeactivateFeatures => "Feature Settings",
-                    })
-                    .style(match &self.state {
-                        SettingsMainState::FeatureSettings => ButtonStyle::Danger,
-                        SettingsMainState::DeactivateFeatures => ButtonStyle::Primary,
-                    }),
-            ]
-            .into(),
+                })
+                .collect(),
         );
-        components.push(CreateContainerComponent::ActionRow(button_toggle_state));
+        components.push(CreateContainerComponent::ActionRow(navigation_buttons));
 
-        let text_add_features = CreateTextDisplay::new(
-            "### Add Features
-> 🛈  List of inactive features that are available for this server.",
+        // Toggle section
+        let text_toggle = CreateTextDisplay::new(
+            "### Enable or Disable Features
+> 🛈  Turn features on or off. A checkmark means the feature is currently enabled.",
         );
-        components.push(CreateContainerComponent::TextDisplay(text_add_features));
+        components.push(CreateContainerComponent::TextDisplay(text_toggle));
 
-        // Add select menu - show disabled placeholder if empty
-        let selectmenu_add_features = if inactive_features.is_empty() {
+        // Build select menu options with emoji indicators using FeatureRegistry
+        let select_options: Vec<_> = FeatureRegistry::all()
+            .iter()
+            .map(|feature| {
+                let is_enabled = feature.is_enabled(self.settings());
+                let emoji = if is_enabled { "✅" } else { "⬜" };
+                CreateSelectMenuOption::new(format!("{} {}", emoji, feature.label), feature.label)
+            })
+            .collect();
+
+        // Add select menu - show disabled placeholder if empty (should never happen)
+        let select_menu = if select_options.is_empty() {
             CreateActionRow::SelectMenu(
                 CreateSelectMenu::new(
-                    "placeholder_no_inactive_features",
+                    "placeholder_no_features",
                     CreateSelectMenuKind::String {
                         options: vec![CreateSelectMenuOption::new(
-                            "All features enabled",
+                            "No features available",
                             "placeholder",
                         )]
                         .into(),
@@ -377,32 +255,23 @@ impl ViewRender<SettingsMainAction> for SettingsMainHandler {
                 .disabled(true),
             )
         } else {
-            CreateActionRow::SelectMenu(CreateSelectMenu::new(
-                registry.register(SettingsMainAction::AddFeatures),
-                CreateSelectMenuKind::String {
-                    options: inactive_features
-                        .into_iter()
-                        .map(|feat| {
-                            let label = feat.label();
-                            let val = match feat {
-                                SettingsMainAction::Feeds => "feeds",
-                                SettingsMainAction::Voice => "voice",
-                                _ => "unknown",
-                            };
-                            CreateSelectMenuOption::new(label, val)
-                        })
-                        .collect(),
-                },
-            ))
+            CreateActionRow::SelectMenu(
+                registry
+                    .register(SettingsMainAction::ToggleFeature)
+                    .as_select(CreateSelectMenuKind::String {
+                        options: select_options.into(),
+                    }),
+            )
         };
-        components.push(CreateContainerComponent::ActionRow(selectmenu_add_features));
+        components.push(CreateContainerComponent::ActionRow(select_menu));
 
         let container = CreateComponent::Container(CreateContainer::new(components));
 
         let bottom_buttons = CreateComponent::ActionRow(CreateActionRow::Buttons(
             vec![
-                CreateButton::new(registry.register(SettingsMainAction::About))
-                    .label(SettingsMainAction::About.label())
+                registry
+                    .register(SettingsMainAction::About)
+                    .as_button()
                     .style(ButtonStyle::Secondary),
             ]
             .into(),
@@ -414,57 +283,64 @@ impl ViewRender<SettingsMainAction> for SettingsMainHandler {
 
 action_enum! {
     SettingsMainAction {
-        Feeds,
-        Voice,
-        Welcome,
-        AddFeatures,
-        ToggleState,
+        #[label = "Feeds"]
+        FeedsFeature,
+        #[label = "Voice"]
+        VoiceFeature,
+        #[label = "Welcome"]
+        WelcomeFeature,
+        ToggleFeature,
         #[label = "🛈 About"]
         About,
     }
 }
 
 #[async_trait::async_trait]
-impl ViewHandler<SettingsMainAction> for SettingsMainHandler {
+impl ViewHandler<SettingsMainAction, ()> for SettingsMainHandler {
     async fn handle(
         &mut self,
-        action: SettingsMainAction,
-        trigger: Trigger<'_>,
-        _ctx: &ViewContext<'_, SettingsMainAction>,
+        ctx: ViewContext<'_, SettingsMainAction>,
     ) -> Result<ViewCommand, Error> {
         use SettingsMainAction::*;
-        use SettingsMainState::*;
 
+        let cor = ctx.coordinator.clone();
+        let action = ctx.action();
         match action {
-            Feeds | Voice | Welcome => match self.state {
-                FeatureSettings => Ok(ViewCommand::Continue),
-                DeactivateFeatures => {
-                    self.toggle_features(from_ref(&action));
-                    Ok(ViewCommand::Render)
+            FeedsFeature => {
+                if let Some(feature) = FeatureRegistry::find_by_label("Feeds") {
+                    cor.navigate(feature.navigate.clone());
                 }
-            },
-            AddFeatures => {
-                if let Trigger::Component(interaction) = trigger
+                Ok(ViewCommand::Exit)
+            }
+            VoiceFeature => {
+                if let Some(feature) = FeatureRegistry::find_by_label("Voice") {
+                    cor.navigate(feature.navigate.clone());
+                }
+                Ok(ViewCommand::Exit)
+            }
+            WelcomeFeature => {
+                if let Some(feature) = FeatureRegistry::find_by_label("Welcome") {
+                    cor.navigate(feature.navigate.clone());
+                }
+                Ok(ViewCommand::Exit)
+            }
+            ToggleFeature => {
+                if let ViewEvent::Component(_, interaction) = ctx.event
                     && let ComponentInteractionDataKind::StringSelect { values } =
                         &interaction.data.kind
                 {
-                    let mut features = Vec::new();
-                    for val in values {
-                        match val.as_str() {
-                            "feeds" => features.push(Feeds),
-                            "voice" => features.push(Voice),
-                            _ => {}
-                        }
-                    }
+                    let features: Vec<_> = values
+                        .iter()
+                        .filter_map(|v| FeatureRegistry::find_by_label(v))
+                        .collect();
                     self.toggle_features(features);
                 }
                 Ok(ViewCommand::Render)
             }
-            ToggleState => {
-                self.state.toggle();
-                Ok(ViewCommand::Render)
+            About => {
+                cor.navigate(NavigationResult::SettingsAbout);
+                Ok(ViewCommand::Exit)
             }
-            About => Ok(ViewCommand::Continue),
         }
     }
 }

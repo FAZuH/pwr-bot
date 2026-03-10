@@ -1,5 +1,4 @@
 //! Voice stats subcommand.
-
 use std::collections::HashMap;
 use std::time::Duration;
 use std::time::Instant;
@@ -17,24 +16,25 @@ use crate::bot::commands::Error;
 use crate::bot::commands::voice::GuildStatType;
 use crate::bot::commands::voice::TimeRange;
 use crate::bot::commands::voice::VoiceStatsTimeRange;
+use crate::bot::commands::voice::stats_chart::generate_line_chart;
 use crate::bot::controller::Controller;
-use crate::bot::controller::Coordinator;
+use crate::bot::coordinator::Coordinator;
 use crate::bot::error::BotError;
 use crate::bot::navigation::NavigationResult;
 use crate::bot::utils::format_duration;
-use crate::bot::views::Action;
 use crate::bot::views::ActionRegistry;
 use crate::bot::views::ResponseKind;
-use crate::bot::views::Trigger;
 use crate::bot::views::ViewCommand;
 use crate::bot::views::ViewContext;
 use crate::bot::views::ViewEngine;
+use crate::bot::views::ViewEvent;
 use crate::bot::views::ViewHandler;
 use crate::bot::views::ViewRender;
 use crate::entity::GuildDailyStats;
 use crate::entity::VoiceDailyActivity;
 use crate::entity::VoiceSessionsEntity;
 use crate::error::AppError;
+use crate::service::traits::VoiceTracker;
 
 /// Show voice activity statistics
 ///
@@ -71,7 +71,7 @@ pub async fn command(
                     .unwrap_or(false);
 
                 if !is_member {
-                    return Err(crate::bot::error::BotError::UserNotInGuild(
+                    return Err(BotError::UserNotInGuild(
                         "The specified user is not a member of this server.".to_string(),
                     )
                     .into());
@@ -83,7 +83,7 @@ pub async fn command(
         }
     } else if let Some(ref target) = user {
         if target.id != ctx.author().id {
-            return Err(crate::bot::error::BotError::UserNotInGuild(
+            return Err(BotError::UserNotInGuild(
                 "In direct messages, you can only view your own voice stats.".to_string(),
             )
             .into());
@@ -93,9 +93,13 @@ pub async fn command(
         Some(ctx.author().clone())
     };
 
-    let mut coordinator = Coordinator::new(ctx);
-    let mut controller = VoiceStatsController::new(&ctx, time_range, target_user, stat_type);
-    let _result = controller.run(&mut coordinator).await?;
+    Coordinator::new(ctx)
+        .run(NavigationResult::VoiceStats {
+            time_range,
+            target_user: Box::new(target_user),
+            stat_type,
+        })
+        .await?;
     Ok(())
 }
 
@@ -126,6 +130,7 @@ action_enum! {
 }
 
 /// Data for voice stats display.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct VoiceStatsData {
     /// The user this data is for (None for guild stats)
     pub user: Option<User>,
@@ -228,13 +233,28 @@ impl VoiceStatsData {
 pub struct VoiceStatsHandler {
     pub data: VoiceStatsData,
     pub image_bytes: Option<Vec<u8>>,
-    pub service: std::sync::Arc<crate::service::voice_tracking_service::VoiceTrackingService>,
+    pub service: std::sync::Arc<dyn VoiceTracker>,
     pub guild_id: u64,
-    pub original_target_user: Option<User>,
+    pub user: User,
 }
 
 impl VoiceStatsHandler {
-    pub async fn refetch_data(&mut self) -> Result<(), Error> {
+    fn new(
+        data: VoiceStatsData,
+        service: std::sync::Arc<dyn VoiceTracker>,
+        guild_id: u64,
+        user: User,
+    ) -> Self {
+        Self {
+            data,
+            image_bytes: None,
+            service,
+            guild_id,
+            user,
+        }
+    }
+
+    async fn refetch_data(&mut self) -> Result<(), Error> {
         let (since, until) = self.data.time_range.to_range();
 
         self.data.raw_sessions = if self.data.time_range != VoiceStatsTimeRange::Yearly {
@@ -275,9 +295,9 @@ impl VoiceStatsHandler {
     }
 
     /// Generates the contribution grid image.
-    pub fn generate_image(&self) -> anyhow::Result<Vec<u8>> {
+    fn generate_image(&self) -> anyhow::Result<Vec<u8>> {
         if self.data.time_range != VoiceStatsTimeRange::Yearly {
-            return crate::bot::commands::voice::stats_chart::generate_line_chart(
+            return generate_line_chart(
                 &self.data.raw_sessions,
                 self.data.time_range,
                 self.data.stat_type,
@@ -447,15 +467,13 @@ impl VoiceStatsHandler {
 impl ViewHandler<VoiceStatsAction> for VoiceStatsHandler {
     async fn handle(
         &mut self,
-        action: VoiceStatsAction,
-        _trigger: Trigger<'_>,
-        _ctx: &ViewContext<'_, VoiceStatsAction>,
+        ctx: ViewContext<'_, VoiceStatsAction>,
     ) -> Result<ViewCommand, Error> {
         use VoiceStatsAction::*;
 
         let mut changed = false;
 
-        match action {
+        match ctx.action() {
             TimeYearly => {
                 self.data.time_range = VoiceStatsTimeRange::Yearly;
                 changed = true;
@@ -490,20 +508,21 @@ impl ViewHandler<VoiceStatsAction> for VoiceStatsHandler {
                 if self.data.is_user_stats() {
                     self.data.user = None;
                 } else {
-                    self.data.user = self.original_target_user.clone();
+                    self.data.user = Some(self.user.clone());
                 }
                 changed = true;
             }
             SelectUser => {
-                if let Trigger::Component(interaction) = _trigger
+                if let ViewEvent::Component(_, ref interaction) = ctx.event
                     && let poise::serenity_prelude::ComponentInteractionDataKind::UserSelect {
                         values,
                     } = &interaction.data.kind
                     && let Some(user_id) = values.first()
                 {
                     // Fetch user object
-                    if let Ok(user) = user_id.to_user(_ctx.poise.http()).await {
-                        self.data.user = Some(user);
+                    if let Ok(user) = user_id.to_user(ctx.poise.http()).await {
+                        self.user = user;
+                        self.data.user = Some(self.user.clone());
                         changed = true;
                     }
                 }
@@ -549,12 +568,14 @@ impl ViewRender<VoiceStatsAction> for VoiceStatsHandler {
 
         // Add Data Mode Toggle to bottom of Container
         let toggle_label = if self.data.is_user_stats() {
-            "Show server stats".to_string()
+            "Show server stats"
         } else {
-            "Show user stats".to_string()
+            "Show user stats"
         };
 
-        let toggle_button = CreateButton::new(registry.register(ToggleDataMode))
+        let toggle_button = registry
+            .register(ToggleDataMode)
+            .as_button()
             .label(toggle_label)
             .style(ButtonStyle::Primary);
 
@@ -568,34 +589,34 @@ impl ViewRender<VoiceStatsAction> for VoiceStatsHandler {
 
         // 1. Time Range Row
         let time_buttons = vec![
-            CreateButton::new(registry.register(TimeYearly))
-                .label(TimeYearly.label())
-                .style(if self.data.time_range == VoiceStatsTimeRange::Yearly {
+            registry.register(TimeYearly).as_button().style(
+                if self.data.time_range == VoiceStatsTimeRange::Yearly {
                     ButtonStyle::Primary
                 } else {
                     ButtonStyle::Secondary
-                }),
-            CreateButton::new(registry.register(TimeMonthly))
-                .label(TimeMonthly.label())
-                .style(if self.data.time_range == VoiceStatsTimeRange::Monthly {
+                },
+            ),
+            registry.register(TimeMonthly).as_button().style(
+                if self.data.time_range == VoiceStatsTimeRange::Monthly {
                     ButtonStyle::Primary
                 } else {
                     ButtonStyle::Secondary
-                }),
-            CreateButton::new(registry.register(TimeWeekly))
-                .label(TimeWeekly.label())
-                .style(if self.data.time_range == VoiceStatsTimeRange::Weekly {
+                },
+            ),
+            registry.register(TimeWeekly).as_button().style(
+                if self.data.time_range == VoiceStatsTimeRange::Weekly {
                     ButtonStyle::Primary
                 } else {
                     ButtonStyle::Secondary
-                }),
-            CreateButton::new(registry.register(TimeHourly))
-                .label(TimeHourly.label())
-                .style(if self.data.time_range == VoiceStatsTimeRange::Hourly {
+                },
+            ),
+            registry.register(TimeHourly).as_button().style(
+                if self.data.time_range == VoiceStatsTimeRange::Hourly {
                     ButtonStyle::Primary
                 } else {
                     ButtonStyle::Secondary
-                }),
+                },
+            ),
         ];
         components.push(CreateComponent::ActionRow(CreateActionRow::Buttons(
             time_buttons.into(),
@@ -604,34 +625,28 @@ impl ViewRender<VoiceStatsAction> for VoiceStatsHandler {
         // 2. Aggregation Row (Only for Guild)
         let mut stat_buttons = vec![];
         if !self.data.is_user_stats() {
-            stat_buttons.push(
-                CreateButton::new(registry.register(StatUniqueUsers))
-                    .label(StatUniqueUsers.label())
-                    .style(if self.data.stat_type == GuildStatType::ActiveUserCount {
-                        ButtonStyle::Primary
-                    } else {
-                        ButtonStyle::Secondary
-                    }),
-            );
+            stat_buttons.push(registry.register(StatUniqueUsers).as_button().style(
+                if self.data.stat_type == GuildStatType::ActiveUserCount {
+                    ButtonStyle::Primary
+                } else {
+                    ButtonStyle::Secondary
+                },
+            ));
         }
-        stat_buttons.push(
-            CreateButton::new(registry.register(StatTotalTime))
-                .label(StatTotalTime.label())
-                .style(if self.data.stat_type == GuildStatType::TotalTime {
-                    ButtonStyle::Primary
-                } else {
-                    ButtonStyle::Secondary
-                }),
-        );
-        stat_buttons.push(
-            CreateButton::new(registry.register(StatAverageTime))
-                .label(StatAverageTime.label())
-                .style(if self.data.stat_type == GuildStatType::AverageTime {
-                    ButtonStyle::Primary
-                } else {
-                    ButtonStyle::Secondary
-                }),
-        );
+        stat_buttons.push(registry.register(StatTotalTime).as_button().style(
+            if self.data.stat_type == GuildStatType::TotalTime {
+                ButtonStyle::Primary
+            } else {
+                ButtonStyle::Secondary
+            },
+        ));
+        stat_buttons.push(registry.register(StatAverageTime).as_button().style(
+            if self.data.stat_type == GuildStatType::AverageTime {
+                ButtonStyle::Primary
+            } else {
+                ButtonStyle::Secondary
+            },
+        ));
         components.push(CreateComponent::ActionRow(CreateActionRow::Buttons(
             stat_buttons.into(),
         )));
@@ -643,10 +658,9 @@ impl ViewRender<VoiceStatsAction> for VoiceStatsHandler {
                 .user
                 .clone()
                 .map(|u| std::borrow::Cow::Owned(vec![u.id]));
-            let user_select = poise::serenity_prelude::CreateSelectMenu::new(
-                registry.register(SelectUser),
-                poise::serenity_prelude::CreateSelectMenuKind::User { default_users },
-            );
+            let user_select = registry
+                .register(SelectUser)
+                .as_select(CreateSelectMenuKind::User { default_users });
             components.push(CreateComponent::ActionRow(CreateActionRow::SelectMenu(
                 user_select,
             )));
@@ -674,7 +688,7 @@ impl ViewRender<VoiceStatsAction> for VoiceStatsHandler {
 /// Controller for voice stats display and interaction.
 pub struct VoiceStatsController<'a> {
     #[allow(dead_code)]
-    ctx: &'a Context<'a>,
+    ctx: Context<'a>,
     pub time_range: VoiceStatsTimeRange,
     pub target_user: Option<User>,
     pub stat_type: GuildStatType,
@@ -683,7 +697,7 @@ pub struct VoiceStatsController<'a> {
 impl<'a> VoiceStatsController<'a> {
     /// Creates a new stats controller.
     pub fn new(
-        ctx: &'a Context<'a>,
+        ctx: Context<'a>,
         time_range: VoiceStatsTimeRange,
         target_user: Option<User>,
         stat_type: GuildStatType,
@@ -761,11 +775,8 @@ impl<'a> VoiceStatsController<'a> {
 }
 
 #[async_trait::async_trait]
-impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceStatsController<'a> {
-    async fn run(
-        &mut self,
-        coordinator: &mut Coordinator<'_, S>,
-    ) -> Result<NavigationResult, Error> {
+impl Controller for VoiceStatsController<'_> {
+    async fn run(&mut self, coordinator: std::sync::Arc<Coordinator<'_>>) -> Result<(), Error> {
         let ctx = *coordinator.context();
         ctx.defer().await?;
 
@@ -773,15 +784,22 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceStatsController<'a> {
 
         // Fetch initial data
         let data = self.fetch_data(&ctx).await?;
-        let guild_id = ctx.guild_id().map(|id| id.get()).unwrap_or(0);
+        let guild_id = ctx
+            .guild_id()
+            .map(|id| id.get())
+            .ok_or(BotError::GuildOnlyCommand)?;
 
-        let mut view = VoiceStatsHandler {
+        let user = self
+            .target_user
+            .clone()
+            .unwrap_or_else(|| ctx.author().clone());
+
+        let mut view = VoiceStatsHandler::new(
             data,
-            image_bytes: None,
-            service: ctx.data().service.voice_tracking.clone(),
+            ctx.data().service.voice_tracking.clone(),
             guild_id,
-            original_target_user: self.target_user.clone(),
-        };
+            user,
+        );
 
         // Generate and send the image
         if !view.data.user_activity.is_empty()
@@ -792,17 +810,15 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceStatsController<'a> {
             view.image_bytes = Some(bytes);
         }
 
-        let mut engine = ViewEngine::new(&ctx, view, Duration::from_secs(120));
+        let mut engine = ViewEngine::new(ctx, view, Duration::from_secs(120), coordinator.clone());
 
         trace!(
             "stats_controller_initial_response {} ms",
             controller_start.elapsed().as_millis()
         );
 
-        engine
-            .run(|_action| Box::pin(async move { ViewCommand::Render }))
-            .await?;
+        engine.run().await?;
 
-        Ok(NavigationResult::Exit)
+        Ok(())
     }
 }

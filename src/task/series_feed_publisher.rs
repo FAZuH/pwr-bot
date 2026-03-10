@@ -15,12 +15,12 @@ use crate::entity::FeedEntity;
 use crate::event::FeedUpdateData;
 use crate::event::FeedUpdateEvent;
 use crate::event::event_bus::EventBus;
-use crate::service::feed_subscription_service::FeedSubscriptionService;
 use crate::service::feed_subscription_service::FeedUpdateResult;
+use crate::service::traits::FeedSubscriptionProvider;
 
 /// Task that periodically checks feeds for updates.
 pub struct SeriesFeedPublisher {
-    service: Arc<FeedSubscriptionService>,
+    service: Arc<dyn FeedSubscriptionProvider>,
     event_bus: Arc<EventBus>,
     poll_interval: Duration,
     running: AtomicBool,
@@ -29,7 +29,7 @@ pub struct SeriesFeedPublisher {
 impl SeriesFeedPublisher {
     /// Creates a new feed publisher with the given configuration.
     pub fn new(
-        service: Arc<FeedSubscriptionService>,
+        service: Arc<dyn FeedSubscriptionProvider>,
         event_bus: Arc<EventBus>,
         poll_interval: Duration,
     ) -> Arc<Self> {

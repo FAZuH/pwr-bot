@@ -72,18 +72,13 @@ impl ViewRender<MyAction> for MyHandler {
 ```
 
 ### 4. Implement `ViewHandler`
-Process actions and return a `ViewCommand`.
+Process actions and return a `ViewCommand`. The `ViewContext` provides access to the action, the event that triggered it, a sender for async tasks, and the coordinator.
 
 ```rust
 #[async_trait::async_trait]
 impl ViewHandler<MyAction> for MyHandler {
-    async fn handle(
-        &mut self,
-        action: MyAction,
-        trigger: Trigger<'_>,
-        ctx: &ViewContext<'_, MyAction>,
-    ) -> Result<ViewCommand, Error> {
-        match action {
+    async fn handle(&mut self, ctx: ViewContext<'_, MyAction>) -> Result<ViewCommand, Error> {
+        match ctx.action() {
             MyAction::Click => {
                 self.count += 1;
                 Ok(ViewCommand::Render)
@@ -95,17 +90,15 @@ impl ViewHandler<MyAction> for MyHandler {
 ```
 
 ### 5. Run the View
-Use `ViewEngine` in your controller or command.
+Use `ViewEngine` in your controller.
 
 ```rust
-pub async fn run_my_view(ctx: &Context<'_>) -> Result<(), Error> {
+pub async fn run_my_view(coordinator: Arc<Coordinator<'_>>) -> Result<(), Error> {
     let handler = MyHandler { count: 0 };
-    let mut engine = ViewEngine::new(ctx, handler, Duration::from_secs(60));
+    let ctx = *coordinator.context();
+    let mut engine = ViewEngine::new(ctx, handler, Duration::from_secs(60), coordinator.clone());
     
-    engine.run(|action| Box::pin(async move {
-        // Optional callback for parent coordination
-        ViewCommand::Continue
-    })).await
+    engine.run().await
 }
 ```
 
@@ -125,8 +118,8 @@ ctx.spawn(async move {
 To open a modal, return `ViewCommand::AlreadyResponded` to prevent the engine from auto-acknowledging the interaction.
 
 ```rust
-if let Trigger::Component(i) = trigger {
-    i.create_response(ctx.poise.http(), CreateInteractionResponse::Modal(my_modal)).await?;
+if let ViewEvent::Component(_, interaction) = &ctx.event {
+    interaction.create_response(ctx.poise.http(), CreateInteractionResponse::Modal(my_modal)).await?;
     return Ok(ViewCommand::AlreadyResponded);
 }
 ```
@@ -136,7 +129,7 @@ Map child actions to parent actions using `ctx.map`.
 
 ```rust
 // In ParentHandler::handle
-if let ParentAction::Pagination(child_action) = action {
-    return self.pagination_view.handle(child_action, trigger, &ctx.map(ParentAction::Pagination)).await;
+if let ParentAction::Pagination(child_action) = ctx.action() {
+    return self.pagination_view.handle(ctx.map(*child_action, ParentAction::Pagination)).await;
 }
 ```

@@ -15,20 +15,20 @@ use crate::entity::SubscriberEntity;
 use crate::entity::SubscriberType;
 use crate::event::Event;
 use crate::event::FeedUpdateEvent;
-use crate::repository::Repository;
+use crate::service::Services;
 use crate::subscriber::Subscriber;
 
 /// Subscriber that sends feed updates to users via DM.
 pub struct DiscordDmSubscriber {
     bot: Arc<Bot>,
-    db: Arc<Repository>,
+    services: Arc<Services>,
 }
 
 impl DiscordDmSubscriber {
     /// Creates a new DM subscriber.
-    pub fn new(bot: Arc<Bot>, db: Arc<Repository>) -> Self {
+    pub fn new(bot: Arc<Bot>, services: Arc<Services>) -> Self {
         debug!("Initializing DiscordDmSubscriber.");
-        Self { bot, db }
+        Self { bot, services }
     }
 
     /// Handles a feed update event by sending DMs to subscribers.
@@ -37,9 +37,9 @@ impl DiscordDmSubscriber {
 
         // Get all subscriptions for this feed
         let subs = self
-            .db
-            .subscriber
-            .select_all_by_type_and_feed(SubscriberType::Dm, event.feed.id)
+            .services
+            .feed_subscription
+            .get_subscribers_by_type_and_feed(SubscriberType::Dm, event.feed.id)
             .await?;
 
         for sub in subs {

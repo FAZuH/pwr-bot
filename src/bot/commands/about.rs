@@ -1,5 +1,4 @@
 //! About command showing bot statistics and information.
-
 use std::time::Duration;
 
 use chrono::Datelike;
@@ -10,14 +9,11 @@ use poise::serenity_prelude::*;
 use crate::action_enum;
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;
-use crate::bot::commands::settings::SettingsPage;
-use crate::bot::commands::settings::run_settings;
 use crate::bot::controller::Controller;
-use crate::bot::controller::Coordinator;
+use crate::bot::coordinator::Coordinator;
 use crate::bot::navigation::NavigationResult;
 use crate::bot::views::ActionRegistry;
 use crate::bot::views::ResponseKind;
-use crate::bot::views::Trigger;
 use crate::bot::views::ViewCommand;
 use crate::bot::views::ViewContext;
 use crate::bot::views::ViewEngine;
@@ -28,17 +24,17 @@ use crate::controller;
 /// Show information about the bot
 #[poise::command(slash_command)]
 pub async fn about(ctx: Context<'_>) -> Result<(), Error> {
-    run_settings(ctx, Some(SettingsPage::About)).await
+    Coordinator::new(ctx)
+        .run(NavigationResult::SettingsAbout)
+        .await?;
+    Ok(())
 }
 
 controller! { pub struct AboutController<'a> {} }
 
 #[async_trait::async_trait]
-impl<S: Send + Sync + 'static> Controller<S> for AboutController<'_> {
-    async fn run(
-        &mut self,
-        coordinator: &mut Coordinator<'_, S>,
-    ) -> Result<NavigationResult, Error> {
+impl Controller for AboutController<'_> {
+    async fn run(&mut self, coordinator: std::sync::Arc<Coordinator<'_>>) -> Result<(), Error> {
         let ctx = *coordinator.context();
         ctx.defer().await?;
 
@@ -47,32 +43,17 @@ impl<S: Send + Sync + 'static> Controller<S> for AboutController<'_> {
 
         let view = AboutView { stats, avatar_url };
 
-        let mut engine = ViewEngine::new(&ctx, view, Duration::from_secs(120));
+        let mut engine = ViewEngine::new(ctx, view, Duration::from_secs(120), coordinator.clone());
 
-        let nav = std::sync::Arc::new(std::sync::Mutex::new(NavigationResult::Exit));
+        engine.run().await?;
 
-        engine
-            .run(|action| {
-                let nav = nav.clone();
-                Box::pin(async move {
-                    match action {
-                        AboutAction::Back => {
-                            *nav.lock().unwrap() = NavigationResult::Back;
-                            ViewCommand::Exit
-                        }
-                    }
-                })
-            })
-            .await?;
-
-        let res = nav.lock().unwrap().clone();
-        Ok(res)
+        Ok(())
     }
 }
 
 action_enum! {
     AboutAction {
-        #[label = "< Back"]
+        #[label = "❮ Back"]
         Back,
     }
 }
@@ -85,14 +66,12 @@ pub struct AboutView {
 
 #[async_trait::async_trait]
 impl ViewHandler<AboutAction> for AboutView {
-    async fn handle(
-        &mut self,
-        action: AboutAction,
-        _trigger: Trigger<'_>,
-        _ctx: &ViewContext<'_, AboutAction>,
-    ) -> Result<ViewCommand, Error> {
-        match action {
-            AboutAction::Back => Ok(ViewCommand::Continue),
+    async fn handle(&mut self, ctx: ViewContext<'_, AboutAction>) -> Result<ViewCommand, Error> {
+        match ctx.action() {
+            AboutAction::Back => {
+                ctx.coordinator.navigate(NavigationResult::SettingsMain);
+                Ok(ViewCommand::Exit)
+            }
         }
     }
 }
@@ -156,10 +135,7 @@ impl ViewRender<AboutAction> for AboutView {
             CreateButton::new_link("https://github.com/FAZuH/pwr-bot/blob/main/LICENSE")
                 .label("License");
 
-        let back_action = crate::bot::views::RegisteredAction {
-            id: registry.register(AboutAction::Back),
-            label: "< Back",
-        };
+        let back_action = registry.register(AboutAction::Back);
 
         let back_button = CreateComponent::ActionRow(CreateActionRow::Buttons(
             vec![back_action.as_button().style(ButtonStyle::Secondary)].into(),
@@ -177,6 +153,7 @@ impl ViewRender<AboutAction> for AboutView {
 }
 
 /// Statistics displayed in the about command.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AboutStats {
     version: String,
     uptime: Duration,

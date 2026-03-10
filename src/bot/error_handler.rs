@@ -21,7 +21,7 @@ impl ErrorHandler {
             FrameworkError::Command { error, ctx, .. } => {
                 let (title, description) = Self::classify_error(&error, &ctx);
                 let message = format!(
-                    "## {}\n\n**Command:** `{}`\n**Error:** {}",
+                    "### {}\n\n**Command:** `{}`\n**Error:** {}",
                     title,
                     ctx.command().qualified_name,
                     description
@@ -30,7 +30,7 @@ impl ErrorHandler {
             }
             FrameworkError::ArgumentParse { error, ctx, .. } => {
                 let message = format!(
-                    "## ⚠️ Invalid Arguments\n\n**Command:** `/{}`\n**Issue:** {}\n\n> Use `/help {}` for usage information.",
+                    "### ⚠️ Invalid Arguments\n\n**Command:** `/{}`\n**Issue:** {}\n\n> Use `/help {}` for usage information.",
                     ctx.command().name,
                     error,
                     ctx.command().name

@@ -6,7 +6,6 @@ use pwr_bot::entity::ServerSettings;
 use pwr_bot::entity::ServerSettingsEntity;
 use pwr_bot::entity::VoiceSessionsEntity;
 use pwr_bot::entity::VoiceSettings;
-use pwr_bot::repository::table::Table;
 use pwr_bot::service::voice_tracking_service::VoiceTrackingService;
 
 mod common;

@@ -50,7 +50,7 @@ async fn main() -> Result<()> {
     let platforms = Arc::new(Platforms::new());
     let services = setup_services(db.clone(), platforms.clone()).await?;
 
-    setup_voice_tracking(&services, init_start).await?;
+    let voice_heartbeat = setup_voice_tracking(&services, init_start).await?;
 
     let voice_subscriber = Arc::new(VoiceStateSubscriber::new(services.clone()));
     let bot = setup_bot(
@@ -63,10 +63,24 @@ async fn main() -> Result<()> {
     )
     .await?;
 
-    setup_subscribers(event_bus.clone(), bot.clone(), db.clone(), voice_subscriber).await?;
+    setup_subscribers(
+        event_bus.clone(),
+        bot.clone(),
+        services.clone(),
+        voice_subscriber,
+    )
+    .await?;
     setup_publishers(&config, &services, event_bus.clone(), init_start)?;
 
-    run(init_start).await
+    info!(
+        "pwr-bot is up in {:.2}s. Press Ctrl+C to stop.",
+        init_start.elapsed().as_secs_f64()
+    );
+    tokio::signal::ctrl_c().await?;
+    info!("Ctrl+C received, shutting down.");
+    voice_heartbeat.update().await;
+
+    Ok(())
 }
 
 async fn load_config() -> Result<Arc<Config>> {
@@ -98,9 +112,14 @@ async fn setup_services(db: Arc<Repository>, platforms: Arc<Platforms>) -> Resul
     Ok(Arc::new(Services::new(db, platforms).await?))
 }
 
-async fn setup_voice_tracking(services: &Services, init_start: Instant) -> Result<()> {
-    let voice_heartbeat =
-        VoiceHeartbeatManager::new(services.internal.clone(), services.voice_tracking.clone());
+async fn setup_voice_tracking(
+    services: &Services,
+    init_start: Instant,
+) -> Result<Arc<VoiceHeartbeatManager>> {
+    let voice_heartbeat = Arc::new(VoiceHeartbeatManager::new(
+        services.internal.clone(),
+        services.voice_tracking.clone(),
+    ));
 
     info!("Performing voice tracking crash recovery...");
     let recovered = voice_heartbeat.recover_from_crash().await?;
@@ -108,13 +127,13 @@ async fn setup_voice_tracking(services: &Services, init_start: Instant) -> Resul
         info!("Recovered {} orphaned voice sessions", recovered);
     }
 
-    voice_heartbeat.start().await;
+    voice_heartbeat.clone().start().await;
     debug!(
         "Voice tracking setup complete ({:.2}s).",
         init_start.elapsed().as_secs_f64()
     );
 
-    Ok(())
+    Ok(voice_heartbeat.clone())
 }
 
 async fn setup_bot(
@@ -148,13 +167,13 @@ async fn setup_bot(
 async fn setup_subscribers(
     event_bus: Arc<EventBus>,
     bot: Arc<Bot>,
-    db: Arc<Repository>,
+    services: Arc<Services>,
     voice_subscriber: Arc<VoiceStateSubscriber>,
 ) -> Result<()> {
     debug!("Setting up Subscribers...");
 
-    let discord_dm_subscriber = Arc::new(DiscordDmSubscriber::new(bot.clone(), db.clone()));
-    let discord_channel_subscriber = Arc::new(DiscordGuildSubscriber::new(bot, db));
+    let discord_dm_subscriber = Arc::new(DiscordDmSubscriber::new(bot.clone(), services.clone()));
+    let discord_channel_subscriber = Arc::new(DiscordGuildSubscriber::new(bot, services));
 
     event_bus
         .register_subcriber::<FeedUpdateEvent, _>(discord_dm_subscriber)
@@ -186,17 +205,5 @@ fn setup_publishers(
         "Publishers setup complete ({:.2}s).",
         init_start.elapsed().as_secs_f64()
     );
-    Ok(())
-}
-
-async fn run(init_start: Instant) -> Result<()> {
-    info!(
-        "pwr-bot is up in {:.2}s. Press Ctrl+C to stop.",
-        init_start.elapsed().as_secs_f64()
-    );
-
-    tokio::signal::ctrl_c().await?;
-    info!("Ctrl+C received, shutting down.");
-
     Ok(())
 }

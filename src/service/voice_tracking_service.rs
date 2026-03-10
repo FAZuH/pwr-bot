@@ -10,13 +10,133 @@ use tokio::sync::RwLock;
 use crate::bot::commands::voice::GuildStatType;
 use crate::entity::GuildDailyStats;
 use crate::entity::ServerSettings;
+use crate::entity::ServerSettingsEntity;
 use crate::entity::VoiceDailyActivity;
 use crate::entity::VoiceLeaderboardEntry;
 use crate::entity::VoiceLeaderboardOpt;
 use crate::entity::VoiceSessionsEntity;
 use crate::repository::Repository;
-use crate::repository::table::Table;
 use crate::service::settings_service::SettingsService;
+use crate::service::traits::VoiceTracker;
+
+#[async_trait::async_trait]
+impl VoiceTracker for VoiceTrackingService {
+    async fn is_enabled(&self, guild_id: u64) -> bool {
+        self.is_enabled(guild_id).await
+    }
+
+    async fn insert(&self, model: &VoiceSessionsEntity) -> anyhow::Result<()> {
+        self.insert(model).await
+    }
+
+    async fn replace(&self, model: &VoiceSessionsEntity) -> anyhow::Result<()> {
+        self.replace(model).await
+    }
+
+    async fn get_server_settings(&self, guild_id: u64) -> anyhow::Result<ServerSettings> {
+        self.get_server_settings(guild_id).await
+    }
+
+    async fn update_server_settings(
+        &self,
+        guild_id: u64,
+        settings: ServerSettings,
+    ) -> anyhow::Result<()> {
+        self.update_server_settings(guild_id, settings).await
+    }
+
+    async fn get_leaderboard_withopt(
+        &self,
+        options: &VoiceLeaderboardOpt,
+    ) -> anyhow::Result<Vec<VoiceLeaderboardEntry>> {
+        self.get_leaderboard_withopt(options).await
+    }
+
+    async fn get_partner_leaderboard(
+        &self,
+        options: &VoiceLeaderboardOpt,
+        target_user_id: u64,
+    ) -> anyhow::Result<Vec<VoiceLeaderboardEntry>> {
+        self.get_partner_leaderboard(options, target_user_id).await
+    }
+
+    async fn get_leaderboard(
+        &self,
+        guild_id: u64,
+        limit: u32,
+    ) -> anyhow::Result<Vec<VoiceLeaderboardEntry>> {
+        self.get_leaderboard(guild_id, limit).await
+    }
+
+    async fn get_leaderboard_with_offset(
+        &self,
+        guild_id: u64,
+        offset: u32,
+        limit: u32,
+    ) -> anyhow::Result<Vec<VoiceLeaderboardEntry>> {
+        self.get_leaderboard_with_offset(guild_id, offset, limit)
+            .await
+    }
+
+    async fn update_session_leave_time(
+        &self,
+        user_id: u64,
+        channel_id: u64,
+        join_time: &DateTime<Utc>,
+        leave_time: &DateTime<Utc>,
+    ) -> anyhow::Result<()> {
+        self.update_session_leave_time(user_id, channel_id, join_time, leave_time)
+            .await
+    }
+
+    async fn close_session(
+        &self,
+        user_id: u64,
+        channel_id: u64,
+        join_time: &DateTime<Utc>,
+        leave_time: &DateTime<Utc>,
+    ) -> anyhow::Result<()> {
+        self.close_session(user_id, channel_id, join_time, leave_time)
+            .await
+    }
+
+    async fn find_active_sessions(&self) -> anyhow::Result<Vec<VoiceSessionsEntity>> {
+        self.find_active_sessions().await
+    }
+
+    async fn get_sessions_in_range(
+        &self,
+        guild_id: u64,
+        user_id: Option<u64>,
+        since: &DateTime<Utc>,
+        until: &DateTime<Utc>,
+    ) -> anyhow::Result<Vec<VoiceSessionsEntity>> {
+        self.get_sessions_in_range(guild_id, user_id, since, until)
+            .await
+    }
+
+    async fn get_user_daily_activity(
+        &self,
+        user_id: u64,
+        guild_id: u64,
+        since: &DateTime<Utc>,
+        until: &DateTime<Utc>,
+    ) -> anyhow::Result<Vec<VoiceDailyActivity>> {
+        self.get_user_daily_activity(user_id, guild_id, since, until)
+            .await
+    }
+
+    async fn get_guild_daily_stats(
+        &self,
+        guild_id: u64,
+        since: &DateTime<Utc>,
+        until: &DateTime<Utc>,
+        stat_type: GuildStatType,
+    ) -> anyhow::Result<Vec<GuildDailyStats>> {
+        self.get_guild_daily_stats(guild_id, since, until, stat_type)
+            .await
+    }
+}
 
 /// Service for tracking voice channel activity.
 pub struct VoiceTrackingService {
@@ -34,7 +154,7 @@ impl VoiceTrackingService {
             settings: settings.clone(),
             disabled_guilds: Arc::new(RwLock::new(HashSet::new())),
         };
-        let all_settings = _self.db.server_settings.select_all().await?;
+        let all_settings: Vec<ServerSettingsEntity> = _self.db.server_settings.select_all().await?;
         let mut disabled = _self.disabled_guilds.write().await;
 
         for model in all_settings {
@@ -230,11 +350,3 @@ impl VoiceTrackingService {
         }
     }
 }
-
-// pub struct VoiceTotalMemberData {
-//     user_id: UserId,
-//     name: String,
-//     duration: Duration,
-//     from: DateTime<Utc>,
-//     until: DateTime<Utc>,
-// }

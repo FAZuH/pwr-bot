@@ -24,7 +24,7 @@ pub enum SubscriberType {
 /// - **Platform**: External service (AniList, MangaDex, Comick)
 /// - **Feed/Source**: Specific content on that platform (One Punch Man on MangaDex)
 /// - **Feed Items**: Individual updates (chapters, episodes)
-#[derive(FromRow, Serialize, Default, Clone, Debug)]
+#[derive(FromRow, Serialize, Deserialize, Default, Clone, Debug)]
 pub struct FeedEntity {
     #[serde(default)]
     pub id: i32,
@@ -57,7 +57,7 @@ pub struct FeedEntity {
 /// Tracks the history of updates for a content source. Each new episode,
 /// chapter, or post creates a new version entry. The latest version can be
 /// determined by querying for the most recent `published` timestamp.
-#[derive(FromRow, Serialize, Default, Clone, Debug)]
+#[derive(FromRow, Serialize, Deserialize, Default, Clone, Debug)]
 pub struct FeedItemEntity {
     #[serde(default)]
     pub id: i32,
@@ -75,7 +75,7 @@ pub struct FeedItemEntity {
 /// Represents either a Discord guild channel or a direct message conversation
 /// with a user. Multiple subscribers can follow the same feed, and a single
 /// subscriber can follow multiple feeds (via `FeedSubscriptionEntity`).
-#[derive(FromRow, Serialize, Default, Clone)]
+#[derive(FromRow, Serialize, Deserialize, Default, Clone, Debug)]
 pub struct SubscriberEntity {
     #[serde(default)]
     pub id: i32,
@@ -91,7 +91,7 @@ pub struct SubscriberEntity {
 /// Junction table implementing the many-to-many relationship between feeds
 /// and subscribers. When a new `FeedVersionModel` is published, query this
 /// table to find all subscribers that need to be notified.
-#[derive(FromRow, Serialize, Default, Clone)]
+#[derive(FromRow, Serialize, Deserialize, Default, Clone, Debug)]
 pub struct FeedSubscriptionEntity {
     #[serde(default)]
     pub id: i32,
@@ -176,7 +176,7 @@ pub struct FeedWithLatestItemRow {
     pub item_published: Option<DateTime<Utc>>,
 }
 
-#[derive(FromRow, Serialize, Default, Clone)]
+#[derive(FromRow, Serialize, Deserialize, Default, Clone, Debug)]
 pub struct VoiceSessionsEntity {
     #[serde(default)]
     pub id: i32,
@@ -214,7 +214,7 @@ pub struct VoiceLeaderboardOpt {
 }
 
 /// Daily voice activity aggregation for a specific user.
-#[derive(FromRow, Serialize, Default, Clone, Debug)]
+#[derive(FromRow, Serialize, Deserialize, Default, Clone, Debug)]
 pub struct VoiceDailyActivity {
     /// The date (day) of the activity
     pub day: chrono::NaiveDate,
@@ -223,7 +223,7 @@ pub struct VoiceDailyActivity {
 }
 
 /// Guild daily statistics aggregation.
-#[derive(FromRow, Serialize, Default, Clone, Debug)]
+#[derive(FromRow, Serialize, Deserialize, Default, Clone, Debug)]
 pub struct GuildDailyStats {
     /// The date (day) of the activity
     pub day: chrono::NaiveDate,

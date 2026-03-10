@@ -1,5 +1,4 @@
 //! Voice leaderboard subcommand.
-
 use std::ops::Deref;
 use std::time::Duration;
 use std::time::Instant;
@@ -11,23 +10,21 @@ use poise::serenity_prelude::*;
 use crate::action_extends;
 use crate::bot::commands::Context;
 use crate::bot::commands::Error;
-use crate::bot::commands::settings::SettingsPage;
-use crate::bot::commands::settings::run_settings;
 use crate::bot::commands::voice::TimeRange;
 use crate::bot::commands::voice::VoiceLeaderboardTimeRange;
 use crate::bot::commands::voice::leaderboard::image_builder::LeaderboardPageBuilder;
 use crate::bot::commands::voice::leaderboard::image_builder::PageGenerationResult;
 use crate::bot::controller::Controller;
-use crate::bot::controller::Coordinator;
+use crate::bot::coordinator::Coordinator;
 use crate::bot::error::BotError;
 use crate::bot::navigation::NavigationResult;
 use crate::bot::utils::format_duration;
 use crate::bot::views::ActionRegistry;
 use crate::bot::views::ResponseKind;
-use crate::bot::views::Trigger;
 use crate::bot::views::ViewCommand;
 use crate::bot::views::ViewContext;
 use crate::bot::views::ViewEngine;
+use crate::bot::views::ViewEvent;
 use crate::bot::views::ViewHandler;
 use crate::bot::views::ViewRender;
 use crate::bot::views::pagination::PaginationAction;
@@ -35,6 +32,7 @@ use crate::bot::views::pagination::PaginationView;
 use crate::entity::VoiceLeaderboardEntry;
 use crate::entity::VoiceLeaderboardOptBuilder;
 use crate::error::AppError;
+use crate::service::traits::VoiceTracker;
 
 pub mod image_builder;
 pub mod image_generator;
@@ -55,21 +53,16 @@ pub async fn leaderboard(
     #[description = "Time period to filter voice activity. Defaults to \"This month\""]
     time_range: Option<VoiceLeaderboardTimeRange>,
 ) -> Result<(), Error> {
-    command(
-        ctx,
-        time_range.unwrap_or(VoiceLeaderboardTimeRange::ThisMonth),
-    )
-    .await
-}
-
-pub async fn command(ctx: Context<'_>, time_range: VoiceLeaderboardTimeRange) -> Result<(), Error> {
-    let mut coordinator = Coordinator::new(ctx);
-    let mut controller = VoiceLeaderboardController::new(&ctx, time_range);
-    let _result = controller.run(&mut coordinator).await?;
+    Coordinator::new(ctx)
+        .run(NavigationResult::VoiceLeaderboard {
+            time_range: time_range.unwrap_or(VoiceLeaderboardTimeRange::ThisMonth),
+        })
+        .await?;
     Ok(())
 }
 
 /// Data for a leaderboard session.
+#[derive(Debug, Clone, Default)]
 pub struct LeaderboardSessionData {
     pub entries: Vec<VoiceLeaderboardEntry>,
     pub user_rank: Option<u32>,
@@ -107,13 +100,13 @@ impl Deref for LeaderboardSessionData {
 /// Controller for voice leaderboard display and interaction.
 pub struct VoiceLeaderboardController<'a> {
     #[allow(dead_code)]
-    ctx: &'a Context<'a>,
+    ctx: Context<'a>,
     pub time_range: VoiceLeaderboardTimeRange,
 }
 
 impl<'a> VoiceLeaderboardController<'a> {
     /// Creates a new leaderboard controller.
-    pub fn new(ctx: &'a Context<'a>, time_range: VoiceLeaderboardTimeRange) -> Self {
+    pub fn new(ctx: Context<'a>, time_range: VoiceLeaderboardTimeRange) -> Self {
         Self { ctx, time_range }
     }
 
@@ -158,11 +151,8 @@ impl<'a> VoiceLeaderboardController<'a> {
 }
 
 #[async_trait::async_trait]
-impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceLeaderboardController<'a> {
-    async fn run(
-        &mut self,
-        coordinator: &mut Coordinator<'_, S>,
-    ) -> Result<NavigationResult, Error> {
+impl Controller for VoiceLeaderboardController<'_> {
+    async fn run(&mut self, coordinator: std::sync::Arc<Coordinator<'_>>) -> Result<(), Error> {
         let controller_start = Instant::now();
 
         let ctx = *coordinator.context();
@@ -188,39 +178,31 @@ impl<'a, S: Send + Sync + 'static> Controller<S> for VoiceLeaderboardController<
         };
 
         if view.leaderboard_data.is_empty() {
-            let mut engine = ViewEngine::new(&ctx, view, Duration::from_millis(1));
-            engine
-                .run(|_| Box::pin(async { ViewCommand::Exit }))
-                .await?;
-            return Ok(NavigationResult::Exit);
+            let mut engine =
+                ViewEngine::new(ctx, view, Duration::from_millis(1), coordinator.clone());
+            engine.run().await?;
+            return Ok(());
         }
 
         // Generate and send initial page
         let page_result = view.generate_current_page().await?;
         view.set_current_page_bytes(Some(page_result.image_bytes));
 
-        let mut engine = ViewEngine::new(&ctx, view, Duration::from_secs(120));
+        let mut engine = ViewEngine::new(ctx, view, Duration::from_secs(120), coordinator.clone());
 
         trace!(
             "controller_initial_response {} ms",
             controller_start.elapsed().as_millis()
         );
 
-        engine
-            .run(|_action| Box::pin(async move { ViewCommand::Render }))
-            .await?;
+        engine.run().await?;
 
         trace!(
             "controller_total {} ms",
             controller_start.elapsed().as_millis()
         );
-        Ok(NavigationResult::Exit)
+        Ok(())
     }
-}
-
-/// Legacy function for voice settings command.
-pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
-    run_settings(ctx, Some(SettingsPage::Voice)).await
 }
 
 pub struct VoiceLeaderboardHandler<'a> {
@@ -231,13 +213,21 @@ pub struct VoiceLeaderboardHandler<'a> {
     pub current_page_bytes: Option<Vec<u8>>,
     pub is_partner_mode: bool,
     pub target_user: Option<poise::serenity_prelude::User>,
-    pub service: std::sync::Arc<crate::service::voice_tracking_service::VoiceTrackingService>,
+    pub service: std::sync::Arc<dyn VoiceTracker>,
     pub guild_id: u64,
     pub author_id: u64,
     pub http: std::sync::Arc<poise::serenity_prelude::Http>,
 }
 
-impl<'a> VoiceLeaderboardHandler<'a> {
+impl VoiceLeaderboardHandler<'_> {
+    /// Check if target user is the author itself
+    fn target_is_author(&self) -> bool {
+        if let Some(user) = &self.target_user {
+            return self.author_id == user.id.get();
+        }
+        false
+    }
+
     /// Calculates the slice indices for the current page.
     fn current_page_indices(&self) -> (usize, usize) {
         if self.leaderboard_data.is_empty() {
@@ -254,7 +244,7 @@ impl<'a> VoiceLeaderboardHandler<'a> {
     }
 
     /// Generates the page image for the current page.
-    pub async fn generate_current_page(&mut self) -> Result<PageGenerationResult, Error> {
+    async fn generate_current_page(&mut self) -> Result<PageGenerationResult, Error> {
         let (offset, end) = self.current_page_indices();
         let entries = &self.leaderboard_data.entries[offset..end];
         let rank_offset = self.current_page_rank_offset();
@@ -262,11 +252,11 @@ impl<'a> VoiceLeaderboardHandler<'a> {
     }
 
     /// Sets the current page image bytes for attachment on edit.
-    pub fn set_current_page_bytes(&mut self, bytes: Option<Vec<u8>>) {
+    fn set_current_page_bytes(&mut self, bytes: Option<Vec<u8>>) {
         self.current_page_bytes = bytes;
     }
 
-    pub async fn refetch_data(&mut self) -> Result<(), Error> {
+    async fn refetch_data(&mut self) -> Result<(), Error> {
         let (since, until) = self.time_range.to_range();
 
         let voice_lb_opts = VoiceLeaderboardOptBuilder::default()
@@ -312,75 +302,71 @@ impl<'a> VoiceLeaderboardHandler<'a> {
 }
 
 #[async_trait::async_trait]
-impl<'a> ViewHandler<VoiceLeaderboardAction> for VoiceLeaderboardHandler<'a> {
+impl ViewHandler<VoiceLeaderboardAction> for VoiceLeaderboardHandler<'_> {
     async fn handle(
         &mut self,
-        action: VoiceLeaderboardAction,
-        _trigger: Trigger<'_>,
-        _ctx: &ViewContext<'_, VoiceLeaderboardAction>,
+        ctx: ViewContext<'_, VoiceLeaderboardAction>,
     ) -> Result<ViewCommand, Error> {
         use VoiceLeaderboardAction::*;
 
         let mut changed_page = false;
         let mut fetch_new = false;
 
-        if let Base(pagination_action) = action {
-            let _cmd = self
-                .pagination
-                .handle(
-                    pagination_action,
-                    _trigger,
-                    &_ctx.map(VoiceLeaderboardAction::Base),
-                )
-                .await?;
-
-            changed_page = true;
-        } else {
-            match action {
-                TimeRange => {
-                    if let Trigger::Component(interaction) = &_trigger
-                        && let ComponentInteractionDataKind::StringSelect { values } =
-                            &interaction.data.kind
-                        && let Some(time_range) = values
-                            .first()
-                            .and_then(|v| VoiceLeaderboardTimeRange::from_display_name(v))
-                        && self.time_range != time_range
-                    {
-                        self.time_range = time_range;
-                        fetch_new = true;
-                    }
-                }
-                ToggleMode => {
-                    self.is_partner_mode = !self.is_partner_mode;
+        match ctx.action() {
+            Base(inner) => {
+                let _ = self
+                    .pagination
+                    .handle(ctx.map(*inner, VoiceLeaderboardAction::Base))
+                    .await?;
+                changed_page = true;
+            }
+            TimeRange => {
+                if let ViewEvent::Component(_, ref interaction) = ctx.event
+                    && let ComponentInteractionDataKind::StringSelect { values } =
+                        &interaction.data.kind
+                    && let Some(time_range) = values
+                        .first()
+                        .and_then(|v| VoiceLeaderboardTimeRange::from_display_name(v))
+                    && self.time_range != time_range
+                {
+                    self.time_range = time_range;
                     fetch_new = true;
                 }
-                SelectUser => {
-                    if let Trigger::Component(interaction) = &_trigger
-                        && let ComponentInteractionDataKind::UserSelect { values } =
-                            &interaction.data.kind
-                        && let Some(user_id) = values.first()
-                        && let Ok(user) = user_id.to_user(&self.http).await
-                    {
-                        self.target_user = Some(user);
-                        fetch_new = true;
-                    }
+            }
+            ToggleMode => {
+                self.is_partner_mode = !self.is_partner_mode;
+                fetch_new = true;
+            }
+            SelectUser => {
+                if let ViewEvent::Component(_, ref interaction) = ctx.event
+                    && let ComponentInteractionDataKind::UserSelect { values } =
+                        &interaction.data.kind
+                    && let Some(user_id) = values.first()
+                    && let Ok(user) = user_id.to_user(&self.http).await
+                {
+                    self.target_user = Some(user);
+                    fetch_new = true;
                 }
-                _ => {}
             }
         }
 
         if fetch_new {
             self.refetch_data().await?;
-        } else if changed_page && !self.leaderboard_data.is_empty() {
+        }
+        if changed_page && !self.leaderboard_data.is_empty() {
             let page_result = self.generate_current_page().await?;
             self.set_current_page_bytes(Some(page_result.image_bytes));
         }
 
         Ok(ViewCommand::Render)
     }
+
+    async fn on_timeout(&mut self) -> Result<ViewCommand, Error> {
+        self.pagination.on_timeout().await
+    }
 }
 
-impl<'a> ViewRender<VoiceLeaderboardAction> for VoiceLeaderboardHandler<'a> {
+impl ViewRender<VoiceLeaderboardAction> for VoiceLeaderboardHandler<'_> {
     fn render(&self, registry: &mut ActionRegistry<VoiceLeaderboardAction>) -> ResponseKind<'_> {
         use VoiceLeaderboardAction::*;
         use VoiceLeaderboardTimeRange::*;
@@ -411,7 +397,7 @@ impl<'a> ViewRender<VoiceLeaderboardAction> for VoiceLeaderboardHandler<'a> {
                     rank, duration_text
                 )),
             ));
-        } else {
+        } else if !self.target_is_author() {
             container.push(CreateContainerComponent::TextDisplay(
                 CreateTextDisplay::new("\nYou are not on the leaderboard for this time range."),
             ));
@@ -453,18 +439,19 @@ impl<'a> ViewRender<VoiceLeaderboardAction> for VoiceLeaderboardHandler<'a> {
         } else {
             "Show Voice Partners"
         };
-        let toggle_button =
-            poise::serenity_prelude::CreateButton::new(registry.register(ToggleMode))
-                .label(toggle_label)
-                .style(poise::serenity_prelude::ButtonStyle::Primary);
+        let toggle_button = registry
+            .register(ToggleMode)
+            .as_button()
+            .label(toggle_label)
+            .style(poise::serenity_prelude::ButtonStyle::Primary);
 
         container.push(CreateContainerComponent::ActionRow(
             CreateActionRow::Buttons(vec![toggle_button].into()),
         ));
 
-        let time_range_menu = poise::serenity_prelude::CreateSelectMenu::new(
-            registry.register(TimeRange),
-            CreateSelectMenuKind::String {
+        let time_range_menu = registry
+            .register(TimeRange)
+            .as_select(CreateSelectMenuKind::String {
                 options: vec![
                     Past24Hours.into(),
                     Past72Hours.into(),
@@ -475,9 +462,8 @@ impl<'a> ViewRender<VoiceLeaderboardAction> for VoiceLeaderboardHandler<'a> {
                     AllTime.into(),
                 ]
                 .into(),
-            },
-        )
-        .placeholder("Select time range");
+            })
+            .placeholder("Select time range");
 
         let action_row = CreateActionRow::SelectMenu(time_range_menu);
 
@@ -491,11 +477,10 @@ impl<'a> ViewRender<VoiceLeaderboardAction> for VoiceLeaderboardHandler<'a> {
                 .target_user
                 .clone()
                 .map(|u| std::borrow::Cow::Owned(vec![u.id]));
-            let user_select = poise::serenity_prelude::CreateSelectMenu::new(
-                registry.register(SelectUser),
-                CreateSelectMenuKind::User { default_users },
-            )
-            .placeholder("Select a user to view their voice partners");
+            let user_select = registry
+                .register(SelectUser)
+                .as_select(CreateSelectMenuKind::User { default_users })
+                .placeholder("Select an user to view their voice partners");
             components.push(CreateComponent::ActionRow(CreateActionRow::SelectMenu(
                 user_select,
             )));
