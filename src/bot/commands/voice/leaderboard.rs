@@ -4,34 +4,16 @@ use std::time::Duration;
 use std::time::Instant;
 
 use log::trace;
-use poise::ChoiceParameter;
-use poise::serenity_prelude::*;
 
-use crate::action_extends;
-use crate::bot::commands::Context;
-use crate::bot::commands::Error;
+use crate::bot::commands::prelude::*;
 use crate::bot::commands::voice::TimeRange;
 use crate::bot::commands::voice::VoiceLeaderboardTimeRange;
 use crate::bot::commands::voice::leaderboard::image_builder::LeaderboardPageBuilder;
 use crate::bot::commands::voice::leaderboard::image_builder::PageGenerationResult;
-use crate::bot::controller::Controller;
-use crate::bot::coordinator::Coordinator;
-use crate::bot::error::BotError;
-use crate::bot::navigation::NavigationResult;
-use crate::bot::utils::format_duration;
-use crate::bot::views::ActionRegistry;
-use crate::bot::views::ResponseKind;
-use crate::bot::views::ViewCommand;
-use crate::bot::views::ViewContext;
-use crate::bot::views::ViewEngine;
-use crate::bot::views::ViewEvent;
-use crate::bot::views::ViewHandler;
-use crate::bot::views::ViewRender;
 use crate::bot::views::pagination::PaginationAction;
 use crate::bot::views::pagination::PaginationView;
 use crate::entity::VoiceLeaderboardEntry;
 use crate::entity::VoiceLeaderboardOptBuilder;
-use crate::error::AppError;
 use crate::service::traits::VoiceTracker;
 
 pub mod image_builder;
@@ -527,13 +509,12 @@ action_extends! {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
-    use crate::bot::commands::voice::leaderboard::image_builder::LeaderboardEntry;
-
-    use chrono::Utc;
     use chrono::DateTime;
     use chrono::Datelike;
+    use chrono::Utc;
+
+    use super::*;
+    use crate::bot::commands::voice::leaderboard::image_builder::LeaderboardEntry;
 
     #[test]
     fn test_leaderboard_session_data_from_entries() {
@@ -577,12 +558,10 @@ mod tests {
     #[test]
     fn test_voice_leaderboard_time_range_into_datetime() {
         let now = Utc::now();
-        let past_24h_start: DateTime<Utc> =
-            VoiceLeaderboardTimeRange::Past24Hours.into();
+        let past_24h_start: DateTime<Utc> = VoiceLeaderboardTimeRange::Past24Hours.into();
         assert!(past_24h_start <= now);
 
-        let all_time_start: DateTime<Utc> =
-            VoiceLeaderboardTimeRange::AllTime.into();
+        let all_time_start: DateTime<Utc> = VoiceLeaderboardTimeRange::AllTime.into();
         assert_eq!(all_time_start, DateTime::UNIX_EPOCH);
     }
 

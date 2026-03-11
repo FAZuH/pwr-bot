@@ -1,36 +1,17 @@
 //! Welcome commands module.
-use crate::bot::commands::welcome::image_generator::WelcomeCardData;
-use crate::bot::views::ViewEvent;
-use crate::service::traits::FeedSubscriptionProvider;
-
-pub mod image_generator;
-
 use std::borrow::Cow;
 use std::collections::HashSet;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use poise::Modal;
-use poise::serenity_prelude::*;
-
-use crate::action_enum;
-use crate::bot::commands::Context;
-use crate::bot::commands::Error;
+use crate::bot::commands::prelude::*;
+use crate::bot::commands::welcome::image_generator::WelcomeCardData;
 use crate::bot::commands::welcome::image_generator::WelcomeImageGenerator;
-use crate::bot::controller::Controller;
-use crate::bot::coordinator::Coordinator;
-use crate::bot::error::BotError;
-use crate::bot::navigation::NavigationResult;
-use crate::bot::views::ActionRegistry;
-use crate::bot::views::ResponseKind;
-use crate::bot::views::ViewCommand;
-use crate::bot::views::ViewContext;
-use crate::bot::views::ViewEngine;
-use crate::bot::views::ViewHandler;
-use crate::bot::views::ViewRender;
-use crate::controller;
 use crate::entity::ServerSettings;
+use crate::service::traits::FeedSubscriptionProvider;
+
+pub mod image_generator;
 
 const WELCOME_FILE: &str = "welcome_preview.png";
 

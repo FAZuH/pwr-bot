@@ -7,6 +7,7 @@
 pub mod about;
 pub mod dump_db;
 pub mod feed;
+pub mod prelude;
 pub mod register;
 pub mod register_owner;
 pub mod settings;

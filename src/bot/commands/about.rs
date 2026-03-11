@@ -4,22 +4,8 @@ use std::time::Duration;
 use chrono::Datelike;
 use chrono::Utc;
 use poise::Command;
-use poise::serenity_prelude::*;
 
-use crate::action_enum;
-use crate::bot::commands::Context;
-use crate::bot::commands::Error;
-use crate::bot::controller::Controller;
-use crate::bot::coordinator::Coordinator;
-use crate::bot::navigation::NavigationResult;
-use crate::bot::views::ActionRegistry;
-use crate::bot::views::ResponseKind;
-use crate::bot::views::ViewCommand;
-use crate::bot::views::ViewContext;
-use crate::bot::views::ViewEngine;
-use crate::bot::views::ViewHandler;
-use crate::bot::views::ViewRender;
-use crate::controller;
+use crate::bot::commands::prelude::*;
 
 /// Show information about the bot
 #[poise::command(slash_command)]
@@ -62,18 +48,6 @@ action_enum! {
 pub struct AboutView {
     stats: AboutStats,
     avatar_url: String,
-}
-
-#[async_trait::async_trait]
-impl ViewHandler<AboutAction> for AboutView {
-    async fn handle(&mut self, ctx: ViewContext<'_, AboutAction>) -> Result<ViewCommand, Error> {
-        match ctx.action() {
-            AboutAction::Back => {
-                ctx.coordinator.navigate(NavigationResult::SettingsMain);
-                Ok(ViewCommand::Exit)
-            }
-        }
-    }
 }
 
 impl AboutView {
@@ -149,6 +123,18 @@ impl ViewRender<AboutAction> for AboutView {
         ]));
 
         vec![container, back_button].into()
+    }
+}
+
+#[async_trait::async_trait]
+impl ViewHandler<AboutAction> for AboutView {
+    async fn handle(&mut self, ctx: ViewContext<'_, AboutAction>) -> Result<ViewCommand, Error> {
+        match ctx.action() {
+            AboutAction::Back => {
+                ctx.coordinator.navigate(NavigationResult::SettingsMain);
+                Ok(ViewCommand::Exit)
+            }
+        }
     }
 }
 

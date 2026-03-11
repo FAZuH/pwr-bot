@@ -3,28 +3,9 @@
 use std::borrow::Cow;
 use std::time::Duration;
 
-use poise::serenity_prelude::*;
-
-use crate::action_enum;
-use crate::bot::checks::is_author_guild_admin;
-use crate::bot::commands::Context;
-use crate::bot::commands::Error;
-use crate::bot::controller::Controller;
-use crate::bot::coordinator::Coordinator;
-use crate::bot::error::BotError;
-use crate::bot::navigation::NavigationResult;
-use crate::bot::views::ActionRegistry;
-use crate::bot::views::ResponseKind;
-use crate::bot::views::ViewCommand;
-use crate::bot::views::ViewContext;
-use crate::bot::views::ViewEngine;
-use crate::bot::views::ViewEvent;
-use crate::bot::views::ViewHandler;
-use crate::bot::views::ViewRender;
-use crate::controller;
+use crate::bot::commands::prelude::*;
 use crate::entity::ServerSettings;
 use crate::entity::ServerSettingsEntity;
-use crate::error::AppError;
 
 /// Model representing a configurable feature in the bot.
 ///

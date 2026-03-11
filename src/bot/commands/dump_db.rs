@@ -1,10 +1,6 @@
 //! Owner dump_db command.
 
-use poise::CreateReply;
-use poise::serenity_prelude::*;
-
-use crate::bot::commands::Context;
-use crate::bot::commands::Error;
+use crate::bot::commands::prelude::*;
 
 #[poise::command(prefix_command, owners_only, hide_in_help)]
 pub async fn dump_db(ctx: Context<'_>) -> Result<(), Error> {
