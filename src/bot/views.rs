@@ -417,6 +417,7 @@ where
         let poise = self.ctx;
         let coordinator = self.coordinator.clone();
 
+        use ViewCommand::*;
         loop {
             tokio::select! {
                 maybe_interaction = stream.next() => {
@@ -451,7 +452,7 @@ where
                     debug!("handle() -> {:?}", cmd);
 
                     // Prevents interaction failure message after handling
-                    if self.should_acknowledge && !matches!(cmd, ViewCommand::AlreadyResponded) {
+                    if self.should_acknowledge && !matches!(cmd, AlreadyResponded) {
                         interaction.create_response(
                             poise.http(),
                             CreateInteractionResponse::Acknowledge,
@@ -459,9 +460,13 @@ where
                     }
 
                     match cmd {
-                        ViewCommand::Render => self.render_view().await?,
-                        ViewCommand::Exit   => break,
-                        _                   => {}
+                        Render => self.render_view().await?,
+                        RenderOnce => {
+                            self.render_view().await?;
+                            break
+                        },
+                        Exit => break,
+                        _ => {}
                     }
                 }
                 maybe_event = rx.recv() => {
@@ -486,13 +491,13 @@ where
                     };
 
                     match cmd {
-                        ViewCommand::Render => self.render_view().await?,
-                        ViewCommand::RenderOnce => {
+                        Render => self.render_view().await?,
+                        RenderOnce => {
                             self.render_view().await?;
                             break
                         },
-                        ViewCommand::Exit   => break,
-                        _                   => {}
+                        Exit => break,
+                        Continue | AlreadyResponded => {}
                     }
                 }
             }

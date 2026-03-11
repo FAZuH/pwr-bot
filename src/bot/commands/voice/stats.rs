@@ -16,7 +16,7 @@ use crate::bot::commands::Error;
 use crate::bot::commands::voice::GuildStatType;
 use crate::bot::commands::voice::TimeRange;
 use crate::bot::commands::voice::VoiceStatsTimeRange;
-use crate::bot::commands::voice::stats_chart::generate_line_chart;
+use crate::bot::commands::voice::stats::chart::generate_line_chart;
 use crate::bot::controller::Controller;
 use crate::bot::coordinator::Coordinator;
 use crate::bot::error::BotError;
@@ -35,6 +35,8 @@ use crate::entity::VoiceDailyActivity;
 use crate::entity::VoiceSessionsEntity;
 use crate::error::AppError;
 use crate::service::traits::VoiceTracker;
+
+pub mod chart;
 
 /// Show voice activity statistics
 ///
