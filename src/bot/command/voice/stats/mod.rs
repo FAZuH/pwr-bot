@@ -18,6 +18,11 @@ use crate::entity::GuildDailyStats;
 use crate::entity::VoiceDailyActivity;
 use crate::entity::VoiceSessionsEntity;
 use crate::service::traits::VoiceTracker;
+use crate::update::Update;
+use crate::update::voice_stats::VoiceStatsCmd;
+use crate::update::voice_stats::VoiceStatsModel;
+use crate::update::voice_stats::VoiceStatsMsg;
+use crate::update::voice_stats::VoiceStatsUpdate;
 
 pub mod chart;
 
@@ -216,6 +221,7 @@ impl VoiceStatsData {
 }
 
 pub struct VoiceStatsHandler {
+    pub model: VoiceStatsModel,
     pub data: VoiceStatsData,
     pub image_bytes: Option<Vec<u8>>,
     pub service: std::sync::Arc<dyn VoiceTracker>,
@@ -230,7 +236,14 @@ impl VoiceStatsHandler {
         guild_id: u64,
         user: User,
     ) -> Self {
+        let model = VoiceStatsModel {
+            time_range: data.time_range,
+            stat_type: data.stat_type,
+            user_id: data.user.as_ref().map(|u| u.id.get()),
+            fallback_user_id: user.id.get(),
+        };
         Self {
+            model,
             data,
             image_bytes: None,
             service,
@@ -240,34 +253,49 @@ impl VoiceStatsHandler {
     }
 
     async fn refetch_data(&mut self) -> Result<(), Error> {
-        let (since, until) = self.data.time_range.to_range();
+        let (since, until) = self.model.time_range.to_range();
 
-        self.data.raw_sessions = if self.data.time_range != VoiceStatsTimeRange::Yearly {
+        let raw_sessions = if self.model.time_range != VoiceStatsTimeRange::Yearly {
             self.service
-                .get_sessions_in_range(
-                    self.guild_id,
-                    self.data.user.as_ref().map(|u| u.id.get()),
-                    &since,
-                    &until,
-                )
+                .get_sessions_in_range(self.guild_id, self.model.user_id, &since, &until)
                 .await
                 .map_err(Error::from)?
         } else {
             vec![]
         };
 
-        if let Some(ref target_user) = self.data.user {
-            self.data.user_activity = self
+        if let Some(target_user_id) = self.model.user_id {
+            let user_activity = self
                 .service
-                .get_user_daily_activity(target_user.id.get(), self.guild_id, &since, &until)
+                .get_user_daily_activity(target_user_id, self.guild_id, &since, &until)
                 .await
                 .map_err(Error::from)?;
+
+            self.data = VoiceStatsData {
+                user: Some(self.user.clone()),
+                guild_name: self.data.guild_name.clone(),
+                user_activity,
+                guild_stats: vec![],
+                stat_type: self.model.stat_type,
+                time_range: self.model.time_range,
+                raw_sessions,
+            };
         } else {
-            self.data.guild_stats = self
+            let guild_stats = self
                 .service
-                .get_guild_daily_stats(self.guild_id, &since, &until, self.data.stat_type)
+                .get_guild_daily_stats(self.guild_id, &since, &until, self.model.stat_type)
                 .await
                 .map_err(Error::from)?;
+
+            self.data = VoiceStatsData {
+                user: None,
+                guild_name: self.data.guild_name.clone(),
+                user_activity: vec![],
+                guild_stats,
+                stat_type: self.model.stat_type,
+                time_range: self.model.time_range,
+                raw_sessions,
+            };
         }
 
         if let Ok(bytes) = self.generate_image() {
@@ -281,22 +309,22 @@ impl VoiceStatsHandler {
 
     /// Generates the contribution grid image.
     fn generate_image(&self) -> anyhow::Result<Vec<u8>> {
-        if self.data.time_range != VoiceStatsTimeRange::Yearly {
+        if self.model.time_range != VoiceStatsTimeRange::Yearly {
             return generate_line_chart(
                 &self.data.raw_sessions,
-                self.data.time_range,
-                self.data.stat_type,
-                self.data.is_user_stats(),
+                self.model.time_range,
+                self.model.stat_type,
+                self.model.is_user_stats(),
             );
         }
 
-        let (since, _until) = self.data.time_range.to_range();
+        let (since, _until) = self.model.time_range.to_range();
         let today = chrono::Local::now().date_naive();
 
         // Build data map for contribution grid
         let mut data_map: HashMap<NaiveDate, u32> = HashMap::new();
 
-        if self.data.is_user_stats() {
+        if self.model.is_user_stats() {
             // User activity: map day -> total seconds (converted to minutes for display)
             for activity in &self.data.user_activity {
                 let minutes = (activity.total_seconds / 60).max(1) as u32;
@@ -305,8 +333,8 @@ impl VoiceStatsHandler {
         } else {
             // Guild stats: map day -> value (minutes for time, count for users)
             for stat in &self.data.guild_stats {
-                let value = if self.data.stat_type == GuildStatType::AverageTime
-                    || self.data.stat_type == GuildStatType::TotalTime
+                let value = if self.model.stat_type == GuildStatType::AverageTime
+                    || self.model.stat_type == GuildStatType::TotalTime
                 {
                     (stat.value / 60).max(1) as u32
                 } else {
@@ -336,15 +364,15 @@ impl VoiceStatsHandler {
 
     /// Formats the stats summary text.
     fn format_stats_summary(&self) -> String {
-        let (since, until) = self.data.time_range.to_range();
+        let (since, until) = self.model.time_range.to_range();
         let time_range_text = format!(
             "-# Time Range: **{}** — <t:{}:f> to <t:{}:R>",
-            self.data.time_range.display_name(),
+            self.model.time_range.display_name(),
             since.timestamp(),
             until.timestamp(),
         );
 
-        if self.data.is_user_stats() {
+        if self.model.is_user_stats() {
             let total = format_duration(self.data.total_time());
             let avg = format_duration(self.data.average_daily_time());
             let streak = self.data.current_streak();
@@ -368,7 +396,8 @@ impl VoiceStatsHandler {
             let _avg_time_str = format_duration(avg_time); // Reserved for future use
 
             // For guild stats, show different metrics based on stat_type
-            let (first_label, first_value, second_label, second_value) = match self.data.stat_type {
+            let (first_label, first_value, second_label, second_value) = match self.model.stat_type
+            {
                 GuildStatType::AverageTime => {
                     // Peak Time: highest average voice time per user
                     let peak = self.data.guild_stats.iter().max_by_key(|s| s.value);
@@ -461,42 +490,59 @@ impl ViewHandler for VoiceStatsHandler {
 
         match ctx.action() {
             TimeYearly => {
-                self.data.time_range = VoiceStatsTimeRange::Yearly;
-                changed = true;
+                let cmd = VoiceStatsUpdate::update(
+                    VoiceStatsMsg::ChangeTimeRange(VoiceStatsTimeRange::Yearly),
+                    &mut self.model,
+                );
+                changed = matches!(cmd, VoiceStatsCmd::RefetchData);
             }
             TimeMonthly => {
-                self.data.time_range = VoiceStatsTimeRange::Monthly;
-                changed = true;
+                let cmd = VoiceStatsUpdate::update(
+                    VoiceStatsMsg::ChangeTimeRange(VoiceStatsTimeRange::Monthly),
+                    &mut self.model,
+                );
+                changed = matches!(cmd, VoiceStatsCmd::RefetchData);
             }
             TimeWeekly => {
-                self.data.time_range = VoiceStatsTimeRange::Weekly;
-                changed = true;
+                let cmd = VoiceStatsUpdate::update(
+                    VoiceStatsMsg::ChangeTimeRange(VoiceStatsTimeRange::Weekly),
+                    &mut self.model,
+                );
+                changed = matches!(cmd, VoiceStatsCmd::RefetchData);
             }
             TimeHourly => {
-                self.data.time_range = VoiceStatsTimeRange::Hourly;
-                changed = true;
+                let cmd = VoiceStatsUpdate::update(
+                    VoiceStatsMsg::ChangeTimeRange(VoiceStatsTimeRange::Hourly),
+                    &mut self.model,
+                );
+                changed = matches!(cmd, VoiceStatsCmd::RefetchData);
             }
 
             StatUniqueUsers => {
-                self.data.stat_type = GuildStatType::ActiveUserCount;
-                changed = true;
+                let cmd = VoiceStatsUpdate::update(
+                    VoiceStatsMsg::ChangeStatType(GuildStatType::ActiveUserCount),
+                    &mut self.model,
+                );
+                changed = matches!(cmd, VoiceStatsCmd::RefetchData);
             }
             StatTotalTime => {
-                self.data.stat_type = GuildStatType::TotalTime;
-                changed = true;
+                let cmd = VoiceStatsUpdate::update(
+                    VoiceStatsMsg::ChangeStatType(GuildStatType::TotalTime),
+                    &mut self.model,
+                );
+                changed = matches!(cmd, VoiceStatsCmd::RefetchData);
             }
             StatAverageTime => {
-                self.data.stat_type = GuildStatType::AverageTime;
-                changed = true;
+                let cmd = VoiceStatsUpdate::update(
+                    VoiceStatsMsg::ChangeStatType(GuildStatType::AverageTime),
+                    &mut self.model,
+                );
+                changed = matches!(cmd, VoiceStatsCmd::RefetchData);
             }
 
             ToggleDataMode => {
-                if self.data.is_user_stats() {
-                    self.data.user = None;
-                } else {
-                    self.data.user = Some(self.user.clone());
-                }
-                changed = true;
+                let cmd = VoiceStatsUpdate::update(VoiceStatsMsg::ToggleDataMode, &mut self.model);
+                changed = matches!(cmd, VoiceStatsCmd::RefetchData);
             }
             SelectUser => {
                 if let ViewEvent::Component(ref interaction) = ctx.event
@@ -507,9 +553,12 @@ impl ViewHandler for VoiceStatsHandler {
                 {
                     // Fetch user object
                     if let Ok(user) = user_id.to_user(ctx.poise.http()).await {
-                        self.user = user;
-                        self.data.user = Some(self.user.clone());
-                        changed = true;
+                        self.user = user.clone();
+                        let cmd = VoiceStatsUpdate::update(
+                            VoiceStatsMsg::SetUser(Some(user.id.get())),
+                            &mut self.model,
+                        );
+                        changed = matches!(cmd, VoiceStatsCmd::RefetchData);
                     }
                 }
             }
@@ -554,7 +603,7 @@ impl ViewRender for VoiceStatsHandler {
         }
 
         // Add Data Mode Toggle to bottom of Container
-        let toggle_label = if self.data.is_user_stats() {
+        let toggle_label = if self.model.is_user_stats() {
             "Show server stats"
         } else {
             "Show user stats"
@@ -577,28 +626,28 @@ impl ViewRender for VoiceStatsHandler {
         // 1. Time Range Row
         let time_buttons = vec![
             registry.register(TimeYearly).as_button().style(
-                if self.data.time_range == VoiceStatsTimeRange::Yearly {
+                if self.model.time_range == VoiceStatsTimeRange::Yearly {
                     ButtonStyle::Primary
                 } else {
                     ButtonStyle::Secondary
                 },
             ),
             registry.register(TimeMonthly).as_button().style(
-                if self.data.time_range == VoiceStatsTimeRange::Monthly {
+                if self.model.time_range == VoiceStatsTimeRange::Monthly {
                     ButtonStyle::Primary
                 } else {
                     ButtonStyle::Secondary
                 },
             ),
             registry.register(TimeWeekly).as_button().style(
-                if self.data.time_range == VoiceStatsTimeRange::Weekly {
+                if self.model.time_range == VoiceStatsTimeRange::Weekly {
                     ButtonStyle::Primary
                 } else {
                     ButtonStyle::Secondary
                 },
             ),
             registry.register(TimeHourly).as_button().style(
-                if self.data.time_range == VoiceStatsTimeRange::Hourly {
+                if self.model.time_range == VoiceStatsTimeRange::Hourly {
                     ButtonStyle::Primary
                 } else {
                     ButtonStyle::Secondary
@@ -611,9 +660,9 @@ impl ViewRender for VoiceStatsHandler {
 
         // 2. Aggregation Row (Only for Guild)
         let mut stat_buttons = vec![];
-        if !self.data.is_user_stats() {
+        if !self.model.is_user_stats() {
             stat_buttons.push(registry.register(StatUniqueUsers).as_button().style(
-                if self.data.stat_type == GuildStatType::ActiveUserCount {
+                if self.model.stat_type == GuildStatType::ActiveUserCount {
                     ButtonStyle::Primary
                 } else {
                     ButtonStyle::Secondary
@@ -621,14 +670,14 @@ impl ViewRender for VoiceStatsHandler {
             ));
         }
         stat_buttons.push(registry.register(StatTotalTime).as_button().style(
-            if self.data.stat_type == GuildStatType::TotalTime {
+            if self.model.stat_type == GuildStatType::TotalTime {
                 ButtonStyle::Primary
             } else {
                 ButtonStyle::Secondary
             },
         ));
         stat_buttons.push(registry.register(StatAverageTime).as_button().style(
-            if self.data.stat_type == GuildStatType::AverageTime {
+            if self.model.stat_type == GuildStatType::AverageTime {
                 ButtonStyle::Primary
             } else {
                 ButtonStyle::Secondary
@@ -639,12 +688,8 @@ impl ViewRender for VoiceStatsHandler {
         )));
 
         // 3. User Select Menu (Only for User)
-        if self.data.is_user_stats() {
-            let default_users = self
-                .data
-                .user
-                .clone()
-                .map(|u| std::borrow::Cow::Owned(vec![u.id]));
+        if self.model.is_user_stats() {
+            let default_users = Some(std::borrow::Cow::Owned(vec![self.user.id]));
             let user_select = registry
                 .register(SelectUser)
                 .as_select(CreateSelectMenuKind::User { default_users });

@@ -5,6 +5,10 @@ use std::time::Duration;
 
 use crate::bot::command::prelude::*;
 use crate::entity::ServerSettings;
+use crate::update::Update;
+use crate::update::feed_settings::FeedSettingsModel;
+use crate::update::feed_settings::FeedSettingsMsg;
+use crate::update::feed_settings::FeedSettingsUpdate;
 
 /// Configure feed settings for this server
 ///
@@ -34,7 +38,14 @@ impl Controller for FeedSettingsController<'_> {
 
         let mut settings = service.get_server_settings(guild_id).await?;
 
+        let feeds_settings = settings.feeds.clone();
         let view = SettingsFeedHandler {
+            model: FeedSettingsModel {
+                enabled: feeds_settings.enabled,
+                channel_id: feeds_settings.channel_id,
+                subscribe_role_id: feeds_settings.subscribe_role_id,
+                unsubscribe_role_id: feeds_settings.unsubscribe_role_id,
+            },
             settings: &mut settings,
         };
 
@@ -64,6 +75,7 @@ action_enum! { SettingsFeedAction {
 } }
 
 pub struct SettingsFeedHandler<'a> {
+    pub model: FeedSettingsModel,
     pub settings: &'a mut ServerSettings,
 }
 
@@ -74,39 +86,52 @@ impl<'a> ViewHandler for SettingsFeedHandler<'a> {
         &mut self,
         ctx: ViewContext<'_, SettingsFeedAction>,
     ) -> Result<ViewCommand, Error> {
-        let settings = &mut self.settings.feeds;
-
         match ctx.action() {
             SettingsFeedAction::Enabled => {
-                let current = settings.enabled.unwrap_or(true);
-                settings.enabled = Some(!current);
+                FeedSettingsUpdate::update(FeedSettingsMsg::ToggleEnabled, &mut self.model);
+                self.settings.feeds.enabled = self.model.enabled;
                 Ok(ViewCommand::Render)
             }
             SettingsFeedAction::Channel => {
-                if let ViewEvent::Component(ref interaction) = ctx.event
+                let channel_id = if let ViewEvent::Component(ref interaction) = ctx.event
                     && let ComponentInteractionDataKind::ChannelSelect { values } =
                         &interaction.data.kind
                 {
-                    settings.channel_id = values.first().map(|id| id.to_string());
-                }
+                    values.first().map(|id| id.to_string())
+                } else {
+                    None
+                };
+                FeedSettingsUpdate::update(
+                    FeedSettingsMsg::SetChannel(channel_id),
+                    &mut self.model,
+                );
+                self.settings.feeds.channel_id = self.model.channel_id.clone();
                 Ok(ViewCommand::Render)
             }
             SettingsFeedAction::SubRole => {
-                if let ViewEvent::Component(ref interaction) = ctx.event
+                let role_id = if let ViewEvent::Component(ref interaction) = ctx.event
                     && let ComponentInteractionDataKind::RoleSelect { values } =
                         &interaction.data.kind
                 {
-                    settings.subscribe_role_id = values.first().map(|v| v.to_string());
-                }
+                    values.first().map(|v| v.to_string())
+                } else {
+                    None
+                };
+                FeedSettingsUpdate::update(FeedSettingsMsg::SetSubRole(role_id), &mut self.model);
+                self.settings.feeds.subscribe_role_id = self.model.subscribe_role_id.clone();
                 Ok(ViewCommand::Render)
             }
             SettingsFeedAction::UnsubRole => {
-                if let ViewEvent::Component(ref interaction) = ctx.event
+                let role_id = if let ViewEvent::Component(ref interaction) = ctx.event
                     && let ComponentInteractionDataKind::RoleSelect { values } =
                         &interaction.data.kind
                 {
-                    settings.unsubscribe_role_id = values.first().map(|v| v.to_string());
-                }
+                    values.first().map(|v| v.to_string())
+                } else {
+                    None
+                };
+                FeedSettingsUpdate::update(FeedSettingsMsg::SetUnsubRole(role_id), &mut self.model);
+                self.settings.feeds.unsubscribe_role_id = self.model.unsubscribe_role_id.clone();
                 Ok(ViewCommand::Render)
             }
             SettingsFeedAction::Back => {
@@ -140,12 +165,12 @@ impl<'a> SettingsFeedHandler<'a> {
 impl<'a> ViewRender for SettingsFeedHandler<'a> {
     type Action = SettingsFeedAction;
     fn render(&self, registry: &mut ActionRegistry<SettingsFeedAction>) -> ResponseKind<'_> {
-        let is_enabled = self.settings.feeds.enabled.unwrap_or(true);
+        let is_enabled = self.model.is_enabled();
 
         let status_text = format!(
             "-# **Settings > Feeds**\n## Feed Subscription Settings\n\n> 🛈  {}",
             if is_enabled {
-                match &self.settings.feeds.channel_id {
+                match &self.model.channel_id {
                     Some(id) => format!("Feed notifications are currently **active**. Notifications will be sent to <#{id}>"),
                     None => "Feed notifications are currently **active**, but notification channel is not set.".to_string(),
                 }
@@ -172,10 +197,10 @@ impl<'a> ViewRender for SettingsFeedHandler<'a> {
             .as_select(CreateSelectMenuKind::Channel {
                 channel_types: Some(vec![ChannelType::Text, ChannelType::News].into()),
                 default_channels: Some(
-                    Self::parse_channel_id(self.settings.feeds.channel_id.as_ref()).into(),
+                    Self::parse_channel_id(self.model.channel_id.as_ref()).into(),
                 ),
             })
-            .placeholder(if self.settings.feeds.channel_id.is_some() {
+            .placeholder(if self.model.channel_id.is_some() {
                 "Change notification channel"
             } else {
                 "⚠️ Required: Select a notification channel"
@@ -186,11 +211,11 @@ impl<'a> ViewRender for SettingsFeedHandler<'a> {
             .register(SettingsFeedAction::SubRole)
             .as_select(CreateSelectMenuKind::Role {
                 default_roles: Some(
-                    Self::parse_role_id(self.settings.feeds.subscribe_role_id.as_ref()).into(),
+                    Self::parse_role_id(self.model.subscribe_role_id.as_ref()).into(),
                 ),
             })
             .min_values(0)
-            .placeholder(if self.settings.feeds.subscribe_role_id.is_some() {
+            .placeholder(if self.model.subscribe_role_id.is_some() {
                 "Change subscribe role"
             } else {
                 "Optional: Select role for subscribe permission"
@@ -201,11 +226,11 @@ impl<'a> ViewRender for SettingsFeedHandler<'a> {
             .register(SettingsFeedAction::UnsubRole)
             .as_select(CreateSelectMenuKind::Role {
                 default_roles: Some(
-                    Self::parse_role_id(self.settings.feeds.unsubscribe_role_id.as_ref()).into(),
+                    Self::parse_role_id(self.model.unsubscribe_role_id.as_ref()).into(),
                 ),
             })
             .min_values(0)
-            .placeholder(if self.settings.feeds.unsubscribe_role_id.is_some() {
+            .placeholder(if self.model.unsubscribe_role_id.is_some() {
                 "Change unsubscribe role"
             } else {
                 "Optional: Select role for unsubscribe permission"

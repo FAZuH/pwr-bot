@@ -119,7 +119,7 @@ pub struct ServerSettings {
     pub welcome: WelcomeSettings,
 }
 
-#[derive(Serialize, Deserialize, Default, Clone, Debug)]
+#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
 pub struct WelcomeSettings {
     #[serde(default)]
     pub enabled: Option<bool>,
