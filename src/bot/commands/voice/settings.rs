@@ -67,7 +67,8 @@ pub struct SettingsVoiceHandler {
 }
 
 #[async_trait::async_trait]
-impl ViewHandler<SettingsVoiceAction> for SettingsVoiceHandler {
+impl ViewHandler for SettingsVoiceHandler {
+    type Action = SettingsVoiceAction;
     async fn handle(
         &mut self,
         ctx: ViewContext<'_, SettingsVoiceAction>,
@@ -91,7 +92,8 @@ impl ViewHandler<SettingsVoiceAction> for SettingsVoiceHandler {
     }
 }
 
-impl ViewRender<SettingsVoiceAction> for SettingsVoiceHandler {
+impl ViewRender for SettingsVoiceHandler {
+    type Action = SettingsVoiceAction;
     fn render(&self, registry: &mut ActionRegistry<SettingsVoiceAction>) -> ResponseKind<'_> {
         let is_enabled = self.settings.voice.enabled.unwrap_or(true);
 

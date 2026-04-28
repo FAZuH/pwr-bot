@@ -171,7 +171,8 @@ impl SettingsMainHandler {
     }
 }
 
-impl ViewRender<SettingsMainAction> for SettingsMainHandler {
+impl ViewRender for SettingsMainHandler {
+    type Action = SettingsMainAction;
     fn render(&self, registry: &mut ActionRegistry<SettingsMainAction>) -> ResponseKind<'_> {
         let text_settings = CreateTextDisplay::new("-# **Settings**");
         let mut components = vec![CreateContainerComponent::TextDisplay(text_settings)];
@@ -277,7 +278,8 @@ action_enum! {
 }
 
 #[async_trait::async_trait]
-impl ViewHandler<SettingsMainAction, ()> for SettingsMainHandler {
+impl ViewHandler for SettingsMainHandler {
+    type Action = SettingsMainAction;
     async fn handle(
         &mut self,
         ctx: ViewContext<'_, SettingsMainAction>,

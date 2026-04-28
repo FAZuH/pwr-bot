@@ -267,7 +267,8 @@ pub struct FeedSubscriptionBatchHandler {
 }
 
 #[async_trait::async_trait]
-impl ViewHandler<FeedSubscriptionBatchAction> for FeedSubscriptionBatchHandler {
+impl ViewHandler for FeedSubscriptionBatchHandler {
+    type Action = FeedSubscriptionBatchAction;
     async fn handle(
         &mut self,
         ctx: ViewContext<'_, FeedSubscriptionBatchAction>,
@@ -288,7 +289,8 @@ impl ViewHandler<FeedSubscriptionBatchAction> for FeedSubscriptionBatchHandler {
     }
 }
 
-impl ViewRender<FeedSubscriptionBatchAction> for FeedSubscriptionBatchHandler {
+impl ViewRender for FeedSubscriptionBatchHandler {
+    type Action = FeedSubscriptionBatchAction;
     fn render(
         &self,
         registry: &mut ActionRegistry<FeedSubscriptionBatchAction>,

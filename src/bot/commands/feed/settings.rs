@@ -68,7 +68,8 @@ pub struct SettingsFeedHandler<'a> {
 }
 
 #[async_trait::async_trait]
-impl<'a> ViewHandler<SettingsFeedAction> for SettingsFeedHandler<'a> {
+impl<'a> ViewHandler for SettingsFeedHandler<'a> {
+    type Action = SettingsFeedAction;
     async fn handle(
         &mut self,
         ctx: ViewContext<'_, SettingsFeedAction>,
@@ -136,7 +137,8 @@ impl<'a> SettingsFeedHandler<'a> {
     }
 }
 
-impl<'a> ViewRender<SettingsFeedAction> for SettingsFeedHandler<'a> {
+impl<'a> ViewRender for SettingsFeedHandler<'a> {
+    type Action = SettingsFeedAction;
     fn render(&self, registry: &mut ActionRegistry<SettingsFeedAction>) -> ResponseKind<'_> {
         let is_enabled = self.settings.feeds.enabled.unwrap_or(true);
 

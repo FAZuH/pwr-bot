@@ -431,22 +431,24 @@ impl<'a, T: Action + 'static> ViewContext<'a, T> {
 }
 
 /// Defines how a view translates its state into Discord components or an embed.
-pub trait ViewRender<T: Action> {
-    fn render(&self, registry: &mut ActionRegistry<T>) -> ResponseKind<'_>;
+pub trait ViewRender {
+    type Action: Action;
+    fn render(&self, registry: &mut ActionRegistry<Self::Action>) -> ResponseKind<'_>;
 
-    fn create_reply(&self, registry: &mut ActionRegistry<T>) -> CreateReply<'_> {
+    fn create_reply(&self, registry: &mut ActionRegistry<Self::Action>) -> CreateReply<'_> {
         self.render(registry).into()
     }
 }
 
 /// Manages state and processes interactions for a view.
 #[async_trait::async_trait]
-pub trait ViewHandler<T: Action, S: Send + Sync = ()>: Send + Sync {
+pub trait ViewHandler: Send + Sync {
+    type Action: Action;
     /// Handles a non-timeout event.
     ///
     /// Receives the full [`ViewContext`] containing the event, action, sender,
     /// and coordinator. Returns a [`ViewCommand`] controlling the engine loop.
-    async fn handle(&mut self, ctx: ViewContext<'_, T>) -> Result<ViewCommand, Error>;
+    async fn handle(&mut self, ctx: ViewContext<'_, Self::Action>) -> Result<ViewCommand, Error>;
 
     /// Called when the view loop times out waiting for user input.
     async fn on_timeout(&mut self) -> Result<ViewCommand, Error> {
@@ -470,7 +472,7 @@ pub trait ViewHandler<T: Action, S: Send + Sync = ()>: Send + Sync {
 pub struct ViewEngine<'a, T, H>
 where
     T: Action + Send + Sync + 'static,
-    H: ViewHandler<T> + ViewRender<T>,
+    H: ViewHandler<Action = T> + ViewRender<Action = T>,
 {
     /// The combined handler and renderer.
     pub handler: H,
@@ -489,7 +491,7 @@ where
 impl<'a, T, H> ViewEngine<'a, T, H>
 where
     T: Action + Send + Sync + 'static,
-    H: ViewHandler<T> + ViewRender<T>,
+    H: ViewHandler<Action = T> + ViewRender<Action = T>,
 {
     pub fn new(
         ctx: Context<'a>,

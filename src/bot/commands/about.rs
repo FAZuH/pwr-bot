@@ -81,7 +81,8 @@ impl AboutView {
     }
 }
 
-impl ViewRender<AboutAction> for AboutView {
+impl ViewRender for AboutView {
+    type Action = AboutAction;
     fn render(&self, registry: &mut ActionRegistry<AboutAction>) -> ResponseKind<'_> {
         let content_text = format!(
             "-# **Settings > About**\n## pwr-bot\n### Stats\n- **Uptime**: {}\n- **Servers**: {}\n- **Users**: {}\n- **Commands**: {}\n- **Latency**: {}ms\n- **Memory**: {:.1} MB\n### Info\n- **Author**: [FAZuH](https://github.com/FAZuH)\n- **Source**: [GitHub](https://github.com/FAZuH/pwr-bot)\n- **License**: [MIT](https://github.com/FAZuH/pwr-bot/blob/main/LICENSE)\nCopyright © 2025-{} FAZuH  —  v{}",
@@ -130,7 +131,8 @@ impl ViewRender<AboutAction> for AboutView {
 }
 
 #[async_trait::async_trait]
-impl ViewHandler<AboutAction> for AboutView {
+impl ViewHandler for AboutView {
+    type Action = AboutAction;
     async fn handle(&mut self, ctx: ViewContext<'_, AboutAction>) -> Result<ViewCommand, Error> {
         match ctx.action() {
             AboutAction::Back => {

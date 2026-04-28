@@ -284,7 +284,8 @@ impl VoiceLeaderboardHandler<'_> {
 }
 
 #[async_trait::async_trait]
-impl ViewHandler<VoiceLeaderboardAction> for VoiceLeaderboardHandler<'_> {
+impl ViewHandler for VoiceLeaderboardHandler<'_> {
+    type Action = VoiceLeaderboardAction;
     async fn handle(
         &mut self,
         ctx: ViewContext<'_, VoiceLeaderboardAction>,
@@ -348,7 +349,8 @@ impl ViewHandler<VoiceLeaderboardAction> for VoiceLeaderboardHandler<'_> {
     }
 }
 
-impl ViewRender<VoiceLeaderboardAction> for VoiceLeaderboardHandler<'_> {
+impl ViewRender for VoiceLeaderboardHandler<'_> {
+    type Action = VoiceLeaderboardAction;
     fn render(&self, registry: &mut ActionRegistry<VoiceLeaderboardAction>) -> ResponseKind<'_> {
         use VoiceLeaderboardAction::*;
         use VoiceLeaderboardTimeRange::*;

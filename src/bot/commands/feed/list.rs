@@ -183,7 +183,8 @@ impl FeedListHandler {
     }
 }
 
-impl ViewRender<FeedListAction> for FeedListHandler {
+impl ViewRender for FeedListHandler {
+    type Action = FeedListAction;
     fn render(&self, registry: &mut ActionRegistry<FeedListAction>) -> ResponseKind<'_> {
         if self.subscriptions.is_empty() {
             return FeedListHandler::create_empty().into();
@@ -221,7 +222,8 @@ action_extends! { FeedListAction extends PaginationAction {
 }}
 
 #[async_trait::async_trait]
-impl ViewHandler<FeedListAction> for FeedListHandler {
+impl ViewHandler for FeedListHandler {
+    type Action = FeedListAction;
     async fn handle(&mut self, ctx: ViewContext<'_, FeedListAction>) -> Result<ViewCommand, Error> {
         use FeedListAction::*;
         match ctx.action() {

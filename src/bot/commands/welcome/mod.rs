@@ -58,7 +58,8 @@ pub struct SettingsWelcomeHandler {
 }
 
 #[async_trait::async_trait]
-impl ViewHandler<SettingsWelcomeAction> for SettingsWelcomeHandler {
+impl ViewHandler for SettingsWelcomeHandler {
+    type Action = SettingsWelcomeAction;
     async fn handle(
         &mut self,
         ctx: ViewContext<'_, SettingsWelcomeAction>,
@@ -202,7 +203,8 @@ impl ViewHandler<SettingsWelcomeAction> for SettingsWelcomeHandler {
 
 // ── View ─────────────────────────────────────────────────────────────────────
 
-impl ViewRender<SettingsWelcomeAction> for SettingsWelcomeHandler {
+impl ViewRender for SettingsWelcomeHandler {
+    type Action = SettingsWelcomeAction;
     fn render(&self, registry: &mut ActionRegistry<SettingsWelcomeAction>) -> ResponseKind<'_> {
         let is_enabled = self.settings.welcome.enabled.unwrap_or(false);
         let msgs = self

@@ -449,7 +449,8 @@ impl VoiceStatsHandler {
 }
 
 #[async_trait::async_trait]
-impl ViewHandler<VoiceStatsAction> for VoiceStatsHandler {
+impl ViewHandler for VoiceStatsHandler {
+    type Action = VoiceStatsAction;
     async fn handle(
         &mut self,
         ctx: ViewContext<'_, VoiceStatsAction>,
@@ -522,7 +523,8 @@ impl ViewHandler<VoiceStatsAction> for VoiceStatsHandler {
     }
 }
 
-impl ViewRender<VoiceStatsAction> for VoiceStatsHandler {
+impl ViewRender for VoiceStatsHandler {
+    type Action = VoiceStatsAction;
     fn render(&self, registry: &mut ActionRegistry<VoiceStatsAction>) -> ResponseKind<'_> {
         use VoiceStatsAction::*;
 
