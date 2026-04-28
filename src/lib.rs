@@ -17,6 +17,7 @@ pub mod repo;
 pub mod service;
 pub mod subscriber;
 pub mod task;
+pub mod update;
 
 /// Trait for types that hold internal data of type `T`.
 ///

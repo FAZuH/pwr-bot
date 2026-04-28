@@ -74,8 +74,12 @@ impl<T: poise::ChoiceParameter + Copy + Into<DateTime<Utc>>> TimeRange for T {
 }
 
 /// Time range filter for voice activity leaderboard.
-#[derive(ChoiceParameter, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(ChoiceParameter, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum VoiceLeaderboardTimeRange {
+    /// From 1st of this month 00:00 until now
+    #[default]
+    #[name = "This month"]
+    ThisMonth,
     /// From start of today (UTC 00:00) until now
     #[name = "Today"]
     Today,
@@ -91,9 +95,6 @@ pub enum VoiceLeaderboardTimeRange {
     /// From 14 days ago until now
     #[name = "Past 14 days"]
     Past14Days,
-    /// From 1st of this month 00:00 until now
-    #[name = "This month"]
-    ThisMonth,
     /// From January 1st 00:00 until now
     #[name = "This year"]
     ThisYear,

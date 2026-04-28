@@ -14,3 +14,5 @@ pub trait Update {
 
     fn update(msg: Self::Msg, model: &mut Self::Model) -> Self::Cmd;
 }
+
+pub mod voice_leaderboard;

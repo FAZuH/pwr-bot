@@ -150,7 +150,7 @@ pub struct VoiceSettings {
     pub enabled: Option<bool>,
 }
 
-#[derive(FromRow, Serialize, Default, Clone, Debug)]
+#[derive(FromRow, Serialize, Default, Clone, Debug, PartialEq, Eq)]
 pub struct VoiceLeaderboardEntry {
     #[sqlx(try_from = "i64")]
     pub user_id: u64,
