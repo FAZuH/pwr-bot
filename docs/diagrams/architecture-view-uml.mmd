@@ -13,7 +13,8 @@ classDiagram
     %% ── Core structs ──────────────────────────────────────────────
     class ViewContext~T~ {
         poise: Context
-        event: ViewEvent~T~
+        action: Option~T~
+        event: ViewEvent
         tx: Arc~dyn ViewSender~T~~
         coordinator: Arc~Coordinator~
         map(action, wrap) ViewContext~C~
@@ -25,19 +26,43 @@ classDiagram
         prefix: String
         counter: usize
         register(action: T) RegisteredAction
-        get(id: str) Option~T~
+        register_with_id(id, action) Option~RegisteredAction~
+        get(id: str) Option~&T~
         clear()
     }
 
     class ViewEngine~T, H~ {
         ctx: Context
         handler: H
-        registry: ActionRegistry~T~
+        registry: Registry~T~
         timeout: Duration
         coordinator: Arc~Coordinator~
         should_acknowledge: bool
         render_view() Result
         run() Result
+    }
+
+    class ViewChannel~T~ {
+        tx: UnboundedSender~EventMessage~T~~
+        rx: UnboundedReceiver~EventMessage~T~~
+        registry: Registry~T~
+        config: ViewChannelConfig
+        new(config, registry)
+        sender() Arc~dyn ViewSender~T~~
+        recv() Option~EventMessage~T~~
+        start(ctx, msg_id, author_id, channel_id, timeout)
+    }
+
+    class ViewChannelConfig {
+        components: bool
+        modals: bool
+        messages: bool
+        reactions: bool
+    }
+
+    class MappedViewSender~C, P~ {
+        parent_tx: Arc~dyn ViewSender~P~~
+        wrap: fn(Option~C~) -> Option~P~
     }
 
     class RegisteredAction {
@@ -76,11 +101,23 @@ classDiagram
 
     class ViewEvent {
         <<enum>>
-        Component
-        Modal
-        Message
+        Component(ComponentInteraction)
+        Modal(ModalInteraction)
+        Message(Message)
+        Reaction(Reaction)
         Async
         Timeout
+    }
+
+    %% ── Type aliases ──────────────────────────────────────────────
+    class EventMessage~T~ {
+        <<type alias>>
+        Tuple of Option~T~ and ViewEvent
+    }
+
+    class Registry~T~ {
+        <<type alias>>
+        Arc wrapping RwLock of ActionRegistry~T~
     }
 
     %% ── Traits ────────────────────────────────────────────────────
@@ -89,16 +126,24 @@ classDiagram
         label() str
     }
 
-    class ViewRender~T: Action~ {
+    class ViewRender {
         <<trait>>
+        type Action: Action
         render(registry) ResponseKind
         create_reply(registry) CreateReply
     }
 
-    class ViewHandler~T: Action, S: Send + Sync~ {
+    class ViewHandler {
         <<trait>>
+        type Action: Action
         handle(ctx) Result~ViewCommand~
         on_timeout() Result~ViewCommand~
+        channel_config() ViewChannelConfig
+    }
+
+    class ViewSender~T~ {
+        <<trait>>
+        send(message: EventMessage~T~)
     }
 
     class Controller {
@@ -109,11 +154,18 @@ classDiagram
     %% ── Trait relationships ───────────────────────────────────────
     ViewEngine --> ViewHandler : owns
     ViewEngine --> ViewRender : owns
+    ViewEngine --> ViewChannel : drives
     ViewEngine --> ActionRegistry : owns
+    ViewChannel --> ActionRegistry : reads
     ViewHandler ..> ViewCommand : returns
-    ViewHandler ..> ViewEvent : receives
+    ViewHandler ..> ViewEvent : receives via ctx
     ViewHandler ..> ViewContext : receives
+    ViewHandler ..> ViewChannelConfig : configures
     ActionRegistry ..> Action : maps
     ActionRegistry ..> RegisteredAction : produces
+    MappedViewSender ..> ViewSender : implements
+    ViewSender ..> EventMessage : sends
     Coordinator ..> Controller : drives
     Controller ..> NavigationResult : returns
+    ViewContext ..> ViewSender : uses
+    ViewContext ..> MappedViewSender : creates via map()

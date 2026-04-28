@@ -13,19 +13,24 @@
   }
 }}%%
 graph TB
-    subgraph ViewEngineLoop["View Engine Event Loop (tokio::select!)"]
+    subgraph ViewEngineLoop["View Engine Event Loop"]
         direction TB
         
         Start["Start ViewEngine"]
-        Render["Render View<br/>(handler.render)"]
-        Select["tokio::select!"]
+        CreateChannel["Create ViewChannel<br/>(from channel_config)"]
+        Render["Render View<br/>(handler.create_reply)"]
+        StartCollectors["ViewChannel::start()<br/>(spawn background collectors)"]
+        Recv["ViewChannel::recv()"]
         
         Component["Component Interaction<br/>(Discord UI)"]
         Async["Async Event<br/>(ctx.spawn / tx.send)"]
         Modal["Modal Submission"]
         Timeout["Timeout Event"]
         
-        ActionEvent["ViewEvent Enum"]
+        Unknown["Unknown custom_id?"]
+        Skip["Acknowledge & Skip"]
+        
+        EventMsg["EventMessage<br/>(Option~Action~, ViewEvent)"]
         Handle["ViewHandler::handle"]
         HandleTimeout["ViewHandler::on_timeout"]
         
@@ -33,31 +38,55 @@ graph TB
         CmdContinue["ViewCommand::Continue / AlreadyResponded"]
         CmdExit["ViewCommand::Exit"]
         
-        CmdRender -->|re-render| Render
-        Start -->|engine.run| Render
-        Render -->|loop| Select
+        Start -->|engine.run| CreateChannel
+        CreateChannel --> Render
+        Render -->|msg_id known| StartCollectors
+        StartCollectors -->|loop| Recv
         
-        Select -->|ComponentInteraction| Component
-        Select -->|mpsc::recv| Async
-        Select -->|ModalSubmit| Modal
-        Select -->|Collector Timeout| Timeout
+        Recv -->|ComponentInteraction| Component
+        Recv -->|Async| Async
+        Recv -->|ModalSubmit| Modal
+        Recv -->|Timeout| Timeout
         
-        Component & Async & Modal -->|Map to Action| ActionEvent
-        ActionEvent -->|"handler.handle(ctx)"| Handle
+        Component --> Unknown
+        Unknown -->|yes| Skip
+        Unknown -->|no| EventMsg
+        Async & Modal --> EventMsg
         Timeout --> HandleTimeout
+        
+        EventMsg -->|"handler.handle(ctx)"| Handle
         
         Handle & HandleTimeout -->|return| CmdRender
         Handle & HandleTimeout -->|return| CmdContinue
         Handle & HandleTimeout -->|return| CmdExit
         
-        CmdContinue -->|next event| Select
+        Skip -->|next event| Recv
+        CmdContinue -->|next event| Recv
+        CmdRender -->|re-render| Render
         CmdExit -->|break| Stop[Stop Engine]
     end
+    
+    subgraph Collectors["Background Collectors (spawned by ViewChannel)"]
+        direction TB
+        CompCollector["ComponentInteractionCollector"]
+        ModalCollector["ModalInteractionCollector"]
+        MsgCollector["MessageCollector"]
+        ReactCollector["ReactionCollector"]
+        
+        CompCollector -->|lookup registry| CompSend["send (Some(action), Component)"]
+        ModalCollector -->|lookup registry| ModalSend["send (Some(action), Modal)"]
+        MsgCollector --> MsgSend["send (None, Message)"]
+        ReactCollector --> ReactSend["send (None, Reaction)"]
+        
+        CompCollector -->|timeout| TimeoutSend["send (None, Timeout)"]
+    end
+    
+    Collectors -.->|feed into| Recv
     
     subgraph Mapping["Context & Delegation"]
         direction TB
         ParentCtx["Parent ViewContext"]
-        Map["ctx.map(Wrap)"]
+        Map["ctx.map(wrap: fn(Option~C~) -> Option~T~)"]
         ChildCtx["Child ViewContext"]
         
         ParentCtx --> Map
@@ -69,4 +98,6 @@ graph TB
     style Start fill:#2d2d2d,stroke:#ffffff,stroke-width:2px
     style Stop fill:#2d2d2d,stroke:#ffffff,stroke-width:2px
     style Render fill:#1e1e1e,stroke:#ffffff
-    style Select fill:#1e1e1e,stroke:#ffffff
+    style Recv fill:#1e1e1e,stroke:#ffffff
+    style CreateChannel fill:#1e1e1e,stroke:#ffffff
+    style StartCollectors fill:#1e1e1e,stroke:#ffffff
