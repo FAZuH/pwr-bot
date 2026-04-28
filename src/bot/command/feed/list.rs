@@ -48,8 +48,6 @@ impl Controller for FeedListController<'_> {
 
         let service = ctx.data().service.feed_subscription.clone();
 
-        let _total_items = service.get_subscription_count(&subscriber).await?;
-
         let subscriptions = service
             .list_paginated_subscriptions(&subscriber, 1u32, SUBSCRIPTIONS_PER_PAGE)
             .await?;

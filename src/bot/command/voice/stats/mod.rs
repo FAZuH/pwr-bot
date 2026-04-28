@@ -386,15 +386,6 @@ impl VoiceStatsHandler {
                 streak
             )
         } else {
-            // Guild stats - calculate average daily time (same for both modes)
-            let avg_time = if self.data.guild_stats.is_empty() {
-                0
-            } else {
-                self.data.guild_stats.iter().map(|s| s.value).sum::<i64>()
-                    / self.data.guild_stats.len() as i64
-            };
-            let _avg_time_str = format_duration(avg_time); // Reserved for future use
-
             // For guild stats, show different metrics based on stat_type
             let (first_label, first_value, second_label, second_value) = match self.model.stat_type
             {

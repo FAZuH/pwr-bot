@@ -137,10 +137,6 @@ impl VoiceStateSubscriber {
         let session = self.active_sessions.lock().await.remove(&session_id);
 
         if let Some(session) = session {
-            let _guild_id = old_state
-                .guild_id
-                .ok_or(anyhow::anyhow!("Missing guild_id"))?
-                .get();
             self.services
                 .voice_tracking
                 .close_session(
@@ -173,10 +169,6 @@ impl VoiceStateSubscriber {
 
         // Close old session
         if let Some(session) = self.active_sessions.lock().await.remove(&old_session_id) {
-            let _guild_id = old_state
-                .guild_id
-                .ok_or(anyhow::anyhow!("Missing guild_id"))?
-                .get();
             self.services
                 .voice_tracking
                 .close_session(

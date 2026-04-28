@@ -180,7 +180,7 @@ mod feed_table_tests {
         let sub_id = create_sub!(db, "user1");
         let f1 = create_feed!(db, "One Piece");
         let f2 = create_feed!(db, "One Punch Man");
-        let _f3 = create_feed!(db, "Naruto");
+        let _ = create_feed!(db, "Naruto");
 
         create_subscription!(db, f1, sub_id);
         create_subscription!(db, f2, sub_id);
