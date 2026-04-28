@@ -1,3 +1,5 @@
+## [0.2.17](https://github.com/FAZuH/pwr-bot/compare/v0.2.16...v0.2.17) (2026-04-28)
+
 ## [0.2.16](https://github.com/FAZuH/pwr-bot/compare/v0.2.15...v0.2.16) (2026-03-10)
 
 
@@ -46,6 +48,4 @@
 
 * Modify /vc leaderboard time range options ([5fc5135](https://github.com/FAZuH/pwr-bot/commit/5fc51355201cb9a9cc2298494aa73329866d817d))
 * Replace Today/Past 3 Days with rolling 24h/72h ranges in /vc leaderboard ([6896898](https://github.com/FAZuH/pwr-bot/commit/68968983c7179c8627675d5f95b3a280b4257632))
-
-## [0.2.12](https://github.com/FAZuH/pwr-bot/compare/v0.2.11...v0.2.12) (2026-02-20)
 
