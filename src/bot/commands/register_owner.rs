@@ -1,7 +1,6 @@
 //! Owner register command.
 
-use crate::bot::commands::Context;
-use crate::bot::commands::Error;
+use crate::bot::commands::prelude::*;
 
 #[poise::command(prefix_command, owners_only, hide_in_help)]
 pub async fn register_owner(ctx: Context<'_>) -> Result<(), Error> {

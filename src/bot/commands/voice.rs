@@ -4,17 +4,12 @@ use chrono::DateTime;
 use chrono::Datelike;
 use chrono::Duration;
 use chrono::Utc;
-use poise::ChoiceParameter;
-use poise::serenity_prelude::*;
 
-use crate::bot::commands::Context;
-use crate::bot::commands::Error;
-use crate::bot::views::Action;
+use crate::bot::commands::prelude::*;
 
 pub mod leaderboard;
 pub mod settings;
 pub mod stats;
-pub mod stats_chart;
 
 /// Voice channel tracking and leaderboard commands
 ///

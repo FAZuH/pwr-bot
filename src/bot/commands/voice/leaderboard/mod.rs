@@ -4,34 +4,16 @@ use std::time::Duration;
 use std::time::Instant;
 
 use log::trace;
-use poise::ChoiceParameter;
-use poise::serenity_prelude::*;
 
-use crate::action_extends;
-use crate::bot::commands::Context;
-use crate::bot::commands::Error;
+use crate::bot::commands::prelude::*;
 use crate::bot::commands::voice::TimeRange;
 use crate::bot::commands::voice::VoiceLeaderboardTimeRange;
 use crate::bot::commands::voice::leaderboard::image_builder::LeaderboardPageBuilder;
 use crate::bot::commands::voice::leaderboard::image_builder::PageGenerationResult;
-use crate::bot::controller::Controller;
-use crate::bot::coordinator::Coordinator;
-use crate::bot::error::BotError;
-use crate::bot::navigation::NavigationResult;
-use crate::bot::utils::format_duration;
-use crate::bot::views::ActionRegistry;
-use crate::bot::views::ResponseKind;
-use crate::bot::views::ViewCommand;
-use crate::bot::views::ViewContext;
-use crate::bot::views::ViewEngine;
-use crate::bot::views::ViewEvent;
-use crate::bot::views::ViewHandler;
-use crate::bot::views::ViewRender;
 use crate::bot::views::pagination::PaginationAction;
 use crate::bot::views::pagination::PaginationView;
 use crate::entity::VoiceLeaderboardEntry;
 use crate::entity::VoiceLeaderboardOptBuilder;
-use crate::error::AppError;
 use crate::service::traits::VoiceTracker;
 
 pub mod image_builder;
@@ -302,7 +284,8 @@ impl VoiceLeaderboardHandler<'_> {
 }
 
 #[async_trait::async_trait]
-impl ViewHandler<VoiceLeaderboardAction> for VoiceLeaderboardHandler<'_> {
+impl ViewHandler for VoiceLeaderboardHandler<'_> {
+    type Action = VoiceLeaderboardAction;
     async fn handle(
         &mut self,
         ctx: ViewContext<'_, VoiceLeaderboardAction>,
@@ -316,12 +299,12 @@ impl ViewHandler<VoiceLeaderboardAction> for VoiceLeaderboardHandler<'_> {
             Base(inner) => {
                 let _ = self
                     .pagination
-                    .handle(ctx.map(*inner, VoiceLeaderboardAction::Base))
+                    .handle(ctx.map(*inner, |v| v.map(VoiceLeaderboardAction::Base)))
                     .await?;
                 changed_page = true;
             }
             TimeRange => {
-                if let ViewEvent::Component(_, ref interaction) = ctx.event
+                if let ViewEvent::Component(ref interaction) = ctx.event
                     && let ComponentInteractionDataKind::StringSelect { values } =
                         &interaction.data.kind
                     && let Some(time_range) = values
@@ -338,7 +321,7 @@ impl ViewHandler<VoiceLeaderboardAction> for VoiceLeaderboardHandler<'_> {
                 fetch_new = true;
             }
             SelectUser => {
-                if let ViewEvent::Component(_, ref interaction) = ctx.event
+                if let ViewEvent::Component(ref interaction) = ctx.event
                     && let ComponentInteractionDataKind::UserSelect { values } =
                         &interaction.data.kind
                     && let Some(user_id) = values.first()
@@ -366,7 +349,8 @@ impl ViewHandler<VoiceLeaderboardAction> for VoiceLeaderboardHandler<'_> {
     }
 }
 
-impl ViewRender<VoiceLeaderboardAction> for VoiceLeaderboardHandler<'_> {
+impl ViewRender for VoiceLeaderboardHandler<'_> {
+    type Action = VoiceLeaderboardAction;
     fn render(&self, registry: &mut ActionRegistry<VoiceLeaderboardAction>) -> ResponseKind<'_> {
         use VoiceLeaderboardAction::*;
         use VoiceLeaderboardTimeRange::*;
@@ -527,7 +511,12 @@ action_extends! {
 
 #[cfg(test)]
 mod tests {
+    use chrono::DateTime;
+    use chrono::Datelike;
+    use chrono::Utc;
+
     use super::*;
+    use crate::bot::commands::voice::leaderboard::image_builder::LeaderboardEntry;
 
     #[test]
     fn test_leaderboard_session_data_from_entries() {
@@ -564,20 +553,18 @@ mod tests {
         assert!(since <= until);
 
         let (since, until) = VoiceLeaderboardTimeRange::AllTime.to_range();
-        assert_eq!(since, chrono::DateTime::UNIX_EPOCH);
+        assert_eq!(since, DateTime::UNIX_EPOCH);
         assert!(since <= until);
     }
 
     #[test]
     fn test_voice_leaderboard_time_range_into_datetime() {
-        let now = chrono::Utc::now();
-        let past_24h_start: chrono::DateTime<chrono::Utc> =
-            VoiceLeaderboardTimeRange::Past24Hours.into();
+        let now = Utc::now();
+        let past_24h_start: DateTime<Utc> = VoiceLeaderboardTimeRange::Past24Hours.into();
         assert!(past_24h_start <= now);
 
-        let all_time_start: chrono::DateTime<chrono::Utc> =
-            VoiceLeaderboardTimeRange::AllTime.into();
-        assert_eq!(all_time_start, chrono::DateTime::UNIX_EPOCH);
+        let all_time_start: DateTime<Utc> = VoiceLeaderboardTimeRange::AllTime.into();
+        assert_eq!(all_time_start, DateTime::UNIX_EPOCH);
     }
 
     #[test]
@@ -588,5 +575,162 @@ mod tests {
 
         assert_eq!(range1, range2);
         assert_ne!(range1, range3);
+    }
+
+    #[test]
+    fn test_format_duration_edge_cases() {
+        // Test zero
+        assert_eq!(format_duration(0), "0s");
+
+        // Test boundaries
+        assert_eq!(format_duration(59), "59s");
+        assert_eq!(format_duration(60), "1m");
+        assert_eq!(format_duration(61), "1m");
+
+        assert_eq!(format_duration(3599), "59m");
+        assert_eq!(format_duration(3600), "1h");
+        assert_eq!(format_duration(3601), "1h");
+
+        assert_eq!(format_duration(86399), "23h 59m");
+        assert_eq!(format_duration(86400), "1d");
+        assert_eq!(format_duration(86401), "1d");
+    }
+
+    #[test]
+    fn test_format_duration_comprehensive() {
+        // Seconds
+        assert_eq!(format_duration(45), "45s");
+
+        // Minutes
+        assert_eq!(format_duration(300), "5m");
+        assert_eq!(format_duration(1500), "25m");
+
+        // Hours with and without minutes
+        assert_eq!(format_duration(7200), "2h");
+        assert_eq!(format_duration(7260), "2h 1m");
+        assert_eq!(format_duration(9000), "2h 30m");
+
+        // Days with and without hours
+        assert_eq!(format_duration(172800), "2d");
+        assert_eq!(format_duration(176400), "2d 1h");
+        assert_eq!(format_duration(259200), "3d");
+
+        // Large values
+        assert_eq!(format_duration(604800), "7d"); // One week
+        assert_eq!(format_duration(2592000), "30d"); // ~30 days
+        assert_eq!(format_duration(31536000), "365d"); // ~1 year
+    }
+
+    #[test]
+    fn test_voice_leaderboard_time_range_all_variants() {
+        // Test all time range variants can be converted to datetime
+        let ranges = vec![
+            VoiceLeaderboardTimeRange::Today,
+            VoiceLeaderboardTimeRange::Past7Days,
+            VoiceLeaderboardTimeRange::Past14Days,
+            VoiceLeaderboardTimeRange::ThisMonth,
+            VoiceLeaderboardTimeRange::ThisYear,
+            VoiceLeaderboardTimeRange::AllTime,
+        ];
+
+        let now = Utc::now();
+
+        for range in ranges {
+            let (since, until) = range.to_range();
+            assert!(since <= until, "Time range {:?} has since > until", range);
+            assert!(
+                until >= now || range == VoiceLeaderboardTimeRange::AllTime,
+                "Until should be around now for {:?}",
+                range
+            );
+
+            // Verify round-trip through ChoiceParameter name
+            let name = ChoiceParameter::name(&range);
+            let recovered = VoiceLeaderboardTimeRange::from_name(name);
+            assert!(
+                recovered.is_some(),
+                "Should be able to recover {:?} from name '{}'",
+                range,
+                name
+            );
+            assert_eq!(
+                recovered.unwrap() as i32,
+                range as i32,
+                "Recovered range should match original"
+            );
+        }
+    }
+
+    #[test]
+    fn test_time_range_date_boundaries() {
+        let now = Utc::now();
+
+        // Today should start at midnight today
+        let today_start: DateTime<Utc> = VoiceLeaderboardTimeRange::Today.into();
+        assert_eq!(
+            today_start.time(),
+            chrono::NaiveTime::from_hms_opt(0, 0, 0).unwrap()
+        );
+        assert_eq!(today_start.date_naive(), now.date_naive());
+
+        // This month should start on the 1st
+        let month_start: DateTime<Utc> = VoiceLeaderboardTimeRange::ThisMonth.into();
+        assert_eq!(month_start.day(), 1);
+        assert_eq!(
+            month_start.time(),
+            chrono::NaiveTime::from_hms_opt(0, 0, 0).unwrap()
+        );
+
+        // This year should start on Jan 1
+        let year_start: DateTime<Utc> = VoiceLeaderboardTimeRange::ThisYear.into();
+        assert_eq!(year_start.month(), 1);
+        assert_eq!(year_start.day(), 1);
+
+        // All time should be Unix epoch
+        let all_time_start: DateTime<Utc> = VoiceLeaderboardTimeRange::AllTime.into();
+        assert_eq!(all_time_start, DateTime::UNIX_EPOCH);
+    }
+
+    #[test]
+    fn test_time_range_relative_durations() {
+        let now = Utc::now();
+
+        // This week should be within the last 7 days
+        let (since, _) = VoiceLeaderboardTimeRange::Past7Days.to_range();
+        let duration = now.signed_duration_since(since);
+        assert!(
+            duration.num_days() >= 0 && duration.num_days() <= 7,
+            "This week should be within last 7 days, got {} days",
+            duration.num_days()
+        );
+
+        // Past 2 weeks should be within the last 14 days
+        let (since, _) = VoiceLeaderboardTimeRange::Past14Days.to_range();
+        let duration = now.signed_duration_since(since);
+        assert!(
+            duration.num_days() >= 7 && duration.num_days() <= 14,
+            "Past 2 weeks should be within last 14 days, got {} days",
+            duration.num_days()
+        );
+    }
+
+    #[test]
+    fn test_leaderboard_entry_clone() {
+        let entry = LeaderboardEntry {
+            rank: 1,
+            user_id: 123456789012345678,
+            display_name: "Test User".to_string(),
+            avatar_url: "https://cdn.discordapp.com/avatars/123/abc.png".to_string(),
+            duration_seconds: 3600,
+            avatar_image: None,
+        };
+
+        let cloned = entry.clone();
+        assert_eq!(cloned.rank, entry.rank);
+        assert_eq!(cloned.user_id, entry.user_id);
+        assert_eq!(cloned.display_name, entry.display_name);
+        assert_eq!(cloned.avatar_url, entry.avatar_url);
+        assert_eq!(cloned.duration_seconds, entry.duration_seconds);
+        assert!(cloned.avatar_image.is_none());
     }
 }

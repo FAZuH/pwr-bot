@@ -1,32 +1,21 @@
 //! About command showing bot statistics and information.
+use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::Datelike;
 use chrono::Utc;
 use poise::Command;
-use poise::serenity_prelude::*;
 
-use crate::action_enum;
-use crate::bot::commands::Context;
-use crate::bot::commands::Error;
-use crate::bot::controller::Controller;
-use crate::bot::coordinator::Coordinator;
-use crate::bot::navigation::NavigationResult;
-use crate::bot::views::ActionRegistry;
-use crate::bot::views::ResponseKind;
-use crate::bot::views::ViewCommand;
-use crate::bot::views::ViewContext;
-use crate::bot::views::ViewEngine;
-use crate::bot::views::ViewHandler;
-use crate::bot::views::ViewRender;
-use crate::controller;
+use crate::bot::commands::prelude::*;
 
 /// Show information about the bot
 #[poise::command(slash_command)]
 pub async fn about(ctx: Context<'_>) -> Result<(), Error> {
-    Coordinator::new(ctx)
-        .run(NavigationResult::SettingsAbout)
-        .await?;
+    invoke(Coordinator::new(ctx)).await
+}
+
+pub async fn invoke(coordinator: Arc<Coordinator<'_>>) -> Result<(), Error> {
+    coordinator.run(NavigationResult::SettingsAbout).await?;
     Ok(())
 }
 
@@ -34,7 +23,7 @@ controller! { pub struct AboutController<'a> {} }
 
 #[async_trait::async_trait]
 impl Controller for AboutController<'_> {
-    async fn run(&mut self, coordinator: std::sync::Arc<Coordinator<'_>>) -> Result<(), Error> {
+    async fn run(&mut self, coordinator: Arc<Coordinator<'_>>) -> Result<(), Error> {
         let ctx = *coordinator.context();
         ctx.defer().await?;
 
@@ -62,18 +51,6 @@ action_enum! {
 pub struct AboutView {
     stats: AboutStats,
     avatar_url: String,
-}
-
-#[async_trait::async_trait]
-impl ViewHandler<AboutAction> for AboutView {
-    async fn handle(&mut self, ctx: ViewContext<'_, AboutAction>) -> Result<ViewCommand, Error> {
-        match ctx.action() {
-            AboutAction::Back => {
-                ctx.coordinator.navigate(NavigationResult::SettingsMain);
-                Ok(ViewCommand::Exit)
-            }
-        }
-    }
 }
 
 impl AboutView {
@@ -104,7 +81,8 @@ impl AboutView {
     }
 }
 
-impl ViewRender<AboutAction> for AboutView {
+impl ViewRender for AboutView {
+    type Action = AboutAction;
     fn render(&self, registry: &mut ActionRegistry<AboutAction>) -> ResponseKind<'_> {
         let content_text = format!(
             "-# **Settings > About**\n## pwr-bot\n### Stats\n- **Uptime**: {}\n- **Servers**: {}\n- **Users**: {}\n- **Commands**: {}\n- **Latency**: {}ms\n- **Memory**: {:.1} MB\n### Info\n- **Author**: [FAZuH](https://github.com/FAZuH)\n- **Source**: [GitHub](https://github.com/FAZuH/pwr-bot)\n- **License**: [MIT](https://github.com/FAZuH/pwr-bot/blob/main/LICENSE)\nCopyright © 2025-{} FAZuH  —  v{}",
@@ -152,8 +130,21 @@ impl ViewRender<AboutAction> for AboutView {
     }
 }
 
+#[async_trait::async_trait]
+impl ViewHandler for AboutView {
+    type Action = AboutAction;
+    async fn handle(&mut self, ctx: ViewContext<'_, AboutAction>) -> Result<ViewCommand, Error> {
+        match ctx.action() {
+            AboutAction::Back => {
+                ctx.coordinator.navigate(NavigationResult::SettingsMain);
+                Ok(ViewCommand::Exit)
+            }
+        }
+    }
+}
+
 /// Statistics displayed in the about command.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone)]
 pub struct AboutStats {
     version: String,
     uptime: Duration,

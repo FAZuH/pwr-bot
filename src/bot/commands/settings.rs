@@ -3,28 +3,9 @@
 use std::borrow::Cow;
 use std::time::Duration;
 
-use poise::serenity_prelude::*;
-
-use crate::action_enum;
-use crate::bot::checks::is_author_guild_admin;
-use crate::bot::commands::Context;
-use crate::bot::commands::Error;
-use crate::bot::controller::Controller;
-use crate::bot::coordinator::Coordinator;
-use crate::bot::error::BotError;
-use crate::bot::navigation::NavigationResult;
-use crate::bot::views::ActionRegistry;
-use crate::bot::views::ResponseKind;
-use crate::bot::views::ViewCommand;
-use crate::bot::views::ViewContext;
-use crate::bot::views::ViewEngine;
-use crate::bot::views::ViewEvent;
-use crate::bot::views::ViewHandler;
-use crate::bot::views::ViewRender;
-use crate::controller;
+use crate::bot::commands::prelude::*;
 use crate::entity::ServerSettings;
 use crate::entity::ServerSettingsEntity;
-use crate::error::AppError;
 
 /// Model representing a configurable feature in the bot.
 ///
@@ -190,7 +171,8 @@ impl SettingsMainHandler {
     }
 }
 
-impl ViewRender<SettingsMainAction> for SettingsMainHandler {
+impl ViewRender for SettingsMainHandler {
+    type Action = SettingsMainAction;
     fn render(&self, registry: &mut ActionRegistry<SettingsMainAction>) -> ResponseKind<'_> {
         let text_settings = CreateTextDisplay::new("-# **Settings**");
         let mut components = vec![CreateContainerComponent::TextDisplay(text_settings)];
@@ -296,7 +278,8 @@ action_enum! {
 }
 
 #[async_trait::async_trait]
-impl ViewHandler<SettingsMainAction, ()> for SettingsMainHandler {
+impl ViewHandler for SettingsMainHandler {
+    type Action = SettingsMainAction;
     async fn handle(
         &mut self,
         ctx: ViewContext<'_, SettingsMainAction>,
@@ -325,7 +308,7 @@ impl ViewHandler<SettingsMainAction, ()> for SettingsMainHandler {
                 Ok(ViewCommand::Exit)
             }
             ToggleFeature => {
-                if let ViewEvent::Component(_, interaction) = ctx.event
+                if let ViewEvent::Component(interaction) = ctx.event
                     && let ComponentInteractionDataKind::StringSelect { values } =
                         &interaction.data.kind
                 {

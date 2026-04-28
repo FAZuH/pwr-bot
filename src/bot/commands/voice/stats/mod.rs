@@ -8,33 +8,18 @@ use contribution_grid::ContributionGraph;
 use contribution_grid::builtins::Strategy;
 use contribution_grid::builtins::Theme;
 use log::trace;
-use poise::serenity_prelude::*;
 
-use crate::action_enum;
-use crate::bot::commands::Context;
-use crate::bot::commands::Error;
+use crate::bot::commands::prelude::*;
 use crate::bot::commands::voice::GuildStatType;
 use crate::bot::commands::voice::TimeRange;
 use crate::bot::commands::voice::VoiceStatsTimeRange;
-use crate::bot::commands::voice::stats_chart::generate_line_chart;
-use crate::bot::controller::Controller;
-use crate::bot::coordinator::Coordinator;
-use crate::bot::error::BotError;
-use crate::bot::navigation::NavigationResult;
-use crate::bot::utils::format_duration;
-use crate::bot::views::ActionRegistry;
-use crate::bot::views::ResponseKind;
-use crate::bot::views::ViewCommand;
-use crate::bot::views::ViewContext;
-use crate::bot::views::ViewEngine;
-use crate::bot::views::ViewEvent;
-use crate::bot::views::ViewHandler;
-use crate::bot::views::ViewRender;
+use crate::bot::commands::voice::stats::chart::generate_line_chart;
 use crate::entity::GuildDailyStats;
 use crate::entity::VoiceDailyActivity;
 use crate::entity::VoiceSessionsEntity;
-use crate::error::AppError;
 use crate::service::traits::VoiceTracker;
+
+pub mod chart;
 
 /// Show voice activity statistics
 ///
@@ -464,7 +449,8 @@ impl VoiceStatsHandler {
 }
 
 #[async_trait::async_trait]
-impl ViewHandler<VoiceStatsAction> for VoiceStatsHandler {
+impl ViewHandler for VoiceStatsHandler {
+    type Action = VoiceStatsAction;
     async fn handle(
         &mut self,
         ctx: ViewContext<'_, VoiceStatsAction>,
@@ -513,7 +499,7 @@ impl ViewHandler<VoiceStatsAction> for VoiceStatsHandler {
                 changed = true;
             }
             SelectUser => {
-                if let ViewEvent::Component(_, ref interaction) = ctx.event
+                if let ViewEvent::Component(ref interaction) = ctx.event
                     && let poise::serenity_prelude::ComponentInteractionDataKind::UserSelect {
                         values,
                     } = &interaction.data.kind
@@ -537,7 +523,8 @@ impl ViewHandler<VoiceStatsAction> for VoiceStatsHandler {
     }
 }
 
-impl ViewRender<VoiceStatsAction> for VoiceStatsHandler {
+impl ViewRender for VoiceStatsHandler {
+    type Action = VoiceStatsAction;
     fn render(&self, registry: &mut ActionRegistry<VoiceStatsAction>) -> ResponseKind<'_> {
         use VoiceStatsAction::*;
 

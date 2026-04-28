@@ -1,13 +1,8 @@
 //! Admin register command.
 
 use poise::samples::create_application_commands;
-use poise::serenity_prelude::*;
 
-use crate::bot::checks::is_author_guild_admin;
-use crate::bot::commands::Context;
-use crate::bot::commands::Error;
-use crate::bot::error::BotError;
-use crate::bot::views::ResponseKind;
+use crate::bot::commands::prelude::*;
 
 /// Registers server slash commands
 ///

@@ -3,24 +3,7 @@
 use std::str::FromStr;
 use std::time::Duration;
 
-use poise::serenity_prelude::*;
-
-use crate::action_enum;
-use crate::bot::commands::Context;
-use crate::bot::commands::Error;
-use crate::bot::controller::Controller;
-use crate::bot::coordinator::Coordinator;
-use crate::bot::error::BotError;
-use crate::bot::navigation::NavigationResult;
-use crate::bot::views::ActionRegistry;
-use crate::bot::views::ResponseKind;
-use crate::bot::views::ViewCommand;
-use crate::bot::views::ViewContext;
-use crate::bot::views::ViewEngine;
-use crate::bot::views::ViewEvent;
-use crate::bot::views::ViewHandler;
-use crate::bot::views::ViewRender;
-use crate::controller;
+use crate::bot::commands::prelude::*;
 use crate::entity::ServerSettings;
 
 /// Configure feed settings for this server
@@ -85,7 +68,8 @@ pub struct SettingsFeedHandler<'a> {
 }
 
 #[async_trait::async_trait]
-impl<'a> ViewHandler<SettingsFeedAction> for SettingsFeedHandler<'a> {
+impl<'a> ViewHandler for SettingsFeedHandler<'a> {
+    type Action = SettingsFeedAction;
     async fn handle(
         &mut self,
         ctx: ViewContext<'_, SettingsFeedAction>,
@@ -99,7 +83,7 @@ impl<'a> ViewHandler<SettingsFeedAction> for SettingsFeedHandler<'a> {
                 Ok(ViewCommand::Render)
             }
             SettingsFeedAction::Channel => {
-                if let ViewEvent::Component(_, ref interaction) = ctx.event
+                if let ViewEvent::Component(ref interaction) = ctx.event
                     && let ComponentInteractionDataKind::ChannelSelect { values } =
                         &interaction.data.kind
                 {
@@ -108,7 +92,7 @@ impl<'a> ViewHandler<SettingsFeedAction> for SettingsFeedHandler<'a> {
                 Ok(ViewCommand::Render)
             }
             SettingsFeedAction::SubRole => {
-                if let ViewEvent::Component(_, ref interaction) = ctx.event
+                if let ViewEvent::Component(ref interaction) = ctx.event
                     && let ComponentInteractionDataKind::RoleSelect { values } =
                         &interaction.data.kind
                 {
@@ -117,7 +101,7 @@ impl<'a> ViewHandler<SettingsFeedAction> for SettingsFeedHandler<'a> {
                 Ok(ViewCommand::Render)
             }
             SettingsFeedAction::UnsubRole => {
-                if let ViewEvent::Component(_, ref interaction) = ctx.event
+                if let ViewEvent::Component(ref interaction) = ctx.event
                     && let ComponentInteractionDataKind::RoleSelect { values } =
                         &interaction.data.kind
                 {
@@ -153,7 +137,8 @@ impl<'a> SettingsFeedHandler<'a> {
     }
 }
 
-impl<'a> ViewRender<SettingsFeedAction> for SettingsFeedHandler<'a> {
+impl<'a> ViewRender for SettingsFeedHandler<'a> {
+    type Action = SettingsFeedAction;
     fn render(&self, registry: &mut ActionRegistry<SettingsFeedAction>) -> ResponseKind<'_> {
         let is_enabled = self.settings.feeds.enabled.unwrap_or(true);
 

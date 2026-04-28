@@ -149,7 +149,8 @@ impl PaginationView {
 }
 
 #[async_trait::async_trait]
-impl ViewHandler<PaginationAction> for PaginationView {
+impl ViewHandler for PaginationView {
+    type Action = PaginationAction;
     async fn handle(
         &mut self,
         ctx: ViewContext<'_, PaginationAction>,

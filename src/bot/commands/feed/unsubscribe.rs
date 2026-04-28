@@ -1,18 +1,10 @@
 //! Feed unsubscribe subcommand.
 
-use poise::serenity_prelude::*;
-
-use crate::bot::commands::Context;
-use crate::bot::commands::Error;
 use crate::bot::commands::feed::SendInto;
 use crate::bot::commands::feed::get_or_create_subscriber;
 use crate::bot::commands::feed::process_subscription_batch;
 use crate::bot::commands::feed::verify_server_config;
-use crate::bot::controller::Controller;
-use crate::bot::coordinator::Coordinator;
-use crate::bot::navigation::NavigationResult;
-use crate::bot::utils::parse_and_validate_urls;
-use crate::controller;
+use crate::bot::commands::prelude::*;
 
 /// Unsubscribe from one or more feeds
 ///

@@ -4,23 +4,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 
-use poise::ChoiceParameter;
-use poise::serenity_prelude::*;
-
-use crate::action_enum;
 use crate::bot::checks::check_author_roles;
-use crate::bot::commands::Context;
-use crate::bot::commands::Error;
-use crate::bot::coordinator::Coordinator;
-use crate::bot::error::BotError;
-use crate::bot::navigation::NavigationResult;
-use crate::bot::views::ActionRegistry;
-use crate::bot::views::ResponseKind;
-use crate::bot::views::ViewCommand;
-use crate::bot::views::ViewContext;
-use crate::bot::views::ViewEngine;
-use crate::bot::views::ViewHandler;
-use crate::bot::views::ViewRender;
+use crate::bot::commands::prelude::*;
 use crate::entity::SubscriberEntity;
 use crate::entity::SubscriberType;
 use crate::service::feed_subscription_service::SubscribeResult;
@@ -282,7 +267,8 @@ pub struct FeedSubscriptionBatchHandler {
 }
 
 #[async_trait::async_trait]
-impl ViewHandler<FeedSubscriptionBatchAction> for FeedSubscriptionBatchHandler {
+impl ViewHandler for FeedSubscriptionBatchHandler {
+    type Action = FeedSubscriptionBatchAction;
     async fn handle(
         &mut self,
         ctx: ViewContext<'_, FeedSubscriptionBatchAction>,
@@ -303,7 +289,8 @@ impl ViewHandler<FeedSubscriptionBatchAction> for FeedSubscriptionBatchHandler {
     }
 }
 
-impl ViewRender<FeedSubscriptionBatchAction> for FeedSubscriptionBatchHandler {
+impl ViewRender for FeedSubscriptionBatchHandler {
+    type Action = FeedSubscriptionBatchAction;
     fn render(
         &self,
         registry: &mut ActionRegistry<FeedSubscriptionBatchAction>,

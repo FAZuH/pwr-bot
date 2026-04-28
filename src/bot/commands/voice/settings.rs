@@ -2,23 +2,7 @@
 
 use std::time::Duration;
 
-use poise::serenity_prelude::*;
-
-use crate::action_enum;
-use crate::bot::commands::Context;
-use crate::bot::commands::Error;
-use crate::bot::controller::Controller;
-use crate::bot::coordinator::Coordinator;
-use crate::bot::error::BotError;
-use crate::bot::navigation::NavigationResult;
-use crate::bot::views::ActionRegistry;
-use crate::bot::views::ResponseKind;
-use crate::bot::views::ViewCommand;
-use crate::bot::views::ViewContext;
-use crate::bot::views::ViewEngine;
-use crate::bot::views::ViewHandler;
-use crate::bot::views::ViewRender;
-use crate::controller;
+use crate::bot::commands::prelude::*;
 use crate::entity::ServerSettings;
 
 /// Configure voice tracking settings for this server
@@ -83,7 +67,8 @@ pub struct SettingsVoiceHandler {
 }
 
 #[async_trait::async_trait]
-impl ViewHandler<SettingsVoiceAction> for SettingsVoiceHandler {
+impl ViewHandler for SettingsVoiceHandler {
+    type Action = SettingsVoiceAction;
     async fn handle(
         &mut self,
         ctx: ViewContext<'_, SettingsVoiceAction>,
@@ -107,7 +92,8 @@ impl ViewHandler<SettingsVoiceAction> for SettingsVoiceHandler {
     }
 }
 
-impl ViewRender<SettingsVoiceAction> for SettingsVoiceHandler {
+impl ViewRender for SettingsVoiceHandler {
+    type Action = SettingsVoiceAction;
     fn render(&self, registry: &mut ActionRegistry<SettingsVoiceAction>) -> ResponseKind<'_> {
         let is_enabled = self.settings.voice.enabled.unwrap_or(true);
 

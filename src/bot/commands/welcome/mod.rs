@@ -1,36 +1,17 @@
 //! Welcome commands module.
-use crate::bot::commands::welcome::image_generator::WelcomeCardData;
-use crate::bot::views::ViewEvent;
-use crate::service::traits::FeedSubscriptionProvider;
-
-pub mod image_generator;
-
 use std::borrow::Cow;
 use std::collections::HashSet;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use poise::Modal;
-use poise::serenity_prelude::*;
-
-use crate::action_enum;
-use crate::bot::commands::Context;
-use crate::bot::commands::Error;
+use crate::bot::commands::prelude::*;
+use crate::bot::commands::welcome::image_generator::WelcomeCardData;
 use crate::bot::commands::welcome::image_generator::WelcomeImageGenerator;
-use crate::bot::controller::Controller;
-use crate::bot::coordinator::Coordinator;
-use crate::bot::error::BotError;
-use crate::bot::navigation::NavigationResult;
-use crate::bot::views::ActionRegistry;
-use crate::bot::views::ResponseKind;
-use crate::bot::views::ViewCommand;
-use crate::bot::views::ViewContext;
-use crate::bot::views::ViewEngine;
-use crate::bot::views::ViewHandler;
-use crate::bot::views::ViewRender;
-use crate::controller;
 use crate::entity::ServerSettings;
+use crate::service::traits::FeedSubscriptionProvider;
+
+pub mod image_generator;
 
 const WELCOME_FILE: &str = "welcome_preview.png";
 
@@ -77,7 +58,8 @@ pub struct SettingsWelcomeHandler {
 }
 
 #[async_trait::async_trait]
-impl ViewHandler<SettingsWelcomeAction> for SettingsWelcomeHandler {
+impl ViewHandler for SettingsWelcomeHandler {
+    type Action = SettingsWelcomeAction;
     async fn handle(
         &mut self,
         ctx: ViewContext<'_, SettingsWelcomeAction>,
@@ -86,31 +68,8 @@ impl ViewHandler<SettingsWelcomeAction> for SettingsWelcomeHandler {
 
         let action = ctx.action();
         match action {
-            AddMessage(None) => {
-                if let ViewEvent::Component(_, ref interaction) = ctx.event {
-                    let interaction = interaction.clone();
-                    let ctx_serenity = self.ctx_serenity.clone();
-
-                    ctx.spawn(async move {
-                        if let Ok(Some(modal_result)) =
-                            poise::execute_modal_on_component_interaction::<AddWelcomeMessageModal>(
-                                &ctx_serenity,
-                                interaction,
-                                None,
-                                None,
-                            )
-                            .await
-                        {
-                            Some(AddMessage(Some(modal_result)))
-                        } else {
-                            None
-                        }
-                    });
-                }
-                return Ok(ViewCommand::AlreadyResponded);
-            }
             SetColor(None) => {
-                if let ViewEvent::Component(_, ref interaction) = ctx.event {
+                if let ViewEvent::Component(ref interaction) = ctx.event {
                     let interaction = interaction.clone();
                     let ctx_serenity = self.ctx_serenity.clone();
 
@@ -132,16 +91,35 @@ impl ViewHandler<SettingsWelcomeAction> for SettingsWelcomeHandler {
                 }
                 return Ok(ViewCommand::AlreadyResponded);
             }
-            _ => {}
-        }
+            AddMessage(None) => {
+                if let ViewEvent::Component(ref interaction) = ctx.event {
+                    let interaction = interaction.clone();
+                    let ctx_serenity = self.ctx_serenity.clone();
 
-        match action {
+                    ctx.spawn(async move {
+                        if let Ok(Some(modal_result)) =
+                            poise::execute_modal_on_component_interaction::<AddWelcomeMessageModal>(
+                                &ctx_serenity,
+                                interaction,
+                                None,
+                                None,
+                            )
+                            .await
+                        {
+                            Some(AddMessage(Some(modal_result)))
+                        } else {
+                            None
+                        }
+                    });
+                }
+                return Ok(ViewCommand::AlreadyResponded);
+            }
             ToggleEnabled => {
                 let current = self.settings.welcome.enabled.unwrap_or(false);
                 self.settings.welcome.enabled = Some(!current);
             }
             ChannelSelect => {
-                if let ViewEvent::Component(_, interaction) = ctx.event
+                if let ViewEvent::Component(interaction) = ctx.event
                     && let ComponentInteractionDataKind::ChannelSelect { values } =
                         &interaction.data.kind
                     && let Some(channel) = values.first()
@@ -150,7 +128,7 @@ impl ViewHandler<SettingsWelcomeAction> for SettingsWelcomeHandler {
                 }
             }
             TemplateSelect => {
-                if let ViewEvent::Component(_, interaction) = ctx.event
+                if let ViewEvent::Component(interaction) = ctx.event
                     && let ComponentInteractionDataKind::StringSelect { values } =
                         &interaction.data.kind
                     && let Some(template) = values.first()
@@ -159,7 +137,7 @@ impl ViewHandler<SettingsWelcomeAction> for SettingsWelcomeHandler {
                 }
             }
             MarkRemoval => {
-                if let ViewEvent::Component(_, interaction) = ctx.event
+                if let ViewEvent::Component(interaction) = ctx.event
                     && let ComponentInteractionDataKind::StringSelect { values } =
                         &interaction.data.kind
                 {
@@ -208,7 +186,6 @@ impl ViewHandler<SettingsWelcomeAction> for SettingsWelcomeHandler {
                 ctx.coordinator.navigate(NavigationResult::SettingsMain);
                 return Ok(ViewCommand::Exit);
             }
-            _ => {}
         }
 
         // Persist after every state-mutating action
@@ -226,7 +203,8 @@ impl ViewHandler<SettingsWelcomeAction> for SettingsWelcomeHandler {
 
 // ── View ─────────────────────────────────────────────────────────────────────
 
-impl ViewRender<SettingsWelcomeAction> for SettingsWelcomeHandler {
+impl ViewRender for SettingsWelcomeHandler {
+    type Action = SettingsWelcomeAction;
     fn render(&self, registry: &mut ActionRegistry<SettingsWelcomeAction>) -> ResponseKind<'_> {
         let is_enabled = self.settings.welcome.enabled.unwrap_or(false);
         let msgs = self
