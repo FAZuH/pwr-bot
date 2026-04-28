@@ -228,7 +228,7 @@ impl ViewHandler<FeedListAction> for FeedListHandler {
             Base(inner) => {
                 let cmd = self
                     .pagination
-                    .handle(ctx.map(*inner, FeedListAction::Base))
+                    .handle(ctx.map(*inner, |o| o.map(FeedListAction::Base)))
                     .await?;
                 self.update_subs().await?;
                 return Ok(cmd);

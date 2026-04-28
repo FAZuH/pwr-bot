@@ -498,7 +498,7 @@ impl ViewHandler<VoiceStatsAction> for VoiceStatsHandler {
                 changed = true;
             }
             SelectUser => {
-                if let ViewEvent::Component(_, ref interaction) = ctx.event
+                if let ViewEvent::Component(ref interaction) = ctx.event
                     && let poise::serenity_prelude::ComponentInteractionDataKind::UserSelect {
                         values,
                     } = &interaction.data.kind

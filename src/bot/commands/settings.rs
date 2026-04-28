@@ -306,7 +306,7 @@ impl ViewHandler<SettingsMainAction, ()> for SettingsMainHandler {
                 Ok(ViewCommand::Exit)
             }
             ToggleFeature => {
-                if let ViewEvent::Component(_, interaction) = ctx.event
+                if let ViewEvent::Component(interaction) = ctx.event
                     && let ComponentInteractionDataKind::StringSelect { values } =
                         &interaction.data.kind
                 {

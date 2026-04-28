@@ -82,7 +82,7 @@ impl<'a> ViewHandler<SettingsFeedAction> for SettingsFeedHandler<'a> {
                 Ok(ViewCommand::Render)
             }
             SettingsFeedAction::Channel => {
-                if let ViewEvent::Component(_, ref interaction) = ctx.event
+                if let ViewEvent::Component(ref interaction) = ctx.event
                     && let ComponentInteractionDataKind::ChannelSelect { values } =
                         &interaction.data.kind
                 {
@@ -91,7 +91,7 @@ impl<'a> ViewHandler<SettingsFeedAction> for SettingsFeedHandler<'a> {
                 Ok(ViewCommand::Render)
             }
             SettingsFeedAction::SubRole => {
-                if let ViewEvent::Component(_, ref interaction) = ctx.event
+                if let ViewEvent::Component(ref interaction) = ctx.event
                     && let ComponentInteractionDataKind::RoleSelect { values } =
                         &interaction.data.kind
                 {
@@ -100,7 +100,7 @@ impl<'a> ViewHandler<SettingsFeedAction> for SettingsFeedHandler<'a> {
                 Ok(ViewCommand::Render)
             }
             SettingsFeedAction::UnsubRole => {
-                if let ViewEvent::Component(_, ref interaction) = ctx.event
+                if let ViewEvent::Component(ref interaction) = ctx.event
                     && let ComponentInteractionDataKind::RoleSelect { values } =
                         &interaction.data.kind
                 {

@@ -1,4 +1,5 @@
 //! About command showing bot statistics and information.
+use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::Datelike;
@@ -10,9 +11,11 @@ use crate::bot::commands::prelude::*;
 /// Show information about the bot
 #[poise::command(slash_command)]
 pub async fn about(ctx: Context<'_>) -> Result<(), Error> {
-    Coordinator::new(ctx)
-        .run(NavigationResult::SettingsAbout)
-        .await?;
+    invoke(Coordinator::new(ctx)).await
+}
+
+pub async fn invoke(coordinator: Arc<Coordinator<'_>>) -> Result<(), Error> {
+    coordinator.run(NavigationResult::SettingsAbout).await?;
     Ok(())
 }
 
@@ -20,7 +23,7 @@ controller! { pub struct AboutController<'a> {} }
 
 #[async_trait::async_trait]
 impl Controller for AboutController<'_> {
-    async fn run(&mut self, coordinator: std::sync::Arc<Coordinator<'_>>) -> Result<(), Error> {
+    async fn run(&mut self, coordinator: Arc<Coordinator<'_>>) -> Result<(), Error> {
         let ctx = *coordinator.context();
         ctx.defer().await?;
 
@@ -139,7 +142,7 @@ impl ViewHandler<AboutAction> for AboutView {
 }
 
 /// Statistics displayed in the about command.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone)]
 pub struct AboutStats {
     version: String,
     uptime: Duration,

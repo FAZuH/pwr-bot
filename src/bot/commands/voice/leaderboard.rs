@@ -298,12 +298,12 @@ impl ViewHandler<VoiceLeaderboardAction> for VoiceLeaderboardHandler<'_> {
             Base(inner) => {
                 let _ = self
                     .pagination
-                    .handle(ctx.map(*inner, VoiceLeaderboardAction::Base))
+                    .handle(ctx.map(*inner, |v| v.map(VoiceLeaderboardAction::Base)))
                     .await?;
                 changed_page = true;
             }
             TimeRange => {
-                if let ViewEvent::Component(_, ref interaction) = ctx.event
+                if let ViewEvent::Component(ref interaction) = ctx.event
                     && let ComponentInteractionDataKind::StringSelect { values } =
                         &interaction.data.kind
                     && let Some(time_range) = values
@@ -320,7 +320,7 @@ impl ViewHandler<VoiceLeaderboardAction> for VoiceLeaderboardHandler<'_> {
                 fetch_new = true;
             }
             SelectUser => {
-                if let ViewEvent::Component(_, ref interaction) = ctx.event
+                if let ViewEvent::Component(ref interaction) = ctx.event
                     && let ComponentInteractionDataKind::UserSelect { values } =
                         &interaction.data.kind
                     && let Some(user_id) = values.first()

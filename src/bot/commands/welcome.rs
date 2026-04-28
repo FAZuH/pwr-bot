@@ -67,31 +67,8 @@ impl ViewHandler<SettingsWelcomeAction> for SettingsWelcomeHandler {
 
         let action = ctx.action();
         match action {
-            AddMessage(None) => {
-                if let ViewEvent::Component(_, ref interaction) = ctx.event {
-                    let interaction = interaction.clone();
-                    let ctx_serenity = self.ctx_serenity.clone();
-
-                    ctx.spawn(async move {
-                        if let Ok(Some(modal_result)) =
-                            poise::execute_modal_on_component_interaction::<AddWelcomeMessageModal>(
-                                &ctx_serenity,
-                                interaction,
-                                None,
-                                None,
-                            )
-                            .await
-                        {
-                            Some(AddMessage(Some(modal_result)))
-                        } else {
-                            None
-                        }
-                    });
-                }
-                return Ok(ViewCommand::AlreadyResponded);
-            }
             SetColor(None) => {
-                if let ViewEvent::Component(_, ref interaction) = ctx.event {
+                if let ViewEvent::Component(ref interaction) = ctx.event {
                     let interaction = interaction.clone();
                     let ctx_serenity = self.ctx_serenity.clone();
 
@@ -113,16 +90,35 @@ impl ViewHandler<SettingsWelcomeAction> for SettingsWelcomeHandler {
                 }
                 return Ok(ViewCommand::AlreadyResponded);
             }
-            _ => {}
-        }
+            AddMessage(None) => {
+                if let ViewEvent::Component(ref interaction) = ctx.event {
+                    let interaction = interaction.clone();
+                    let ctx_serenity = self.ctx_serenity.clone();
 
-        match action {
+                    ctx.spawn(async move {
+                        if let Ok(Some(modal_result)) =
+                            poise::execute_modal_on_component_interaction::<AddWelcomeMessageModal>(
+                                &ctx_serenity,
+                                interaction,
+                                None,
+                                None,
+                            )
+                            .await
+                        {
+                            Some(AddMessage(Some(modal_result)))
+                        } else {
+                            None
+                        }
+                    });
+                }
+                return Ok(ViewCommand::AlreadyResponded);
+            }
             ToggleEnabled => {
                 let current = self.settings.welcome.enabled.unwrap_or(false);
                 self.settings.welcome.enabled = Some(!current);
             }
             ChannelSelect => {
-                if let ViewEvent::Component(_, interaction) = ctx.event
+                if let ViewEvent::Component(interaction) = ctx.event
                     && let ComponentInteractionDataKind::ChannelSelect { values } =
                         &interaction.data.kind
                     && let Some(channel) = values.first()
@@ -131,7 +127,7 @@ impl ViewHandler<SettingsWelcomeAction> for SettingsWelcomeHandler {
                 }
             }
             TemplateSelect => {
-                if let ViewEvent::Component(_, interaction) = ctx.event
+                if let ViewEvent::Component(interaction) = ctx.event
                     && let ComponentInteractionDataKind::StringSelect { values } =
                         &interaction.data.kind
                     && let Some(template) = values.first()
@@ -140,7 +136,7 @@ impl ViewHandler<SettingsWelcomeAction> for SettingsWelcomeHandler {
                 }
             }
             MarkRemoval => {
-                if let ViewEvent::Component(_, interaction) = ctx.event
+                if let ViewEvent::Component(interaction) = ctx.event
                     && let ComponentInteractionDataKind::StringSelect { values } =
                         &interaction.data.kind
                 {
@@ -189,7 +185,6 @@ impl ViewHandler<SettingsWelcomeAction> for SettingsWelcomeHandler {
                 ctx.coordinator.navigate(NavigationResult::SettingsMain);
                 return Ok(ViewCommand::Exit);
             }
-            _ => {}
         }
 
         // Persist after every state-mutating action

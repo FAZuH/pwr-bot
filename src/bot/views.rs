@@ -18,10 +18,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::StreamExt;
-use log::debug;
 use poise::CreateReply;
 use poise::ReplyHandle;
 use poise::serenity_prelude::*;
+use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 use tokio::sync::mpsc;
 
 use crate::bot::commands::Context;
@@ -29,9 +30,13 @@ use crate::bot::commands::Error;
 use crate::bot::coordinator::Coordinator;
 
 /// Type alias for a thread-safe, shared handle to a Discord message.
-pub type SharedReplyHandle<'a> = Arc<tokio::sync::Mutex<Option<ReplyHandle<'a>>>>;
+pub type SharedReplyHandle<'a> = Arc<Mutex<Option<ReplyHandle<'a>>>>;
+pub type EventMessage<T> = (Option<T>, ViewEvent);
+pub type Registry<T> = Arc<RwLock<ActionRegistry<T>>>;
 
 pub mod pagination;
+
+// ── Response Content ───────────────────────────────────────────────────────────────
 
 /// Enum representing the type of response content.
 ///
@@ -67,6 +72,8 @@ impl<'a> From<ResponseKind<'a>> for CreateReply<'a> {
     }
 }
 
+// ── Actions ───────────────────────────────────────────────────────────────
+
 /// Trait for action types used in interactive views.
 pub trait Action: Send + Sync + Clone {
     /// Returns the UI label associated with this action.
@@ -75,7 +82,7 @@ pub trait Action: Send + Sync + Clone {
 
 /// Registry for actions that maps unique IDs to action instances.
 pub struct ActionRegistry<T> {
-    actions: HashMap<String, T>,
+    pub actions: HashMap<String, T>,
     prefix: String,
     counter: usize,
 }
@@ -103,6 +110,19 @@ impl<T: Action> ActionRegistry<T> {
         self.counter += 1;
         self.actions.insert(id.clone(), action);
         RegisteredAction { id, label }
+    }
+
+    /// Registers an action using given id, and returns a [`RegisteredAction`] for building Discord components.
+    ///
+    /// If an action is already registered with the same id, the action will be updated, and the
+    /// old action is returned.
+    pub fn register_with_id(&mut self, id: &str, action: T) -> Option<RegisteredAction> {
+        self.actions
+            .insert(id.to_string(), action)
+            .map(|old| RegisteredAction {
+                id: id.to_string(),
+                label: old.label(),
+            })
     }
 
     /// Retrieves an action associated with a given `custom_id`.
@@ -148,6 +168,8 @@ impl RegisteredAction {
     }
 }
 
+// ── View Enums ───────────────────────────────────────────────────────────────
+
 /// Returned by [`ViewHandler::handle`] to control the engine loop.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ViewCommand {
@@ -168,41 +190,32 @@ pub enum ViewCommand {
 ///
 /// Replaces the former separate `Trigger` enum — the action and its originating
 /// interaction are kept together, eliminating redundancy with [`ViewContext`].
-pub enum ViewEvent<T> {
+#[derive(Debug, Clone)]
+pub enum ViewEvent {
     /// A component interaction (button click, select menu choice).
-    Component(T, ComponentInteraction),
+    Component(ComponentInteraction),
     /// A modal submission.
-    Modal(T, ModalInteraction),
+    Modal(ModalInteraction),
     /// A message in the channel.
-    Message(T, Message),
+    Message(Message),
+    /// A reaction to a listened message.
+    Reaction(Reaction),
     /// An async event triggered via [`ViewContext::spawn`].
-    Async(T),
+    Async,
     /// The view loop timed out.
     Timeout,
 }
 
-impl<T: Clone> ViewEvent<T> {
-    /// Returns the action contained in this event, if any.
-    /// `Timeout` carries no action.
-    pub fn action(&self) -> Option<&T> {
-        match self {
-            ViewEvent::Component(a, _)
-            | ViewEvent::Modal(a, _)
-            | ViewEvent::Message(a, _)
-            | ViewEvent::Async(a) => Some(a),
-            ViewEvent::Timeout => None,
-        }
-    }
-}
+// ── View Sender ───────────────────────────────────────────────────────────────
 
 /// Trait for sending events to a running [`ViewEngine`].
 pub trait ViewSender<T: Action>: Send + Sync {
-    fn send(&self, event: ViewEvent<T>);
+    fn send(&self, message: EventMessage<T>);
 }
 
-impl<T: Action> ViewSender<T> for mpsc::UnboundedSender<ViewEvent<T>> {
-    fn send(&self, event: ViewEvent<T>) {
-        let _ = self.send(event);
+impl<T: Action> ViewSender<T> for mpsc::UnboundedSender<EventMessage<T>> {
+    fn send(&self, message: EventMessage<T>) {
+        let _ = self.send(message);
     }
 }
 
@@ -210,24 +223,153 @@ impl<T: Action> ViewSender<T> for mpsc::UnboundedSender<ViewEvent<T>> {
 ///
 /// Enables the delegation pattern where a child view's interactions are
 /// forwarded to the parent's action enum.
-pub struct MappedSender<C: Action, P: Action> {
+pub struct MappedViewSender<C: Action, P: Action> {
     parent_tx: Arc<dyn ViewSender<P>>,
-    wrap: fn(C) -> P,
+    wrap: fn(Option<C>) -> Option<P>,
 }
 
-impl<C: Action, P: Action> ViewSender<C> for MappedSender<C, P> {
-    fn send(&self, event: ViewEvent<C>) {
-        let mapped = match event {
-            ViewEvent::Component(c, i) => ViewEvent::Component((self.wrap)(c), i),
-            ViewEvent::Modal(c, i) => ViewEvent::Modal((self.wrap)(c), i),
-            ViewEvent::Message(c, m) => ViewEvent::Message((self.wrap)(c), m),
-            ViewEvent::Async(c) => ViewEvent::Async((self.wrap)(c)),
-            ViewEvent::Timeout => ViewEvent::Timeout,
-        };
-        self.parent_tx.send(mapped);
+impl<C: Action, P: Action> ViewSender<C> for MappedViewSender<C, P> {
+    fn send(&self, message: EventMessage<C>) {
+        let (action, event) = message;
+        let new_action = (self.wrap)(action);
+        self.parent_tx.send((new_action, event));
     }
 }
 
+// ── ViewChannel ───────────────────────────────────────────────────────────────
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+/// Configuration for [`ViewChannel`] about what events is collected.
+pub struct ViewChannelConfig {
+    pub components: bool,
+    pub modals: bool,
+    pub messages: bool,
+    pub reactions: bool,
+}
+
+impl Default for ViewChannelConfig {
+    fn default() -> Self {
+        Self {
+            components: true, // What this bot builds most of its responses on
+            modals: false,
+            messages: false,
+            reactions: false,
+        }
+    }
+}
+
+pub struct ViewChannel<T: Action + Send + Sync + 'static> {
+    tx: mpsc::UnboundedSender<EventMessage<T>>,
+    rx: mpsc::UnboundedReceiver<EventMessage<T>>,
+    /// Snapshot of custom_id → action, updated after every render_view().
+    registry: Registry<T>,
+    config: ViewChannelConfig,
+}
+
+impl<T: Action + Send + Sync + 'static> ViewChannel<T> {
+    pub fn new(config: ViewChannelConfig, registry: Registry<T>) -> Self {
+        let (tx, rx) = mpsc::unbounded_channel();
+        Self {
+            tx,
+            rx,
+            registry,
+            config,
+        }
+    }
+
+    pub fn sender(&self) -> Arc<dyn ViewSender<T>> {
+        Arc::new(self.tx.clone())
+    }
+
+    pub async fn recv(&mut self) -> Option<EventMessage<T>> {
+        self.rx.recv().await
+    }
+
+    /// Spawns all enabled collectors into background tasks.
+    /// Must be called after the first render_view() so msg_id is available.
+    pub fn start(
+        &self,
+        ctx: &Context<'_>,
+        msg_id: MessageId,
+        author_id: UserId,
+        channel_id: GenericChannelId,
+        timeout: Duration,
+    ) {
+        let serenity_ctx = ctx.serenity_context().clone();
+
+        if self.config.components {
+            let tx = self.tx.clone();
+            let registry = self.registry.clone();
+            let sctx = serenity_ctx.clone();
+            tokio::spawn(async move {
+                let collector = ComponentInteractionCollector::new(&sctx)
+                    .author_id(author_id)
+                    .message_id(msg_id)
+                    .timeout(timeout);
+                let mut stream = collector.stream();
+                while let Some(interaction) = stream.next().await {
+                    let action = registry
+                        .read()
+                        .await
+                        .get(interaction.data.custom_id.as_ref())
+                        .cloned();
+                    let _ = tx.send((action, ViewEvent::Component(interaction.clone())));
+                }
+                let _ = tx.send((None, ViewEvent::Timeout));
+            });
+        }
+
+        if self.config.modals {
+            let tx = self.tx.clone();
+            let sctx = serenity_ctx.clone();
+            let registry = self.registry.clone();
+            tokio::spawn(async move {
+                let collector = ModalInteractionCollector::new(&sctx)
+                    .author_id(author_id)
+                    .timeout(timeout);
+                let mut stream = collector.stream();
+                while let Some(interaction) = stream.next().await {
+                    let action = registry
+                        .read()
+                        .await
+                        .get(interaction.data.custom_id.as_ref())
+                        .cloned();
+                    let _ = tx.send((action, ViewEvent::Modal(interaction.clone())));
+                }
+            });
+        }
+
+        if self.config.messages {
+            let tx = self.tx.clone();
+            let sctx = serenity_ctx.clone();
+            tokio::spawn(async move {
+                let collector = MessageCollector::new(&sctx)
+                    .author_id(author_id)
+                    .channel_id(channel_id)
+                    .timeout(timeout);
+                let mut stream = collector.stream();
+                while let Some(msg) = stream.next().await {
+                    let _ = tx.send((None, ViewEvent::Message(msg.clone())));
+                }
+            });
+        }
+
+        if self.config.reactions {
+            let tx = self.tx.clone();
+            let sctx = serenity_ctx.clone();
+            tokio::spawn(async move {
+                let collector = ReactionCollector::new(&sctx)
+                    .author_id(author_id)
+                    .message_id(msg_id)
+                    .timeout(timeout);
+                let mut stream = collector.stream();
+                while let Some(reaction) = stream.next().await {
+                    let _ = tx.send((None, ViewEvent::Reaction(reaction.clone())));
+                }
+            });
+        }
+    }
+}
 // ── ViewContext ───────────────────────────────────────────────────────────────
 
 /// Passed to [`ViewHandler::handle`] for every non-timeout event.
@@ -237,9 +379,11 @@ impl<C: Action, P: Action> ViewSender<C> for MappedSender<C, P> {
 pub struct ViewContext<'a, T: Action> {
     /// Poise command context.
     pub poise: Context<'a>,
+    // None for Modal, Message, Reaction
+    pub action: Option<T>,
     /// The event that triggered this handler call, including the action and
     /// any associated Discord interaction.
-    pub event: ViewEvent<T>,
+    pub event: ViewEvent,
     /// Sender for dispatching further events back to the engine loop.
     pub tx: Arc<dyn ViewSender<T>>,
     /// Shared coordinator — provides access to the reply handle and nav state.
@@ -249,8 +393,8 @@ pub struct ViewContext<'a, T: Action> {
 impl<'a, T: Action + 'static> ViewContext<'a, T> {
     /// Returns a reference to the action that triggered this call.
     pub fn action(&self) -> &T {
-        self.event
-            .action()
+        self.action
+            .as_ref()
             .expect("ViewContext::action called on a Timeout event")
     }
 
@@ -258,19 +402,13 @@ impl<'a, T: Action + 'static> ViewContext<'a, T> {
     pub fn map<C: Action + Send + 'static>(
         &self,
         action: C,
-        wrap: fn(C) -> T,
+        wrap: fn(Option<C>) -> Option<T>,
     ) -> ViewContext<'a, C> {
-        let event = match &self.event {
-            ViewEvent::Component(_, i) => ViewEvent::Component(action, i.clone()),
-            ViewEvent::Modal(_, i) => ViewEvent::Modal(action, i.clone()),
-            ViewEvent::Message(_, m) => ViewEvent::Message(action, m.clone()),
-            ViewEvent::Async(_) => ViewEvent::Async(action),
-            ViewEvent::Timeout => ViewEvent::Timeout,
-        };
         ViewContext {
             poise: self.poise,
-            event,
-            tx: Arc::new(MappedSender {
+            action: Some(action),
+            event: self.event.clone(),
+            tx: Arc::new(MappedViewSender {
                 parent_tx: self.tx.clone(),
                 wrap,
             }),
@@ -286,7 +424,7 @@ impl<'a, T: Action + 'static> ViewContext<'a, T> {
         let tx = self.tx.clone();
         tokio::spawn(async move {
             if let Some(action) = future.await {
-                tx.send(ViewEvent::Async(action));
+                tx.send((Some(action), ViewEvent::Async));
             }
         });
     }
@@ -314,6 +452,11 @@ pub trait ViewHandler<T: Action, S: Send + Sync = ()>: Send + Sync {
     async fn on_timeout(&mut self) -> Result<ViewCommand, Error> {
         Ok(ViewCommand::Exit)
     }
+
+    /// The channel config this view sets
+    fn channel_config(&self) -> ViewChannelConfig {
+        ViewChannelConfig::default()
+    }
 }
 
 /// The engine that drives the entire View lifecycle.
@@ -329,16 +472,16 @@ where
     T: Action + Send + Sync + 'static,
     H: ViewHandler<T> + ViewRender<T>,
 {
-    /// Poise command context.
-    pub ctx: Context<'a>,
     /// The combined handler and renderer.
     pub handler: H,
-    /// Registry for mapping custom IDs to actions.
-    pub registry: ActionRegistry<T>,
-    /// Inactivity timeout for the interaction collector.
-    pub timeout: Duration,
     /// Whether the engine should auto-acknowledge component interactions.
-    pub should_acknowledge: bool,
+    should_acknowledge: bool,
+    /// Poise command context.
+    ctx: Context<'a>,
+    /// Registry for mapping custom IDs to actions.
+    registry: Registry<T>,
+    /// Inactivity timeout for the interaction collector.
+    timeout: Duration,
     /// Shared handle to the active message.
     coordinator: Arc<Coordinator<'a>>,
 }
@@ -357,7 +500,7 @@ where
         Self {
             ctx,
             handler,
-            registry: ActionRegistry::new(),
+            registry: Arc::new(RwLock::new(ActionRegistry::new())),
             timeout,
             should_acknowledge: true,
             coordinator,
@@ -371,10 +514,99 @@ where
         self
     }
 
+    /// Starts the interactive event loop.
+    pub async fn run(&mut self) -> Result<(), Error> {
+        let mut channel = ViewChannel::new(self.handler.channel_config(), self.registry.clone());
+        self.render_view().await?;
+
+        let msg_id = {
+            let lock = self.coordinator.reply_handle.lock().await;
+            lock.as_ref()
+                .expect("reply_handle must exist after render_view")
+                .message()
+                .await?
+                .id
+        };
+
+        channel.start(
+            &self.ctx,
+            msg_id,
+            self.ctx.author().id,
+            self.ctx.channel_id(),
+            self.timeout,
+        );
+
+        let poise = self.ctx;
+        let coordinator = self.coordinator.clone();
+        let tx_arc = channel.sender();
+
+        use ViewCommand::*;
+        while let Some((action, event)) = channel.recv().await {
+            let cmd = match event {
+                ViewEvent::Timeout => self.handler.on_timeout().await?,
+                ViewEvent::Component(ref interaction) => {
+                    let Some(action) = action else {
+                        if self.should_acknowledge {
+                            interaction
+                                .create_response(
+                                    poise.http(),
+                                    CreateInteractionResponse::Acknowledge,
+                                )
+                                .await
+                                .ok();
+                        }
+                        continue;
+                    };
+                    // need to acknowledge after handle
+                    let raw = interaction.clone();
+                    let view_ctx = ViewContext {
+                        action: Some(action),
+                        poise,
+                        event,
+                        tx: tx_arc.clone(),
+                        coordinator: coordinator.clone(),
+                    };
+                    let cmd = self.handler.handle(view_ctx).await?;
+                    if self.should_acknowledge && !matches!(cmd, AlreadyResponded) {
+                        raw.create_response(poise.http(), CreateInteractionResponse::Acknowledge)
+                            .await
+                            .ok();
+                    }
+                    cmd
+                }
+                other => {
+                    let view_ctx = ViewContext {
+                        action,
+                        poise,
+                        event: other,
+                        tx: tx_arc.clone(),
+                        coordinator: coordinator.clone(),
+                    };
+                    self.handler.handle(view_ctx).await?
+                }
+            };
+
+            match cmd {
+                Render => {
+                    self.render_view().await?;
+                }
+                RenderOnce => {
+                    self.render_view().await?;
+                    break;
+                }
+                Exit => break,
+                Continue | AlreadyResponded => {}
+            }
+        }
+
+        Ok(())
+    }
+
     /// Re-renders the view, editing the existing message or sending a new one.
-    pub async fn render_view(&mut self) -> Result<(), Error> {
-        self.registry.clear();
-        let reply = self.handler.create_reply(&mut self.registry);
+    async fn render_view(&self) -> Result<(), Error> {
+        let mut registry_write = self.registry.write().await;
+        registry_write.clear();
+        let reply = self.handler.create_reply(&mut registry_write);
 
         let existing = {
             let lock = self.coordinator.reply_handle.lock().await;
@@ -386,121 +618,6 @@ where
         } else {
             let handle = self.ctx.send(reply).await?;
             *self.coordinator.reply_handle.lock().await = Some(handle);
-        }
-
-        Ok(())
-    }
-
-    /// Starts the interactive event loop.
-    pub async fn run(&mut self) -> Result<(), Error> {
-        self.render_view().await?;
-
-        let (tx, mut rx) = mpsc::unbounded_channel::<ViewEvent<T>>();
-        let tx_arc: Arc<dyn ViewSender<T>> = Arc::new(tx.clone());
-
-        let msg_id = {
-            let lock = self.coordinator.reply_handle.lock().await;
-            lock.as_ref()
-                .expect("reply_handle must exist after render_view")
-                .message()
-                .await?
-                .id
-        };
-
-        let collector = ComponentInteractionCollector::new(self.ctx.serenity_context())
-            .author_id(self.ctx.author().id)
-            .message_id(msg_id)
-            .timeout(self.timeout);
-
-        let mut stream = collector.stream();
-
-        let poise = self.ctx;
-        let coordinator = self.coordinator.clone();
-
-        use ViewCommand::*;
-        loop {
-            tokio::select! {
-                maybe_interaction = stream.next() => {
-                    let interaction = match maybe_interaction {
-                        Some(i) => i,
-                        None => {
-                            let _ = tx.send(ViewEvent::Timeout);
-                            continue;
-                        }
-                    };
-
-                    let Some(action) = self.registry.get(&interaction.data.custom_id).cloned() else {
-                        if self.should_acknowledge {
-                            interaction.create_response(
-                                poise.http(),
-                                CreateInteractionResponse::Acknowledge,
-                            ).await.ok();
-                        }
-                        continue;
-                    };
-
-                    let event = ViewEvent::Component(action, interaction.clone());
-
-                    let view_ctx = ViewContext {
-                        poise,
-                        event,
-                        tx: tx_arc.clone(),
-                        coordinator: coordinator.clone(),
-                    };
-
-                    let cmd = self.handler.handle(view_ctx).await?;
-                    debug!("handle() -> {:?}", cmd);
-
-                    // Prevents interaction failure message after handling
-                    if self.should_acknowledge && !matches!(cmd, AlreadyResponded) {
-                        interaction.create_response(
-                            poise.http(),
-                            CreateInteractionResponse::Acknowledge,
-                        ).await.ok();
-                    }
-
-                    match cmd {
-                        Render => self.render_view().await?,
-                        RenderOnce => {
-                            self.render_view().await?;
-                            break
-                        },
-                        Exit => break,
-                        _ => {}
-                    }
-                }
-                maybe_event = rx.recv() => {
-                    let event = match maybe_event {
-                        Some(e) => e,
-                        None    => break,
-                    };
-
-                    let cmd = match event {
-                        ViewEvent::Timeout => {
-                            self.handler.on_timeout().await?
-                        }
-                        other => {
-                            let view_ctx = ViewContext {
-                                poise,
-                                event: other,
-                                tx: tx_arc.clone(),
-                                coordinator: coordinator.clone(),
-                            };
-                            self.handler.handle(view_ctx).await?
-                        }
-                    };
-
-                    match cmd {
-                        Render => self.render_view().await?,
-                        RenderOnce => {
-                            self.render_view().await?;
-                            break
-                        },
-                        Exit => break,
-                        Continue | AlreadyResponded => {}
-                    }
-                }
-            }
         }
 
         Ok(())
