@@ -8,8 +8,7 @@ use log::trace;
 use crate::bot::command::prelude::*;
 use crate::bot::command::voice::TimeRange;
 use crate::bot::command::voice::VoiceLeaderboardTimeRange;
-use crate::bot::command::voice::leaderboard::image_builder::LeaderboardPageBuilder;
-use crate::bot::command::voice::leaderboard::image_builder::PageGenerationResult;
+use crate::bot::command::voice::leaderboard::image_builder::LeaderboardImageBuilder;
 use crate::bot::view::pagination::PaginationAction;
 use crate::bot::view::pagination::PaginationView;
 use crate::entity::VoiceLeaderboardEntry;
@@ -148,37 +147,11 @@ impl Controller for VoiceLeaderboardController<'_> {
         let entries = Self::fetch_entries(&ctx, self.time_range, false, None).await?;
         let guild_id = ctx.guild_id().map(|id| id.get()).unwrap_or(0);
         let author_id = ctx.author().id.get();
+        let model = VoiceLeaderboardModel::from_entries(entries, author_id, LEADERBOARD_PER_PAGE);
 
-        let mut view = VoiceLeaderboardHandler {
-            model: VoiceLeaderboardModel::from_entries(entries, author_id, LEADERBOARD_PER_PAGE),
-            page_builder: LeaderboardPageBuilder::new(&ctx),
-            current_page_bytes: None,
-            target_user: None,
-            service: ctx.data().service.voice_tracking.clone(),
-            guild_id,
-            author_id,
-            http: ctx.serenity_context().http.clone(),
-            pagination_disabled: false,
-        };
+        let view = VoiceLeaderboardHandler::new(model, &ctx, guild_id, author_id);
 
-        if view.model.is_empty() {
-            let mut engine =
-                ViewEngine::new(ctx, view, Duration::from_millis(1), coordinator.clone());
-            engine.run().await?;
-            return Ok(());
-        }
-
-        // Generate and send initial page
-        let page_result = view.generate_current_page().await?;
-        view.set_current_page_bytes(Some(page_result.image_bytes));
-
-        let mut engine = ViewEngine::new(ctx, view, Duration::from_secs(120), coordinator.clone());
-
-        trace!(
-            "controller_initial_response {} ms",
-            controller_start.elapsed().as_millis()
-        );
-
+        let mut engine = ViewEngine::new(ctx, view, Duration::from_mins(2), coordinator.clone());
         engine.run().await?;
 
         trace!(
@@ -191,27 +164,47 @@ impl Controller for VoiceLeaderboardController<'_> {
 
 pub struct VoiceLeaderboardHandler<'a> {
     pub model: VoiceLeaderboardModel,
-    pub page_builder: LeaderboardPageBuilder<'a>,
-    pub current_page_bytes: Option<Vec<u8>>,
+    pub img_builder: LeaderboardImageBuilder<'a>,
+    pub lb_img: Option<Vec<u8>>,
     pub target_user: Option<poise::serenity_prelude::User>,
     pub service: std::sync::Arc<dyn VoiceTracker>,
     pub guild_id: u64,
     pub author_id: u64,
     pub http: std::sync::Arc<poise::serenity_prelude::Http>,
-    pub pagination_disabled: bool,
+    pub pagination: bool,
 }
 
-impl VoiceLeaderboardHandler<'_> {
-    /// Generates the page image for the current page.
-    async fn generate_current_page(&mut self) -> Result<PageGenerationResult, Error> {
-        let entries = self.model.current_page_entries();
-        let rank_offset = self.model.current_page_rank_offset();
-        self.page_builder.build_page(entries, rank_offset).await
+impl<'a> VoiceLeaderboardHandler<'a> {
+    pub fn new(
+        model: VoiceLeaderboardModel,
+        ctx: &'a Context<'a>,
+        guild_id: u64,
+        author_id: u64,
+    ) -> Self {
+        Self {
+            pagination: model.is_empty(),
+            model,
+            lb_img: None,
+            target_user: None,
+            service: ctx.data().service.voice_tracking.clone(),
+            guild_id,
+            author_id,
+            http: ctx.serenity_context().http.clone(),
+            img_builder: LeaderboardImageBuilder::new(ctx),
+        }
     }
 
-    /// Sets the current page image bytes for attachment on edit.
-    fn set_current_page_bytes(&mut self, bytes: Option<Vec<u8>>) {
-        self.current_page_bytes = bytes;
+    /// Generates the page image for the current page.
+    async fn generate_img(&mut self) -> Result<(), Error> {
+        if !self.model.is_empty() {
+            let entries = self.model.current_page_entries();
+            let rank_offset = self.model.current_page_rank_offset();
+            let res = self.img_builder.build(entries, rank_offset).await;
+            if let Ok(img) = res {
+                self.lb_img = Some(img.image_bytes);
+            }
+        }
+        Ok(())
     }
 
     async fn refetch_data(&mut self) -> Result<(), Error> {
@@ -244,10 +237,9 @@ impl VoiceLeaderboardHandler<'_> {
         );
 
         if !self.model.is_empty() {
-            let page_result = self.generate_current_page().await?;
-            self.set_current_page_bytes(Some(page_result.image_bytes));
+            self.generate_img().await?;
         } else {
-            self.set_current_page_bytes(None);
+            self.lb_img = None;
         }
 
         Ok(())
@@ -266,6 +258,7 @@ impl ViewHandler for VoiceLeaderboardHandler<'_> {
         let mut changed_page = false;
         let mut fetch_new = false;
 
+        log::debug!("{:?}", ctx.event);
         match ctx.action() {
             Base(inner) => {
                 let cmd = VoiceLeaderboardUpdate::update(
@@ -318,15 +311,14 @@ impl ViewHandler for VoiceLeaderboardHandler<'_> {
             self.refetch_data().await?;
         }
         if changed_page && !self.model.is_empty() {
-            let page_result = self.generate_current_page().await?;
-            self.set_current_page_bytes(Some(page_result.image_bytes));
+            self.generate_img().await?
         }
 
         Ok(ViewCommand::Render)
     }
 
     async fn on_timeout(&mut self) -> Result<ViewCommand, Error> {
-        self.pagination_disabled = true;
+        self.pagination = false;
         if self.model.pages() > 1 {
             Ok(ViewCommand::RenderOnce)
         } else {
@@ -459,7 +451,7 @@ impl ViewRender for VoiceLeaderboardHandler<'_> {
         let mut pagination =
             PaginationView::new(self.model.entries.len() as u32, LEADERBOARD_PER_PAGE);
         pagination.state.current_page = self.model.current_page;
-        pagination.disabled = self.pagination_disabled;
+        pagination.disabled = self.pagination;
         pagination.attach_if_multipage(registry, &mut components, |action| {
             VoiceLeaderboardAction::Base(action)
         });
@@ -474,7 +466,7 @@ impl ViewRender for VoiceLeaderboardHandler<'_> {
         let response = self.render(registry);
         let mut reply: poise::CreateReply<'_> = response.into();
 
-        if let Some(ref bytes) = self.current_page_bytes {
+        if let Some(ref bytes) = self.lb_img {
             let attachment =
                 CreateAttachment::bytes(bytes.clone(), VOICE_LEADERBOARD_IMAGE_FILENAME);
             reply = reply.attachment(attachment);

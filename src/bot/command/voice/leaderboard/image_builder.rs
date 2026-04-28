@@ -23,19 +23,19 @@ pub struct LeaderboardEntry {
 }
 
 /// Result of generating a leaderboard page.
-pub struct PageGenerationResult {
+pub struct ImageGenerationResult {
     pub entries_with_names: Vec<(VoiceLeaderboardEntry, String)>,
     pub image_bytes: Vec<u8>,
 }
 
 /// Builder for creating leaderboard pages with image generation.
-pub struct LeaderboardPageBuilder<'a> {
+pub struct LeaderboardImageBuilder<'a> {
     ctx: &'a Context<'a>,
     image_gen: LeaderboardImageGenerator,
     user_cache: HashMap<u64, poise::serenity_prelude::User>,
 }
 
-impl<'a> LeaderboardPageBuilder<'a> {
+impl<'a> LeaderboardImageBuilder<'a> {
     /// Creates a new page builder with initialized image generator.
     pub fn new(ctx: &'a Context<'a>) -> Self {
         let image_gen = LeaderboardImageGenerator::new();
@@ -47,11 +47,11 @@ impl<'a> LeaderboardPageBuilder<'a> {
     }
 
     /// Generates a page for the given entries with the specified rank offset.
-    pub async fn build_page(
+    pub async fn build(
         &mut self,
         entries: &[VoiceLeaderboardEntry],
         rank_offset: u32,
-    ) -> Result<PageGenerationResult, Error> {
+    ) -> Result<ImageGenerationResult, Error> {
         let fetch_start = Instant::now();
         let http_client = self.image_gen.http_client.clone();
 
@@ -81,7 +81,7 @@ impl<'a> LeaderboardPageBuilder<'a> {
             })?;
         trace!("generate_took {} ms", init_start.elapsed().as_millis());
 
-        Ok(PageGenerationResult {
+        Ok(ImageGenerationResult {
             entries_with_names,
             image_bytes,
         })
