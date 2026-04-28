@@ -15,7 +15,7 @@ use crate::entity::FeedEntity;
 use crate::event::FeedUpdateData;
 use crate::event::FeedUpdateEvent;
 use crate::event::event_bus::EventBus;
-use crate::service::feed_subscription_service::FeedUpdateResult;
+use crate::service::feed_subscription::FeedUpdateResult;
 use crate::service::traits::FeedSubscriptionProvider;
 
 /// Task that periodically checks feeds for updates.

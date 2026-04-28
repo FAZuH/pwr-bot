@@ -9,9 +9,9 @@ use pwr_bot::entity::ServerSettings;
 use pwr_bot::entity::SubscriberType;
 use pwr_bot::feed::FeedItem;
 use pwr_bot::feed::FeedSource;
-use pwr_bot::feed::platforms::Platforms;
-use pwr_bot::service::feed_subscription_service::FeedSubscriptionService;
-use pwr_bot::service::feed_subscription_service::SubscriberTarget;
+use pwr_bot::feed::Platforms;
+use pwr_bot::service::feed_subscription::FeedSubscriptionService;
+use pwr_bot::service::feed_subscription::SubscriberTarget;
 
 mod common;
 

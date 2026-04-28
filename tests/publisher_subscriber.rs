@@ -9,10 +9,10 @@ use pwr_bot::event::FeedUpdateEvent;
 use pwr_bot::event::event_bus::EventBus;
 use pwr_bot::feed::FeedItem;
 use pwr_bot::feed::FeedSource;
-use pwr_bot::feed::platforms::Platforms;
-use pwr_bot::service::feed_subscription_service::FeedSubscriptionService;
-use pwr_bot::service::feed_subscription_service::SubscribeResult;
-use pwr_bot::service::feed_subscription_service::SubscriberTarget;
+use pwr_bot::feed::Platforms;
+use pwr_bot::service::feed_subscription::FeedSubscriptionService;
+use pwr_bot::service::feed_subscription::SubscribeResult;
+use pwr_bot::service::feed_subscription::SubscriberTarget;
 use pwr_bot::task::series_feed_publisher::SeriesFeedPublisher;
 use tokio::time::sleep;
 

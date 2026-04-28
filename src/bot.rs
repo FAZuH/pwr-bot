@@ -5,14 +5,14 @@
 //! bridge between the Discord gateway and the application's internal services.
 
 pub mod checks;
-pub mod commands;
+pub mod command;
 pub mod controller;
 pub mod coordinator;
 pub mod error;
 pub mod error_handler;
 pub mod navigation;
 pub mod utils;
-pub mod views;
+pub mod view;
 
 use std::collections::HashSet;
 use std::str::FromStr;
@@ -33,16 +33,16 @@ use poise::serenity_prelude::*;
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
 
-use crate::bot::commands::Cog;
-use crate::bot::commands::Cogs;
+use crate::bot::command::Cog;
+use crate::bot::command::Cogs;
 use crate::bot::error_handler::ErrorHandler;
 use crate::config::Config;
 use crate::entity::BotMetaKey;
 use crate::event::VoiceStateEvent;
 use crate::event::event_bus::EventBus;
-use crate::feed::platforms::Platforms;
+use crate::feed::Platforms;
 use crate::service::Services;
-use crate::subscriber::voice_state_subscriber::VoiceStateSubscriber;
+use crate::subscriber::voice_state::VoiceStateSubscriber;
 
 /// Data shared across bot commands and contexts.
 pub struct Data {

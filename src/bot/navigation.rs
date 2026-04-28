@@ -4,10 +4,10 @@
 
 use poise::serenity_prelude::User;
 
-use crate::bot::commands::feed::SendInto;
-use crate::bot::commands::voice::GuildStatType;
-use crate::bot::commands::voice::VoiceLeaderboardTimeRange;
-use crate::bot::commands::voice::VoiceStatsTimeRange;
+use crate::bot::command::feed::SendInto;
+use crate::bot::command::voice::GuildStatType;
+use crate::bot::command::voice::VoiceLeaderboardTimeRange;
+use crate::bot::command::voice::VoiceStatsTimeRange;
 
 /// Result type for controller navigation.
 ///
