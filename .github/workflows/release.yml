@@ -28,20 +28,36 @@ jobs:
       - name: Set Up version.json
         run: echo "{\"version\":\"$(git describe --tags --abbrev=0 2>/dev/null || echo '0.0.0')\"}" > version.json
 
-      - name: Create Changelog
+      - name: Install changelog dependencies
+        run: npm install conventional-changelog-conventionalcommits@7.0.2
+
+      - name: Generate Changelog (dry run)
         id: changelog
-        uses: TriPSs/conventional-changelog-action@v5.2.1
+        uses: TriPSs/conventional-changelog-action@v6
         with:
+          skip-commit: true
+          skip-tag: true
           github-token: ${{ secrets.PRIVATE_TOKEN }}
-          git-user-name: "faz-bot"
-          git-user-email: "mail@fazuh.com"
-          pre-commit: ./.github/.pre-commit.js
           config-file-path: ./.github/.config.js
           version-file: ./version.json
+          preset: conventionalcommits
           skip-version-file: true
           skip-git-pull: true
           skip-on-empty: false
-          release-count: 5
+
+      - name: Bump Cargo.toml version
+        if: ${{ steps.changelog.outputs.skipped != 'true' }}
+        run: |
+          VERSION=${{ steps.changelog.outputs.tag }}
+          VERSION=${VERSION#v}
+          sed -i "0,/^version = \".*\"/{s/^version = \".*\"/version = \"$VERSION\"/}" Cargo.toml
+
+      - name: Upload patched Cargo.toml
+        if: ${{ steps.changelog.outputs.skipped != 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: patched-cargo-toml
+          path: Cargo.toml
 
   build:
     name: Build Binary
@@ -74,9 +90,48 @@ jobs:
           name: pwr-bot
           path: target/release/pwr-bot
 
+  publish-changelog:
+    name: Publish Changelog Commit
+    needs: [changelog, build]
+    if: ${{ needs.changelog.outputs.skipped != 'true' }}
+    outputs:
+      tag: ${{ steps.commit.outputs.tag }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set Up version.json
+        run: echo "{\"version\":\"$(git describe --tags --abbrev=0 2>/dev/null || echo '0.0.0')\"}" > version.json
+
+      - name: Download patched Cargo.toml
+        uses: actions/download-artifact@v4
+        with:
+          name: patched-cargo-toml
+          path: .
+
+      - name: Install changelog dependencies
+        run: npm install conventional-changelog-conventionalcommits@7.0.2
+
+      - name: Commit, Tag, Push
+        id: commit
+        uses: TriPSs/conventional-changelog-action@v6
+        with:
+          github-token: ${{ secrets.PRIVATE_TOKEN }}
+          git-user-name: "faz-bot"
+          git-user-email: "mail@fazuh.com"
+          config-file-path: ./.github/.config.js
+          version-file: ./version.json
+          preset: conventionalcommits
+          skip-version-file: true
+          skip-git-pull: true
+          skip-on-empty: false
+
   push-image:
     name: Docker Build & Push
-    needs: changelog
+    needs: [changelog, build, publish-changelog]
     if: ${{ needs.changelog.outputs.skipped != 'true' }}
     runs-on: ubuntu-latest
     steps:
@@ -116,7 +171,7 @@ jobs:
 
   release-github:
     name: Release to GitHub
-    needs: [changelog, build]
+    needs: [changelog, build, publish-changelog]
     if: ${{ needs.changelog.outputs.skipped != 'true' }}
     runs-on: ubuntu-latest
     steps:
