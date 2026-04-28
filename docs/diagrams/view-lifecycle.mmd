@@ -83,6 +83,22 @@ graph TB
     
     Collectors -.->|feed into| Recv
     
+    subgraph TEAPattern["TEA Update Pattern (inside ViewHandler::handle)"]
+        direction TB
+        Parse["Parse Discord interaction<br/>into Msg"]
+        Update["Update::update(msg, model)<br/>→ Cmd"]
+        Model[(Model)]
+        Cmd[(Cmd)]
+        SideEffects["Perform side effects<br/>(db fetch, persist, render)"]
+        
+        Parse --> Update
+        Model --> Update
+        Update --> Cmd
+        Cmd --> SideEffects
+    end
+    
+    TEAPattern -.->|executed by| Handle
+    
     subgraph Mapping["Context & Delegation"]
         direction TB
         ParentCtx["Parent ViewContext"]
@@ -101,3 +117,7 @@ graph TB
     style Recv fill:#1e1e1e,stroke:#ffffff
     style CreateChannel fill:#1e1e1e,stroke:#ffffff
     style StartCollectors fill:#1e1e1e,stroke:#ffffff
+    style TEAPattern fill:#1a3a1a,stroke:#4ade80,stroke-width:2px
+    style Parse fill:#2d2d2d,stroke:#4ade80
+    style Update fill:#2d2d2d,stroke:#4ade80
+    style SideEffects fill:#2d2d2d,stroke:#4ade80
