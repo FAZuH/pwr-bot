@@ -216,7 +216,7 @@ async fn test_list_paginated_subscriptions_optimization() {
             let item = FeedItemEntity {
                 feed_id,
                 description: format!("Chapter {}", i),
-                published: Utc::now(),
+                published: Utc::now().naive_utc(),
                 ..Default::default()
             };
             db.feed_item.insert(&item).await.unwrap();

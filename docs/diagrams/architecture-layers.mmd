@@ -112,7 +112,7 @@ graph TB
             BotMetaTable["BotMetaTable"]
             Repo --> FeedTable & FeedItemTable & SubscriberTable & VoiceTable & SettingsTable & BotMetaTable
         end
-        SQLite["SQLite  ·  SQLx async"]
+        SQLite["SQLite  ·  Diesel async"]
         FeedTable & FeedItemTable & SubscriberTable & VoiceTable & SettingsTable --> SQLite
     end
 

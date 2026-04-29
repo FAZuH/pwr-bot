@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 // TODO: Improve error handling here in general
 // Especially with db results
-use sqlx::error::ErrorKind;
+use diesel::result::DatabaseErrorKind;
 
 use crate::entity::FeedEntity;
 use crate::entity::FeedItemEntity;
@@ -164,9 +164,9 @@ impl FeedSubscriptionService {
         match self.create_subscription(feed.id, subscriber.id).await {
             Ok(_) => Ok(SubscribeResult::Success { feed }),
             Err(err) => {
-                if let ServiceError::DatabaseError(DatabaseError::BackendError(sqlx_err)) = &err
-                    && let Some(db_err) = sqlx_err.as_database_error()
-                    && matches!(db_err.kind(), ErrorKind::UniqueViolation)
+                if let ServiceError::DatabaseError(DatabaseError::BackendError(
+                    diesel::result::Error::DatabaseError(DatabaseErrorKind::UniqueViolation, _),
+                )) = &err
                 {
                     Ok(SubscribeResult::AlreadySubscribed { feed })
                 } else {
@@ -301,7 +301,7 @@ impl FeedSubscriptionService {
             id: 0,
             feed_id: feed.id,
             description: new_latest.title.clone(),
-            published: new_latest.published,
+            published: new_latest.published.naive_utc(),
         };
         self.db.feed_item.replace(&new_feed_item).await?;
 
@@ -480,7 +480,7 @@ impl FeedSubscriptionService {
                         id: 0,
                         feed_id: feed.id,
                         description: feed_latest.title,
-                        published: feed_latest.published,
+                        published: feed_latest.published.naive_utc(),
                     };
                     // DB 1??
                     self.db.feed_item.insert(&version).await?;
