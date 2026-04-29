@@ -10,16 +10,16 @@ use async_trait::async_trait;
 use chrono::DateTime;
 use chrono::Utc;
 
-use crate::bot::commands::voice::GuildStatType;
+use crate::bot::command::voice::GuildStatType;
 use crate::entity::*;
-use crate::repository::error::DatabaseError;
+use crate::repo::error::DatabaseError;
 use crate::service::error::ServiceError;
-use crate::service::feed_subscription_service::FeedUpdateResult;
-use crate::service::feed_subscription_service::SubscribeResult;
-use crate::service::feed_subscription_service::SubscriberTarget;
-use crate::service::feed_subscription_service::Subscription;
-use crate::service::feed_subscription_service::UnsubscribeResult;
-use crate::service::internal_service::DatabaseDump;
+use crate::service::feed_subscription::FeedUpdateResult;
+use crate::service::feed_subscription::SubscribeResult;
+use crate::service::feed_subscription::SubscriberTarget;
+use crate::service::feed_subscription::Subscription;
+use crate::service::feed_subscription::UnsubscribeResult;
+use crate::service::internal::DatabaseDump;
 
 /// Logic for managing feed subscriptions (AniList, MangaDex, Comick).
 #[async_trait]

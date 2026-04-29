@@ -2,19 +2,6 @@
 //!
 //! Initializes all components and starts the Discord bot.
 
-pub mod bot;
-pub mod config;
-pub mod entity;
-pub mod error;
-pub mod event;
-pub mod feed;
-pub mod logging;
-pub mod macros;
-pub mod repository;
-pub mod service;
-pub mod subscriber;
-pub mod task;
-
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -22,21 +9,20 @@ use anyhow::Result;
 use dotenv::dotenv;
 use log::debug;
 use log::info;
-
-use crate::bot::Bot;
-use crate::config::Config;
-use crate::event::FeedUpdateEvent;
-use crate::event::VoiceStateEvent;
-use crate::event::event_bus::EventBus;
-use crate::feed::platforms::Platforms;
-use crate::logging::setup_logging;
-use crate::repository::Repository;
-use crate::service::Services;
-use crate::subscriber::discord_dm_subscriber::DiscordDmSubscriber;
-use crate::subscriber::discord_guild_subscriber::DiscordGuildSubscriber;
-use crate::subscriber::voice_state_subscriber::VoiceStateSubscriber;
-use crate::task::series_feed_publisher::SeriesFeedPublisher;
-use crate::task::voice_heartbeat::VoiceHeartbeatManager;
+use pwr_bot::bot::Bot;
+use pwr_bot::config::Config;
+use pwr_bot::event::FeedUpdateEvent;
+use pwr_bot::event::VoiceStateEvent;
+use pwr_bot::event::event_bus::EventBus;
+use pwr_bot::feed::Platforms;
+use pwr_bot::logging::setup_logging;
+use pwr_bot::repo::Repository;
+use pwr_bot::service::Services;
+use pwr_bot::subscriber::discord_dm::DiscordDmSubscriber;
+use pwr_bot::subscriber::discord_guild::DiscordGuildSubscriber;
+use pwr_bot::subscriber::voice_state::VoiceStateSubscriber;
+use pwr_bot::task::series_feed_publisher::SeriesFeedPublisher;
+use pwr_bot::task::voice_heartbeat::VoiceHeartbeatManager;
 
 #[tokio::main]
 async fn main() -> Result<()> {

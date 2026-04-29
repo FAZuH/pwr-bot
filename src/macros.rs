@@ -117,7 +117,7 @@ macro_rules! controller {
         $(#[$meta])*
         $vis struct $name<$lt> {
             #[allow(dead_code)]
-            ctx: $crate::bot::commands::Context<$lt>,
+            ctx: $crate::bot::command::Context<$lt>,
             $(
                 $(#[$field_meta:meta])*
                 pub $field: $field_type,
@@ -127,7 +127,7 @@ macro_rules! controller {
         impl<$lt> $name<$lt> {
             /// Creates a new controller instance.
             pub fn new(
-                ctx: $crate::bot::commands::Context<$lt>,
+                ctx: $crate::bot::command::Context<$lt>,
                 $($field: $field_type),*
             ) -> Self {
                 Self {
@@ -178,7 +178,7 @@ macro_rules! action_enum {
             )*
         }
 
-        impl $crate::bot::views::Action for $name {
+        impl $crate::bot::view::Action for $name {
             fn label(&self) -> &'static str {
                 match self {
                     $(
@@ -254,7 +254,7 @@ macro_rules! action_extends {
             }
         }
 
-        impl $crate::bot::views::Action for $name {
+        impl $crate::bot::view::Action for $name {
             fn label(&self) -> &'static str {
                 match self {
                     Self::Base(base) => base.label(),

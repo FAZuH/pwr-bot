@@ -1,0 +1,640 @@
+//! Feed subscription management service.
+
+use std::sync::Arc;
+
+// TODO: Improve error handling here in general
+// Especially with db results
+use sqlx::error::ErrorKind;
+
+use crate::entity::FeedEntity;
+use crate::entity::FeedItemEntity;
+use crate::entity::FeedSubscriptionEntity;
+use crate::entity::FeedWithLatestItemRow;
+use crate::entity::ServerSettings;
+use crate::entity::SubscriberEntity;
+use crate::entity::SubscriberType;
+use crate::error::AppError;
+use crate::feed::PlatformInfo;
+use crate::feed::Platforms;
+use crate::feed::error::FeedError;
+use crate::repo::error::DatabaseError;
+use crate::service::Repository;
+use crate::service::error::ServiceError;
+use crate::service::settings::SettingsService;
+use crate::service::traits::FeedSubscriptionProvider;
+
+#[async_trait::async_trait]
+impl FeedSubscriptionProvider for FeedSubscriptionService {
+    async fn subscribe(
+        &self,
+        url: &str,
+        subscriber: &SubscriberEntity,
+    ) -> Result<SubscribeResult, ServiceError> {
+        self.subscribe(url, subscriber).await
+    }
+
+    async fn get_feeds_by_tag(&self, tag: &str) -> Result<Vec<FeedEntity>, ServiceError> {
+        self.get_feeds_by_tag(tag).await
+    }
+
+    async fn get_both_subscribers(
+        &self,
+        target_id: String,
+        guild_id: Option<String>,
+    ) -> (Option<SubscriberEntity>, Option<SubscriberEntity>) {
+        self.get_both_subscribers(target_id, guild_id).await
+    }
+
+    async fn search_and_combine_feeds(
+        &self,
+        partial: &str,
+        user_subscriber: Option<SubscriberEntity>,
+        guild_subscriber: Option<SubscriberEntity>,
+    ) -> Vec<FeedEntity> {
+        self.search_and_combine_feeds(partial, user_subscriber, guild_subscriber)
+            .await
+    }
+
+    async fn check_feed_update(&self, feed: &FeedEntity) -> Result<FeedUpdateResult, ServiceError> {
+        self.check_feed_update(feed).await
+    }
+
+    async fn unsubscribe(
+        &self,
+        source_url: &str,
+        subscriber: &SubscriberEntity,
+    ) -> Result<UnsubscribeResult, ServiceError> {
+        self.unsubscribe(source_url, subscriber).await
+    }
+
+    async fn list_paginated_subscriptions(
+        &self,
+        subscriber: &SubscriberEntity,
+        page: u32,
+        per_page: u32,
+    ) -> Result<Vec<Subscription>, ServiceError> {
+        self.list_paginated_subscriptions(subscriber, page, per_page)
+            .await
+    }
+
+    async fn get_subscription_count(
+        &self,
+        subscriber: &SubscriberEntity,
+    ) -> Result<u32, ServiceError> {
+        self.get_subscription_count(subscriber).await
+    }
+
+    async fn search_subcriptions(
+        &self,
+        subscriber: &SubscriberEntity,
+        partial: &str,
+    ) -> Result<Vec<FeedEntity>, ServiceError> {
+        self.search_subcriptions(subscriber, partial).await
+    }
+
+    async fn get_or_create_feed(&self, source_url: &str) -> Result<FeedEntity, ServiceError> {
+        self.get_or_create_feed(source_url).await
+    }
+
+    async fn get_or_create_subscriber(
+        &self,
+        target: &SubscriberTarget,
+    ) -> Result<SubscriberEntity, ServiceError> {
+        self.get_or_create_subscriber(target).await
+    }
+
+    async fn get_feed_by_source_url(
+        &self,
+        source_url: &str,
+    ) -> Result<Option<FeedEntity>, ServiceError> {
+        self.get_feed_by_source_url(source_url).await
+    }
+
+    async fn get_server_settings(&self, guild_id: u64) -> Result<ServerSettings, ServiceError> {
+        self.get_server_settings(guild_id).await
+    }
+
+    async fn get_subscribers_by_type_and_feed(
+        &self,
+        subscriber_type: SubscriberType,
+        feed_id: i32,
+    ) -> Result<Vec<SubscriberEntity>, ServiceError> {
+        self.get_subscribers_by_type_and_feed(subscriber_type, feed_id)
+            .await
+    }
+
+    async fn update_server_settings(
+        &self,
+        guild_id: u64,
+        settings: ServerSettings,
+    ) -> Result<(), ServiceError> {
+        self.update_server_settings(guild_id, settings).await
+    }
+}
+
+/// Service for managing feed subscriptions and updates.
+pub struct FeedSubscriptionService {
+    pub db: Arc<Repository>,
+    pub platforms: Arc<Platforms>,
+    settings: Arc<SettingsService>,
+}
+
+impl FeedSubscriptionService {
+    /// Creates a new feed subscription service.
+    pub fn new(db: Arc<Repository>, platforms: Arc<Platforms>) -> Self {
+        let settings = Arc::new(SettingsService::new(db.clone()));
+        Self {
+            db,
+            platforms,
+            settings,
+        }
+    }
+    /// Core subscription operations
+    ///
+    /// # Performance
+    /// * DB calls: 1
+    pub async fn subscribe(
+        &self,
+        url: &str,
+        subscriber: &SubscriberEntity,
+    ) -> Result<SubscribeResult, ServiceError> {
+        let feed = self.get_or_create_feed(url).await?;
+
+        // DB 1
+        match self.create_subscription(feed.id, subscriber.id).await {
+            Ok(_) => Ok(SubscribeResult::Success { feed }),
+            Err(err) => {
+                if let ServiceError::DatabaseError(DatabaseError::BackendError(sqlx_err)) = &err
+                    && let Some(db_err) = sqlx_err.as_database_error()
+                    && matches!(db_err.kind(), ErrorKind::UniqueViolation)
+                {
+                    Ok(SubscribeResult::AlreadySubscribed { feed })
+                } else {
+                    Err(ServiceError::UnexpectedResult {
+                        message: err.to_string(),
+                    })
+                }
+            }
+        }
+    }
+    /// # Performance
+    /// * DB calls: 1
+    pub async fn get_feeds_by_tag(&self, tag: &str) -> Result<Vec<FeedEntity>, ServiceError> {
+        Ok(self.db.feed.select_all_by_tag(tag).await?)
+    }
+
+    pub async fn get_both_subscribers(
+        &self,
+        target_id: impl Into<String>,
+        guild_id: Option<impl Into<String>>,
+    ) -> (Option<SubscriberEntity>, Option<SubscriberEntity>) {
+        let user_target = SubscriberTarget {
+            target_id: target_id.into(),
+            subscriber_type: SubscriberType::Dm,
+        };
+
+        let user_subscriber = self.get_or_create_subscriber(&user_target).await.ok();
+
+        let guild_subscriber = match guild_id {
+            Some(guild_id) => {
+                let guild_target = SubscriberTarget {
+                    target_id: guild_id.into(),
+                    subscriber_type: SubscriberType::Guild,
+                };
+                self.get_or_create_subscriber(&guild_target).await.ok()
+            }
+            None => None,
+        };
+
+        (user_subscriber, guild_subscriber)
+    }
+
+    /// Gets both DM and guild subscribers for the current user.
+    /// Searches and combines feeds from both user and guild subscriptions.
+    pub async fn search_and_combine_feeds(
+        &self,
+        partial: &str,
+        user_subscriber: Option<SubscriberEntity>,
+        guild_subscriber: Option<SubscriberEntity>,
+    ) -> Vec<FeedEntity> {
+        let mut user_feeds = match user_subscriber {
+            Some(sub) => self
+                .search_subcriptions(&sub, partial)
+                .await
+                .unwrap_or_default(),
+            None => vec![],
+        };
+
+        let mut guild_feeds = match guild_subscriber {
+            Some(sub) => self
+                .search_subcriptions(&sub, partial)
+                .await
+                .unwrap_or_default(),
+            None => vec![],
+        };
+
+        for f in &mut user_feeds {
+            Self::format_subscription_with_prefix(f, true);
+        }
+        for f in &mut guild_feeds {
+            Self::format_subscription_with_prefix(f, false);
+        }
+
+        user_feeds.append(&mut guild_feeds);
+        user_feeds
+    }
+
+    /// Adds a prefix to feed name indicating subscription type.
+    fn format_subscription_with_prefix(feed: &mut FeedEntity, is_dm: bool) {
+        let prefix = if is_dm { "(DM) " } else { "(Server) " };
+        feed.name.insert_str(0, prefix);
+    }
+
+    /// Check for updates on a specific feed
+    pub async fn check_feed_update(
+        &self,
+        feed: &FeedEntity,
+    ) -> Result<FeedUpdateResult, ServiceError> {
+        // Skip feeds with no subscribers
+        let subs = self.db.feed_subscription.exists_by_feed_id(feed.id).await?;
+
+        if !subs {
+            return Ok(FeedUpdateResult::NoUpdate);
+        }
+
+        // Get the latest known version for this feed
+        let old_latest: Option<FeedItemEntity> =
+            self.db.feed_item.select_latest_by_feed_id(feed.id).await?;
+
+        let platform = self
+            .platforms
+            .get_platform_by_source_url(&feed.source_url)
+            .ok_or_else(|| {
+                ServiceError::DatabaseError(DatabaseError::AppError(AppError::internal_with_ref(
+                    "Series feed source with url {} not found.",
+                )))
+            })?;
+
+        // Fetch current state from source
+        let new_latest = match platform.fetch_latest(&feed.items_id).await {
+            Ok(series) => series,
+            Err(e) => {
+                if matches!(e, FeedError::SourceFinished { .. }) {
+                    self.db.feed.delete(&feed.id).await?;
+                    return Ok(FeedUpdateResult::SourceFinished);
+                } else {
+                    return Err(e.into());
+                }
+            }
+        };
+
+        // Check if version changed
+        if old_latest
+            .as_ref()
+            .is_some_and(|e| new_latest.title == e.description)
+        {
+            return Ok(FeedUpdateResult::NoUpdate);
+        }
+
+        // Insert new version into database
+        let new_feed_item = FeedItemEntity {
+            id: 0,
+            feed_id: feed.id,
+            description: new_latest.title.clone(),
+            published: new_latest.published,
+        };
+        self.db.feed_item.replace(&new_feed_item).await?;
+
+        Ok(FeedUpdateResult::Updated {
+            feed: feed.clone(),
+            old_item: old_latest,
+            new_item: new_feed_item,
+            feed_info: platform.get_base().info.clone(),
+        })
+    }
+
+    /// # Performance
+    /// * DB calls: 1 + 1?
+    pub async fn unsubscribe(
+        &self,
+        source_url: &str,
+        subscriber: &SubscriberEntity,
+    ) -> Result<UnsubscribeResult, ServiceError> {
+        // DB 1
+        let feed = match self.get_feed_by_source_url(source_url).await? {
+            Some(feed) => feed,
+            None => {
+                return Ok(UnsubscribeResult::NoneSubscribed {
+                    url: source_url.to_string(),
+                });
+            }
+        };
+
+        // DB 1?
+        match self
+            .db
+            .feed_subscription
+            .delete_subscription(feed.id, subscriber.id)
+            .await
+        {
+            Ok(not_already_deleted) => {
+                if not_already_deleted {
+                    Ok(UnsubscribeResult::Success { feed })
+                } else {
+                    Ok(UnsubscribeResult::AlreadyUnsubscribed { feed })
+                }
+            }
+            Err(err) => Err(ServiceError::UnexpectedResult {
+                message: err.to_string(),
+            }),
+        }
+    }
+
+    /// # Performance
+    /// * DB calls: 1
+    ///
+    /// Where N is number of subscriptions found for given page
+    pub async fn list_paginated_subscriptions(
+        &self,
+        subscriber: &SubscriberEntity,
+        page: impl Into<u32>,
+        per_page: impl Into<u32>,
+    ) -> Result<Vec<Subscription>, ServiceError> {
+        let page = page.into() - 1;
+        let per_page = per_page.into();
+
+        // DB 1
+        let rows: Vec<FeedWithLatestItemRow> = self
+            .db
+            .feed_subscription
+            .select_paginated_with_latest_by_subscriber_id(subscriber.id, page, per_page)
+            .await?;
+
+        let ret = rows
+            .into_iter()
+            .map(|row| {
+                let feed = FeedEntity {
+                    id: row.id,
+                    name: row.name,
+                    description: row.description,
+                    platform_id: row.platform_id,
+                    source_id: row.source_id,
+                    items_id: row.items_id,
+                    source_url: row.source_url,
+                    cover_url: row.cover_url,
+                    tags: row.tags,
+                };
+
+                let feed_latest = if let (Some(id), Some(desc), Some(pub_date)) =
+                    (row.item_id, row.item_description, row.item_published)
+                {
+                    Some(FeedItemEntity {
+                        id,
+                        feed_id: feed.id,
+                        description: desc,
+                        published: pub_date,
+                    })
+                } else {
+                    None
+                };
+
+                Subscription { feed, feed_latest }
+            })
+            .collect();
+
+        Ok(ret)
+    }
+
+    /// # Performance
+    /// * DB calls: 1
+    pub async fn get_subscription_count(
+        &self,
+        subscriber: &SubscriberEntity,
+    ) -> Result<u32, ServiceError> {
+        // DB 1
+        Ok(self
+            .db
+            .feed_subscription
+            .count_by_subscriber_id(subscriber.id)
+            .await?)
+    }
+
+    /// # Performance
+    /// * DB calls: 1
+    pub async fn search_subcriptions(
+        &self,
+        subscriber: &SubscriberEntity,
+        partial: &str,
+    ) -> Result<Vec<FeedEntity>, ServiceError> {
+        // DB 1
+        Ok(self
+            .db
+            .feed
+            .select_by_name_and_subscriber_id(&subscriber.id, partial, Some(25))
+            .await?)
+    }
+
+    /// # Performance
+    /// * DB calls: 1 + 1? + 1??
+    /// * API calls: 2?
+    pub async fn get_or_create_feed(&self, source_url: &str) -> Result<FeedEntity, ServiceError> {
+        let platform = self
+            .platforms
+            .get_platform_by_source_url(source_url)
+            .ok_or_else(|| FeedError::UnsupportedUrl {
+                url: source_url.to_string(),
+            })?;
+        let source_id = platform.get_id_from_source_url(source_url)?;
+
+        // DB 1
+        let feed = match self
+            .db
+            .feed
+            .select_by_source_id(platform.get_id(), source_id)
+            .await?
+        {
+            Some(res) => res,
+            None => {
+                // Feed doesn't exist, create it
+                // API 1?
+                let feed_source = platform.fetch_source(source_id).await?;
+
+                let mut feed = FeedEntity {
+                    id: 0,
+                    name: feed_source.name,
+                    description: feed_source.description,
+                    platform_id: platform.get_id().to_string(),
+                    source_id: source_id.to_string(),
+                    items_id: feed_source.items_id,
+                    source_url: feed_source.source_url,
+                    cover_url: feed_source.image_url.unwrap_or("".to_string()),
+                    tags: platform.get_info().tags.clone(),
+                };
+                // DB 1?
+                feed.id = self.db.feed.insert(&feed).await?;
+
+                // API 1?
+                if let Ok(feed_latest) = platform.fetch_latest(&feed.items_id).await {
+                    // Create initial version
+                    let version = FeedItemEntity {
+                        id: 0,
+                        feed_id: feed.id,
+                        description: feed_latest.title,
+                        published: feed_latest.published,
+                    };
+                    // DB 1??
+                    self.db.feed_item.insert(&version).await?;
+                }
+
+                feed
+            }
+        };
+        Ok(feed)
+    }
+
+    /// # Performance
+    /// * DB calls: 1 + 1?
+    pub async fn get_or_create_subscriber(
+        &self,
+        target: &SubscriberTarget,
+    ) -> Result<SubscriberEntity, ServiceError> {
+        // DB 1
+        let subscriber = match self
+            .db
+            .subscriber
+            .select_by_type_and_target(&target.subscriber_type, &target.target_id)
+            .await?
+        {
+            Some(res) => res,
+            None => {
+                // Subscriber doesn't exist, create it
+                let mut subscriber = SubscriberEntity {
+                    r#type: target.subscriber_type,
+                    target_id: target.target_id.clone(),
+                    ..Default::default()
+                };
+                // DB 1?
+                subscriber.id = self.db.subscriber.insert(&subscriber).await?;
+                subscriber
+            }
+        };
+        Ok(subscriber)
+    }
+
+    /// Get [`FeedEntity`] by source url.
+    ///
+    /// Returns `Some(FeedEntity)` if found. `None` otherwise.
+    ///
+    /// # Performance
+    /// * DB calls: 1
+    pub async fn get_feed_by_source_url(
+        &self,
+        source_url: &str,
+    ) -> Result<Option<FeedEntity>, ServiceError> {
+        let platform = self
+            .platforms
+            .get_platform_by_source_url(source_url)
+            .ok_or_else(|| FeedError::UnsupportedUrl {
+                url: source_url.to_string(),
+            })?;
+        let source_id = platform.get_id_from_source_url(source_url)?;
+
+        // DB 1
+        Ok(self
+            .db
+            .feed
+            .select_by_source_id(platform.get_id(), source_id)
+            .await?)
+    }
+
+    /// # Performance
+    /// * DB calls: 1
+    pub async fn get_server_settings(&self, guild_id: u64) -> Result<ServerSettings, ServiceError> {
+        self.settings.get_server_settings(guild_id).await
+    }
+
+    /// Get all subscribers of a specific type for a given feed.
+    ///
+    /// # Performance
+    /// * DB calls: 1
+    pub async fn get_subscribers_by_type_and_feed(
+        &self,
+        subscriber_type: SubscriberType,
+        feed_id: i32,
+    ) -> Result<Vec<SubscriberEntity>, ServiceError> {
+        Ok(self
+            .db
+            .subscriber
+            .select_all_by_type_and_feed(subscriber_type, feed_id)
+            .await?)
+    }
+
+    /// # Performance
+    /// * DB calls: 1
+    pub async fn update_server_settings(
+        &self,
+        guild_id: u64,
+        settings: ServerSettings,
+    ) -> Result<(), ServiceError> {
+        self.settings
+            .update_server_settings(guild_id, settings)
+            .await
+    }
+
+    /// # Performance
+    /// * DB calls: 1
+    async fn create_subscription(
+        &self,
+        feed_id: i32,
+        subscriber_id: i32,
+    ) -> Result<(), ServiceError> {
+        let subscription = FeedSubscriptionEntity {
+            feed_id,
+            subscriber_id,
+            ..Default::default()
+        };
+        self.db.feed_subscription.insert(&subscription).await?;
+        Ok(())
+    }
+}
+
+// Return types
+pub enum SubscribeResult {
+    /// Successfully subscribed from feed
+    Success { feed: FeedEntity },
+    /// Already subscribed from feed
+    AlreadySubscribed { feed: FeedEntity },
+}
+
+pub enum UnsubscribeResult {
+    /// Successfully unsubscribed from feed
+    Success { feed: FeedEntity },
+    /// Already unsubscribed from feed
+    AlreadyUnsubscribed { feed: FeedEntity },
+    /// The url is not found in the app database, i.e., the url has not been subscribed by anyone
+    NoneSubscribed { url: String },
+}
+
+#[derive(Debug, Clone)]
+pub struct SubscriberTarget {
+    pub subscriber_type: SubscriberType, // Guild or Dm
+    pub target_id: String,               // "guild_id:channel_id" or "user_id"
+}
+
+#[derive(Clone, Debug)]
+pub struct Subscription {
+    pub feed: FeedEntity,
+    pub feed_latest: Option<FeedItemEntity>,
+}
+
+#[allow(clippy::large_enum_variant)]
+pub enum FeedUpdateResult {
+    NoUpdate,
+    Updated {
+        feed: FeedEntity,
+        old_item: Option<FeedItemEntity>,
+        new_item: FeedItemEntity,
+        feed_info: PlatformInfo,
+    },
+    SourceFinished,
+}

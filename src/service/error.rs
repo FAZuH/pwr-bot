@@ -1,7 +1,7 @@
 //! Service-level error types.
 
 use crate::feed::error::FeedError;
-use crate::repository::error::DatabaseError;
+use crate::repo::error::DatabaseError;
 
 /// Errors that can occur in service operations.
 #[derive(Debug, thiserror::Error)]

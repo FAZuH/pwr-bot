@@ -11,7 +11,7 @@ use pwr_bot::feed::FeedSource;
 use pwr_bot::feed::Platform;
 use pwr_bot::feed::PlatformInfo;
 use pwr_bot::feed::error::FeedError;
-use pwr_bot::repository::Repository;
+use pwr_bot::repo::Repository;
 use uuid::Uuid;
 
 /// Sets up a temporary test database.

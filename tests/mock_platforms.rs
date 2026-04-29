@@ -5,10 +5,10 @@ use std::path::PathBuf;
 use httpmock::Method::GET;
 use httpmock::Method::POST;
 use httpmock::MockServer;
+use pwr_bot::feed::AniListPlatform;
+use pwr_bot::feed::ComickPlatform;
+use pwr_bot::feed::MangaDexPlatform;
 use pwr_bot::feed::Platform;
-use pwr_bot::feed::anilist_platform::AniListPlatform;
-use pwr_bot::feed::comick_platform::ComickPlatform;
-use pwr_bot::feed::mangadex_platform::MangaDexPlatform;
 
 /// Loads a test response file from the responses directory.
 fn get_response(filename: &str) -> String {

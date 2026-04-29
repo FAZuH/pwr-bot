@@ -4,16 +4,16 @@
 
 use poise::serenity_prelude::User;
 
-use crate::bot::commands::feed::SendInto;
-use crate::bot::commands::voice::GuildStatType;
-use crate::bot::commands::voice::VoiceLeaderboardTimeRange;
-use crate::bot::commands::voice::VoiceStatsTimeRange;
+use crate::bot::command::feed::SendInto;
+use crate::bot::command::voice::GuildStatType;
+use crate::bot::command::voice::VoiceLeaderboardTimeRange;
+use crate::bot::command::voice::VoiceStatsTimeRange;
 
 /// Result type for controller navigation.
 ///
 /// Controllers return this enum to indicate where the coordinator should
 /// navigate next. Each domain (Settings, Feed, Voice) has its own section.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NavigationResult {
     // Settings section
     /// Navigate to main settings page

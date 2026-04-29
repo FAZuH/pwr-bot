@@ -6,7 +6,7 @@ use log::error;
 use uuid::Uuid;
 
 use crate::feed::error::FeedError;
-use crate::repository::error::DatabaseError;
+use crate::repo::error::DatabaseError;
 use crate::service::error::ServiceError;
 
 /// Application-level errors.

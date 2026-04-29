@@ -1,6 +1,6 @@
 //! Controller trait for the MVC-C pattern.
 
-use crate::bot::commands::Error;
+use crate::bot::command::Error;
 use crate::bot::coordinator::Coordinator;
 
 /// Trait for command controllers that manage state and view lifecycle.

@@ -1,8 +1,8 @@
 //! Event subscribers that handle published events.
 
-pub mod discord_dm_subscriber;
-pub mod discord_guild_subscriber;
-pub mod voice_state_subscriber;
+pub mod discord_dm;
+pub mod discord_guild;
+pub mod voice_state;
 
 use anyhow::Result;
 

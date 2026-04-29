@@ -4,8 +4,8 @@ use std::borrow::Cow;
 
 use poise::serenity_prelude::*;
 
-use crate::bot::commands::Context;
-use crate::bot::commands::Error;
+use crate::bot::command::Context;
+use crate::bot::command::Error;
 use crate::bot::error::BotError;
 
 /// Checks if the command author has server administrator permissions.

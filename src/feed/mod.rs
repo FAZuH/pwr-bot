@@ -9,15 +9,16 @@
 //! - **Feed Source**: Specific content source on a platform (e.g., "One Punch Man" on MangaDex)
 //! - **Feed Item**: Individual updates within a source (e.g., chapters, episodes)
 
-pub mod anilist_platform;
-pub mod comick_platform;
 pub mod error;
-pub mod mangadex_platform;
-pub mod platforms;
+pub mod platform;
 
 use async_trait::async_trait;
 use chrono::DateTime;
 use chrono::Utc;
+pub use platform::AniListPlatform;
+pub use platform::ComickPlatform;
+pub use platform::MangaDexPlatform;
+pub use platform::Platforms;
 use serde::Deserialize;
 use serde::Serialize;
 

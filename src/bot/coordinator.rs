@@ -8,20 +8,20 @@ use std::sync::Arc;
 use std::sync::Mutex;
 
 use crate::bot::Error;
-use crate::bot::commands::Context;
-use crate::bot::commands::about::AboutController;
-use crate::bot::commands::feed::list::FeedListController;
-use crate::bot::commands::feed::settings::FeedSettingsController;
-use crate::bot::commands::feed::subscribe::FeedSubscribeController;
-use crate::bot::commands::feed::unsubscribe::FeedUnsubscribeController;
-use crate::bot::commands::settings::SettingsMainController;
-use crate::bot::commands::voice::leaderboard::VoiceLeaderboardController;
-use crate::bot::commands::voice::settings::VoiceSettingsController;
-use crate::bot::commands::voice::stats::VoiceStatsController;
-use crate::bot::commands::welcome::WelcomeSettingsController;
+use crate::bot::command::Context;
+use crate::bot::command::about::AboutController;
+use crate::bot::command::feed::list::FeedListController;
+use crate::bot::command::feed::settings::FeedSettingsController;
+use crate::bot::command::feed::subscribe::FeedSubscribeController;
+use crate::bot::command::feed::unsubscribe::FeedUnsubscribeController;
+use crate::bot::command::settings::SettingsMainController;
+use crate::bot::command::voice::leaderboard::VoiceLeaderboardController;
+use crate::bot::command::voice::settings::VoiceSettingsController;
+use crate::bot::command::voice::stats::VoiceStatsController;
+use crate::bot::command::welcome::WelcomeSettingsController;
 use crate::bot::controller::Controller;
 use crate::bot::navigation::NavigationResult;
-use crate::bot::views::SharedReplyHandle;
+use crate::bot::view::SharedReplyHandle;
 
 /// Maximum number of navigation steps to keep in history.
 const MAX_NAV_HISTORY: usize = 10;
@@ -63,6 +63,11 @@ impl<'a> Coordinator<'a> {
             queue.pop_front();
         }
         queue.push_back(next);
+    }
+
+    /// Returns the most recent navigation target without removing it.
+    pub fn peek_navigation(&self) -> Option<NavigationResult> {
+        self.nav_queue.lock().unwrap().back().cloned()
     }
 
     /// Starts the navigation loop with an initial destination.

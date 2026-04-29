@@ -1,0 +1,125 @@
+%%{init: {
+  'theme': 'dark',
+  'themeVariables': {
+    'primaryColor': '#1e1e1e',
+    'primaryTextColor': '#ffffff',
+    'primaryBorderColor': '#ffffff',
+    'lineColor': '#ffffff',
+    'secondaryColor': '#2d2d2d',
+    'tertiaryColor': '#1e1e1e',
+    'noteBkgColor': '#2d2d2d',
+    'noteTextColor': '#ffffff',
+    'noteBorderColor': '#ffffff'
+  }
+}}%%
+graph TB
+    subgraph ViewEngineLoop["View Engine Event Loop"]
+        direction TB
+        
+        Start["Start ViewEngine"]
+        CreateChannel["Create ViewChannel<br/>(from channel_config)"]
+        Render["Render View<br/>(handler.create_reply)"]
+        StartCollectors["ViewChannel::start()<br/>(spawn background collectors)"]
+        Recv["ViewChannel::recv()"]
+        
+        Component["Component Interaction<br/>(Discord UI)"]
+        Async["Async Event<br/>(ctx.spawn / tx.send)"]
+        Modal["Modal Submission"]
+        Synthetic["Synthetic Event<br/>(test framework)"]
+        Timeout["Timeout Event"]
+
+        Unknown["Unknown custom_id?"]
+        Skip["Acknowledge & Skip"]
+
+        EventMsg["EventMessage<br/>(Option~Action~, ViewEvent)"]
+        Handle["ViewHandler::handle"]
+        HandleTimeout["ViewHandler::on_timeout"]
+
+        CmdRender["ViewCommand::Render / RenderOnce"]
+        CmdContinue["ViewCommand::Continue / AlreadyResponded"]
+        CmdExit["ViewCommand::Exit"]
+
+        Start -->|engine.run| CreateChannel
+        CreateChannel --> Render
+        Render -->|msg_id known| StartCollectors
+        StartCollectors -->|loop| Recv
+
+        Recv -->|ComponentInteraction| Component
+        Recv -->|Async| Async
+        Recv -->|ModalSubmit| Modal
+        Recv -->|Synthetic| Synthetic
+        Recv -->|Timeout| Timeout
+
+        Component --> Unknown
+        Unknown -->|yes| Skip
+        Unknown -->|no| EventMsg
+        Async & Modal & Synthetic --> EventMsg
+        Timeout --> HandleTimeout
+
+        EventMsg -->|"handler.handle(ctx)"| Handle
+
+        Handle & HandleTimeout -->|return| CmdRender
+        Handle & HandleTimeout -->|return| CmdContinue
+        Handle & HandleTimeout -->|return| CmdExit
+
+        Skip -->|next event| Recv
+        CmdContinue -->|next event| Recv
+        CmdRender -->|re-render| Render
+        CmdExit -->|break| Stop[Stop Engine]
+    end
+    
+    subgraph Collectors["Background Collectors (spawned by ViewChannel)"]
+        direction TB
+        CompCollector["ComponentInteractionCollector"]
+        ModalCollector["ModalInteractionCollector"]
+        MsgCollector["MessageCollector"]
+        ReactCollector["ReactionCollector"]
+        
+        CompCollector -->|lookup registry| CompSend["send (Some(action), Component)"]
+        ModalCollector -->|lookup registry| ModalSend["send (Some(action), Modal)"]
+        MsgCollector --> MsgSend["send (None, Message)"]
+        ReactCollector --> ReactSend["send (None, Reaction)"]
+        
+        CompCollector -->|timeout| TimeoutSend["send (None, Timeout)"]
+    end
+    
+    Collectors -.->|feed into| Recv
+    
+    subgraph TEAPattern["TEA Update Pattern (inside ViewHandler::handle)"]
+        direction TB
+        Parse["Parse Discord interaction<br/>into Msg"]
+        Update["Update::update(msg, model)<br/>→ Cmd"]
+        Model[(Model)]
+        Cmd[(Cmd)]
+        SideEffects["Perform side effects<br/>(db fetch, persist, render)"]
+        
+        Parse --> Update
+        Model --> Update
+        Update --> Cmd
+        Cmd --> SideEffects
+    end
+    
+    TEAPattern -.->|executed by| Handle
+    
+    subgraph Mapping["Context & Delegation"]
+        direction TB
+        ParentCtx["Parent ViewContext"]
+        Map["ctx.map(wrap: fn(Option~C~) -> Option~T~)"]
+        ChildCtx["Child ViewContext"]
+        
+        ParentCtx --> Map
+        Map --> ChildCtx
+    end
+    
+    Mapping -.->|provides| Handle
+    
+    style Start fill:#2d2d2d,stroke:#ffffff,stroke-width:2px
+    style Stop fill:#2d2d2d,stroke:#ffffff,stroke-width:2px
+    style Render fill:#1e1e1e,stroke:#ffffff
+    style Recv fill:#1e1e1e,stroke:#ffffff
+    style CreateChannel fill:#1e1e1e,stroke:#ffffff
+    style StartCollectors fill:#1e1e1e,stroke:#ffffff
+    style TEAPattern fill:#1a3a1a,stroke:#4ade80,stroke-width:2px
+    style Parse fill:#2d2d2d,stroke:#4ade80
+    style Update fill:#2d2d2d,stroke:#4ade80
+    style SideEffects fill:#2d2d2d,stroke:#4ade80
