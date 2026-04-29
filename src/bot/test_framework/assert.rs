@@ -43,7 +43,7 @@ pub async fn assert_navigated_to<'a>(
     }
 }
 
-/// Asserts that two [`crate::bot::view::ViewCommand`]s are equal.
+/// Asserts that two [`crate::bot::view::ViewCmd`]s are equal.
 pub fn assert_eq_cmd(actual: ViewCmd, expected: ViewCmd, msg: &str) -> Result<(), GuiTestError> {
     if actual == expected {
         Ok(())

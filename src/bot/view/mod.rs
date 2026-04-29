@@ -526,7 +526,7 @@ pub trait ViewHandler: Send + Sync {
     /// Handles a non-timeout event.
     ///
     /// Receives the full [`ViewContext`] containing the event, action, sender,
-    /// and coordinator. Returns a [`ViewCommand`] controlling the engine loop.
+    /// and coordinator. Returns a [`ViewCmd`] controlling the engine loop.
     async fn handle(&mut self, ctx: ViewContext<'_, Self::Action>) -> Result<ViewCmd, Error>;
 
     /// Called when the view loop times out waiting for user input.
@@ -547,7 +547,7 @@ pub trait ViewHandler: Send + Sync {
 /// 2. Enters a `tokio::select!` loop waiting for Discord interactions or async events.
 /// 3. Matches interactions back to [`Action`] variants using the [`ActionRegistry`].
 /// 4. Dispatches the action to the [`ViewHandler`].
-/// 5. Reacts to the returned [`ViewCommand`] (Render, Exit, etc.).
+/// 5. Reacts to the returned [`ViewCmd`] (Render, Exit, etc.).
 pub struct ViewEngine<'a, T, H>
 where
     T: Action + Send + Sync + 'static,

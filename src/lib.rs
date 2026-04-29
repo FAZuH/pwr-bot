@@ -18,14 +18,3 @@ pub mod service;
 pub mod subscriber;
 pub mod task;
 pub mod update;
-
-/// Trait for types that hold internal data of type `T`.
-///
-/// Provides immutable and mutable access to the internal data.
-pub trait WithData<T> {
-    /// Returns an immutable reference to the internal data.
-    fn data(&self) -> &T;
-
-    /// Returns a mutable reference to the internal data.
-    fn data_mut(&mut self) -> &mut T;
-}
