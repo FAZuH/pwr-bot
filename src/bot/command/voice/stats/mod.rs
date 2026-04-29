@@ -230,7 +230,7 @@ pub struct VoiceStatsHandler {
 }
 
 impl VoiceStatsHandler {
-    fn new(
+    pub(crate) fn new(
         data: VoiceStatsData,
         service: std::sync::Arc<dyn VoiceTracker>,
         guild_id: u64,
@@ -536,21 +536,15 @@ impl ViewHandler for VoiceStatsHandler {
                 changed = matches!(cmd, VoiceStatsCmd::RefetchData);
             }
             SelectUser => {
-                if let ViewEvent::Component(ref interaction) = ctx.event
-                    && let poise::serenity_prelude::ComponentInteractionDataKind::UserSelect {
-                        values,
-                    } = &interaction.data.kind
-                    && let Some(user_id) = values.first()
+                if let Some(user_id) = ctx.user_select_values().and_then(|v| v.first().copied())
+                    && let Ok(user) = user_id.to_user(ctx.poise.http()).await
                 {
-                    // Fetch user object
-                    if let Ok(user) = user_id.to_user(ctx.poise.http()).await {
-                        self.user = user.clone();
-                        let cmd = VoiceStatsUpdate::update(
-                            VoiceStatsMsg::SetUser(Some(user.id.get())),
-                            &mut self.model,
-                        );
-                        changed = matches!(cmd, VoiceStatsCmd::RefetchData);
-                    }
+                    self.user = user.clone();
+                    let cmd = VoiceStatsUpdate::update(
+                        VoiceStatsMsg::SetUser(Some(user.id.get())),
+                        &mut self.model,
+                    );
+                    changed = matches!(cmd, VoiceStatsCmd::RefetchData);
                 }
             }
         }

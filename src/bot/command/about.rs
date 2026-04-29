@@ -49,8 +49,8 @@ action_enum! {
 
 /// View for displaying bot statistics and information.
 pub struct AboutView {
-    stats: AboutStats,
-    avatar_url: String,
+    pub(crate) stats: AboutStats,
+    pub(crate) avatar_url: String,
 }
 
 impl AboutView {
@@ -158,7 +158,7 @@ pub struct AboutStats {
 
 impl AboutStats {
     /// Gathers bot statistics for the about command.
-    async fn gather_stats(ctx: &Context<'_>) -> Result<AboutStats, Error> {
+    pub(crate) async fn gather_stats(ctx: &Context<'_>) -> Result<AboutStats, Error> {
         let start_time = ctx.data().start_time;
         let version = ctx.data().config.version.clone();
         let uptime = start_time.elapsed();

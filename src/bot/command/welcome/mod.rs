@@ -56,10 +56,10 @@ pub struct SettingsWelcomeHandler {
     pub model: WelcomeSettingsModel,
     pub settings: ServerSettings,
     pub current_image_bytes: Option<Vec<u8>>,
-    service: Arc<dyn FeedSubscriptionProvider>,
-    generator: Arc<WelcomeImageGenerator>,
-    guild_id: u64,
-    ctx_serenity: poise::serenity_prelude::Context,
+    pub(crate) service: Arc<dyn FeedSubscriptionProvider>,
+    pub(crate) generator: Arc<WelcomeImageGenerator>,
+    pub(crate) guild_id: u64,
+    pub(crate) ctx_serenity: poise::serenity_prelude::Context,
 }
 
 impl SettingsWelcomeHandler {
@@ -141,10 +141,7 @@ impl ViewHandler for SettingsWelcomeHandler {
                 }
             }
             ChannelSelect => {
-                if let ViewEvent::Component(interaction) = ctx.event
-                    && let ComponentInteractionDataKind::ChannelSelect { values } =
-                        &interaction.data.kind
-                    && let Some(channel) = values.first()
+                if let Some(channel) = ctx.channel_select_values().and_then(|v| v.first().copied())
                 {
                     let cmd = WelcomeSettingsUpdate::update(
                         WelcomeSettingsMsg::SetChannel(Some(channel.to_string())),
@@ -156,13 +153,10 @@ impl ViewHandler for SettingsWelcomeHandler {
                 }
             }
             TemplateSelect => {
-                if let ViewEvent::Component(interaction) = ctx.event
-                    && let ComponentInteractionDataKind::StringSelect { values } =
-                        &interaction.data.kind
-                    && let Some(template) = values.first()
+                if let Some(template) = ctx.string_select_values().and_then(|v| v.first().cloned())
                 {
                     let cmd = WelcomeSettingsUpdate::update(
-                        WelcomeSettingsMsg::SetTemplate(Some(template.clone())),
+                        WelcomeSettingsMsg::SetTemplate(Some(template)),
                         &mut self.model,
                     );
                     if matches!(cmd, WelcomeSettingsCmd::PersistSettings) {
@@ -172,10 +166,7 @@ impl ViewHandler for SettingsWelcomeHandler {
             }
             MarkRemoval => {
                 let mut indices = HashSet::new();
-                if let ViewEvent::Component(interaction) = ctx.event
-                    && let ComponentInteractionDataKind::StringSelect { values } =
-                        &interaction.data.kind
-                {
+                if let Some(values) = ctx.string_select_values() {
                     for val in values {
                         if let Ok(idx) = val.parse::<usize>() {
                             indices.insert(idx);

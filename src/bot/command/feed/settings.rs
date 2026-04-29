@@ -93,14 +93,9 @@ impl<'a> ViewHandler for SettingsFeedHandler<'a> {
                 Ok(ViewCommand::Render)
             }
             SettingsFeedAction::Channel => {
-                let channel_id = if let ViewEvent::Component(ref interaction) = ctx.event
-                    && let ComponentInteractionDataKind::ChannelSelect { values } =
-                        &interaction.data.kind
-                {
-                    values.first().map(|id| id.to_string())
-                } else {
-                    None
-                };
+                let channel_id = ctx
+                    .channel_select_values()
+                    .and_then(|v| v.first().map(|id| id.to_string()));
                 FeedSettingsUpdate::update(
                     FeedSettingsMsg::SetChannel(channel_id),
                     &mut self.model,
@@ -109,27 +104,17 @@ impl<'a> ViewHandler for SettingsFeedHandler<'a> {
                 Ok(ViewCommand::Render)
             }
             SettingsFeedAction::SubRole => {
-                let role_id = if let ViewEvent::Component(ref interaction) = ctx.event
-                    && let ComponentInteractionDataKind::RoleSelect { values } =
-                        &interaction.data.kind
-                {
-                    values.first().map(|v| v.to_string())
-                } else {
-                    None
-                };
+                let role_id = ctx
+                    .role_select_values()
+                    .and_then(|v| v.first().map(|id| id.to_string()));
                 FeedSettingsUpdate::update(FeedSettingsMsg::SetSubRole(role_id), &mut self.model);
                 self.settings.feeds.subscribe_role_id = self.model.subscribe_role_id.clone();
                 Ok(ViewCommand::Render)
             }
             SettingsFeedAction::UnsubRole => {
-                let role_id = if let ViewEvent::Component(ref interaction) = ctx.event
-                    && let ComponentInteractionDataKind::RoleSelect { values } =
-                        &interaction.data.kind
-                {
-                    values.first().map(|v| v.to_string())
-                } else {
-                    None
-                };
+                let role_id = ctx
+                    .role_select_values()
+                    .and_then(|v| v.first().map(|id| id.to_string()));
                 FeedSettingsUpdate::update(FeedSettingsMsg::SetUnsubRole(role_id), &mut self.model);
                 self.settings.feeds.unsubscribe_role_id = self.model.unsubscribe_role_id.clone();
                 Ok(ViewCommand::Render)

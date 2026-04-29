@@ -65,6 +65,11 @@ impl<'a> Coordinator<'a> {
         queue.push_back(next);
     }
 
+    /// Returns the most recent navigation target without removing it.
+    pub fn peek_navigation(&self) -> Option<NavigationResult> {
+        self.nav_queue.lock().unwrap().back().cloned()
+    }
+
     /// Starts the navigation loop with an initial destination.
     ///
     /// The loop continues as long as controllers return [`NavigationResult`]s,

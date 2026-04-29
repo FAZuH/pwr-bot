@@ -15,7 +15,7 @@ use crate::update::feed_list::FeedListUpdate;
 use crate::update::feed_list::FeedListViewState;
 
 /// Number of items per page for subscriptions list.
-const SUBSCRIPTIONS_PER_PAGE: u32 = 10;
+pub(crate) const SUBSCRIPTIONS_PER_PAGE: u32 = 10;
 
 /// List your current feed subscriptions
 ///

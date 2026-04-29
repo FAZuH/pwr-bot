@@ -186,6 +186,22 @@ pub enum ViewCommand {
     AlreadyResponded,
 }
 
+/// Values extracted from a select menu interaction.
+#[derive(Debug, Clone)]
+pub enum SelectValues {
+    String(Vec<String>),
+    Channel(Vec<GenericChannelId>),
+    Role(Vec<RoleId>),
+    User(Vec<UserId>),
+}
+
+/// A synthetic event used for automated GUI testing.
+#[derive(Debug, Clone)]
+pub enum SyntheticEvent {
+    Button,
+    Select(SelectValues),
+}
+
 /// An event that wakes up the [`ViewEngine`] loop.
 ///
 /// Replaces the former separate `Trigger` enum — the action and its originating
@@ -204,6 +220,8 @@ pub enum ViewEvent {
     Async,
     /// The view loop timed out.
     Timeout,
+    /// A synthetic event injected by the test framework.
+    Synthetic(SyntheticEvent),
 }
 
 // ── View Sender ───────────────────────────────────────────────────────────────
@@ -396,6 +414,63 @@ impl<'a, T: Action + 'static> ViewContext<'a, T> {
         self.action
             .as_ref()
             .expect("ViewContext::action called on a Timeout event")
+    }
+
+    /// Extracts select-menu values from the event, if any.
+    pub fn select_values(&self) -> Option<SelectValues> {
+        match &self.event {
+            ViewEvent::Component(interaction) => match &interaction.data.kind {
+                ComponentInteractionDataKind::StringSelect { values } => {
+                    Some(SelectValues::String(values.to_vec()))
+                }
+                ComponentInteractionDataKind::ChannelSelect { values } => {
+                    Some(SelectValues::Channel(
+                        values.iter().copied().map(GenericChannelId::from).collect(),
+                    ))
+                }
+                ComponentInteractionDataKind::RoleSelect { values } => {
+                    Some(SelectValues::Role(values.to_vec()))
+                }
+                ComponentInteractionDataKind::UserSelect { values } => {
+                    Some(SelectValues::User(values.to_vec()))
+                }
+                _ => None,
+            },
+            ViewEvent::Synthetic(SyntheticEvent::Select(values)) => Some(values.clone()),
+            _ => None,
+        }
+    }
+
+    /// Returns string-select values, if this event was a string select.
+    pub fn string_select_values(&self) -> Option<Vec<String>> {
+        match self.select_values()? {
+            SelectValues::String(v) => Some(v),
+            _ => None,
+        }
+    }
+
+    /// Returns channel-select values, if this event was a channel select.
+    pub fn channel_select_values(&self) -> Option<Vec<GenericChannelId>> {
+        match self.select_values()? {
+            SelectValues::Channel(v) => Some(v),
+            _ => None,
+        }
+    }
+
+    /// Returns role-select values, if this event was a role select.
+    pub fn role_select_values(&self) -> Option<Vec<RoleId>> {
+        match self.select_values()? {
+            SelectValues::Role(v) => Some(v),
+            _ => None,
+        }
+    }
+
+    /// Returns user-select values, if this event was a user select.
+    pub fn user_select_values(&self) -> Option<Vec<UserId>> {
+        match self.select_values()? {
+            SelectValues::User(v) => Some(v),
+            _ => None,
+        }
     }
 
     /// Creates a child context that maps child actions into the parent's action type.

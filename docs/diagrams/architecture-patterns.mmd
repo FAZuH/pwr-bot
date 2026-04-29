@@ -71,6 +71,16 @@ graph LR
         PT -.->|impl| MD & AL & CK
     end
 
+    subgraph TestPat["Automated GUI Testing"]
+        direction TB
+        GuiTestCmd["/gui_test<br/>owner-only command"]
+        TestStep["TestStep<br/>name · description · run"]
+        SimClick["simulate_click()<br/>SyntheticEvent::Button"]
+        SimSelect["simulate_select()<br/>SyntheticEvent::Select"]
+        GuiTestCmd --> TestStep --> SimClick & SimSelect
+        SimClick & SimSelect -->|injects| Handler["ViewHandler::handle()"]
+    end
+
     subgraph RepoPat["Repository Pattern"]
         direction TB
         Cogs["Cogs / Commands"]

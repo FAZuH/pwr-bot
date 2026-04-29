@@ -19,6 +19,11 @@ classDiagram
         coordinator: Arc~Coordinator~
         map(action, wrap) ViewContext~C~
         spawn(future)
+        select_values() Option~SelectValues~
+        string_select_values() Option~Vec~String~~
+        channel_select_values() Option~Vec~GenericChannelId~~
+        role_select_values() Option~Vec~RoleId~~
+        user_select_values() Option~Vec~UserId~~
     }
 
     class ActionRegistry~T~ {
@@ -107,6 +112,21 @@ classDiagram
         Reaction(Reaction)
         Async
         Timeout
+        Synthetic(SyntheticEvent)
+    }
+
+    class SyntheticEvent {
+        <<enum>>
+        Button
+        Select(SelectValues)
+    }
+
+    class SelectValues {
+        <<enum>>
+        String(Vec~String~)
+        Channel(Vec~GenericChannelId~)
+        Role(Vec~RoleId~)
+        User(Vec~UserId~)
     }
 
     %% ── Type aliases ──────────────────────────────────────────────
@@ -157,6 +177,27 @@ classDiagram
     class Controller {
         <<trait>>
         run(coordinator: Arc~Coordinator~) Result
+    }
+
+    class GuiTestError {
+        <<enum>>
+        AssertionFailed
+        SetupFailed
+        ExecutionFailed
+    }
+
+    class TestStep {
+        name: str
+        description: str
+        run: fn(Context) Result
+    }
+
+    class TestHelpers {
+        <<module>>
+        noop_sender() Arc~dyn ViewSender~
+        extract_actions(handler) ActionRegistry
+        simulate_click(ctx, handler, action, coord) Result~ViewCommand~
+        simulate_select(ctx, handler, action, values, coord) Result~ViewCommand~
     }
 
     %% ── Concrete Update examples ──────────────────────────────────
@@ -222,9 +263,16 @@ classDiagram
     Controller ..> NavigationResult : returns
     ViewContext ..> ViewSender : uses
     ViewContext ..> MappedViewSender : creates via map()
+    ViewContext ..> SelectValues : uses
+    ViewEvent ..> SyntheticEvent : contains
+    SyntheticEvent ..> SelectValues : contains
     VoiceLeaderboardUpdate ..> Update : implements
     VoiceStatsUpdate ..> Update : implements
     WelcomeSettingsUpdate ..> Update : implements
     FeedListUpdate ..> Update : implements
     FeedSettingsUpdate ..> Update : implements
     SettingsMainUpdate ..> Update : implements
+    TestHelpers ..> ViewHandler : drives
+    TestHelpers ..> ActionRegistry : inspects
+    TestStep ..> GuiTestError : returns
+    TestHelpers ..> GuiTestError : propagates
