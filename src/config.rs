@@ -45,8 +45,8 @@ impl Config {
             .parse::<u32>()
             .map_or(Duration::new(60, 0), |v| Duration::new(v.into(), 0));
 
-        self.db_url = std::env::var("DATABASE_URL").unwrap_or("sqlite://data.db".to_string());
-        self.db_path = std::env::var("DATABASE_PATH").unwrap_or("./data/data.db".to_string());
+        self.db_url = std::env::var("DATABASE_URL")
+            .unwrap_or("postgres://pwr_bot:pwr_bot@localhost:5432/pwr_bot".to_string());
 
         self.discord_token =
             std::env::var("DISCORD_TOKEN").map_err(|_| AppError::MissingConfig {

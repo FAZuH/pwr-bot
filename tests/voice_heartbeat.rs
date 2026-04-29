@@ -3,9 +3,11 @@
 use std::sync::Arc;
 
 use chrono::Duration;
+use chrono::SubsecRound;
 use chrono::Utc;
 use pwr_bot::entity::BotMetaKey;
 use pwr_bot::entity::VoiceSessionsEntity;
+use pwr_bot::repo::traits::*;
 use pwr_bot::service::internal::InternalService;
 use pwr_bot::service::voice_tracking::VoiceTrackingService;
 use pwr_bot::task::voice_heartbeat::VoiceHeartbeatManager;
@@ -14,7 +16,7 @@ mod common;
 
 #[tokio::test]
 async fn test_heartbeat_read_write() {
-    let (db, db_path) = common::setup_db().await;
+    let db = common::setup_db().await;
     let service = Arc::new(
         VoiceTrackingService::new(db.clone())
             .await
@@ -30,12 +32,12 @@ async fn test_heartbeat_read_write() {
         .expect("Failed to read heartbeat");
     assert!(last_heartbeat.is_none(), "Should be no heartbeat initially");
 
-    common::teardown_db(db_path).await;
+    common::teardown_db(&db).await;
 }
 
 #[tokio::test]
 async fn test_heartbeat_crash_recovery_no_sessions() {
-    let (db, db_path) = common::setup_db().await;
+    let db = common::setup_db().await;
     let service = Arc::new(
         VoiceTrackingService::new(db.clone())
             .await
@@ -59,12 +61,12 @@ async fn test_heartbeat_crash_recovery_no_sessions() {
         .expect("Failed to recover");
     assert_eq!(recovered, 0, "Should recover 0 sessions when none exist");
 
-    common::teardown_db(db_path).await;
+    common::teardown_db(&db).await;
 }
 
 #[tokio::test]
 async fn test_heartbeat_crash_recovery_with_active_sessions() {
-    let (db, db_path) = common::setup_db().await;
+    let db = common::setup_db().await;
     let service = Arc::new(
         VoiceTrackingService::new(db.clone())
             .await
@@ -141,12 +143,12 @@ async fn test_heartbeat_crash_recovery_with_active_sessions() {
         );
     }
 
-    common::teardown_db(db_path).await;
+    common::teardown_db(&db).await;
 }
 
 #[tokio::test]
 async fn test_heartbeat_crash_recovery_no_heartbeat() {
-    let (db, db_path) = common::setup_db().await;
+    let db = common::setup_db().await;
     let service = Arc::new(
         VoiceTrackingService::new(db.clone())
             .await
@@ -196,12 +198,12 @@ async fn test_heartbeat_crash_recovery_no_heartbeat() {
         "Session should still be active"
     );
 
-    common::teardown_db(db_path).await;
+    common::teardown_db(&db).await;
 }
 
 #[tokio::test]
 async fn test_find_active_sessions() {
-    let (db, db_path) = common::setup_db().await;
+    let db = common::setup_db().await;
     let service = VoiceTrackingService::new(db.clone())
         .await
         .expect("Failed to create service");
@@ -260,17 +262,17 @@ async fn test_find_active_sessions() {
     assert!(user_ids.contains(&1003), "User 1003 should be active");
     assert!(!user_ids.contains(&1002), "User 1002 should not be active");
 
-    common::teardown_db(db_path).await;
+    common::teardown_db(&db).await;
 }
 
 #[tokio::test]
 async fn test_update_session_leave_time() {
-    let (db, db_path) = common::setup_db().await;
+    let db = common::setup_db().await;
     let service = VoiceTrackingService::new(db.clone())
         .await
         .expect("Failed to create service");
 
-    let now = Utc::now();
+    let now = Utc::now().trunc_subsecs(6);
     let join_time = now - Duration::hours(1);
 
     // Insert an active session
@@ -315,5 +317,5 @@ async fn test_update_session_leave_time() {
     assert_eq!(sessions[0].leave_time, new_leave_time);
     assert_ne!(sessions[0].leave_time, sessions[0].join_time);
 
-    common::teardown_db(db_path).await;
+    common::teardown_db(&db).await;
 }

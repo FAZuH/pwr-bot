@@ -1,146 +1,81 @@
-//! Database module with SQLite storage and Diesel.
-
-use deadpool::managed::Metrics;
-use deadpool::managed::Pool;
-use deadpool::managed::RecycleResult;
-use diesel::SqliteConnection;
-use diesel_async::RunQueryDsl;
-use diesel_async::pooled_connection::AsyncDieselConnectionManager;
-use diesel_async::pooled_connection::PoolError as DieselPoolError;
-use diesel_async::sync_connection_wrapper::SyncConnectionWrapper;
-use log::debug;
-use log::info;
-use tokio::task;
-
-use crate::repo::table::*;
-use crate::repo::traits::*;
+//! Data repository module.
 
 pub mod error;
 pub mod schema;
 pub mod table;
 pub mod traits;
 
-/// Custom deadpool manager that sets `busy_timeout` on every new SQLite connection.
-pub struct SqliteConnectionManager {
-    inner: AsyncDieselConnectionManager<SyncConnectionWrapper<SqliteConnection>>,
-    busy_timeout_ms: i32,
-}
+use diesel::Connection;
+use diesel_async::AsyncPgConnection;
+use diesel_async::pooled_connection::AsyncDieselConnectionManager;
+use diesel_async::pooled_connection::deadpool::Object;
+use diesel_async::pooled_connection::deadpool::Pool;
+use diesel_migrations::EmbeddedMigrations;
+use diesel_migrations::MigrationHarness;
+use diesel_migrations::embed_migrations;
+use log::info;
+use tokio::task;
 
-impl SqliteConnectionManager {
-    pub fn new(database_url: impl Into<String>, busy_timeout_ms: i32) -> Self {
-        Self {
-            inner: AsyncDieselConnectionManager::new(database_url.into()),
-            busy_timeout_ms,
-        }
-    }
-}
+use crate::repo::table::*;
+use crate::repo::traits::*;
 
-impl deadpool::managed::Manager for SqliteConnectionManager {
-    type Type = SyncConnectionWrapper<SqliteConnection>;
-    type Error = DieselPoolError;
+pub type DbPool = Pool<AsyncPgConnection>;
+pub type DbConn = Object<AsyncPgConnection>;
 
-    async fn create(&self) -> Result<Self::Type, Self::Error> {
-        let mut conn = self.inner.create().await?;
-        diesel::sql_query(format!("PRAGMA busy_timeout = {}", self.busy_timeout_ms))
-            .execute(&mut conn)
-            .await
-            .map_err(DieselPoolError::QueryError)?;
-        Ok(conn)
-    }
-
-    async fn recycle(
-        &self,
-        conn: &mut Self::Type,
-        metrics: &Metrics,
-    ) -> RecycleResult<Self::Error> {
-        self.inner.recycle(conn, metrics).await
-    }
-}
-
-pub type DbPool = Pool<SqliteConnectionManager>;
+const MIGRATIONS: EmbeddedMigrations = embed_migrations!("migrations");
 
 /// Main database struct containing all table handlers.
 pub struct Repository {
+    pub feed: FeedTable,
+    pub feed_item: FeedItemTable,
+    pub subscriber: SubscriberTable,
+    pub feed_subscription: FeedSubscriptionTable,
+    pub server_settings: ServerSettingsTable,
+    pub voice_sessions: VoiceSessionsTable,
+    pub bot_meta: BotMetaTable,
+
     pool: DbPool,
-    db_path: String,
-    pub feed: Box<dyn FeedRepository>,
-    pub feed_item: Box<dyn FeedItemRepository>,
-    pub subscriber: Box<dyn SubscriberRepository>,
-    pub feed_subscription: Box<dyn FeedSubscriptionRepository>,
-    pub server_settings: Box<dyn ServerSettingsRepository>,
-    pub voice_sessions: Box<dyn VoiceSessionsRepository>,
-    pub bot_meta: Box<dyn BotMetaRepository>,
+    db_url: String,
 }
 
 impl Repository {
     /// Creates a new database connection and initializes table handlers.
-    pub async fn new(db_url: &str, db_path: &str) -> anyhow::Result<Self> {
-        let path = std::path::Path::new(db_path);
-        if !path.exists() {
-            debug!("Database path {db_path} does not exist. Creating...");
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            std::fs::write(path, "")?;
-            info!("Created {db_path}");
-        }
-
-        debug!("Connecting to db...");
-        let manager = SqliteConnectionManager::new(db_url, 5000);
-        let pool = Pool::builder(manager).max_size(5).build()?;
-        log::log!(log::Level::Info, "Connected to db.");
-
-        // Enable WAL mode for better concurrent read/write performance.
-        let mut conn = pool.get().await?;
-        diesel::sql_query("PRAGMA journal_mode = WAL")
-            .execute(&mut conn)
-            .await?;
-        drop(conn);
-
-        let feed = Box::new(FeedTable::new(pool.clone()));
-        let feed_item = Box::new(FeedItemTable::new(pool.clone()));
-        let subscriber = Box::new(SubscriberTable::new(pool.clone()));
-        let feed_subscription = Box::new(FeedSubscriptionTable::new(pool.clone()));
-        let server_settings = Box::new(ServerSettingsTable::new(pool.clone()));
-        let voice_sessions = Box::new(VoiceSessionsTable::new(pool.clone()));
-        let bot_meta = Box::new(BotMetaTable::new(pool.clone()));
+    pub async fn new(db_url: impl Into<String>) -> anyhow::Result<Self> {
+        let db_url = db_url.into();
+        info!("connecting to db");
+        let conf = AsyncDieselConnectionManager::new(db_url.clone());
+        let pool: DbPool = Pool::builder(conf).max_size(5).build()?;
+        info!("connected to db");
 
         Ok(Self {
+            feed: FeedTable::new(pool.clone()),
+            feed_item: FeedItemTable::new(pool.clone()),
+            subscriber: SubscriberTable::new(pool.clone()),
+            feed_subscription: FeedSubscriptionTable::new(pool.clone()),
+            server_settings: ServerSettingsTable::new(pool.clone()),
+            voice_sessions: VoiceSessionsTable::new(pool.clone()),
+            bot_meta: BotMetaTable::new(pool.clone()),
             pool,
-            db_path: db_path.to_string(),
-            feed,
-            feed_item,
-            subscriber,
-            feed_subscription,
-            server_settings,
-            voice_sessions,
-            bot_meta,
+            db_url,
         })
-    }
-
-    /// Runs database migrations from the migrations directory.
-    pub async fn run_migrations(&self) -> anyhow::Result<()> {
-        let db_path = self.db_path.clone();
-        task::spawn_blocking(move || {
-            use diesel::Connection;
-            use diesel::SqliteConnection;
-            use diesel_migrations::MigrationHarness;
-            use diesel_migrations::embed_migrations;
-
-            const MIGRATIONS: diesel_migrations::EmbeddedMigrations =
-                embed_migrations!("migrations");
-            let mut conn = SqliteConnection::establish(&db_path)?;
-            conn.run_pending_migrations(MIGRATIONS)
-                .map_err(|e| anyhow::anyhow!(e))?;
-            Ok::<(), anyhow::Error>(())
-        })
-        .await??;
-        Ok(())
     }
 
     /// Access the underlying connection pool.
     pub fn pool(&self) -> &DbPool {
         &self.pool
+    }
+
+    /// Runs database migrations from the migrations directory.
+    pub async fn run_migrations(&self) -> anyhow::Result<()> {
+        let db_url = self.db_url.clone();
+        task::spawn_blocking(move || {
+            let mut conn =
+                diesel::PgConnection::establish(&db_url).expect("failed to connect for migrations");
+            conn.run_pending_migrations(MIGRATIONS)
+                .expect("failed to run migrations");
+        })
+        .await?;
+        Ok(())
     }
 
     /// Drops all tables. Use with caution!
@@ -155,7 +90,7 @@ impl Repository {
         Ok(())
     }
 
-    /// Deletes all data from all tables. Use with caution!
+    /// Deletes all data from all tables and resets sequences. Use with caution!
     pub async fn delete_all_tables(&self) -> anyhow::Result<()> {
         self.feed.delete_all().await?;
         self.feed_item.delete_all().await?;

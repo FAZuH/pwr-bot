@@ -96,7 +96,7 @@ impl FeedListHandler {
                 "### {}\n\n- **Last version**: {}\n- **Last updated**: <t:{}>\n- [**Source** 🗗](<{}>)",
                 sub.feed.name,
                 latest.description,
-                latest.published.and_utc().timestamp(),
+                latest.published.timestamp(),
                 sub.feed.source_url
             )
         } else {
