@@ -282,7 +282,8 @@ impl ViewHandler for FeedSubscriptionBatchHandler {
                     SubscriberType::Dm => SendInto::DM,
                 };
                 ctx.coordinator
-                    .navigate(Navigation::FeedList(Some(send_into)));
+                    .navigate(Navigation::FeedList(Some(send_into)))
+                    .await;
                 Ok(ViewCommand::Exit)
             }
         }

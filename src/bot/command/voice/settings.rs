@@ -78,11 +78,11 @@ impl ViewHandler for SettingsVoiceHandler {
                 ViewCommand::Render
             }
             SettingsVoiceAction::Back => {
-                ctx.coordinator.navigate(Navigation::SettingsMain);
+                ctx.coordinator.navigate(Navigation::SettingsMain).await;
                 ViewCommand::Exit
             }
             SettingsVoiceAction::About => {
-                ctx.coordinator.navigate(Navigation::SettingsAbout);
+                ctx.coordinator.navigate(Navigation::SettingsAbout).await;
                 ViewCommand::Exit
             }
         };

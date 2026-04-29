@@ -118,11 +118,11 @@ impl<'a> ViewHandler for SettingsFeedHandler<'a> {
                 Ok(ViewCommand::Render)
             }
             SettingsFeedAction::Back => {
-                ctx.coordinator.navigate(Navigation::SettingsMain);
+                ctx.coordinator.navigate(Navigation::SettingsMain).await;
                 Ok(ViewCommand::Exit)
             }
             SettingsFeedAction::About => {
-                ctx.coordinator.navigate(Navigation::SettingsAbout);
+                ctx.coordinator.navigate(Navigation::SettingsAbout).await;
                 Ok(ViewCommand::Exit)
             }
         }

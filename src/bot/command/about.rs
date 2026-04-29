@@ -136,7 +136,7 @@ impl ViewHandler for AboutView {
     async fn handle(&mut self, ctx: ViewContext<'_, AboutAction>) -> Result<ViewCommand, Error> {
         match ctx.action() {
             AboutAction::Back => {
-                ctx.coordinator.navigate(Navigation::SettingsMain);
+                ctx.coordinator.navigate(Navigation::SettingsMain).await;
                 Ok(ViewCommand::Exit)
             }
         }

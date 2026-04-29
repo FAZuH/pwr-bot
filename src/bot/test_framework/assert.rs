@@ -27,11 +27,11 @@ pub fn assert_has_action<T: Action + Clone>(
 }
 
 /// Asserts that the coordinator's most recent navigation target matches.
-pub fn assert_navigated_to(
-    coordinator: &Coordinator,
+pub async fn assert_navigated_to<'a>(
+    cor: &Coordinator<'a>,
     expected: Navigation,
 ) -> Result<(), GuiTestError> {
-    let actual = coordinator.peek_navigation();
+    let actual = cor.peek_navigation().await;
     if actual.as_ref() == Some(&expected) {
         Ok(())
     } else {

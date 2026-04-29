@@ -298,19 +298,19 @@ impl ViewHandler for SettingsMainHandler {
         match action {
             FeedsFeature => {
                 if let Some(feature) = FeatureRegistry::find_by_label("Feeds") {
-                    cor.navigate(feature.navigate.clone());
+                    cor.navigate(feature.navigate.clone()).await;
                 }
                 Ok(ViewCommand::Exit)
             }
             VoiceFeature => {
                 if let Some(feature) = FeatureRegistry::find_by_label("Voice") {
-                    cor.navigate(feature.navigate.clone());
+                    cor.navigate(feature.navigate.clone()).await;
                 }
                 Ok(ViewCommand::Exit)
             }
             WelcomeFeature => {
                 if let Some(feature) = FeatureRegistry::find_by_label("Welcome") {
-                    cor.navigate(feature.navigate.clone());
+                    cor.navigate(feature.navigate.clone()).await;
                 }
                 Ok(ViewCommand::Exit)
             }
@@ -343,7 +343,7 @@ impl ViewHandler for SettingsMainHandler {
                 Ok(ViewCommand::Render)
             }
             About => {
-                cor.navigate(Navigation::SettingsAbout);
+                cor.navigate(Navigation::SettingsAbout).await;
                 Ok(ViewCommand::Exit)
             }
         }

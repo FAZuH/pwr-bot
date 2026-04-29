@@ -207,11 +207,11 @@ impl ViewHandler for SettingsWelcomeHandler {
                 WelcomeSettingsUpdate::update(WelcomeSettingsMsg::CancelRemoval, &mut self.model);
             }
             About => {
-                ctx.coordinator.navigate(Navigation::SettingsAbout);
+                ctx.coordinator.navigate(Navigation::SettingsAbout).await;
                 return Ok(ViewCommand::Exit);
             }
             Back => {
-                ctx.coordinator.navigate(Navigation::SettingsMain);
+                ctx.coordinator.navigate(Navigation::SettingsMain).await;
                 return Ok(ViewCommand::Exit);
             }
         }

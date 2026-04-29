@@ -5,7 +5,8 @@
 
 use std::collections::VecDeque;
 use std::sync::Arc;
-use std::sync::Mutex;
+
+use poise::ReplyHandle;
 
 use crate::bot::Error;
 use crate::bot::command::Context;
@@ -21,10 +22,12 @@ use crate::bot::command::voice::stats::VoiceStatsController;
 use crate::bot::command::welcome::WelcomeSettingsController;
 use crate::bot::controller::Controller;
 use crate::bot::navigation::Navigation;
-use crate::bot::view::SharedReplyHandle;
 
 /// Maximum number of navigation steps to keep in history.
 const MAX_NAV_HISTORY: usize = 10;
+
+type SharedReplyHandle<'a> = Arc<tokio::sync::Mutex<Option<ReplyHandle<'a>>>>;
+type NavHistory = tokio::sync::Mutex<VecDeque<Navigation>>;
 
 /// Orchestrator for controller navigation and shared state.
 ///
@@ -34,7 +37,7 @@ pub struct Coordinator<'a> {
     /// Poise command context.
     ctx: Context<'a>,
     /// Stack of navigation steps for history tracking.
-    nav_queue: Mutex<VecDeque<Navigation>>,
+    nav_queue: NavHistory,
     /// Shared handle to the active message.
     pub reply_handle: SharedReplyHandle<'a>,
 }
@@ -44,7 +47,7 @@ impl<'a> Coordinator<'a> {
     pub fn new(ctx: Context<'a>) -> Arc<Self> {
         Arc::new(Self {
             ctx,
-            nav_queue: Mutex::new(VecDeque::new()),
+            nav_queue: tokio::sync::Mutex::new(VecDeque::new()),
             reply_handle: Arc::new(tokio::sync::Mutex::new(None)),
         })
     }
@@ -57,8 +60,8 @@ impl<'a> Coordinator<'a> {
     /// Pushes a new navigation target onto the stack.
     ///
     /// If history exceeds [`MAX_NAV_HISTORY`], the oldest step is removed.
-    pub fn navigate(&self, next: Navigation) {
-        let mut queue = self.nav_queue.lock().unwrap();
+    pub async fn navigate(&self, next: Navigation) {
+        let mut queue = self.nav_queue.lock().await;
         if queue.len() >= MAX_NAV_HISTORY {
             queue.pop_front();
         }
@@ -66,8 +69,8 @@ impl<'a> Coordinator<'a> {
     }
 
     /// Returns the most recent navigation target without removing it.
-    pub fn peek_navigation(&self) -> Option<Navigation> {
-        self.nav_queue.lock().unwrap().back().cloned()
+    pub async fn peek_navigation(&self) -> Option<Navigation> {
+        self.nav_queue.lock().await.back().cloned()
     }
 
     /// Starts the navigation loop with an initial destination.
@@ -75,25 +78,25 @@ impl<'a> Coordinator<'a> {
     /// The loop continues as long as controllers return [`NavigationResult`]s,
     /// stopping when [`NavigationResult::Exit`] is reached or the history stack is empty.
     pub async fn run(self: Arc<Self>, initial: Navigation) -> Result<(), Error> {
-        self.navigate(initial);
-        while let Some(mut controller) = self.next_controller() {
+        self.navigate(initial).await;
+        while let Some(mut controller) = self.next_controller().await {
             controller.run(self.clone()).await?;
         }
         Ok(())
     }
 
     /// Pops the last navigation result from history.
-    fn pop_next(&self) -> Option<Navigation> {
-        self.nav_queue.lock().unwrap().pop_back()
+    async fn pop_next(&self) -> Option<Navigation> {
+        self.nav_queue.lock().await.pop_back()
     }
 
     /// Instantiates the next controller based on the current navigation state.
-    fn next_controller(&self) -> Option<Box<dyn Controller + 'a>> {
+    async fn next_controller(&self) -> Option<Box<dyn Controller + 'a>> {
         use Navigation::*;
         let ctx = self.ctx;
 
         loop {
-            let nav = self.pop_next()?;
+            let nav = self.pop_next().await?;
             let res: Box<dyn Controller> = match nav {
                 SettingsMain => Box::new(SettingsMainController::new(ctx)),
                 SettingsFeeds => Box::new(FeedSettingsController::new(ctx)),

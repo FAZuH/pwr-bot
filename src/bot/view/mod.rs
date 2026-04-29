@@ -19,9 +19,7 @@ use std::time::Duration;
 
 use futures::StreamExt;
 use poise::CreateReply;
-use poise::ReplyHandle;
 use poise::serenity_prelude::*;
-use tokio::sync::Mutex;
 use tokio::sync::RwLock;
 use tokio::sync::mpsc;
 
@@ -30,9 +28,8 @@ use crate::bot::command::Error;
 use crate::bot::coordinator::Coordinator;
 
 /// Type alias for a thread-safe, shared handle to a Discord message.
-pub type SharedReplyHandle<'a> = Arc<Mutex<Option<ReplyHandle<'a>>>>;
-pub type EventMessage<T> = (Option<T>, ViewEvent);
-pub type Registry<T> = Arc<RwLock<ActionRegistry<T>>>;
+type EventMessage<T> = (Option<T>, ViewEvent);
+type Registry<T> = Arc<RwLock<ActionRegistry<T>>>;
 
 pub mod pagination;
 
