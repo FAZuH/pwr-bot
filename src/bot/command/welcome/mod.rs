@@ -10,6 +10,11 @@ use crate::bot::command::welcome::image_generator::WelcomeCardData;
 use crate::bot::command::welcome::image_generator::WelcomeImageGenerator;
 use crate::entity::ServerSettings;
 use crate::service::traits::FeedSubscriptionProvider;
+use crate::update::Update;
+use crate::update::welcome_settings::WelcomeSettingsCmd;
+use crate::update::welcome_settings::WelcomeSettingsModel;
+use crate::update::welcome_settings::WelcomeSettingsMsg;
+use crate::update::welcome_settings::WelcomeSettingsUpdate;
 
 pub mod image_generator;
 
@@ -48,13 +53,25 @@ pub struct SetPrimaryColorModal {
 // ── Handler ──────────────────────────────────────────────────────────────────
 
 pub struct SettingsWelcomeHandler {
+    pub model: WelcomeSettingsModel,
     pub settings: ServerSettings,
-    pub marked_removal: HashSet<usize>,
     pub current_image_bytes: Option<Vec<u8>>,
     service: Arc<dyn FeedSubscriptionProvider>,
     generator: Arc<WelcomeImageGenerator>,
     guild_id: u64,
     ctx_serenity: poise::serenity_prelude::Context,
+}
+
+impl SettingsWelcomeHandler {
+    async fn persist_and_regenerate(&mut self) -> Result<(), Error> {
+        self.settings.welcome = self.model.settings.clone();
+        self.service
+            .update_server_settings(self.guild_id, self.settings.clone())
+            .await?;
+        self.current_image_bytes =
+            WelcomeSettingsController::generate_preview_from(&self.settings, &self.generator).await;
+        Ok(())
+    }
 }
 
 #[async_trait::async_trait]
@@ -115,8 +132,13 @@ impl ViewHandler for SettingsWelcomeHandler {
                 return Ok(ViewCommand::AlreadyResponded);
             }
             ToggleEnabled => {
-                let current = self.settings.welcome.enabled.unwrap_or(false);
-                self.settings.welcome.enabled = Some(!current);
+                let cmd = WelcomeSettingsUpdate::update(
+                    WelcomeSettingsMsg::ToggleEnabled,
+                    &mut self.model,
+                );
+                if matches!(cmd, WelcomeSettingsCmd::PersistSettings) {
+                    self.persist_and_regenerate().await?;
+                }
             }
             ChannelSelect => {
                 if let ViewEvent::Component(interaction) = ctx.event
@@ -124,7 +146,13 @@ impl ViewHandler for SettingsWelcomeHandler {
                         &interaction.data.kind
                     && let Some(channel) = values.first()
                 {
-                    self.settings.welcome.channel_id = Some(channel.to_string());
+                    let cmd = WelcomeSettingsUpdate::update(
+                        WelcomeSettingsMsg::SetChannel(Some(channel.to_string())),
+                        &mut self.model,
+                    );
+                    if matches!(cmd, WelcomeSettingsCmd::PersistSettings) {
+                        self.persist_and_regenerate().await?;
+                    }
                 }
             }
             TemplateSelect => {
@@ -133,50 +161,59 @@ impl ViewHandler for SettingsWelcomeHandler {
                         &interaction.data.kind
                     && let Some(template) = values.first()
                 {
-                    self.settings.welcome.template_id = Some(template.clone());
+                    let cmd = WelcomeSettingsUpdate::update(
+                        WelcomeSettingsMsg::SetTemplate(Some(template.clone())),
+                        &mut self.model,
+                    );
+                    if matches!(cmd, WelcomeSettingsCmd::PersistSettings) {
+                        self.persist_and_regenerate().await?;
+                    }
                 }
             }
             MarkRemoval => {
+                let mut indices = HashSet::new();
                 if let ViewEvent::Component(interaction) = ctx.event
                     && let ComponentInteractionDataKind::StringSelect { values } =
                         &interaction.data.kind
                 {
-                    self.marked_removal.clear();
                     for val in values {
                         if let Ok(idx) = val.parse::<usize>() {
-                            self.marked_removal.insert(idx);
+                            indices.insert(idx);
                         }
                     }
                 }
+                WelcomeSettingsUpdate::update(
+                    WelcomeSettingsMsg::MarkRemoval(indices),
+                    &mut self.model,
+                );
             }
             AddMessage(Some(modal)) => {
-                let msg = modal.message.trim().to_string();
-                if !msg.is_empty() {
-                    let msgs = self.settings.welcome.messages.get_or_insert_with(Vec::new);
-                    if msgs.len() < 25 {
-                        msgs.push(msg);
-                    }
+                let cmd = WelcomeSettingsUpdate::update(
+                    WelcomeSettingsMsg::AddMessage(modal.message.clone()),
+                    &mut self.model,
+                );
+                if matches!(cmd, WelcomeSettingsCmd::PersistSettings) {
+                    self.persist_and_regenerate().await?;
                 }
             }
             SetColor(Some(modal)) => {
-                let color = modal.color.trim().to_string();
-                if color.starts_with('#') {
-                    self.settings.welcome.primary_color = Some(color);
+                let cmd = WelcomeSettingsUpdate::update(
+                    WelcomeSettingsMsg::SetColor(modal.color.clone()),
+                    &mut self.model,
+                );
+                if matches!(cmd, WelcomeSettingsCmd::PersistSettings) {
+                    self.persist_and_regenerate().await?;
                 }
             }
             SaveRemoval => {
-                let msgs = self.settings.welcome.messages.clone().unwrap_or_default();
-                self.settings.welcome.messages = Some(
-                    msgs.into_iter()
-                        .enumerate()
-                        .filter(|(i, _)| !self.marked_removal.contains(i))
-                        .map(|(_, msg)| msg)
-                        .collect(),
-                );
-                self.marked_removal.clear();
+                let cmd =
+                    WelcomeSettingsUpdate::update(WelcomeSettingsMsg::SaveRemoval, &mut self.model);
+                if matches!(cmd, WelcomeSettingsCmd::PersistSettings) {
+                    self.persist_and_regenerate().await?;
+                }
             }
             CancelRemoval => {
-                self.marked_removal.clear();
+                WelcomeSettingsUpdate::update(WelcomeSettingsMsg::CancelRemoval, &mut self.model);
             }
             About => {
                 ctx.coordinator.navigate(NavigationResult::SettingsAbout);
@@ -188,15 +225,6 @@ impl ViewHandler for SettingsWelcomeHandler {
             }
         }
 
-        // Persist after every state-mutating action
-        self.service
-            .update_server_settings(self.guild_id, self.settings.clone())
-            .await?;
-
-        // Regenerate preview if welcome is enabled
-        self.current_image_bytes =
-            WelcomeSettingsController::generate_preview_from(&self.settings, &self.generator).await;
-
         Ok(ViewCommand::Render)
     }
 }
@@ -206,14 +234,8 @@ impl ViewHandler for SettingsWelcomeHandler {
 impl ViewRender for SettingsWelcomeHandler {
     type Action = SettingsWelcomeAction;
     fn render(&self, registry: &mut ActionRegistry<SettingsWelcomeAction>) -> ResponseKind<'_> {
-        let is_enabled = self.settings.welcome.enabled.unwrap_or(false);
-        let msgs = self
-            .settings
-            .welcome
-            .messages
-            .as_ref()
-            .map(|m| m.len())
-            .unwrap_or(0);
+        let is_enabled = self.model.is_enabled();
+        let msgs = self.model.message_count();
 
         let status_text = format!(
             "-# **Settings > Welcome**\n## Welcome Settings\n\n> 🛈  {}",
@@ -243,8 +265,8 @@ impl ViewRender for SettingsWelcomeHandler {
         ];
 
         let default_channels = self
+            .model
             .settings
-            .welcome
             .channel_id
             .as_deref()
             .and_then(|id| GenericChannelId::from_str(id).ok())
@@ -275,8 +297,8 @@ impl ViewRender for SettingsWelcomeHandler {
             })
             .placeholder(format!(
                 "Select Template (Current: {})",
-                self.settings
-                    .welcome
+                self.model
+                    .settings
                     .template_id
                     .clone()
                     .unwrap_or_else(|| "1".to_string())
@@ -316,15 +338,15 @@ impl ViewRender for SettingsWelcomeHandler {
 
         if msgs > 0 {
             let options: Vec<_> = self
+                .model
                 .settings
-                .welcome
                 .messages
                 .as_ref()
                 .unwrap()
                 .iter()
                 .enumerate()
                 .map(|(i, msg)| {
-                    let label = if self.marked_removal.contains(&i) {
+                    let label = if self.model.marked_removal.contains(&i) {
                         if msg.len() > 48 {
                             format!("❌ {}...", &msg[..45])
                         } else {
@@ -337,7 +359,7 @@ impl ViewRender for SettingsWelcomeHandler {
                     };
                     let mut opt =
                         poise::serenity_prelude::CreateSelectMenuOption::new(label, i.to_string());
-                    if self.marked_removal.contains(&i) {
+                    if self.model.marked_removal.contains(&i) {
                         opt = opt.default_selection(true);
                     }
                     opt
@@ -356,7 +378,7 @@ impl ViewRender for SettingsWelcomeHandler {
                 CreateActionRow::SelectMenu(select),
             ));
 
-            if !self.marked_removal.is_empty() {
+            if !self.model.marked_removal.is_empty() {
                 components.push(CreateContainerComponent::ActionRow(
                     CreateActionRow::Buttons(
                         vec![
@@ -471,8 +493,8 @@ impl Controller for WelcomeSettingsController<'_> {
             .map_err(Error::from)?;
 
         let mut view = SettingsWelcomeHandler {
+            model: WelcomeSettingsModel::new(settings.welcome.clone()),
             settings,
-            marked_removal: HashSet::new(),
             current_image_bytes: None,
             service,
             generator: generator.clone(),

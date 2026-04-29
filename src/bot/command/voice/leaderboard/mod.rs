@@ -8,13 +8,17 @@ use log::trace;
 use crate::bot::command::prelude::*;
 use crate::bot::command::voice::TimeRange;
 use crate::bot::command::voice::VoiceLeaderboardTimeRange;
-use crate::bot::command::voice::leaderboard::image_builder::LeaderboardPageBuilder;
-use crate::bot::command::voice::leaderboard::image_builder::PageGenerationResult;
+use crate::bot::command::voice::leaderboard::image_builder::LeaderboardImageBuilder;
 use crate::bot::view::pagination::PaginationAction;
 use crate::bot::view::pagination::PaginationView;
 use crate::entity::VoiceLeaderboardEntry;
 use crate::entity::VoiceLeaderboardOptBuilder;
 use crate::service::traits::VoiceTracker;
+use crate::update::Update;
+use crate::update::voice_leaderboard::VoiceLeaderboardCmd;
+use crate::update::voice_leaderboard::VoiceLeaderboardModel;
+use crate::update::voice_leaderboard::VoiceLeaderboardMsg;
+use crate::update::voice_leaderboard::VoiceLeaderboardUpdate;
 
 pub mod image_builder;
 pub mod image_generator;
@@ -98,7 +102,7 @@ impl<'a> VoiceLeaderboardController<'a> {
         time_range: VoiceLeaderboardTimeRange,
         is_partner_mode: bool,
         target_user: Option<poise::serenity_prelude::UserId>,
-    ) -> Result<LeaderboardSessionData, Error> {
+    ) -> Result<Vec<VoiceLeaderboardEntry>, Error> {
         let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?.get();
         let (since, until) = time_range.to_range();
 
@@ -110,7 +114,7 @@ impl<'a> VoiceLeaderboardController<'a> {
             .build()
             .map_err(AppError::from)?;
 
-        let new_entries = if is_partner_mode {
+        let entries = if is_partner_mode {
             let target_id = target_user.unwrap_or(ctx.author().id).get();
             ctx.data()
                 .service
@@ -127,8 +131,7 @@ impl<'a> VoiceLeaderboardController<'a> {
                 .map_err(Error::from)?
         };
 
-        let author_id = ctx.author().id.get();
-        Ok(LeaderboardSessionData::from_entries(new_entries, author_id))
+        Ok(entries)
     }
 }
 
@@ -141,42 +144,14 @@ impl Controller for VoiceLeaderboardController<'_> {
         ctx.defer().await?;
 
         // Fetch initial entries
-        let session_data = Self::fetch_entries(&ctx, self.time_range, false, None).await?;
+        let entries = Self::fetch_entries(&ctx, self.time_range, false, None).await?;
         let guild_id = ctx.guild_id().map(|id| id.get()).unwrap_or(0);
         let author_id = ctx.author().id.get();
+        let model = VoiceLeaderboardModel::from_entries(entries, author_id, LEADERBOARD_PER_PAGE);
 
-        let mut view = VoiceLeaderboardHandler {
-            pagination: PaginationView::new(session_data.len() as u32, LEADERBOARD_PER_PAGE),
-            leaderboard_data: session_data,
-            time_range: self.time_range,
-            page_builder: LeaderboardPageBuilder::new(&ctx),
-            current_page_bytes: None,
-            is_partner_mode: false,
-            target_user: None,
-            service: ctx.data().service.voice_tracking.clone(),
-            guild_id,
-            author_id,
-            http: ctx.serenity_context().http.clone(),
-        };
+        let view = VoiceLeaderboardHandler::new(model, &ctx, guild_id, author_id);
 
-        if view.leaderboard_data.is_empty() {
-            let mut engine =
-                ViewEngine::new(ctx, view, Duration::from_millis(1), coordinator.clone());
-            engine.run().await?;
-            return Ok(());
-        }
-
-        // Generate and send initial page
-        let page_result = view.generate_current_page().await?;
-        view.set_current_page_bytes(Some(page_result.image_bytes));
-
-        let mut engine = ViewEngine::new(ctx, view, Duration::from_secs(120), coordinator.clone());
-
-        trace!(
-            "controller_initial_response {} ms",
-            controller_start.elapsed().as_millis()
-        );
-
+        let mut engine = ViewEngine::new(ctx, view, Duration::from_mins(2), coordinator.clone());
         engine.run().await?;
 
         trace!(
@@ -188,58 +163,52 @@ impl Controller for VoiceLeaderboardController<'_> {
 }
 
 pub struct VoiceLeaderboardHandler<'a> {
-    pub leaderboard_data: LeaderboardSessionData,
-    pub time_range: VoiceLeaderboardTimeRange,
-    pub pagination: PaginationView,
-    pub page_builder: LeaderboardPageBuilder<'a>,
-    pub current_page_bytes: Option<Vec<u8>>,
-    pub is_partner_mode: bool,
+    pub model: VoiceLeaderboardModel,
+    pub img_builder: LeaderboardImageBuilder<'a>,
+    pub lb_img: Option<Vec<u8>>,
     pub target_user: Option<poise::serenity_prelude::User>,
     pub service: std::sync::Arc<dyn VoiceTracker>,
     pub guild_id: u64,
     pub author_id: u64,
     pub http: std::sync::Arc<poise::serenity_prelude::Http>,
+    pub pagination: bool,
 }
 
-impl VoiceLeaderboardHandler<'_> {
-    /// Check if target user is the author itself
-    fn target_is_author(&self) -> bool {
-        if let Some(user) = &self.target_user {
-            return self.author_id == user.id.get();
+impl<'a> VoiceLeaderboardHandler<'a> {
+    pub fn new(
+        model: VoiceLeaderboardModel,
+        ctx: &'a Context<'a>,
+        guild_id: u64,
+        author_id: u64,
+    ) -> Self {
+        Self {
+            pagination: model.is_empty(),
+            model,
+            lb_img: None,
+            target_user: None,
+            service: ctx.data().service.voice_tracking.clone(),
+            guild_id,
+            author_id,
+            http: ctx.serenity_context().http.clone(),
+            img_builder: LeaderboardImageBuilder::new(ctx),
         }
-        false
-    }
-
-    /// Calculates the slice indices for the current page.
-    fn current_page_indices(&self) -> (usize, usize) {
-        if self.leaderboard_data.is_empty() {
-            return (0, 0);
-        }
-        let offset = ((self.pagination.current_page() - 1) * LEADERBOARD_PER_PAGE) as usize;
-        let end = (offset + LEADERBOARD_PER_PAGE as usize).min(self.leaderboard_data.len());
-        (offset, end)
-    }
-
-    /// Returns the rank offset for the current page.
-    fn current_page_rank_offset(&self) -> u32 {
-        (self.pagination.current_page() - 1) * LEADERBOARD_PER_PAGE
     }
 
     /// Generates the page image for the current page.
-    async fn generate_current_page(&mut self) -> Result<PageGenerationResult, Error> {
-        let (offset, end) = self.current_page_indices();
-        let entries = &self.leaderboard_data.entries[offset..end];
-        let rank_offset = self.current_page_rank_offset();
-        self.page_builder.build_page(entries, rank_offset).await
-    }
-
-    /// Sets the current page image bytes for attachment on edit.
-    fn set_current_page_bytes(&mut self, bytes: Option<Vec<u8>>) {
-        self.current_page_bytes = bytes;
+    async fn generate_img(&mut self) -> Result<(), Error> {
+        if !self.model.is_empty() {
+            let entries = self.model.current_page_entries();
+            let rank_offset = self.model.current_page_rank_offset();
+            let res = self.img_builder.build(entries, rank_offset).await;
+            if let Ok(img) = res {
+                self.lb_img = Some(img.image_bytes);
+            }
+        }
+        Ok(())
     }
 
     async fn refetch_data(&mut self) -> Result<(), Error> {
-        let (since, until) = self.time_range.to_range();
+        let (since, until) = self.model.time_range.to_range();
 
         let voice_lb_opts = VoiceLeaderboardOptBuilder::default()
             .guild_id(self.guild_id)
@@ -249,12 +218,8 @@ impl VoiceLeaderboardHandler<'_> {
             .build()
             .map_err(AppError::from)?;
 
-        let new_entries = if self.is_partner_mode {
-            let target_id = self
-                .target_user
-                .as_ref()
-                .map(|u| u.id.get())
-                .unwrap_or(self.author_id);
+        let new_entries = if self.model.is_partner_mode {
+            let target_id = self.model.target_user_id.unwrap_or(self.author_id);
             self.service
                 .get_partner_leaderboard(&voice_lb_opts, target_id)
                 .await
@@ -266,17 +231,15 @@ impl VoiceLeaderboardHandler<'_> {
                 .map_err(Error::from)?
         };
 
-        self.leaderboard_data = LeaderboardSessionData::from_entries(new_entries, self.author_id);
+        VoiceLeaderboardUpdate::update(
+            VoiceLeaderboardMsg::SetEntries(new_entries),
+            &mut self.model,
+        );
 
-        // Update pagination
-        self.pagination =
-            PaginationView::new(self.leaderboard_data.len() as u32, LEADERBOARD_PER_PAGE);
-
-        if !self.leaderboard_data.is_empty() {
-            let page_result = self.generate_current_page().await?;
-            self.set_current_page_bytes(Some(page_result.image_bytes));
+        if !self.model.is_empty() {
+            self.generate_img().await?;
         } else {
-            self.set_current_page_bytes(None);
+            self.lb_img = None;
         }
 
         Ok(())
@@ -295,12 +258,14 @@ impl ViewHandler for VoiceLeaderboardHandler<'_> {
         let mut changed_page = false;
         let mut fetch_new = false;
 
+        log::debug!("{:?}", ctx.event);
         match ctx.action() {
             Base(inner) => {
-                let _ = self
-                    .pagination
-                    .handle(ctx.map(*inner, |v| v.map(VoiceLeaderboardAction::Base)))
-                    .await?;
+                let cmd = VoiceLeaderboardUpdate::update(
+                    VoiceLeaderboardMsg::Pagination(*inner),
+                    &mut self.model,
+                );
+                assert!(matches!(cmd, VoiceLeaderboardCmd::None));
                 changed_page = true;
             }
             TimeRange => {
@@ -310,15 +275,20 @@ impl ViewHandler for VoiceLeaderboardHandler<'_> {
                     && let Some(time_range) = values
                         .first()
                         .and_then(|v| VoiceLeaderboardTimeRange::from_display_name(v))
-                    && self.time_range != time_range
                 {
-                    self.time_range = time_range;
-                    fetch_new = true;
+                    let cmd = VoiceLeaderboardUpdate::update(
+                        VoiceLeaderboardMsg::ChangeTimeRange(time_range),
+                        &mut self.model,
+                    );
+                    fetch_new = matches!(cmd, VoiceLeaderboardCmd::RefetchData);
                 }
             }
             ToggleMode => {
-                self.is_partner_mode = !self.is_partner_mode;
-                fetch_new = true;
+                let cmd = VoiceLeaderboardUpdate::update(
+                    VoiceLeaderboardMsg::ToggleMode,
+                    &mut self.model,
+                );
+                fetch_new = matches!(cmd, VoiceLeaderboardCmd::RefetchData);
             }
             SelectUser => {
                 if let ViewEvent::Component(ref interaction) = ctx.event
@@ -327,8 +297,12 @@ impl ViewHandler for VoiceLeaderboardHandler<'_> {
                     && let Some(user_id) = values.first()
                     && let Ok(user) = user_id.to_user(&self.http).await
                 {
-                    self.target_user = Some(user);
-                    fetch_new = true;
+                    self.target_user = Some(user.clone());
+                    let cmd = VoiceLeaderboardUpdate::update(
+                        VoiceLeaderboardMsg::SetTargetUser(Some(user.id.get())),
+                        &mut self.model,
+                    );
+                    fetch_new = matches!(cmd, VoiceLeaderboardCmd::RefetchData);
                 }
             }
         }
@@ -336,16 +310,20 @@ impl ViewHandler for VoiceLeaderboardHandler<'_> {
         if fetch_new {
             self.refetch_data().await?;
         }
-        if changed_page && !self.leaderboard_data.is_empty() {
-            let page_result = self.generate_current_page().await?;
-            self.set_current_page_bytes(Some(page_result.image_bytes));
+        if changed_page && !self.model.is_empty() {
+            self.generate_img().await?
         }
 
         Ok(ViewCommand::Render)
     }
 
     async fn on_timeout(&mut self) -> Result<ViewCommand, Error> {
-        self.pagination.on_timeout().await
+        self.pagination = false;
+        if self.model.pages() > 1 {
+            Ok(ViewCommand::RenderOnce)
+        } else {
+            Ok(ViewCommand::Exit)
+        }
     }
 }
 
@@ -356,7 +334,7 @@ impl ViewRender for VoiceLeaderboardHandler<'_> {
         use VoiceLeaderboardTimeRange::*;
 
         let mut container = vec![CreateContainerComponent::TextDisplay(
-            CreateTextDisplay::new(if self.is_partner_mode {
+            CreateTextDisplay::new(if self.model.is_partner_mode {
                 let display_name = self
                     .target_user
                     .as_ref()
@@ -368,9 +346,9 @@ impl ViewRender for VoiceLeaderboardHandler<'_> {
             }),
         )];
 
-        if let Some(rank) = self.leaderboard_data.user_rank {
+        if let Some(rank) = self.model.user_rank {
             let duration_text = self
-                .leaderboard_data
+                .model
                 .user_duration
                 .map(format_duration)
                 .unwrap_or_else(|| "unknown".to_string());
@@ -381,17 +359,17 @@ impl ViewRender for VoiceLeaderboardHandler<'_> {
                     rank, duration_text
                 )),
             ));
-        } else if !self.target_is_author() {
+        } else if !self.model.target_is_author() {
             container.push(CreateContainerComponent::TextDisplay(
                 CreateTextDisplay::new("\nYou are not on the leaderboard for this time range."),
             ));
         }
 
-        let (since, until) = self.time_range.to_range();
+        let (since, until) = self.model.time_range.to_range();
         container.push(CreateContainerComponent::TextDisplay(
             CreateTextDisplay::new(format!(
                 "\n-# Time Range: **{}** — <t:{}:f> to <t:{}:R>",
-                self.time_range.name(),
+                self.model.time_range.name(),
                 since.timestamp(),
                 until.timestamp(),
             )),
@@ -401,7 +379,7 @@ impl ViewRender for VoiceLeaderboardHandler<'_> {
             true,
         )));
 
-        if self.leaderboard_data.is_empty() {
+        if self.model.is_empty() {
             container.push(CreateContainerComponent::TextDisplay(
                 CreateTextDisplay::new(
                     "No voice activity recorded yet at this time range.\n\nJoin a **voice channel** to start tracking!",
@@ -418,7 +396,7 @@ impl ViewRender for VoiceLeaderboardHandler<'_> {
             ));
         }
 
-        let toggle_label = if self.is_partner_mode {
+        let toggle_label = if self.model.is_partner_mode {
             "Show Server Leaderboard"
         } else {
             "Show Voice Partners"
@@ -456,7 +434,7 @@ impl ViewRender for VoiceLeaderboardHandler<'_> {
             CreateComponent::ActionRow(action_row),
         ];
 
-        if self.is_partner_mode {
+        if self.model.is_partner_mode {
             let default_users = self
                 .target_user
                 .clone()
@@ -470,10 +448,13 @@ impl ViewRender for VoiceLeaderboardHandler<'_> {
             )));
         }
 
-        self.pagination
-            .attach_if_multipage(registry, &mut components, |action| {
-                VoiceLeaderboardAction::Base(action)
-            });
+        let mut pagination =
+            PaginationView::new(self.model.entries.len() as u32, LEADERBOARD_PER_PAGE);
+        pagination.state.current_page = self.model.current_page;
+        pagination.disabled = self.pagination;
+        pagination.attach_if_multipage(registry, &mut components, |action| {
+            VoiceLeaderboardAction::Base(action)
+        });
 
         components.into()
     }
@@ -485,7 +466,7 @@ impl ViewRender for VoiceLeaderboardHandler<'_> {
         let response = self.render(registry);
         let mut reply: poise::CreateReply<'_> = response.into();
 
-        if let Some(ref bytes) = self.current_page_bytes {
+        if let Some(ref bytes) = self.lb_img {
             let attachment =
                 CreateAttachment::bytes(bytes.clone(), VOICE_LEADERBOARD_IMAGE_FILENAME);
             reply = reply.attachment(attachment);

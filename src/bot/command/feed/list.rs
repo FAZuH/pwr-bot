@@ -1,5 +1,4 @@
 //! Feed list subcommand.
-use std::collections::HashSet;
 use std::time::Duration;
 
 use crate::bot::command::feed::SendInto;
@@ -8,6 +7,12 @@ use crate::bot::command::prelude::*;
 use crate::entity::SubscriberEntity;
 use crate::service::feed_subscription::Subscription;
 use crate::service::traits::FeedSubscriptionProvider;
+use crate::update::Update;
+use crate::update::feed_list::FeedListCmd;
+use crate::update::feed_list::FeedListModel;
+use crate::update::feed_list::FeedListMsg;
+use crate::update::feed_list::FeedListUpdate;
+use crate::update::feed_list::FeedListViewState;
 
 /// Number of items per page for subscriptions list.
 const SUBSCRIPTIONS_PER_PAGE: u32 = 10;
@@ -43,19 +48,13 @@ impl Controller for FeedListController<'_> {
 
         let service = ctx.data().service.feed_subscription.clone();
 
-        let total_items = service.get_subscription_count(&subscriber).await?;
-
         let subscriptions = service
             .list_paginated_subscriptions(&subscriber, 1u32, SUBSCRIPTIONS_PER_PAGE)
             .await?;
 
-        let pagination = PaginationView::new(total_items, SUBSCRIPTIONS_PER_PAGE);
-
         let view = FeedListHandler {
             subscriptions,
-            pagination,
-            state: FeedListState::View,
-            marked_unsub: HashSet::new(),
+            model: FeedListModel::new(SUBSCRIPTIONS_PER_PAGE),
             service: service.clone(),
             subscriber: subscriber.clone(),
         };
@@ -68,17 +67,9 @@ impl Controller for FeedListController<'_> {
     }
 }
 
-#[derive(PartialEq)]
-pub enum FeedListState {
-    View,
-    Edit,
-}
-
 pub struct FeedListHandler {
     pub subscriptions: Vec<Subscription>,
-    pub pagination: PaginationView,
-    pub state: FeedListState,
-    pub marked_unsub: HashSet<String>,
+    pub model: FeedListModel,
     pub service: std::sync::Arc<dyn FeedSubscriptionProvider>,
     pub subscriber: SubscriberEntity,
 }
@@ -117,13 +108,13 @@ impl FeedListHandler {
 
         let text_component = CreateSectionComponent::TextDisplay(CreateTextDisplay::new(text));
 
-        let accessory = match self.state {
-            FeedListState::View => CreateSectionAccessory::Thumbnail(CreateThumbnail::new(
+        let accessory = match self.model.state {
+            FeedListViewState::View => CreateSectionAccessory::Thumbnail(CreateThumbnail::new(
                 CreateUnfurledMediaItem::new(sub.feed.cover_url),
             )),
-            FeedListState::Edit => {
+            FeedListViewState::Edit => {
                 let source_url = sub.feed.source_url;
-                let button = if self.marked_unsub.contains(&source_url) {
+                let button = if self.model.marked_unsub.contains(&source_url) {
                     registry
                         .register(UndoUnsub { source_url })
                         .as_button()
@@ -146,9 +137,9 @@ impl FeedListHandler {
         &self,
         registry: &mut ActionRegistry<FeedListAction>,
     ) -> CreateComponent<'b> {
-        let action = match self.state {
-            FeedListState::Edit => FeedListAction::View,
-            FeedListState::View => FeedListAction::Edit,
+        let action = match self.model.state {
+            FeedListViewState::Edit => FeedListAction::View,
+            FeedListViewState::View => FeedListAction::Edit,
         };
 
         let state_button = registry
@@ -160,7 +151,7 @@ impl FeedListHandler {
             .as_button()
             .style(ButtonStyle::Success);
 
-        if self.marked_unsub.is_empty() {
+        if self.model.marked_unsub.is_empty() {
             save_button = save_button.disabled(true)
         }
 
@@ -174,8 +165,8 @@ impl FeedListHandler {
             .service
             .list_paginated_subscriptions(
                 &self.subscriber,
-                self.pagination.state.current_page,
-                SUBSCRIPTIONS_PER_PAGE,
+                self.model.current_page,
+                self.model.per_page,
             )
             .await?;
         self.subscriptions = subs;
@@ -200,8 +191,11 @@ impl ViewRender for FeedListHandler {
         let container = CreateComponent::Container(CreateContainer::new(sections));
         let mut components = vec![container];
 
-        self.pagination
-            .attach_if_multipage(registry, &mut components, FeedListAction::Base);
+        let mut pagination =
+            PaginationView::new(self.subscriptions.len() as u32, self.model.per_page);
+        pagination.state.current_page = self.model.current_page;
+        pagination.disabled = self.model.pagination_disabled;
+        pagination.attach_if_multipage(registry, &mut components, FeedListAction::Base);
         components.push(self.create_toggle_button(registry));
 
         components.into()
@@ -228,33 +222,47 @@ impl ViewHandler for FeedListHandler {
         use FeedListAction::*;
         match ctx.action() {
             Base(inner) => {
-                let cmd = self
-                    .pagination
-                    .handle(ctx.map(*inner, |o| o.map(FeedListAction::Base)))
-                    .await?;
+                FeedListUpdate::update(FeedListMsg::Pagination(*inner), &mut self.model);
                 self.update_subs().await?;
-                return Ok(cmd);
+                return Ok(ViewCommand::Render);
             }
             Edit => {
-                self.state = FeedListState::Edit;
+                FeedListUpdate::update(FeedListMsg::Edit, &mut self.model);
             }
             View => {
-                self.state = FeedListState::View;
+                FeedListUpdate::update(FeedListMsg::View, &mut self.model);
             }
             Unsubscribe { source_url } => {
-                self.marked_unsub.insert(source_url.clone());
+                FeedListUpdate::update(
+                    FeedListMsg::ToggleUnsub {
+                        source_url: source_url.clone(),
+                    },
+                    &mut self.model,
+                );
             }
             UndoUnsub { source_url } => {
-                self.marked_unsub.remove(source_url);
+                FeedListUpdate::update(
+                    FeedListMsg::ToggleUnsub {
+                        source_url: source_url.clone(),
+                    },
+                    &mut self.model,
+                );
             }
             Exit => return Ok(ViewCommand::Continue),
             Save => {
-                self.state = FeedListState::View;
-                for sub in &self.marked_unsub {
-                    self.service.unsubscribe(sub, &self.subscriber).await?;
+                let cmd = FeedListUpdate::update(FeedListMsg::Save, &mut self.model);
+                match cmd {
+                    FeedListCmd::SaveUnsubscribes(urls) => {
+                        for sub in urls {
+                            self.service.unsubscribe(&sub, &self.subscriber).await?;
+                        }
+                        self.update_subs().await?;
+                    }
+                    FeedListCmd::RefetchSubscriptions => {
+                        self.update_subs().await?;
+                    }
+                    FeedListCmd::None => {}
                 }
-                self.marked_unsub.clear();
-                self.update_subs().await?;
             }
         };
 
@@ -262,6 +270,11 @@ impl ViewHandler for FeedListHandler {
     }
 
     async fn on_timeout(&mut self) -> Result<ViewCommand, Error> {
-        self.pagination.on_timeout().await
+        self.model.pagination_disabled = true;
+        if self.subscriptions.is_empty() {
+            Ok(ViewCommand::Exit)
+        } else {
+            Ok(ViewCommand::RenderOnce)
+        }
     }
 }

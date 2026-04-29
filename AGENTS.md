@@ -1,156 +1,111 @@
 # AGENTS.md
 
-This document provides guidelines for AI agents working on the pwr-bot Rust codebase.
+Guidelines for AI agents working on the pwr-bot Rust codebase.
 
-## Project Overview
+## Project
 
-- **Type**: Discord bot with feed subscriptions and voice channel tracking
-- **Language**: Rust (Edition 2024)
-- **Database**: SQLite with SQLx
-- **Framework**: Serenity + Poise for Discord integration
-- **Async Runtime**: Tokio
+- Discord bot with feed subscriptions and voice channel tracking
+- Rust 2024, SQLite + SQLx, Serenity + Poise, Tokio
+- Requires **nightly Rust** for formatting (`rustfmt.toml` uses `imports_granularity = "Item"`)
 
 ## Development Commands
 
-Use `./dev.sh` for most tasks:
 ```bash
-./dev.sh format|lint|test|build|all
+# Quick iteration — compilation check only, does not modify files
+cargo check
+
+# Run tests (locally needs a .env file; CI copies .env-example → .env automatically)
+cargo test --all-features
+
+# When finishing up — format + lint modifies files, so run last
+./dev.sh format lint   # format uses +nightly; lint uses clippy --fix --allow-dirty
 ```
 
-Standard `cargo` commands work as expected. Tests require `SQLX_OFFLINE=true` (handled in CI).
+- Do **not** run `./dev.sh format lint` after every edit — it mutates source files and may require re-reading
+- Do **not** use `./dev.sh build` for quick feedback — it builds a Docker image
+- Tests need `SQLX_OFFLINE=true` in CI; locally they need `DATABASE_URL` in `.env`
+- CI order: `fmt --check` → `build --all-targets` → `clippy -D warnings` → `test`
+- Diagrams: always use `./dev.sh docs`, never invoke `mmdc` directly
 
-**Important:** When checking for compilation errors during development, use `cargo check` instead of `./dev.sh build`. Building is expensive and time-consuming. Use `cargo check` to quickly verify code compiles correctly.
+## Code Style
 
-## Code Style Guidelines
-
-- **Imports**: Group `std`, external, then crate-local (see `rustfmt.toml`). No `use crate::module::*;`.
-- **Explicit Imports**: Always import items explicitly at the top of the file. Do not use `use crate::*;` anywhere in the code.
-- **Formatting**: Standard Rust (4 spaces, trailing commas). 100 char line length.
-- **Naming**: `PascalCase` types, `snake_case` functions/vars, `SCREAMING_SNAKE` consts.
-- **Errors**: Use `anyhow` for app errors, `thiserror` for custom types. Suffix with `Error`.
-- **Async**: Use `tokio::spawn`, `&self` (interior mutability), and `tokio::sync::Mutex`.
-- **Logging**: Use `log` macros (`info!`, `debug!`) with context.
-- **Testing**: `#[tokio::test]`. Use `tests/common/` for utilities.
+- Imports: group `std`, external, then crate-local (`rustfmt.toml`). No `use crate::module::*;`
+- Line length: 100 chars
+- Errors: `anyhow` for app errors, `thiserror` for custom types (suffix `Error`)
+- Async: `tokio::spawn`, `&self` with interior mutability, `tokio::sync::Mutex`
+- Logging: `log` macros (`info!`, `debug!`)
 
 ## Adding Commands
 
-Commands follow the **Command Pattern** using Poise. Top-level commands are aggregated in `src/bot/commands.rs`.
-
-1. Create a command module or function.
-2. Implement the command with `#[poise::command]`.
-3. Add the command function call to the `Cogs` implementation in `src/bot/commands.rs`.
+1. Create module under `src/bot/command/`
+2. Implement with `#[poise::command(slash_command)]`
+3. Register in `src/bot/command/mod.rs` inside `Cogs::commands()`
 
 ```rust
+// src/bot/command/my_module.rs
 #[poise::command(slash_command)]
 pub async fn my_command(ctx: Context<'_>) -> Result<(), Error> { /* ... */ }
-```
 
-In `src/bot/commands.rs`:
-```rust
+// src/bot/command/mod.rs
 impl Cog for Cogs {
     fn commands(&self) -> Vec<Command<Data, Error>> {
         vec![
             // ...
-            my_command(),
+            my_module::my_command(),
         ]
     }
 }
 ```
 
-### Command Groups
-For commands with subcommands, use the `subcommands` attribute:
+## UI Views (ViewEngine)
+
+Interactive views live in `src/bot/view/` (formerly `src/bot/views.rs`).
+
+- `ViewRender` and `ViewHandler` use **associated types**: `type Action: Action`
+- `ViewEngine<T, H>` requires `H: ViewHandler<Action = T> + ViewRender<Action = T>`
+- `ViewEvent` is non-generic; `ViewContext` carries `action: Option<T>` separately
+- See `.opencode/skills/ui-views/SKILL.md` for full patterns
+
+## Business Logic (Update Pattern)
+
+Pure, testable state mutations follow the TEA `Update` trait in `src/update/mod.rs`:
 
 ```rust
-#[poise::command(
-    slash_command,
-    subcommands("subcommand_a", "subcommand_b")
-)]
-pub async fn parent_command(_ctx: Context<'_>) -> Result<(), Error> { Ok(()) }
+pub trait Update {
+    type Model;
+    type Msg;
+    type Cmd;
+    fn update(msg: Self::Msg, model: &mut Self::Model) -> Self::Cmd;
+}
 ```
 
-## Creating UI Views (ViewEngine architecture)
+- Place pure logic in `src/update/<feature>.rs` (Msg, Model, Cmd, Update impl, tests)
+- Handlers in `src/bot/command/` parse Discord interactions, call `Update::update()`, then execute side effects (DB queries, image generation) based on the returned `Cmd`
+- See existing modules: `voice_leaderboard`, `voice_stats`, `feed_list`, `welcome_settings`, `feed_settings`, `settings_main`
 
-Views use the `ViewEngine` system in `src/bot/views.rs`:
-- `Action` - Trait for the action enum.
-- `ViewRender<T>` - Renders components/embeds using `ActionRegistry`.
-- `ViewHandler<T>` - Handles logic and returns `ViewCommand`.
-- `ViewEngine<T, H>` - Runs the event loop.
+## Database
 
-See [`.opencode/skills/ui-views/SKILL.md`](.opencode/skills/ui-views/SKILL.md) for detailed documentation and patterns.
-
-## Database Schema Changes
-
-See [`.opencode/skills/db-schema/SKILL.md`](.opencode/skills/db-schema/SKILL.md) for guidelines on:
-- Creating migrations with `cargo sqlx migrate add`
-- Writing safe UP/DOWN migration scripts
-- Modifying models and repository code
-
-## Creating and Modifying Skills
-
-When certain types of documentation or patterns become repetitive, create a skill in `.opencode/skills/<skill-name>/SKILL.md`.
-
-### When to Create a Skill
-
-Create a new skill when:
-1. A complex workflow requires multiple sequential steps that are repeated across the codebase
-2. Documentation in AGENTS.md exceeds ~50 lines for a single topic
-3. A pattern has multiple components that need to be configured together
-4. The same instructions are needed by multiple developers/sub-agents
-
-### Skill Structure
-
-```
-.opencode/skills/<skill-name>/
-├── SKILL.md          # Main skill documentation (required)
-├── README.md         # Quick overview (optional)
-├── router.sh         # CLI entry point if skill has commands (optional)
-└── scripts/         # Script files if needed (optional)
-```
-
-### SKILL.md Frontmatter
-
-Each skill must include YAML frontmatter:
-
-```yaml
----
-name: <skill-name>
-description: Brief description of what this skill does and when to use it
----
-```
-
-### Guidelines for Writing Skills
-
-1. **Keep it practical** - Focus on actionable steps, not theory
-2. **Use examples** - Show real code patterns from the codebase
-3. **Include prerequisites** - What must be done before using the skill
-4. **Provide validation** - How to verify the result is correct
-5. **Reference related skills** - Link to other relevant skills
-
-### Modifying Existing Skills
-
-Update a skill when:
-- The codebase patterns change (e.g., new framework version)
-- New best practices are discovered
-- Common errors indicate the documentation needs clarification
-- The skill needs to cover additional use cases
+- SQLite with SQLx (compile-time checked queries)
+- Migrations: `cargo sqlx migrate add <name>`
+- Offline query metadata stored in `.sqlx/` — regenerate with `cargo sqlx prepare` if you change queries
+- See `.opencode/skills/db-schema/SKILL.md` for migration and model patterns
 
 ## Commit Conventions
 
-See [`.opencode/skills/commit/SKILL.md`](.opencode/skills/commit/SKILL.md) for detailed commit conventions, types, user-facing commit rules (`u_` prefix), and examples.
+See `.opencode/skills/commit/SKILL.md` for full conventions.
 
-## CI/CD
+- **User-facing commits**: include `[pub]` or `[public]` in the message (anywhere) to appear in the changelog
+- **CI skip**: append `[skip ci]`, `[no ci]`, `[ci skip]`, etc. for docs/format-only commits
+- **Version bumps**: use `chore!(major)` or `chore!(minor)` in the subject to trigger major/minor releases
+- Do **not** use the old `u_` prefix — it has been replaced by the `[pub]` marker
 
-- GitHub Actions: format, build, clippy, tests. All must pass.
+## Architecture Diagrams
 
-## Documentation
-
-### Architecture Diagrams
-
-Update `docs/diagrams/` (`.mmd` source) and export PNG.
+Source lives in `docs/diagrams/*.mmd`. Export to PNG with `mmdc` after edits.
 
 ## Past Mistakes
 
 | Mistake | Solution |
 |---------|----------|
-| Stripping code documentation comments during refactoring | Preserve all `///` doc comments and `//!` module docs; never delete documentation when moving code |
-| Not using conventional commit | Strictly follow AGENTS.md's commit guideline |
+| Stripping doc comments during refactoring | Preserve all `///` and `//!` docs when moving code |
+| Wrong commit format | Follow `.opencode/skills/commit/SKILL.md` strictly |

@@ -141,6 +141,14 @@ classDiagram
         channel_config() ViewChannelConfig
     }
 
+    class Update {
+        <<trait>>
+        type Model
+        type Msg
+        type Cmd
+        update(msg, model) Cmd
+    }
+
     class ViewSender~T~ {
         <<trait>>
         send(message: EventMessage~T~)
@@ -149,6 +157,49 @@ classDiagram
     class Controller {
         <<trait>>
         run(coordinator: Arc~Coordinator~) Result
+    }
+
+    %% ── Concrete Update examples ──────────────────────────────────
+    class VoiceLeaderboardUpdate {
+        <<impl Update>>
+        Model = VoiceLeaderboardModel
+        Msg = VoiceLeaderboardMsg
+        Cmd = VoiceLeaderboardCmd
+    }
+
+    class VoiceStatsUpdate {
+        <<impl Update>>
+        Model = VoiceStatsModel
+        Msg = VoiceStatsMsg
+        Cmd = VoiceStatsCmd
+    }
+
+    class WelcomeSettingsUpdate {
+        <<impl Update>>
+        Model = WelcomeSettingsModel
+        Msg = WelcomeSettingsMsg
+        Cmd = WelcomeSettingsCmd
+    }
+
+    class FeedListUpdate {
+        <<impl Update>>
+        Model = FeedListModel
+        Msg = FeedListMsg
+        Cmd = FeedListCmd
+    }
+
+    class FeedSettingsUpdate {
+        <<impl Update>>
+        Model = FeedSettingsModel
+        Msg = FeedSettingsMsg
+        Cmd = FeedSettingsCmd
+    }
+
+    class SettingsMainUpdate {
+        <<impl Update>>
+        Model = SettingsMainModel
+        Msg = SettingsMainMsg
+        Cmd = SettingsMainCmd
     }
 
     %% ── Trait relationships ───────────────────────────────────────
@@ -161,6 +212,8 @@ classDiagram
     ViewHandler ..> ViewEvent : receives via ctx
     ViewHandler ..> ViewContext : receives
     ViewHandler ..> ViewChannelConfig : configures
+    ViewHandler ..> Update : delegates to
+    Update ..> ViewHandler : used by
     ActionRegistry ..> Action : maps
     ActionRegistry ..> RegisteredAction : produces
     MappedViewSender ..> ViewSender : implements
@@ -169,3 +222,9 @@ classDiagram
     Controller ..> NavigationResult : returns
     ViewContext ..> ViewSender : uses
     ViewContext ..> MappedViewSender : creates via map()
+    VoiceLeaderboardUpdate ..> Update : implements
+    VoiceStatsUpdate ..> Update : implements
+    WelcomeSettingsUpdate ..> Update : implements
+    FeedListUpdate ..> Update : implements
+    FeedSettingsUpdate ..> Update : implements
+    SettingsMainUpdate ..> Update : implements

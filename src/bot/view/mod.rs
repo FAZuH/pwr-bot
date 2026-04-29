@@ -75,7 +75,7 @@ impl<'a> From<ResponseKind<'a>> for CreateReply<'a> {
 // ── Actions ───────────────────────────────────────────────────────────────
 
 /// Trait for action types used in interactive views.
-pub trait Action: Send + Sync + Clone {
+pub trait Action: Send + Sync + Clone + std::fmt::Debug {
     /// Returns the UI label associated with this action.
     fn label(&self) -> &'static str;
 }

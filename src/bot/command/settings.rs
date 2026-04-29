@@ -1,11 +1,14 @@
 //! Admin settings command.
 
-use std::borrow::Cow;
 use std::time::Duration;
 
 use crate::bot::command::prelude::*;
 use crate::entity::ServerSettings;
 use crate::entity::ServerSettingsEntity;
+use crate::update::Update;
+use crate::update::settings_main::SettingsMainModel;
+use crate::update::settings_main::SettingsMainMsg;
+use crate::update::settings_main::SettingsMainUpdate;
 
 /// Model representing a configurable feature in the bot.
 ///
@@ -112,17 +115,20 @@ impl Controller for SettingsMainController<'_> {
             settings: sqlx::types::Json(settings),
         };
 
-        let view = SettingsMainHandler {
-            settings,
-            is_settings_modified: false,
-        };
+        let model = SettingsMainModel::new(
+            settings.settings.0.feeds.enabled.unwrap_or(false),
+            settings.settings.0.voice.enabled.unwrap_or(false),
+            settings.settings.0.welcome.enabled.unwrap_or(false),
+        );
+        let view = SettingsMainHandler { settings, model };
 
         let mut engine = ViewEngine::new(ctx, view, Duration::from_secs(120), coordinator.clone());
 
         engine.run().await?;
 
         // Save settings if modified
-        if engine.handler.is_settings_modified {
+        if engine.handler.model.is_modified {
+            engine.handler.sync_model_to_settings();
             let guild_id = engine.handler.settings.guild_id;
             let settings_data = engine.handler.settings.settings.0.clone();
             ctx.data()
@@ -139,7 +145,7 @@ impl Controller for SettingsMainController<'_> {
 
 pub struct SettingsMainHandler {
     pub settings: ServerSettingsEntity,
-    pub is_settings_modified: bool,
+    pub model: SettingsMainModel,
 }
 
 impl SettingsMainHandler {
@@ -152,22 +158,20 @@ impl SettingsMainHandler {
     }
 
     pub fn done_update_settings(&mut self) -> Result<(), AppError> {
-        if !self.is_settings_modified {
+        if !self.model.is_modified {
             return Err(AppError::internal_with_ref(
                 "done_update_settings called but settings not modified",
             ));
         }
-        self.is_settings_modified = false;
+        self.model.is_modified = false;
 
         Ok(())
     }
 
-    pub fn toggle_features<'b>(&mut self, features: impl Into<Cow<'b, [&'static Feature]>>) {
-        let features = features.into();
-        for feature in features.iter() {
-            feature.toggle_enabled(self.settings_mut());
-            self.is_settings_modified = true;
-        }
+    fn sync_model_to_settings(&mut self) {
+        self.settings.settings.0.feeds.enabled = Some(self.model.feeds_enabled);
+        self.settings.settings.0.voice.enabled = Some(self.model.voice_enabled);
+        self.settings.settings.0.welcome.enabled = Some(self.model.welcome_enabled);
     }
 }
 
@@ -215,7 +219,12 @@ impl ViewRender for SettingsMainHandler {
         let select_options: Vec<_> = FeatureRegistry::all()
             .iter()
             .map(|feature| {
-                let is_enabled = feature.is_enabled(self.settings());
+                let is_enabled = match feature.label {
+                    "Feeds" => self.model.feeds_enabled,
+                    "Voice" => self.model.voice_enabled,
+                    "Welcome" => self.model.welcome_enabled,
+                    _ => false,
+                };
                 let emoji = if is_enabled { "✅" } else { "⬜" };
                 CreateSelectMenuOption::new(format!("{} {}", emoji, feature.label), feature.label)
             })
@@ -312,11 +321,29 @@ impl ViewHandler for SettingsMainHandler {
                     && let ComponentInteractionDataKind::StringSelect { values } =
                         &interaction.data.kind
                 {
-                    let features: Vec<_> = values
-                        .iter()
-                        .filter_map(|v| FeatureRegistry::find_by_label(v))
-                        .collect();
-                    self.toggle_features(features);
+                    for value in values {
+                        match value.as_str() {
+                            "Feeds" => {
+                                SettingsMainUpdate::update(
+                                    SettingsMainMsg::ToggleFeeds,
+                                    &mut self.model,
+                                );
+                            }
+                            "Voice" => {
+                                SettingsMainUpdate::update(
+                                    SettingsMainMsg::ToggleVoice,
+                                    &mut self.model,
+                                );
+                            }
+                            "Welcome" => {
+                                SettingsMainUpdate::update(
+                                    SettingsMainMsg::ToggleWelcome,
+                                    &mut self.model,
+                                );
+                            }
+                            _ => {}
+                        }
+                    }
                 }
                 Ok(ViewCommand::Render)
             }
