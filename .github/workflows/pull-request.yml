@@ -70,4 +70,4 @@ jobs:
       - name: Run Tests
         run: |
           cp .env-example .env
-          cargo test --all-features --no-fail-fast
+          cargo test --all-features --no-fail-fast -- --test-threads=1
