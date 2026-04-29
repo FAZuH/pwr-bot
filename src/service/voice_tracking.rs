@@ -159,7 +159,7 @@ impl VoiceTrackingService {
 
         for model in all_settings {
             if let Some(false) = model.settings.0.voice.enabled {
-                disabled.insert(model.guild_id);
+                disabled.insert(*model.guild_id);
             }
         }
         drop(disabled);

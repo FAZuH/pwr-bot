@@ -14,6 +14,7 @@ use crate::bot::test_framework::helpers::simulate_click;
 use crate::bot::test_framework::helpers::simulate_select;
 use crate::bot::view::SelectValues;
 use crate::bot::view::ViewCmd;
+use crate::entity::Json;
 use crate::entity::ServerSettingsEntity;
 use crate::update::feed_settings::FeedSettingsModel;
 use crate::update::settings_main::SettingsMainModel;
@@ -34,8 +35,8 @@ pub async fn test_settings_main(ctx: Context<'_>) -> Result<(), GuiTestError> {
         .map_err(|e| GuiTestError::setup_failed("settings_main", e))?;
 
     let entity = ServerSettingsEntity {
-        guild_id: guild_id.into(),
-        settings: sqlx::types::Json(settings),
+        guild_id: guild_id.get().into(),
+        settings: Json(settings),
     };
 
     let model = SettingsMainModel::new(

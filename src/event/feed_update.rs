@@ -85,7 +85,7 @@ impl FeedUpdateData {
                     "**Old {}**: {}\nPublished on <t:{}>",
                     feed_info.feed_item_name,
                     old.description,
-                    old.published.timestamp()
+                    old.published.and_utc().timestamp()
                 )
             },
         );
@@ -106,7 +106,7 @@ Published on <t:{}>
             old_section,
             feed_info.feed_item_name,
             new_feed_item.description,
-            new_feed_item.published.timestamp(),
+            new_feed_item.published.and_utc().timestamp(),
             feed.source_url
         );
         let text_footer = format!("-# {}", feed_info.copyright_notice);

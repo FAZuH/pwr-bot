@@ -2,10 +2,12 @@
 
 use chrono::Duration;
 use chrono::Utc;
+use pwr_bot::entity::DbU64;
 use pwr_bot::entity::FeedEntity;
 use pwr_bot::entity::FeedItemEntity;
 use pwr_bot::entity::FeedSubscriptionEntity;
 use pwr_bot::entity::FeedsSettings;
+use pwr_bot::entity::Json;
 use pwr_bot::entity::ServerSettingsEntity;
 use pwr_bot::entity::SubscriberEntity;
 use pwr_bot::entity::SubscriberType;
@@ -80,7 +82,7 @@ macro_rules! create_subscription {
 
 macro_rules! create_item {
     ($db:expr, $feed_id:expr, $desc:expr) => {
-        create_item!($db, $feed_id, $desc, Utc::now())
+        create_item!($db, $feed_id, $desc, Utc::now().naive_utc())
     };
     ($db:expr, $feed_id:expr, $desc:expr, $date:expr) => {
         $db.feed_item
@@ -216,8 +218,13 @@ mod feed_item_table_tests {
 
     db_test!(insert_and_select_latest, |db| {
         let feed_id = create_feed!(db, "Feed");
-        create_item!(db, feed_id, "Chapter 1", Utc::now());
-        create_item!(db, feed_id, "Chapter 2", Utc::now() + Duration::hours(1));
+        create_item!(db, feed_id, "Chapter 1", Utc::now().naive_utc());
+        create_item!(
+            db,
+            feed_id,
+            "Chapter 2",
+            (Utc::now() + Duration::hours(1)).naive_utc()
+        );
 
         let latest = db
             .feed_item
@@ -230,8 +237,13 @@ mod feed_item_table_tests {
 
     db_test!(select_all_by_feed_id_ordered, |db| {
         let feed_id = create_feed!(db, "Feed");
-        create_item!(db, feed_id, "Chapter 1", Utc::now());
-        create_item!(db, feed_id, "Chapter 2", Utc::now() + Duration::hours(1));
+        create_item!(db, feed_id, "Chapter 1", Utc::now().naive_utc());
+        create_item!(
+            db,
+            feed_id,
+            "Chapter 2",
+            (Utc::now() + Duration::hours(1)).naive_utc()
+        );
 
         let all = db.feed_item.select_all_by_feed_id(feed_id).await.unwrap();
         assert_eq!(all.len(), 2);
@@ -422,8 +434,8 @@ mod server_settings_table_tests {
 
     fn create_settings(guild_id: u64, chan: &str) -> ServerSettingsEntity {
         ServerSettingsEntity {
-            guild_id,
-            settings: sqlx::types::Json(ServerSettings {
+            guild_id: DbU64::from(guild_id),
+            settings: Json(ServerSettings {
                 voice: VoiceSettings::default(),
                 feeds: FeedsSettings {
                     enabled: Some(true),

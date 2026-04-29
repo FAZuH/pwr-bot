@@ -2,6 +2,8 @@
 
 use chrono::Duration;
 use chrono::Utc;
+use pwr_bot::entity::DbU64;
+use pwr_bot::entity::Json;
 use pwr_bot::entity::ServerSettings;
 use pwr_bot::entity::ServerSettingsEntity;
 use pwr_bot::entity::VoiceSessionsEntity;
@@ -419,8 +421,8 @@ async fn test_disabled_guilds_cache_on_init() {
     // Pre-populate database with disabled guild
     let disabled_guild_id: u64 = 999999;
     let settings = ServerSettingsEntity {
-        guild_id: disabled_guild_id,
-        settings: sqlx::types::Json(ServerSettings {
+        guild_id: DbU64::from(disabled_guild_id),
+        settings: Json(ServerSettings {
             voice: VoiceSettings {
                 enabled: Some(false),
             },

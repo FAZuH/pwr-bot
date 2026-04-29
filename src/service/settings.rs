@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use crate::entity::Json;
 use crate::entity::ServerSettings;
 use crate::entity::ServerSettingsEntity;
 use crate::repo::Repository;
@@ -59,8 +60,8 @@ impl SettingsService {
         settings: ServerSettings,
     ) -> Result<(), ServiceError> {
         let model = ServerSettingsEntity {
-            guild_id,
-            settings: sqlx::types::Json(settings),
+            guild_id: guild_id.into(),
+            settings: Json(settings),
         };
         self.db.server_settings.replace(&model).await?;
         Ok(())

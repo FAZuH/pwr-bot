@@ -3,6 +3,7 @@
 use std::time::Duration;
 
 use crate::bot::command::prelude::*;
+use crate::entity::Json;
 use crate::entity::ServerSettings;
 use crate::entity::ServerSettingsEntity;
 use crate::update::Update;
@@ -109,8 +110,8 @@ impl Controller for SettingsMainController<'_> {
             .await?;
 
         let settings = ServerSettingsEntity {
-            guild_id: guild_id.into(),
-            settings: sqlx::types::Json(settings),
+            guild_id: guild_id.get().into(),
+            settings: Json(settings),
         };
 
         let model = SettingsMainModel::new(
@@ -132,7 +133,7 @@ impl Controller for SettingsMainController<'_> {
             ctx.data()
                 .service
                 .feed_subscription
-                .update_server_settings(guild_id, settings_data)
+                .update_server_settings(*guild_id, settings_data)
                 .await?;
             engine.handler.done_update_settings()?;
         }
