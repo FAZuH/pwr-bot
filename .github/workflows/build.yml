@@ -1,0 +1,103 @@
+name: Build
+
+on:
+  workflow_call:
+    inputs:
+      cargo-build-args:
+        description: 'Arguments to pass to cargo build'
+        required: false
+        type: string
+        default: '--all-features --all-targets'
+      upload-binary:
+        description: 'Whether to upload the binary artifact'
+        required: false
+        type: boolean
+        default: false
+      binary-artifact-name:
+        description: 'Name of the binary artifact'
+        required: false
+        type: string
+        default: 'pwr-bot'
+      binary-artifact-path:
+        description: 'Path to the binary artifact'
+        required: false
+        type: string
+        default: 'target/release/pwr-bot'
+      export-docker-image:
+        description: 'Whether to export the Docker image as an artifact'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  SQLX_OFFLINE: true
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-binary:
+    name: Build Binary
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Set up Stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "ci"
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libfontconfig1-dev
+
+      - name: Build
+        run: cargo build ${{ inputs.cargo-build-args }}
+
+      - name: Upload Binary Artifact
+        if: ${{ inputs.upload-binary }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.binary-artifact-name }}
+          path: ${{ inputs.binary-artifact-path }}
+
+  build-docker:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker Image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: pwr-bot:build
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Save Docker Image
+        if: ${{ inputs.export-docker-image }}
+        run: docker save pwr-bot:build -o /tmp/docker-image.tar
+
+      - name: Upload Docker Image Artifact
+        if: ${{ inputs.export-docker-image }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-image
+          path: /tmp/docker-image.tar

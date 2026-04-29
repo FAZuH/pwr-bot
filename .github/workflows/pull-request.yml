@@ -12,6 +12,11 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  build:
+    name: Build
+    if: "! github.event.pull_request.draft"
+    uses: ./.github/workflows/build.yml
+
   format-and-test:
     name: Run Rust Tests
     if: "! github.event.pull_request.draft"
@@ -44,9 +49,6 @@ jobs:
 
       - name: Check Format
         run: cargo +nightly fmt --all -- --check
-
-      - name: Build All Targets
-        run: cargo build --all-features --all-targets
 
       - name: Lint with Clippy
         run: cargo clippy --all-features --all-targets --no-deps -- -D warnings
