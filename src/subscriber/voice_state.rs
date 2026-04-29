@@ -217,7 +217,7 @@ impl VoiceStateSubscriber {
 
 #[async_trait::async_trait]
 impl Subscriber<VoiceStateEvent> for VoiceStateSubscriber {
-    /// From https://discord.com/developers/docs/events/gateway-events#voice-state-update:
+    /// From <https://discord.com/developers/docs/events/gateway-events#voice-state-update>:
     /// > Called when someone joins/leaves/moves voice channels. Inner payload is a voice state object.
     ///
     /// - event.old is None if and only if user joined a voice channel

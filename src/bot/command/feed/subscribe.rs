@@ -21,7 +21,7 @@ pub async fn subscribe(
     >,
 ) -> Result<(), Error> {
     Coordinator::new(ctx)
-        .run(NavigationResult::FeedSubscribe { links, send_into })
+        .run(Navigation::FeedSubscribe { links, send_into })
         .await?;
     Ok(())
 }

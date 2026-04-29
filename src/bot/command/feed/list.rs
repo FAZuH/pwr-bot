@@ -29,7 +29,7 @@ pub async fn list(
 ) -> Result<(), Error> {
     let sent_into = sent_into.unwrap_or(SendInto::DM);
     Coordinator::new(ctx)
-        .run(NavigationResult::FeedList(Some(sent_into)))
+        .run(Navigation::FeedList(Some(sent_into)))
         .await?;
     Ok(())
 }
@@ -218,13 +218,13 @@ action_extends! { FeedListAction extends PaginationAction {
 #[async_trait::async_trait]
 impl ViewHandler for FeedListHandler {
     type Action = FeedListAction;
-    async fn handle(&mut self, ctx: ViewContext<'_, FeedListAction>) -> Result<ViewCommand, Error> {
+    async fn handle(&mut self, ctx: ViewContext<'_, FeedListAction>) -> Result<ViewCmd, Error> {
         use FeedListAction::*;
         match ctx.action() {
             Base(inner) => {
                 FeedListUpdate::update(FeedListMsg::Pagination(*inner), &mut self.model);
                 self.update_subs().await?;
-                return Ok(ViewCommand::Render);
+                return Ok(ViewCmd::Render);
             }
             Edit => {
                 FeedListUpdate::update(FeedListMsg::Edit, &mut self.model);
@@ -248,7 +248,7 @@ impl ViewHandler for FeedListHandler {
                     &mut self.model,
                 );
             }
-            Exit => return Ok(ViewCommand::Continue),
+            Exit => return Ok(ViewCmd::Continue),
             Save => {
                 let cmd = FeedListUpdate::update(FeedListMsg::Save, &mut self.model);
                 match cmd {
@@ -266,15 +266,15 @@ impl ViewHandler for FeedListHandler {
             }
         };
 
-        Ok(ViewCommand::Render)
+        Ok(ViewCmd::Render)
     }
 
-    async fn on_timeout(&mut self) -> Result<ViewCommand, Error> {
+    async fn on_timeout(&mut self) -> Result<ViewCmd, Error> {
         self.model.pagination_disabled = true;
         if self.subscriptions.is_empty() {
-            Ok(ViewCommand::Exit)
+            Ok(ViewCmd::Exit)
         } else {
-            Ok(ViewCommand::RenderOnce)
+            Ok(ViewCmd::RenderOnce)
         }
     }
 }

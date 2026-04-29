@@ -9,7 +9,7 @@ use crate::bot::view::Action;
 use crate::bot::view::ActionRegistry;
 use crate::bot::view::SelectValues;
 use crate::bot::view::SyntheticEvent;
-use crate::bot::view::ViewCommand;
+use crate::bot::view::ViewCmd;
 use crate::bot::view::ViewContext;
 use crate::bot::view::ViewEvent;
 use crate::bot::view::ViewHandler;
@@ -46,7 +46,7 @@ pub async fn simulate_click<'a, T, H>(
     handler: &mut H,
     action: T,
     coordinator: Arc<Coordinator<'a>>,
-) -> Result<ViewCommand, Error>
+) -> Result<ViewCmd, Error>
 where
     H: ViewHandler<Action = T>,
     T: Action + 'static,
@@ -68,7 +68,7 @@ pub async fn simulate_select<'a, T, H>(
     action: T,
     values: SelectValues,
     coordinator: Arc<Coordinator<'a>>,
-) -> Result<ViewCommand, Error>
+) -> Result<ViewCmd, Error>
 where
     H: ViewHandler<Action = T>,
     T: Action + 'static,

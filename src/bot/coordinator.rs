@@ -1,11 +1,12 @@
 //! Navigation coordinator for the MVC-C pattern.
 //!
 //! The `Coordinator` drives the interaction flow of a command by managing
-//! a stack of [`Controller`]s and processing [`NavigationResult`]s.
+//! a stack of [`Controller`]s and processing [`Navigation`]s.
 
 use std::collections::VecDeque;
 use std::sync::Arc;
-use std::sync::Mutex;
+
+use poise::ReplyHandle;
 
 use crate::bot::Error;
 use crate::bot::command::Context;
@@ -20,32 +21,34 @@ use crate::bot::command::voice::settings::VoiceSettingsController;
 use crate::bot::command::voice::stats::VoiceStatsController;
 use crate::bot::command::welcome::WelcomeSettingsController;
 use crate::bot::controller::Controller;
-use crate::bot::navigation::NavigationResult;
-use crate::bot::view::SharedReplyHandle;
+use crate::bot::navigation::Navigation;
 
 /// Maximum number of navigation steps to keep in history.
-const MAX_NAV_HISTORY: usize = 10;
+pub const MAX_NAV_HISTORY: usize = 10;
+
+type SyncReplyHandle<'a> = tokio::sync::Mutex<Option<ReplyHandle<'a>>>;
+type NavHistory = tokio::sync::Mutex<VecDeque<Navigation>>;
 
 /// Orchestrator for controller navigation and shared state.
 ///
 /// The `Coordinator` owns the Poise command context
-/// It maintains a history of [`NavigationResult`]s to support "Back" navigation.
+/// It maintains a history of [`Navigation`]s to support "Back" navigation.
 pub struct Coordinator<'a> {
     /// Poise command context.
     ctx: Context<'a>,
     /// Stack of navigation steps for history tracking.
-    nav_queue: Mutex<VecDeque<NavigationResult>>,
+    nav_queue: NavHistory,
     /// Shared handle to the active message.
-    pub reply_handle: SharedReplyHandle<'a>,
+    reply_handle: SyncReplyHandle<'a>,
 }
 
 impl<'a> Coordinator<'a> {
-    /// Creates a new coordinator without shared state.
+    /// Creates a new coordinator.
     pub fn new(ctx: Context<'a>) -> Arc<Self> {
         Arc::new(Self {
             ctx,
-            nav_queue: Mutex::new(VecDeque::new()),
-            reply_handle: Arc::new(tokio::sync::Mutex::new(None)),
+            nav_queue: tokio::sync::Mutex::new(VecDeque::new()),
+            reply_handle: tokio::sync::Mutex::new(None),
         })
     }
 
@@ -57,8 +60,8 @@ impl<'a> Coordinator<'a> {
     /// Pushes a new navigation target onto the stack.
     ///
     /// If history exceeds [`MAX_NAV_HISTORY`], the oldest step is removed.
-    pub fn navigate(&self, next: NavigationResult) {
-        let mut queue = self.nav_queue.lock().unwrap();
+    pub async fn navigate(&self, next: Navigation) {
+        let mut queue = self.nav_queue.lock().await;
         if queue.len() >= MAX_NAV_HISTORY {
             queue.pop_front();
         }
@@ -66,34 +69,42 @@ impl<'a> Coordinator<'a> {
     }
 
     /// Returns the most recent navigation target without removing it.
-    pub fn peek_navigation(&self) -> Option<NavigationResult> {
-        self.nav_queue.lock().unwrap().back().cloned()
+    pub async fn peek_navigation(&self) -> Option<Navigation> {
+        self.nav_queue.lock().await.back().cloned()
+    }
+
+    pub async fn set_reply_handle(&self, new_reply: ReplyHandle<'a>) {
+        *self.reply_handle.lock().await = Some(new_reply)
+    }
+
+    pub async fn reply_handle(&self) -> tokio::sync::MutexGuard<'_, Option<ReplyHandle<'a>>> {
+        self.reply_handle.lock().await
     }
 
     /// Starts the navigation loop with an initial destination.
     ///
-    /// The loop continues as long as controllers return [`NavigationResult`]s,
-    /// stopping when [`NavigationResult::Exit`] is reached or the history stack is empty.
-    pub async fn run(self: Arc<Self>, initial: NavigationResult) -> Result<(), Error> {
-        self.navigate(initial);
-        while let Some(mut controller) = self.next_controller() {
+    /// The loop continues as long as controllers return [`Navigation`]s,
+    /// stopping when [`Navigation::Exit`] is reached or the history stack is empty.
+    pub async fn run(self: Arc<Self>, initial: Navigation) -> Result<(), Error> {
+        self.navigate(initial).await;
+        while let Some(mut controller) = self.next_controller().await {
             controller.run(self.clone()).await?;
         }
         Ok(())
     }
 
     /// Pops the last navigation result from history.
-    fn pop_next(&self) -> Option<NavigationResult> {
-        self.nav_queue.lock().unwrap().pop_back()
+    async fn pop_next(&self) -> Option<Navigation> {
+        self.nav_queue.lock().await.pop_back()
     }
 
     /// Instantiates the next controller based on the current navigation state.
-    fn next_controller(&self) -> Option<Box<dyn Controller + 'a>> {
-        use NavigationResult::*;
+    async fn next_controller(&self) -> Option<Box<dyn Controller + 'a>> {
+        use Navigation::*;
         let ctx = self.ctx;
 
         loop {
-            let nav = self.pop_next()?;
+            let nav = self.pop_next().await?;
             let res: Box<dyn Controller> = match nav {
                 SettingsMain => Box::new(SettingsMainController::new(ctx)),
                 SettingsFeeds => Box::new(FeedSettingsController::new(ctx)),

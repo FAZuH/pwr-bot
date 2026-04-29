@@ -21,7 +21,7 @@ pub async fn unsubscribe(
     >,
 ) -> Result<(), Error> {
     Coordinator::new(ctx)
-        .run(NavigationResult::FeedUnsubscribe { links, send_into })
+        .run(Navigation::FeedUnsubscribe { links, send_into })
         .await?;
     Ok(())
 }

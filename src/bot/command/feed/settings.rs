@@ -19,9 +19,7 @@ use crate::update::feed_settings::FeedSettingsUpdate;
     default_member_permissions = "ADMINISTRATOR | MANAGE_GUILD"
 )]
 pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
-    Coordinator::new(ctx)
-        .run(NavigationResult::SettingsFeeds)
-        .await?;
+    Coordinator::new(ctx).run(Navigation::SettingsFeeds).await?;
     Ok(())
 }
 
@@ -82,15 +80,12 @@ pub struct SettingsFeedHandler<'a> {
 #[async_trait::async_trait]
 impl<'a> ViewHandler for SettingsFeedHandler<'a> {
     type Action = SettingsFeedAction;
-    async fn handle(
-        &mut self,
-        ctx: ViewContext<'_, SettingsFeedAction>,
-    ) -> Result<ViewCommand, Error> {
+    async fn handle(&mut self, ctx: ViewContext<'_, SettingsFeedAction>) -> Result<ViewCmd, Error> {
         match ctx.action() {
             SettingsFeedAction::Enabled => {
                 FeedSettingsUpdate::update(FeedSettingsMsg::ToggleEnabled, &mut self.model);
                 self.settings.feeds.enabled = self.model.enabled;
-                Ok(ViewCommand::Render)
+                Ok(ViewCmd::Render)
             }
             SettingsFeedAction::Channel => {
                 let channel_id = ctx
@@ -101,7 +96,7 @@ impl<'a> ViewHandler for SettingsFeedHandler<'a> {
                     &mut self.model,
                 );
                 self.settings.feeds.channel_id = self.model.channel_id.clone();
-                Ok(ViewCommand::Render)
+                Ok(ViewCmd::Render)
             }
             SettingsFeedAction::SubRole => {
                 let role_id = ctx
@@ -109,7 +104,7 @@ impl<'a> ViewHandler for SettingsFeedHandler<'a> {
                     .and_then(|v| v.first().map(|id| id.to_string()));
                 FeedSettingsUpdate::update(FeedSettingsMsg::SetSubRole(role_id), &mut self.model);
                 self.settings.feeds.subscribe_role_id = self.model.subscribe_role_id.clone();
-                Ok(ViewCommand::Render)
+                Ok(ViewCmd::Render)
             }
             SettingsFeedAction::UnsubRole => {
                 let role_id = ctx
@@ -117,15 +112,15 @@ impl<'a> ViewHandler for SettingsFeedHandler<'a> {
                     .and_then(|v| v.first().map(|id| id.to_string()));
                 FeedSettingsUpdate::update(FeedSettingsMsg::SetUnsubRole(role_id), &mut self.model);
                 self.settings.feeds.unsubscribe_role_id = self.model.unsubscribe_role_id.clone();
-                Ok(ViewCommand::Render)
+                Ok(ViewCmd::Render)
             }
             SettingsFeedAction::Back => {
-                ctx.coordinator.navigate(NavigationResult::SettingsMain);
-                Ok(ViewCommand::Exit)
+                ctx.coordinator.navigate(Navigation::SettingsMain).await;
+                Ok(ViewCmd::Exit)
             }
             SettingsFeedAction::About => {
-                ctx.coordinator.navigate(NavigationResult::SettingsAbout);
-                Ok(ViewCommand::Exit)
+                ctx.coordinator.navigate(Navigation::SettingsAbout).await;
+                Ok(ViewCmd::Exit)
             }
         }
     }

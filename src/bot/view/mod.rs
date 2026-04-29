@@ -19,9 +19,7 @@ use std::time::Duration;
 
 use futures::StreamExt;
 use poise::CreateReply;
-use poise::ReplyHandle;
 use poise::serenity_prelude::*;
-use tokio::sync::Mutex;
 use tokio::sync::RwLock;
 use tokio::sync::mpsc;
 
@@ -30,9 +28,8 @@ use crate::bot::command::Error;
 use crate::bot::coordinator::Coordinator;
 
 /// Type alias for a thread-safe, shared handle to a Discord message.
-pub type SharedReplyHandle<'a> = Arc<Mutex<Option<ReplyHandle<'a>>>>;
-pub type EventMessage<T> = (Option<T>, ViewEvent);
-pub type Registry<T> = Arc<RwLock<ActionRegistry<T>>>;
+type EventMessage<T> = (Option<T>, ViewEvent);
+type Registry<T> = Arc<RwLock<ActionRegistry<T>>>;
 
 pub mod pagination;
 
@@ -98,7 +95,7 @@ impl<T: Action> ActionRegistry<T> {
             .as_millis();
         Self {
             actions: HashMap::new(),
-            prefix: format!("{}:{}", type_name, timestamp),
+            prefix: format!("{type_name}:{timestamp}"),
             counter: 0,
         }
     }
@@ -172,7 +169,7 @@ impl RegisteredAction {
 
 /// Returned by [`ViewHandler::handle`] to control the engine loop.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ViewCommand {
+pub enum ViewCmd {
     /// Re-render the view and update the Discord message.
     Render,
     /// Render once then exit the view loop immediately.
@@ -203,9 +200,6 @@ pub enum SyntheticEvent {
 }
 
 /// An event that wakes up the [`ViewEngine`] loop.
-///
-/// Replaces the former separate `Trigger` enum — the action and its originating
-/// interaction are kept together, eliminating redundancy with [`ViewContext`].
 #[derive(Debug, Clone)]
 pub enum ViewEvent {
     /// A component interaction (button click, select menu choice).
@@ -279,7 +273,6 @@ impl Default for ViewChannelConfig {
 pub struct ViewChannel<T: Action + Send + Sync + 'static> {
     tx: mpsc::UnboundedSender<EventMessage<T>>,
     rx: mpsc::UnboundedReceiver<EventMessage<T>>,
-    /// Snapshot of custom_id → action, updated after every render_view().
     registry: Registry<T>,
     config: ViewChannelConfig,
 }
@@ -418,22 +411,15 @@ impl<'a, T: Action + 'static> ViewContext<'a, T> {
 
     /// Extracts select-menu values from the event, if any.
     pub fn select_values(&self) -> Option<SelectValues> {
+        use ComponentInteractionDataKind::*;
         match &self.event {
             ViewEvent::Component(interaction) => match &interaction.data.kind {
-                ComponentInteractionDataKind::StringSelect { values } => {
-                    Some(SelectValues::String(values.to_vec()))
-                }
-                ComponentInteractionDataKind::ChannelSelect { values } => {
-                    Some(SelectValues::Channel(
-                        values.iter().copied().map(GenericChannelId::from).collect(),
-                    ))
-                }
-                ComponentInteractionDataKind::RoleSelect { values } => {
-                    Some(SelectValues::Role(values.to_vec()))
-                }
-                ComponentInteractionDataKind::UserSelect { values } => {
-                    Some(SelectValues::User(values.to_vec()))
-                }
+                StringSelect { values } => Some(SelectValues::String(values.to_vec())),
+                ChannelSelect { values } => Some(SelectValues::Channel(
+                    values.iter().copied().map(GenericChannelId::from).collect(),
+                )),
+                RoleSelect { values } => Some(SelectValues::Role(values.to_vec())),
+                UserSelect { values } => Some(SelectValues::User(values.to_vec())),
                 _ => None,
             },
             ViewEvent::Synthetic(SyntheticEvent::Select(values)) => Some(values.clone()),
@@ -503,6 +489,24 @@ impl<'a, T: Action + 'static> ViewContext<'a, T> {
             }
         });
     }
+
+    pub async fn spawn_modal_component<M: poise::Modal + Send>(
+        &self,
+        modal_consumer: impl FnOnce(M) -> T + Send + 'static,
+    ) {
+        if let ViewEvent::Component(ref interaction) = self.event {
+            let i = interaction.clone();
+            let ctx = self.poise.serenity_context().clone();
+
+            self.spawn(async move {
+                poise::execute_modal_on_component_interaction::<M>(&ctx, i, None, None)
+                    .await
+                    .ok()
+                    .flatten()
+                    .map(modal_consumer)
+            });
+        }
+    }
 }
 
 /// Defines how a view translates its state into Discord components or an embed.
@@ -522,12 +526,12 @@ pub trait ViewHandler: Send + Sync {
     /// Handles a non-timeout event.
     ///
     /// Receives the full [`ViewContext`] containing the event, action, sender,
-    /// and coordinator. Returns a [`ViewCommand`] controlling the engine loop.
-    async fn handle(&mut self, ctx: ViewContext<'_, Self::Action>) -> Result<ViewCommand, Error>;
+    /// and coordinator. Returns a [`ViewCmd`] controlling the engine loop.
+    async fn handle(&mut self, ctx: ViewContext<'_, Self::Action>) -> Result<ViewCmd, Error>;
 
     /// Called when the view loop times out waiting for user input.
-    async fn on_timeout(&mut self) -> Result<ViewCommand, Error> {
-        Ok(ViewCommand::Exit)
+    async fn on_timeout(&mut self) -> Result<ViewCmd, Error> {
+        Ok(ViewCmd::Exit)
     }
 
     /// The channel config this view sets
@@ -543,7 +547,7 @@ pub trait ViewHandler: Send + Sync {
 /// 2. Enters a `tokio::select!` loop waiting for Discord interactions or async events.
 /// 3. Matches interactions back to [`Action`] variants using the [`ActionRegistry`].
 /// 4. Dispatches the action to the [`ViewHandler`].
-/// 5. Reacts to the returned [`ViewCommand`] (Render, Exit, etc.).
+/// 5. Reacts to the returned [`ViewCmd`] (Render, Exit, etc.).
 pub struct ViewEngine<'a, T, H>
 where
     T: Action + Send + Sync + 'static,
@@ -597,7 +601,7 @@ where
         self.render_view().await?;
 
         let msg_id = {
-            let lock = self.coordinator.reply_handle.lock().await;
+            let lock = self.coordinator.reply_handle().await;
             lock.as_ref()
                 .expect("reply_handle must exist after render_view")
                 .message()
@@ -617,7 +621,7 @@ where
         let coordinator = self.coordinator.clone();
         let tx_arc = channel.sender();
 
-        use ViewCommand::*;
+        use ViewCmd::*;
         while let Some((action, event)) = channel.recv().await {
             let cmd = match event {
                 ViewEvent::Timeout => self.handler.on_timeout().await?,
@@ -681,20 +685,17 @@ where
 
     /// Re-renders the view, editing the existing message or sending a new one.
     async fn render_view(&self) -> Result<(), Error> {
-        let mut registry_write = self.registry.write().await;
-        registry_write.clear();
-        let reply = self.handler.create_reply(&mut registry_write);
+        let mut registry = self.registry.write().await;
+        registry.clear();
+        let reply = self.handler.create_reply(&mut registry);
 
-        let existing = {
-            let lock = self.coordinator.reply_handle.lock().await;
-            lock.as_ref().cloned()
-        };
+        let existing = { self.coordinator.reply_handle().await.as_ref().cloned() };
 
         if let Some(handle) = existing {
             handle.edit(self.ctx, reply).await?;
         } else {
             let handle = self.ctx.send(reply).await?;
-            *self.coordinator.reply_handle.lock().await = Some(handle);
+            self.coordinator.set_reply_handle(handle).await;
         }
 
         Ok(())

@@ -84,7 +84,7 @@ pub async fn command(
     };
 
     Coordinator::new(ctx)
-        .run(NavigationResult::VoiceStats {
+        .run(Navigation::VoiceStats {
             time_range,
             target_user: Box::new(target_user),
             stat_type,
@@ -471,10 +471,7 @@ impl VoiceStatsHandler {
 #[async_trait::async_trait]
 impl ViewHandler for VoiceStatsHandler {
     type Action = VoiceStatsAction;
-    async fn handle(
-        &mut self,
-        ctx: ViewContext<'_, VoiceStatsAction>,
-    ) -> Result<ViewCommand, Error> {
+    async fn handle(&mut self, ctx: ViewContext<'_, VoiceStatsAction>) -> Result<ViewCmd, Error> {
         use VoiceStatsAction::*;
 
         let mut changed = false;
@@ -553,7 +550,7 @@ impl ViewHandler for VoiceStatsHandler {
             self.refetch_data().await?;
         }
 
-        Ok(ViewCommand::Render)
+        Ok(ViewCmd::Render)
     }
 }
 

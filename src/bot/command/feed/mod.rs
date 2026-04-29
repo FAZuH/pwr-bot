@@ -272,7 +272,7 @@ impl ViewHandler for FeedSubscriptionBatchHandler {
     async fn handle(
         &mut self,
         ctx: ViewContext<'_, FeedSubscriptionBatchAction>,
-    ) -> Result<ViewCommand, Error> {
+    ) -> Result<ViewCmd, Error> {
         use FeedSubscriptionBatchAction as Action;
         match ctx.action() {
             Action::ViewSubscriptions => {
@@ -282,8 +282,9 @@ impl ViewHandler for FeedSubscriptionBatchHandler {
                     SubscriberType::Dm => SendInto::DM,
                 };
                 ctx.coordinator
-                    .navigate(NavigationResult::FeedList(Some(send_into)));
-                Ok(ViewCommand::Exit)
+                    .navigate(Navigation::FeedList(Some(send_into)))
+                    .await;
+                Ok(ViewCmd::Exit)
             }
         }
     }
