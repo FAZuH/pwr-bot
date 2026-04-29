@@ -7,7 +7,7 @@ description: Handle database schema changes using Diesel migrations. Supports cr
 
 ## Overview
 
-This skill handles all database schema changes in the pwr-bot project using **Diesel** (with `diesel-async` and `deadpool`). It provides a structured workflow for:
+This skill handles all database schema changes in the pwr-bot project using **Diesel** (with `diesel-async` and `deadpool`) on **PostgreSQL**. It provides a structured workflow for:
 - Creating new tables
 - Modifying existing tables (add/remove columns, indexes, constraints)
 - Rolling back migrations safely
@@ -15,10 +15,10 @@ This skill handles all database schema changes in the pwr-bot project using **Di
 
 ## Prerequisites
 
-- SQLite database with Diesel
+- PostgreSQL database with Diesel
 - Cargo project with `diesel`, `diesel-async`, and `diesel_migrations` installed
 - Migration files stored in `migrations/` directory
-- `diesel.toml` configured for SQLite
+- `diesel.toml` configured for PostgreSQL
 
 ## Workflow
 
@@ -56,17 +56,17 @@ The `up.sql` file should:
 ```sql
 -- Example: Creating a new table
 CREATE TABLE IF NOT EXISTS user_preferences (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
+    id SERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL,
     theme TEXT DEFAULT 'dark',
-    notifications_enabled INTEGER DEFAULT 1,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    notifications_enabled BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(user_id)
 );
 
 -- Example: Adding a column to existing table
-ALTER TABLE feeds ADD COLUMN last_fetched_at TIMESTAMP DEFAULT NULL;
+ALTER TABLE feeds ADD COLUMN IF NOT EXISTS last_fetched_at TIMESTAMPTZ DEFAULT NULL;
 ```
 
 ### Step 4: Write the DOWN Migration
@@ -80,8 +80,7 @@ The `down.sql` file should:
 DROP TABLE IF EXISTS user_preferences;
 
 -- Example: Remove the column added in UP
--- Note: SQLite has limited ALTER TABLE support
--- For complex rollbacks, may need to recreate table with old schema
+ALTER TABLE feeds DROP COLUMN IF EXISTS last_fetched_at;
 ```
 
 ### Step 5: Validate Migration Syntax
@@ -89,11 +88,11 @@ DROP TABLE IF EXISTS user_preferences;
 Run the migration against a test database to verify:
 
 ```bash
-# Test migration locally
-diesel migration run --database-url sqlite:data/test.db
+# Test migration locally (ensure PostgreSQL is running)
+diesel migration run --database-url postgres://pwr_bot:pwr_bot@localhost:5432/pwr_bot
 
 # Or verify without running
-diesel migration list --database-url sqlite:data/test.db
+diesel migration list --database-url postgres://pwr_bot:pwr_bot@localhost:5432/pwr_bot
 ```
 
 ### Step 6: Regenerate Schema (if needed)
@@ -101,12 +100,15 @@ diesel migration list --database-url sqlite:data/test.db
 After adding new tables, update `src/repo/schema.rs`:
 
 ```bash
-diesel print-schema --database-url sqlite:data/test.db > src/repo/schema.rs
+# Requires a running PostgreSQL instance with the migrations applied
+diesel print-schema --database-url postgres://pwr_bot:pwr_bot@localhost:5432/pwr_bot > src/repo/schema.rs
 ```
 
 Then manually verify:
 - Auto-increment PKs use `Integer` (not `Nullable<Integer>`)
 - Boolean columns use `Bool` (not `Integer`)
+- Timestamps use `Timestamptz` (not `Timestamp`)
+- JSON columns use `Jsonb` (not `Text`)
 
 ### Step 7: Modify Entity (src/entity.rs)
 
@@ -116,27 +118,29 @@ Add or update entity structs with Diesel derives:
 use diesel::prelude::*;
 use serde::Serialize;
 use serde::Deserialize;
+use chrono::DateTime;
+use chrono::Utc;
 
 #[derive(Queryable, Selectable, Insertable, Identifiable, Serialize, Deserialize, Default, Clone, Debug)]
 #[diesel(table_name = user_preferences)]
 #[diesel(primary_key(id))]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct UserPreferencesEntity {
     #[serde(default)]
     pub id: i32,
-    pub user_id: i32,
+    pub user_id: i64,
     pub theme: String,
     pub notifications_enabled: bool,
-    pub created_at: chrono::NaiveDateTime,
-    pub updated_at: chrono::NaiveDateTime,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 ```
 
 **Model Naming Conventions:**
 - Table: `user_preferences` → Entity: `UserPreferencesEntity`
 - Use `DbU64` newtype for Discord snowflakes (`u64`) stored as `BIGINT`
-- Use `Json<T>` newtype for JSON columns stored as `TEXT`
-- Use `NaiveDateTime` for timestamps (Diesel SQLite maps `Timestamp` to `NaiveDateTime`)
+- Use `Json<T>` newtype for JSONB columns
+- Use `DateTime<Utc>` for timestamps (Diesel PostgreSQL maps `Timestamptz` to `DateTime<Utc>`)
 
 **For u64 IDs:**
 ```rust
@@ -144,13 +148,14 @@ use crate::entity::DbU64;
 
 #[derive(Queryable, Selectable, Insertable)]
 #[diesel(table_name = server_settings)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct ServerSettingsEntity {
     pub guild_id: DbU64,
     // ...
 }
 ```
 
-**For JSON columns:**
+**For JSONB columns:**
 ```rust
 use crate::entity::Json;
 
@@ -171,7 +176,7 @@ use diesel_async::RunQueryDsl;
 use crate::entity::UserPreferencesEntity;
 use crate::repo::error::DatabaseError;
 use crate::repo::schema::user_preferences;
-use crate::repo::traits::FeedRepository;
+use crate::repo::traits::UserPreferencesRepository;
 
 pub struct UserPreferencesTable {
     pool: DbPool,
@@ -206,23 +211,23 @@ Add the new table to the `Repository` struct:
 ```rust
 pub struct Repository {
     pool: DbPool,
-    db_path: String,
-    pub feed: Box<dyn FeedRepository>,
-    pub feed_item: Box<dyn FeedItemRepository>,
-    pub subscriber: Box<dyn SubscriberRepository>,
-    pub feed_subscription: Box<dyn FeedSubscriptionRepository>,
-    pub server_settings: Box<dyn ServerSettingsRepository>,
-    pub voice_sessions: Box<dyn VoiceSessionsRepository>,
-    pub bot_meta: Box<dyn BotMetaRepository>,
+    db_url: String,
+    pub feed: FeedTable,
+    pub feed_item: FeedItemTable,
+    pub subscriber: SubscriberTable,
+    pub feed_subscription: FeedSubscriptionTable,
+    pub server_settings: ServerSettingsTable,
+    pub voice_sessions: VoiceSessionsTable,
+    pub bot_meta: BotMetaTable,
     // Add new table here
-    pub user_preferences: Box<dyn UserPreferencesRepository>,
+    pub user_preferences: UserPreferencesTable,
 }
 
 impl Repository {
-    pub async fn new(db_url: &str, db_path: &str) -> anyhow::Result<Self> {
+    pub async fn new(db_url: impl Into<String>) -> anyhow::Result<Self> {
         // ... existing code ...
         
-        let user_preferences = Box::new(UserPreferencesTable::new(pool.clone()));
+        let user_preferences = UserPreferencesTable::new(pool.clone());
         
         Ok(Self {
             // ... existing fields ...
@@ -254,7 +259,7 @@ use crate::entity::UserPreferencesEntity;
 Diesel migrations run inside transactions by default. For manual SQL:
 
 ```sql
-BEGIN TRANSACTION;
+BEGIN;
 
 -- Your migration steps
 
@@ -267,10 +272,14 @@ ROLLBACK;
 
 ```sql
 -- Check if column exists before adding
-SELECT COUNT(*) FROM pragma_table_info('table_name') WHERE name = 'column_name';
+SELECT column_name 
+FROM information_schema.columns 
+WHERE table_name = 'table_name' AND column_name = 'column_name';
 
 -- Check if index exists before creating
-SELECT name FROM sqlite_master WHERE type='index' AND name='index_name';
+SELECT indexname 
+FROM pg_indexes 
+WHERE tablename = 'table_name' AND indexname = 'index_name';
 ```
 
 ### 3. Handle Existing Data
@@ -286,34 +295,36 @@ UPDATE table_name SET new_field = old_field WHERE new_field IS NULL;
 ### 4. Use Safe Rollback Patterns
 
 ```sql
--- UP: Add NOT NULL column
-ALTER TABLE users ADD COLUMN email TEXT NOT NULL;
+-- UP: Add column
+ALTER TABLE users ADD COLUMN email TEXT NOT NULL DEFAULT '';
 
--- DOWN: Make nullable first, then drop
-ALTER TABLE users ALTER COLUMN email TEXT NULL;
+-- DOWN: Drop column
 ALTER TABLE users DROP COLUMN email;
 ```
 
-### 5. SQLite Limitations
+### 5. PostgreSQL Features
 
-- No `ALTER TABLE DROP COLUMN` in older SQLite (use `ALTER TABLE RENAME TO`)
-- No `ALTER TABLE ADD CONSTRAINT` - recreate table for constraints
-- Use `IF NOT EXISTS` and `IF EXISTS` for idempotency
+- Use `IF NOT EXISTS` for idempotent CREATE statements
+- Use `IF EXISTS` for idempotent DROP statements
+- `SERIAL` for auto-incrementing primary keys
+- `TIMESTAMPTZ` for timezone-aware timestamps
+- `JSONB` for JSON data (more efficient than `JSON`)
+- `BOOLEAN` for true/false values
 
 ## Validation Checklist
 
 Before completing the schema change:
 
 - [ ] Migration files created with `diesel migration generate`
-- [ ] UP migration tested locally
+- [ ] UP migration tested locally against PostgreSQL
 - [ ] DOWN migration tested (can rollback)
-- [ ] `schema.rs` regenerated and manually corrected (nullability, bools)
+- [ ] `schema.rs` regenerated and manually corrected (nullability, types)
 - [ ] Entity added/updated in `src/entity.rs`
 - [ ] Table implementation added in `src/repo/table.rs`
 - [ ] Repository updated in `src/repo/mod.rs`
 - [ ] Build passes: `cargo build`
 - [ ] Lint passes: `./dev.sh lint`
-- [ ] Tests pass: `./dev.sh test`
+- [ ] Tests pass: `cargo test --all-features -- --test-threads=1`
 
 ## Quick Reference
 
@@ -328,8 +339,20 @@ Before completing the schema change:
 ## Error Handling
 
 If migration fails:
-1. Check SQL syntax
+1. Check SQL syntax (PostgreSQL syntax, not SQLite)
 2. Verify table/column exists
 3. Ensure foreign key constraints are valid
-4. For SQLite, check version compatibility
-5. Use `PRAGMA foreign_keys = ON` to enforce FK constraints
+4. Check PostgreSQL version compatibility
+5. Verify `diesel_cli` was compiled with PostgreSQL support
+
+## Data Migration
+
+For migrating from SQLite to PostgreSQL:
+
+```bash
+# Ensure PostgreSQL is running and DATABASE_URL is set
+export DATABASE_URL="postgres://pwr_bot:pwr_bot@localhost:5432/pwr_bot"
+
+# Run the migration script
+uv run --script scripts/migrate.py
+```

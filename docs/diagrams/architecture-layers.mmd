@@ -112,8 +112,8 @@ graph TB
             BotMetaTable["BotMetaTable"]
             Repo --> FeedTable & FeedItemTable & SubscriberTable & VoiceTable & SettingsTable & BotMetaTable
         end
-        SQLite["SQLite  ·  Diesel async"]
-        FeedTable & FeedItemTable & SubscriberTable & VoiceTable & SettingsTable --> SQLite
+        PostgreSQL["PostgreSQL  ·  Diesel async"]
+        FeedTable & FeedItemTable & SubscriberTable & VoiceTable & SettingsTable --> PostgreSQL
     end
 
     Config["Config<br/>env vars + feature flags"]

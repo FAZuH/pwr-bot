@@ -5,7 +5,7 @@ Guidelines for AI agents working on the pwr-bot Rust codebase.
 ## Project
 
 - Discord bot with feed subscriptions and voice channel tracking
-- Rust 2024, SQLite + Diesel (diesel-async + deadpool), Serenity + Poise, Tokio
+- Rust 2024, PostgreSQL + Diesel (diesel-async + deadpool), Serenity + Poise, Tokio
 - Requires **nightly Rust** for formatting (`rustfmt.toml` uses `imports_granularity = "Item"`)
 
 ## Development Commands
@@ -85,10 +85,11 @@ pub trait Update {
 
 ## Database
 
-- SQLite with Diesel (diesel-async 0.8 + deadpool)
-- Migrations: `diesel migration generate <name>` (requires `diesel_cli` installed)
-- Schema source: `src/repo/schema.rs` — regenerate with `diesel print-schema` after migration changes, then manually correct `Nullable<Integer>` PKs to `Integer` and `Integer` bools to `Bool`
+- PostgreSQL with Diesel (diesel-async 0.8 + deadpool)
+- Migrations: `diesel migration generate <name>` (requires `diesel_cli` installed with PostgreSQL support)
+- Schema source: `src/repo/schema.rs` — regenerate with `diesel print-schema` after migration changes, then manually correct `Nullable<Integer>` PKs to `Integer`
 - See `.opencode/skills/db-schema/SKILL.md` for migration and model patterns
+- Migration script: `scripts/migrate.py` (SQLite → PostgreSQL data migration)
 
 ## Commit Conventions
 
