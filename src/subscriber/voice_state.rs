@@ -632,7 +632,9 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(active_after_second.len(), 1);
-        assert_eq!(active_after_second[0].join_time, active_after_first[0].join_time);
+        assert_eq!(
+            active_after_second[0].join_time,
+            active_after_first[0].join_time
+        );
     }
-
 }
