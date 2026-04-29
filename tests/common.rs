@@ -1,6 +1,5 @@
 //! Common test utilities and mock implementations.
 
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::RwLock;
 
@@ -12,28 +11,30 @@ use pwr_bot::feed::Platform;
 use pwr_bot::feed::PlatformInfo;
 use pwr_bot::feed::error::FeedError;
 use pwr_bot::repo::Repository;
-use uuid::Uuid;
 
-/// Sets up a temporary test database.
-pub async fn setup_db() -> (Arc<Repository>, PathBuf) {
-    let uuid = Uuid::new_v4();
-    let db_path = std::env::temp_dir().join(format!("pwr-bot-test-{}.db", uuid));
-    let db_url = format!("sqlite://{}", db_path.to_str().unwrap());
+/// Sets up a test database connection to PostgreSQL.
+pub async fn setup_db() -> Arc<Repository> {
+    let db_url = std::env::var("DB_URL")
+        .unwrap_or("postgres://pwr_bot:pwr_bot@localhost:5432/pwr_bot".to_string());
 
-    let db = Repository::new(&db_url, db_path.to_str().unwrap())
+    let db = Repository::new(&db_url)
         .await
-        .expect("Failed to create database");
+        .expect("Failed to connect to database");
+
+    db.delete_all_tables()
+        .await
+        .expect("Failed to clean database");
 
     db.run_migrations().await.expect("Failed to run migrations");
 
-    (Arc::new(db), db_path)
+    Arc::new(db)
 }
 
-/// Cleans up the test database file.
-pub async fn teardown_db(db_path: PathBuf) {
-    if db_path.exists() {
-        let _ = std::fs::remove_file(db_path);
-    }
+/// Cleans up the test database by deleting all data.
+pub async fn teardown_db(db: &Repository) {
+    db.delete_all_tables()
+        .await
+        .expect("Failed to clean database");
 }
 
 // MOCK FEED

@@ -2,24 +2,40 @@ name: pwr-bot
 
 services:
 
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${DB_USER:-pwr_bot}
+      POSTGRES_PASSWORD: ${DB_PASS:?error}
+      POSTGRES_DB: ${DB_NAME:-pwr_bot}
+    volumes:
+      - pgdat:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pwr_bot -d pwr_bot"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   app:
-    image: ghcr.io/fazuh/pwr-bot:latest 
+    image: ghcr.io/fazuh/pwr-bot:latest
     build:
       context: .
       dockerfile: Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
     volumes:
-      - data:/app/data
       - logs:/app/logs
     environment:
-      - POLL_INTERVAL=${POLL_INTERVAL:-180}
-      - DATABASE_PATH=${DATABASE_PATH:-./data/data.db}
-      - DATABASE_URL=${DATABASE_URL:-sqlite://data/data.db}
-      - DISCORD_TOKEN=${DISCORD_TOKEN:?error}
-      - RUST_LOG=${RUST_LOG:-pwr_bot=info}
-      - ADMIN_ID=${ADMIN_ID:?error}
-      - LOGS_PATH=${LOGS_PATH:-./logs}
+      POLL_INTERVAL: ${POLL_INTERVAL:-180}
+      DB_URL: ${DB_URL:-postgres://pwr_bot:pwr_bot@db:5432/pwr_bot}
+      DISCORD_TOKEN: ${DISCORD_TOKEN:?error}
+      RUST_LOG: ${RUST_LOG:-pwr_bot=info}
+      ADMIN_ID: ${ADMIN_ID:?error}
+      LOGS_PATH: ${LOGS_PATH:-./logs}
     restart: unless-stopped
-      
+
 volumes:
-  data:
-  logs:
+  pgdata:

@@ -16,6 +16,7 @@ use crate::entity::VoiceLeaderboardEntry;
 use crate::entity::VoiceLeaderboardOpt;
 use crate::entity::VoiceSessionsEntity;
 use crate::repo::Repository;
+use crate::repo::traits::*;
 use crate::service::settings::SettingsService;
 use crate::service::traits::VoiceTracker;
 

@@ -10,6 +10,7 @@ use crate::entity::FeedSubscriptionEntity;
 use crate::entity::SubscriberEntity;
 use crate::repo::Repository;
 use crate::repo::error::DatabaseError;
+use crate::repo::traits::*;
 use crate::service::traits::InternalOps;
 
 #[async_trait::async_trait]

@@ -1,7 +1,5 @@
-PRAGMA foreign_keys = ON;
-
-CREATE TABLE feeds (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+CREATE TABLE IF NOT EXISTS feeds (
+    id SERIAL PRIMARY KEY,
     name TEXT NOT NULL,
     description TEXT NOT NULL DEFAULT '',
     platform_id TEXT NOT NULL,
@@ -12,29 +10,29 @@ CREATE TABLE feeds (
     tags TEXT NOT NULL DEFAULT ''
 );
 
-CREATE UNIQUE INDEX idx_feeds_platform_source ON feeds(platform_id, source_id);
-CREATE UNIQUE INDEX idx_feeds_source_url ON feeds(source_url);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_feeds_platform_source ON feeds(platform_id, source_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_feeds_source_url ON feeds(source_url);
 
-CREATE TABLE feed_items (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+CREATE TABLE IF NOT EXISTS feed_items (
+    id SERIAL PRIMARY KEY,
     feed_id INTEGER NOT NULL,
     description TEXT NOT NULL,
-    published TIMESTAMP NOT NULL,
+    published TIMESTAMPTZ NOT NULL,
     UNIQUE(feed_id, published),
     FOREIGN KEY (feed_id) REFERENCES feeds(id)
         ON DELETE CASCADE
         ON UPDATE CASCADE
 );
 
-CREATE TABLE subscribers (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+CREATE TABLE IF NOT EXISTS subscribers (
+    id SERIAL PRIMARY KEY,
     type TEXT NOT NULL,
     target_id TEXT NOT NULL,
     UNIQUE(type, target_id)
 );
 
-CREATE TABLE feed_subscriptions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+CREATE TABLE IF NOT EXISTS feed_subscriptions (
+    id SERIAL PRIMARY KEY,
     feed_id INTEGER NOT NULL,
     subscriber_id INTEGER NOT NULL,
     UNIQUE(feed_id, subscriber_id),
@@ -46,26 +44,26 @@ CREATE TABLE feed_subscriptions (
         ON UPDATE CASCADE
 );
 
-CREATE TABLE server_settings (
+CREATE TABLE IF NOT EXISTS server_settings (
     guild_id BIGINT PRIMARY KEY,
-    settings TEXT NOT NULL
+    settings JSONB NOT NULL
 );
 
-CREATE TABLE voice_sessions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+CREATE TABLE IF NOT EXISTS voice_sessions (
+    id SERIAL PRIMARY KEY,
     user_id BIGINT NOT NULL,
     guild_id BIGINT NOT NULL,
     channel_id BIGINT NOT NULL,
-    join_time TIMESTAMP NOT NULL,
-    leave_time TIMESTAMP NOT NULL,
-    is_active INTEGER NOT NULL DEFAULT 0,
+    join_time TIMESTAMPTZ NOT NULL,
+    leave_time TIMESTAMPTZ NOT NULL,
+    is_active BOOLEAN NOT NULL DEFAULT FALSE,
     UNIQUE(user_id, channel_id, join_time)
 );
 
-CREATE INDEX idx_voice_sessions_partner
+CREATE INDEX IF NOT EXISTS idx_voice_sessions_partner
 ON voice_sessions (guild_id, channel_id, join_time, leave_time);
 
-CREATE TABLE bot_meta (
+CREATE TABLE IF NOT EXISTS bot_meta (
     key TEXT NOT NULL PRIMARY KEY,
     value TEXT NOT NULL
 );

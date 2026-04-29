@@ -18,6 +18,7 @@ use crate::feed::PlatformInfo;
 use crate::feed::Platforms;
 use crate::feed::error::FeedError;
 use crate::repo::error::DatabaseError;
+use crate::repo::traits::*;
 use crate::service::Repository;
 use crate::service::error::ServiceError;
 use crate::service::settings::SettingsService;
@@ -301,7 +302,7 @@ impl FeedSubscriptionService {
             id: 0,
             feed_id: feed.id,
             description: new_latest.title.clone(),
-            published: new_latest.published.naive_utc(),
+            published: new_latest.published,
         };
         self.db.feed_item.replace(&new_feed_item).await?;
 
@@ -480,7 +481,7 @@ impl FeedSubscriptionService {
                         id: 0,
                         feed_id: feed.id,
                         description: feed_latest.title,
-                        published: feed_latest.published.naive_utc(),
+                        published: feed_latest.published,
                     };
                     // DB 1??
                     self.db.feed_item.insert(&version).await?;

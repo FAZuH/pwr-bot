@@ -17,7 +17,7 @@
 │           feed/  entity/ — models and platforms             │
 ├─────────────────────────────────────────────────────────────┤
 │                 Infrastructure Layer                        │
-│              repository/ — SQLite via Diesel                │
+│              repository/ — PostgreSQL via Diesel            │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -221,7 +221,7 @@ Discord gateway event
   → EventBus::publish(VoiceStateEvent)
   → VoiceStateSubscriber
   → VoiceTrackingService             update session state
-  → Repository                       persist to SQLite
+  → Repository                       persist to PostgreSQL
 ```
 
 ---

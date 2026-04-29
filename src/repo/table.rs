@@ -119,13 +119,11 @@ impl CrudTable<FeedEntity, i32> for FeedTable {
     }
 
     async fn replace(&self, model: &FeedEntity) -> Result<i32, DatabaseError> {
-        let mut conn = self.pool.get().await?;
-        let id = diesel::replace_into(feeds::table)
-            .values(model)
-            .returning(feeds::id)
-            .get_result(&mut conn)
-            .await?;
-        Ok(id)
+        if model.id != 0 && self.select(&model.id).await?.is_some() {
+            self.update(model).await?;
+            return Ok(model.id);
+        }
+        self.insert(model).await
     }
 }
 
@@ -168,7 +166,7 @@ impl FeedRepository for FeedTable {
 
         Ok(feeds::table
             .filter(
-                feeds::name.like(pattern).and(
+                feeds::name.ilike(pattern).and(
                     feeds::id.eq_any(
                         feed_subscriptions::table
                             .filter(feed_subscriptions::subscriber_id.eq(subscriber_id))
@@ -562,9 +560,9 @@ impl FeedSubscriptionRepository for FeedSubscriptionTable {
             LEFT JOIN feed_items fi ON fi.id = (
                 SELECT id FROM feed_items WHERE feed_id = f.id ORDER BY published DESC LIMIT 1
             )
-            WHERE fs.subscriber_id = ?
+            WHERE fs.subscriber_id = $1
             ORDER BY f.name
-            LIMIT ? OFFSET ?
+            LIMIT $2 OFFSET $3
             "#,
         )
         .bind::<diesel::sql_types::Integer, _>(subscriber_id)
@@ -685,13 +683,12 @@ impl CrudTable<ServerSettingsEntity, u64> for ServerSettingsTable {
     }
 
     async fn replace(&self, model: &ServerSettingsEntity) -> Result<u64, DatabaseError> {
-        let mut conn = self.pool.get().await?;
-        let guild_id: DbU64 = diesel::replace_into(server_settings::table)
-            .values(model)
-            .returning(server_settings::guild_id)
-            .get_result(&mut conn)
-            .await?;
-        Ok(guild_id.into())
+        let gid: u64 = model.guild_id.into();
+        if self.select(&gid).await?.is_some() {
+            self.update(model).await?;
+            return Ok(gid);
+        }
+        self.insert(model).await
     }
 }
 
@@ -765,13 +762,11 @@ impl CrudTable<VoiceSessionsEntity, i32> for VoiceSessionsTable {
     }
 
     async fn replace(&self, model: &VoiceSessionsEntity) -> Result<i32, DatabaseError> {
-        let mut conn = self.pool.get().await?;
-        let id = diesel::replace_into(voice_sessions::table)
-            .values(&model.to_insertable())
-            .returning(voice_sessions::id)
-            .get_result(&mut conn)
-            .await?;
-        Ok(id)
+        if model.id != 0 && self.select(&model.id).await?.is_some() {
+            self.update(model).await?;
+            return Ok(model.id);
+        }
+        self.insert(model).await
     }
 }
 
@@ -794,21 +789,21 @@ impl VoiceSessionsRepository for VoiceSessionsTable {
             SELECT
                 user_id,
                 SUM(
-                    strftime('%s', MIN(?, CASE WHEN is_active = 1 THEN CURRENT_TIMESTAMP ELSE leave_time END)) -
-                    strftime('%s', MAX(?, join_time))
-                ) as total_duration
+                    EXTRACT(EPOCH FROM LEAST($1, CASE WHEN is_active THEN CURRENT_TIMESTAMP ELSE leave_time END))::bigint -
+                    EXTRACT(EPOCH FROM GREATEST($2, join_time))::bigint
+                )::bigint as total_duration
             FROM voice_sessions
-            WHERE guild_id = ?
-            AND join_time <= ?
-            AND (is_active = 1 OR leave_time >= ?)
-            GROUP BY user_id ORDER BY total_duration DESC LIMIT ? OFFSET ?
+            WHERE guild_id = $3
+            AND join_time <= $4
+            AND (is_active OR leave_time >= $5)
+            GROUP BY user_id ORDER BY total_duration DESC LIMIT $6 OFFSET $7
             "#,
         )
-        .bind::<diesel::sql_types::Timestamp, _>(until_val.naive_utc())
-        .bind::<diesel::sql_types::Timestamp, _>(since_val.naive_utc())
+        .bind::<diesel::sql_types::Timestamptz, _>(until_val)
+        .bind::<diesel::sql_types::Timestamptz, _>(since_val)
         .bind::<diesel::sql_types::BigInt, _>(opts.guild_id as i64)
-        .bind::<diesel::sql_types::Timestamp, _>(until_val.naive_utc())
-        .bind::<diesel::sql_types::Timestamp, _>(since_val.naive_utc())
+        .bind::<diesel::sql_types::Timestamptz, _>(until_val)
+        .bind::<diesel::sql_types::Timestamptz, _>(since_val)
         .bind::<diesel::sql_types::BigInt, _>(limit)
         .bind::<diesel::sql_types::BigInt, _>(offset)
         .load(&mut conn)
@@ -853,47 +848,43 @@ impl VoiceSessionsRepository for VoiceSessionsTable {
         let mut conn = self.pool.get().await?;
         let limit = opts.limit.unwrap_or(10) as i64;
         let offset = opts.offset.unwrap_or(0) as i64;
-        let since_val = opts
-            .since
-            .map(|s| s.naive_utc())
-            .unwrap_or_else(|| chrono::DateTime::UNIX_EPOCH.naive_utc());
+        let since_val = opts.since.unwrap_or(chrono::DateTime::UNIX_EPOCH);
         let until_val = opts
             .until
-            .map(|u| u.naive_utc())
-            .unwrap_or_else(|| (chrono::Utc::now() + chrono::Duration::days(365)).naive_utc());
+            .unwrap_or_else(|| chrono::Utc::now() + chrono::Duration::days(365));
 
         let rows: Vec<VoiceLeaderboardRow> = diesel::sql_query(
             r#"
             SELECT
                 v2.user_id,
                 SUM(
-                    strftime('%s', MIN(
-                        CASE WHEN v1.is_active = 1 THEN CURRENT_TIMESTAMP ELSE v1.leave_time END,
-                        CASE WHEN v2.is_active = 1 THEN CURRENT_TIMESTAMP ELSE v2.leave_time END
-                    )) -
-                    strftime('%s', MAX(v1.join_time, v2.join_time))
-                ) as total_duration
+                    EXTRACT(EPOCH FROM LEAST(
+                        CASE WHEN v1.is_active THEN CURRENT_TIMESTAMP ELSE v1.leave_time END,
+                        CASE WHEN v2.is_active THEN CURRENT_TIMESTAMP ELSE v2.leave_time END
+                    ))::bigint -
+                    EXTRACT(EPOCH FROM GREATEST(v1.join_time, v2.join_time))::bigint
+                )::bigint as total_duration
             FROM voice_sessions v1
             JOIN voice_sessions v2
                 ON v1.guild_id = v2.guild_id
                 AND v1.channel_id = v2.channel_id
                 AND v1.user_id != v2.user_id
-                AND MAX(v1.join_time, v2.join_time) < MIN(
-                    CASE WHEN v1.is_active = 1 THEN CURRENT_TIMESTAMP ELSE v1.leave_time END,
-                    CASE WHEN v2.is_active = 1 THEN CURRENT_TIMESTAMP ELSE v2.leave_time END
+                AND GREATEST(v1.join_time, v2.join_time) < LEAST(
+                    CASE WHEN v1.is_active THEN CURRENT_TIMESTAMP ELSE v1.leave_time END,
+                    CASE WHEN v2.is_active THEN CURRENT_TIMESTAMP ELSE v2.leave_time END
                 )
-            WHERE v1.user_id = ? AND v1.guild_id = ?
-                AND v1.join_time >= ? AND v2.join_time >= ?
-                AND v1.join_time <= ? AND v2.join_time <= ?
-            GROUP BY v2.user_id ORDER BY total_duration DESC LIMIT ? OFFSET ?
+            WHERE v1.user_id = $1 AND v1.guild_id = $2
+                AND v1.join_time >= $3 AND v2.join_time >= $4
+                AND v1.join_time <= $5 AND v2.join_time <= $6
+            GROUP BY v2.user_id ORDER BY total_duration DESC LIMIT $7 OFFSET $8
             "#,
         )
         .bind::<diesel::sql_types::BigInt, _>(target_user_id as i64)
         .bind::<diesel::sql_types::BigInt, _>(opts.guild_id as i64)
-        .bind::<diesel::sql_types::Timestamp, _>(since_val)
-        .bind::<diesel::sql_types::Timestamp, _>(since_val)
-        .bind::<diesel::sql_types::Timestamp, _>(until_val)
-        .bind::<diesel::sql_types::Timestamp, _>(until_val)
+        .bind::<diesel::sql_types::Timestamptz, _>(since_val)
+        .bind::<diesel::sql_types::Timestamptz, _>(since_val)
+        .bind::<diesel::sql_types::Timestamptz, _>(until_val)
+        .bind::<diesel::sql_types::Timestamptz, _>(until_val)
         .bind::<diesel::sql_types::BigInt, _>(limit)
         .bind::<diesel::sql_types::BigInt, _>(offset)
         .load(&mut conn)
@@ -914,9 +905,9 @@ impl VoiceSessionsRepository for VoiceSessionsTable {
             voice_sessions::table
                 .filter(voice_sessions::user_id.eq(DbU64::from(user_id)))
                 .filter(voice_sessions::channel_id.eq(DbU64::from(channel_id)))
-                .filter(voice_sessions::join_time.eq(join_time.naive_utc())),
+                .filter(voice_sessions::join_time.eq(join_time)),
         )
-        .set(voice_sessions::leave_time.eq(leave_time.naive_utc()))
+        .set(voice_sessions::leave_time.eq(leave_time))
         .execute(&mut conn)
         .await?;
         Ok(())
@@ -934,10 +925,10 @@ impl VoiceSessionsRepository for VoiceSessionsTable {
             voice_sessions::table
                 .filter(voice_sessions::user_id.eq(DbU64::from(user_id)))
                 .filter(voice_sessions::channel_id.eq(DbU64::from(channel_id)))
-                .filter(voice_sessions::join_time.eq(join_time.naive_utc())),
+                .filter(voice_sessions::join_time.eq(join_time)),
         )
         .set((
-            voice_sessions::leave_time.eq(leave_time.naive_utc()),
+            voice_sessions::leave_time.eq(leave_time),
             voice_sessions::is_active.eq(false),
         ))
         .execute(&mut conn)
@@ -965,8 +956,8 @@ impl VoiceSessionsRepository for VoiceSessionsTable {
         let mut conn = self.pool.get().await?;
         let mut query = voice_sessions::table
             .filter(voice_sessions::guild_id.eq(DbU64::from(guild_id)))
-            .filter(voice_sessions::join_time.ge(since.naive_utc()))
-            .filter(voice_sessions::join_time.le(until.naive_utc()))
+            .filter(voice_sessions::join_time.ge(since))
+            .filter(voice_sessions::join_time.le(until))
             .into_boxed();
 
         if let Some(uid) = user_id {
@@ -992,24 +983,24 @@ impl VoiceSessionsRepository for VoiceSessionsTable {
         let rows = diesel::sql_query(
             r#"
             SELECT
-                date(join_time) as day,
+                DATE(join_time) as day,
                 SUM(
                     CASE
-                        WHEN is_active = 1
-                        THEN strftime('%s', 'now') - strftime('%s', join_time)
-                        ELSE strftime('%s', leave_time) - strftime('%s', join_time)
+                        WHEN is_active
+                        THEN EXTRACT(EPOCH FROM NOW())::bigint - EXTRACT(EPOCH FROM join_time)::bigint
+                        ELSE EXTRACT(EPOCH FROM leave_time)::bigint - EXTRACT(EPOCH FROM join_time)::bigint
                     END
-                ) as total_seconds
+                )::bigint as total_seconds
             FROM voice_sessions
-            WHERE user_id = ? AND guild_id = ? AND join_time >= ? AND join_time <= ?
-            GROUP BY date(join_time)
+            WHERE user_id = $1 AND guild_id = $2 AND join_time >= $3 AND join_time <= $4
+            GROUP BY DATE(join_time)
             ORDER BY day
             "#,
         )
         .bind::<diesel::sql_types::BigInt, _>(user_id as i64)
         .bind::<diesel::sql_types::BigInt, _>(guild_id as i64)
-        .bind::<diesel::sql_types::Timestamp, _>(since.naive_utc())
-        .bind::<diesel::sql_types::Timestamp, _>(until.naive_utc())
+        .bind::<diesel::sql_types::Timestamptz, _>(since)
+        .bind::<diesel::sql_types::Timestamptz, _>(until)
         .load::<VoiceDailyActivity>(&mut conn)
         .await?;
         Ok(rows)
@@ -1026,29 +1017,29 @@ impl VoiceSessionsRepository for VoiceSessionsTable {
             r#"
             SELECT
                 day,
-                SUM(user_daily_total) as value
+                SUM(user_daily_total)::bigint as value
             FROM (
                 SELECT
                     user_id,
-                    date(join_time) as day,
+                    DATE(join_time) as day,
                     SUM(
                         CASE
-                            WHEN is_active = 1
-                            THEN strftime('%s', 'now') - strftime('%s', join_time)
-                            ELSE strftime('%s', leave_time) - strftime('%s', join_time)
+                            WHEN is_active
+                            THEN EXTRACT(EPOCH FROM NOW())::bigint - EXTRACT(EPOCH FROM join_time)::bigint
+                            ELSE EXTRACT(EPOCH FROM leave_time)::bigint - EXTRACT(EPOCH FROM join_time)::bigint
                         END
-                    ) as user_daily_total
+                    )::bigint as user_daily_total
                 FROM voice_sessions
-                WHERE guild_id = ? AND join_time >= ? AND join_time <= ?
-                GROUP BY user_id, date(join_time)
+                WHERE guild_id = $1 AND join_time >= $2 AND join_time <= $3
+                GROUP BY user_id, DATE(join_time)
             ) user_totals
             GROUP BY day
             ORDER BY day
             "#,
         )
         .bind::<diesel::sql_types::BigInt, _>(guild_id as i64)
-        .bind::<diesel::sql_types::Timestamp, _>(since.naive_utc())
-        .bind::<diesel::sql_types::Timestamp, _>(until.naive_utc())
+        .bind::<diesel::sql_types::Timestamptz, _>(since)
+        .bind::<diesel::sql_types::Timestamptz, _>(until)
         .load::<GuildDailyStats>(&mut conn)
         .await?;
         Ok(rows)
@@ -1065,29 +1056,29 @@ impl VoiceSessionsRepository for VoiceSessionsTable {
             r#"
             SELECT
                 day,
-                CAST(AVG(user_daily_total) AS INTEGER) as value
+                CAST(AVG(user_daily_total) AS BIGINT) as value
             FROM (
                 SELECT
                     user_id,
-                    date(join_time) as day,
+                    DATE(join_time) as day,
                     SUM(
                         CASE
-                            WHEN is_active = 1
-                            THEN strftime('%s', 'now') - strftime('%s', join_time)
-                            ELSE strftime('%s', leave_time) - strftime('%s', join_time)
+                            WHEN is_active
+                            THEN EXTRACT(EPOCH FROM NOW())::bigint - EXTRACT(EPOCH FROM join_time)::bigint
+                            ELSE EXTRACT(EPOCH FROM leave_time)::bigint - EXTRACT(EPOCH FROM join_time)::bigint
                         END
-                    ) as user_daily_total
+                    )::bigint as user_daily_total
                 FROM voice_sessions
-                WHERE guild_id = ? AND join_time >= ? AND join_time <= ?
-                GROUP BY user_id, date(join_time)
+                WHERE guild_id = $1 AND join_time >= $2 AND join_time <= $3
+                GROUP BY user_id, DATE(join_time)
             ) user_totals
             GROUP BY day
             ORDER BY day
             "#,
         )
         .bind::<diesel::sql_types::BigInt, _>(guild_id as i64)
-        .bind::<diesel::sql_types::Timestamp, _>(since.naive_utc())
-        .bind::<diesel::sql_types::Timestamp, _>(until.naive_utc())
+        .bind::<diesel::sql_types::Timestamptz, _>(since)
+        .bind::<diesel::sql_types::Timestamptz, _>(until)
         .load::<GuildDailyStats>(&mut conn)
         .await?;
         Ok(rows)
@@ -1103,17 +1094,17 @@ impl VoiceSessionsRepository for VoiceSessionsTable {
         let rows = diesel::sql_query(
             r#"
             SELECT
-                date(join_time) as day,
+                DATE(join_time) as day,
                 COUNT(DISTINCT user_id) as value
             FROM voice_sessions
-            WHERE guild_id = ? AND join_time >= ? AND join_time <= ?
-            GROUP BY date(join_time)
+            WHERE guild_id = $1 AND join_time >= $2 AND join_time <= $3
+            GROUP BY DATE(join_time)
             ORDER BY day
             "#,
         )
         .bind::<diesel::sql_types::BigInt, _>(guild_id as i64)
-        .bind::<diesel::sql_types::Timestamp, _>(since.naive_utc())
-        .bind::<diesel::sql_types::Timestamp, _>(until.naive_utc())
+        .bind::<diesel::sql_types::Timestamptz, _>(since)
+        .bind::<diesel::sql_types::Timestamptz, _>(until)
         .load::<GuildDailyStats>(&mut conn)
         .await?;
         Ok(rows)
@@ -1191,13 +1182,11 @@ impl CrudTable<BotMetaEntity, String> for BotMetaTable {
     }
 
     async fn replace(&self, model: &BotMetaEntity) -> Result<String, DatabaseError> {
-        let mut conn = self.pool.get().await?;
-        let key = diesel::replace_into(bot_meta::table)
-            .values(model)
-            .returning(bot_meta::key)
-            .get_result(&mut conn)
-            .await?;
-        Ok(key)
+        if self.select(&model.key).await?.is_some() {
+            self.update(model).await?;
+            return Ok(model.key.clone());
+        }
+        self.insert(model).await
     }
 }
 
@@ -1208,10 +1197,12 @@ impl BotMetaRepository for BotMetaTable {
             Ok(c) => c,
             Err(_) => return false,
         };
-        diesel::sql_query("SELECT name FROM sqlite_master WHERE type='table' AND name='bot_meta'")
-            .execute(&mut conn)
-            .await
-            .map(|r| r > 0)
-            .unwrap_or(false)
+        diesel::sql_query(
+            "SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'bot_meta'"
+        )
+        .execute(&mut conn)
+        .await
+        .map(|r| r > 0)
+        .unwrap_or(false)
     }
 }

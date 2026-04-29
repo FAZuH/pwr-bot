@@ -6,6 +6,7 @@ use crate::entity::Json;
 use crate::entity::ServerSettings;
 use crate::entity::ServerSettingsEntity;
 use crate::repo::Repository;
+use crate::repo::traits::*;
 use crate::service::error::ServiceError;
 use crate::service::traits::SettingsProvider;
 

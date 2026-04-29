@@ -1,6 +1,7 @@
 //! Integration tests for database table operations.
 
 use chrono::Duration;
+use chrono::SubsecRound;
 use chrono::Utc;
 use pwr_bot::entity::DbU64;
 use pwr_bot::entity::FeedEntity;
@@ -13,6 +14,7 @@ use pwr_bot::entity::SubscriberEntity;
 use pwr_bot::entity::SubscriberType;
 use pwr_bot::entity::VoiceSessionsEntity;
 use pwr_bot::entity::WelcomeSettings;
+use pwr_bot::repo::traits::*;
 
 mod common;
 
@@ -21,13 +23,14 @@ mod common;
 macro_rules! db_test {
     ($name:ident, |$db:ident| $body:block) => {
         #[tokio::test]
+        #[serial_test::serial]
         async fn $name() {
-            let ($db, db_path) = common::setup_db().await;
+            let $db = common::setup_db().await;
 
             // Execute the test logic
             $body
 
-            common::teardown_db(db_path).await;
+            common::teardown_db(&$db).await;
         }
     };
 }
@@ -82,7 +85,7 @@ macro_rules! create_subscription {
 
 macro_rules! create_item {
     ($db:expr, $feed_id:expr, $desc:expr) => {
-        create_item!($db, $feed_id, $desc, Utc::now().naive_utc())
+        create_item!($db, $feed_id, $desc, Utc::now())
     };
     ($db:expr, $feed_id:expr, $desc:expr, $date:expr) => {
         $db.feed_item
@@ -218,13 +221,8 @@ mod feed_item_table_tests {
 
     db_test!(insert_and_select_latest, |db| {
         let feed_id = create_feed!(db, "Feed");
-        create_item!(db, feed_id, "Chapter 1", Utc::now().naive_utc());
-        create_item!(
-            db,
-            feed_id,
-            "Chapter 2",
-            (Utc::now() + Duration::hours(1)).naive_utc()
-        );
+        create_item!(db, feed_id, "Chapter 1", Utc::now());
+        create_item!(db, feed_id, "Chapter 2", Utc::now() + Duration::hours(1));
 
         let latest = db
             .feed_item
@@ -237,13 +235,8 @@ mod feed_item_table_tests {
 
     db_test!(select_all_by_feed_id_ordered, |db| {
         let feed_id = create_feed!(db, "Feed");
-        create_item!(db, feed_id, "Chapter 1", Utc::now().naive_utc());
-        create_item!(
-            db,
-            feed_id,
-            "Chapter 2",
-            (Utc::now() + Duration::hours(1)).naive_utc()
-        );
+        create_item!(db, feed_id, "Chapter 1", Utc::now());
+        create_item!(db, feed_id, "Chapter 2", Utc::now() + Duration::hours(1));
 
         let all = db.feed_item.select_all_by_feed_id(feed_id).await.unwrap();
         assert_eq!(all.len(), 2);
@@ -531,7 +524,7 @@ mod voice_sessions_table_tests {
             .expect("Failed to insert session");
 
         // Update leave_time
-        let new_leave_time = join_time + Duration::hours(1);
+        let new_leave_time = (join_time + Duration::hours(1)).trunc_subsecs(6);
         db.voice_sessions
             .update_leave_time(100, 300, &join_time, &new_leave_time)
             .await

@@ -21,6 +21,21 @@ jobs:
     if: "! github.event.pull_request.draft"
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: pwr_bot
+          POSTGRES_PASSWORD: pwr_bot
+          POSTGRES_DB: pwr_bot
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -44,7 +59,7 @@ jobs:
           shared-key: "ci"
 
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y pkg-config libfontconfig1-dev libsqlite3-dev
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libfontconfig1-dev libpq-dev
 
       - name: Check Format
         run: cargo +nightly fmt --all -- --check
@@ -55,4 +70,4 @@ jobs:
       - name: Run Tests
         run: |
           cp .env-example .env
-          cargo test --all-features --no-fail-fast
+          cargo test --all-features --no-fail-fast -- --test-threads=1
