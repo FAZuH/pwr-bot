@@ -31,6 +31,14 @@ graph TB
             Coordinator --> Controllers --> Views
         end
 
+        subgraph TestFW["Test Framework  ·  src/bot/test_framework/"]
+            TestRunner["GuiTestRunner<br/>/gui_test command"]
+            SimEvents["SyntheticEvent<br/>simulate_click / simulate_select"]
+            TestAsserts["assert_has_action<br/>assert_navigated_to"]
+            TestRunner --> SimEvents --> Views
+            TestRunner --> TestAsserts
+        end
+
         Bot --> EventHandler & Cogs
         FeedCmd & VoiceCmd & SettingsCmd --> Coordinator
     end
