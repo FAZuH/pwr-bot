@@ -14,7 +14,7 @@ use pwr_bot::repo::Repository;
 
 /// Sets up a test database connection to PostgreSQL.
 pub async fn setup_db() -> Arc<Repository> {
-    let db_url = std::env::var("DATABASE_URL")
+    let db_url = std::env::var("DB_URL")
         .unwrap_or("postgres://pwr_bot:pwr_bot@localhost:5432/pwr_bot".to_string());
 
     let db = Repository::new(&db_url)

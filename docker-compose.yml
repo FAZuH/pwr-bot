@@ -5,11 +5,11 @@ services:
   db:
     image: postgres:17-alpine
     environment:
-      POSTGRES_USER: pwr_bot
+      POSTGRES_USER: ${DB_USER:-pwr_bot}
       POSTGRES_PASSWORD: ${DB_PASS:?error}
-      POSTGRES_DB: pwr_bot
+      POSTGRES_DB: ${DB_NAME:-pwr_bot}
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - pgdat:/var/lib/postgresql/data
     ports:
       - "5432:5432"
     healthcheck:
@@ -26,9 +26,11 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    volumes:
+      - logs:/app/logs
     environment:
       POLL_INTERVAL: ${POLL_INTERVAL:-180}
-      DATABASE_URL: ${DB_URL:-postgres://pwr_bot:pwr_bot@db:5432/pwr_bot}
+      DB_URL: ${DB_URL:-postgres://pwr_bot:pwr_bot@db:5432/pwr_bot}
       DISCORD_TOKEN: ${DISCORD_TOKEN:?error}
       RUST_LOG: ${RUST_LOG:-pwr_bot=info}
       ADMIN_ID: ${ADMIN_ID:?error}

@@ -350,8 +350,8 @@ If migration fails:
 For migrating from SQLite to PostgreSQL:
 
 ```bash
-# Ensure PostgreSQL is running and DATABASE_URL is set
-export DATABASE_URL="postgres://pwr_bot:pwr_bot@localhost:5432/pwr_bot"
+# Ensure PostgreSQL is running and DB_URL is set
+export DB_URL="postgres://pwr_bot:pwr_bot@localhost:5432/pwr_bot"
 
 # Run the migration script
 uv run --script scripts/migrate.py

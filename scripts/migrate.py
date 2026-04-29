@@ -8,11 +8,10 @@
 """Migrate data from SQLite to PostgreSQL for pwr-bot.
 
 Usage:
-    export DATABASE_URL="postgres://pwr_bot:pwr_bot@localhost:5432/pwr_bot"
-    uv run --script scripts/migrate.py
+    export DB_URL="postgres://pwr_bot:pwr_bot@localhost:5432/pwr_bot"
 
 This script reads from data/prod.db (SQLite) and writes to the PostgreSQL
-database configured by DATABASE_URL. It preserves IDs to maintain FK
+database configured by DB_URL. It preserves IDs to maintain FK
 relationships and resets SERIAL sequences afterward.
 """
 
@@ -27,7 +26,7 @@ from psycopg2.extras import Json as PgJson
 
 SQLITE_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "prod.db")
 PG_URL = os.environ.get(
-    "DATABASE_URL", "postgres://pwr_bot:pwr_bot@localhost:5432/pwr_bot"
+    "DB_URL", "postgres://pwr_bot:pwr_bot@localhost:5432/pwr_bot"
 )
 
 

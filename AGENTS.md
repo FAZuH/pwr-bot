@@ -23,7 +23,7 @@ cargo test --all-features
 
 - Do **not** run `./dev.sh format lint` after every edit — it mutates source files and may require re-reading
 - Do **not** use `./dev.sh build` for quick feedback — it builds a Docker image
-- Tests need `DATABASE_URL` in `.env` locally; CI copies `.env-example` → `.env` automatically
+- Tests need `DB_URL` in `.env` locally; CI copies `.env-example` → `.env` automatically
 - CI order: `fmt --check` → `build --all-targets` → `clippy -D warnings` → `test`
 - Diagrams: always use `./dev.sh docs`, never invoke `mmdc` directly
 

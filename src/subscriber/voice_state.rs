@@ -272,7 +272,7 @@ mod tests {
     use crate::repo::Repository;
 
     async fn create_mock_subscriber() -> anyhow::Result<VoiceStateSubscriber> {
-        let db_url = std::env::var("DATABASE_URL")
+        let db_url = std::env::var("DB_URL")
             .unwrap_or("postgres://pwr_bot:pwr_bot@localhost:5432/pwr_bot".to_string());
 
         let db = Repository::new(&db_url).await.unwrap();

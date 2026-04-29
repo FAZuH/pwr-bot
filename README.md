@@ -136,7 +136,10 @@ See `.env-example` for available configuration options.
 | `DISCORD_TOKEN` | Your Discord bot token | **Required** |
 | `ADMIN_ID` | Discord User ID for admin commands | **Required** |
 | `POLL_INTERVAL` | Feed polling interval in seconds | `180` |
-| `DATABASE_PATH` | Path to SQLite DB file | `./data/data.db` |
+| `DB_URL` | PostgreSQL connection URL | `postgres://pwr_bot:pwr_bot@localhost:5432/pwr_bot` |
+| `DB_PASS` | PostgreSQL password | `pwr_bot` |
+| `DB_USER` | PostgreSQL username | `pwr_bot` |
+| `DB_NAME` | PostgreSQL database name | `pwr_bot` |
 | `LOGS_PATH` | Directory for logs | `./logs` |
 | `DATA_PATH` | Directory for data files | `./data` |
 | `ENABLE_VOICE_TRACKING` | Enable voice channel tracking and heartbeat | `true` |
@@ -162,7 +165,7 @@ After the bot is running and invited to your server, you need to register the sl
 
 ## Notes and Tips
 
-- **Database:** The application uses SQLite. Migrations are handled automatically on startup.
+- **Database:** The application uses PostgreSQL. Migrations are handled automatically on startup.
 - **Logs:** Application logs are stored in the configured `LOGS_PATH` (default: `logs/` directory).
 - **Docker Volumes:** If you are using Docker, make sure `data/` and `logs/` are mounted to persist data and logs between restarts.
 
