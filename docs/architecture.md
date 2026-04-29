@@ -17,7 +17,7 @@
 │           feed/  entity/ — models and platforms             │
 ├─────────────────────────────────────────────────────────────┤
 │                 Infrastructure Layer                        │
-│              repository/ — SQLite via SQLx                  │
+│              repository/ — PostgreSQL via Diesel            │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -160,18 +160,18 @@ Implements the **Strategy pattern** — `FeedSubscriptionService` depends on the
 
 ## Infrastructure Layer (`src/repository/`)
 
-Data access. Repositories depend on domain entities, not the other way around. Owns all SQLx query logic, the connection pool, and migrations.
+Data access. Repositories depend on domain entities, not the other way around. Owns all Diesel query logic, the connection pool, and migrations.
 
 ```rust
 pub struct Repository {
-    pool: SqlitePool,
-    pub feed: FeedTable,
-    pub feed_item: FeedItemTable,
-    pub subscriber: SubscriberTable,
-    pub feed_subscription: FeedSubscriptionTable,
-    pub server_settings: ServerSettingsTable,
-    pub voice_sessions: VoiceSessionsTable,
-    pub bot_meta: BotMetaTable,
+    pool: DbPool,
+    pub feed: Box<dyn FeedRepository>,
+    pub feed_item: Box<dyn FeedItemRepository>,
+    pub subscriber: Box<dyn SubscriberRepository>,
+    pub feed_subscription: Box<dyn FeedSubscriptionRepository>,
+    pub server_settings: Box<dyn ServerSettingsRepository>,
+    pub voice_sessions: Box<dyn VoiceSessionsRepository>,
+    pub bot_meta: Box<dyn BotMetaRepository>,
 }
 ```
 
@@ -221,7 +221,7 @@ Discord gateway event
   → EventBus::publish(VoiceStateEvent)
   → VoiceStateSubscriber
   → VoiceTrackingService             update session state
-  → Repository                       persist to SQLite
+  → Repository                       persist to PostgreSQL
 ```
 
 ---

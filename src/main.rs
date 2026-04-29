@@ -81,7 +81,7 @@ async fn load_config() -> Result<Arc<Config>> {
 
 async fn setup_database(config: &Config, init_start: Instant) -> Result<Arc<Repository>> {
     debug!("Setting up Database...");
-    let db = Arc::new(Repository::new(&config.db_url, &config.db_path).await?);
+    let db = Arc::new(Repository::new(&config.db_url).await?);
 
     info!("Running database migrations...");
     db.run_migrations().await?;

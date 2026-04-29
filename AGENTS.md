@@ -5,7 +5,7 @@ Guidelines for AI agents working on the pwr-bot Rust codebase.
 ## Project
 
 - Discord bot with feed subscriptions and voice channel tracking
-- Rust 2024, SQLite + SQLx, Serenity + Poise, Tokio
+- Rust 2024, PostgreSQL + Diesel (diesel-async + deadpool), Serenity + Poise, Tokio
 - Requires **nightly Rust** for formatting (`rustfmt.toml` uses `imports_granularity = "Item"`)
 
 ## Development Commands
@@ -23,7 +23,7 @@ cargo test --all-features
 
 - Do **not** run `./dev.sh format lint` after every edit — it mutates source files and may require re-reading
 - Do **not** use `./dev.sh build` for quick feedback — it builds a Docker image
-- Tests need `SQLX_OFFLINE=true` in CI; locally they need `DATABASE_URL` in `.env`
+- Tests need `DB_URL` in `.env` locally; CI copies `.env-example` → `.env` automatically
 - CI order: `fmt --check` → `build --all-targets` → `clippy -D warnings` → `test`
 - Diagrams: always use `./dev.sh docs`, never invoke `mmdc` directly
 
@@ -85,10 +85,11 @@ pub trait Update {
 
 ## Database
 
-- SQLite with SQLx (compile-time checked queries)
-- Migrations: `cargo sqlx migrate add <name>`
-- Offline query metadata stored in `.sqlx/` — regenerate with `cargo sqlx prepare` if you change queries
+- PostgreSQL with Diesel (diesel-async 0.8 + deadpool)
+- Migrations: `diesel migration generate <name>` (requires `diesel_cli` installed with PostgreSQL support)
+- Schema source: `src/repo/schema.rs` — regenerate with `diesel print-schema` after migration changes, then manually correct `Nullable<Integer>` PKs to `Integer`
 - See `.opencode/skills/db-schema/SKILL.md` for migration and model patterns
+- Migration script: `scripts/migrate.py` (SQLite → PostgreSQL data migration)
 
 ## Commit Conventions
 

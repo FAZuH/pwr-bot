@@ -11,7 +11,7 @@ pub use crate::bot::command::Error;
 pub use crate::bot::controller::Controller;
 pub use crate::bot::coordinator::Coordinator;
 pub use crate::bot::error::BotError;
-pub use crate::bot::navigation::NavigationResult;
+pub use crate::bot::navigation::Navigation;
 pub use crate::bot::utils::*;
 pub use crate::bot::view::Action;
 pub use crate::bot::view::pagination::PaginationAction;

@@ -1,16 +1,20 @@
 //! Integration tests for database table operations.
 
 use chrono::Duration;
+use chrono::SubsecRound;
 use chrono::Utc;
+use pwr_bot::entity::DbU64;
 use pwr_bot::entity::FeedEntity;
 use pwr_bot::entity::FeedItemEntity;
 use pwr_bot::entity::FeedSubscriptionEntity;
 use pwr_bot::entity::FeedsSettings;
+use pwr_bot::entity::Json;
 use pwr_bot::entity::ServerSettingsEntity;
 use pwr_bot::entity::SubscriberEntity;
 use pwr_bot::entity::SubscriberType;
 use pwr_bot::entity::VoiceSessionsEntity;
 use pwr_bot::entity::WelcomeSettings;
+use pwr_bot::repo::traits::*;
 
 mod common;
 
@@ -19,13 +23,14 @@ mod common;
 macro_rules! db_test {
     ($name:ident, |$db:ident| $body:block) => {
         #[tokio::test]
+        #[serial_test::serial]
         async fn $name() {
-            let ($db, db_path) = common::setup_db().await;
+            let $db = common::setup_db().await;
 
             // Execute the test logic
             $body
 
-            common::teardown_db(db_path).await;
+            common::teardown_db(&$db).await;
         }
     };
 }
@@ -422,8 +427,8 @@ mod server_settings_table_tests {
 
     fn create_settings(guild_id: u64, chan: &str) -> ServerSettingsEntity {
         ServerSettingsEntity {
-            guild_id,
-            settings: sqlx::types::Json(ServerSettings {
+            guild_id: DbU64::from(guild_id),
+            settings: Json(ServerSettings {
                 voice: VoiceSettings::default(),
                 feeds: FeedsSettings {
                     enabled: Some(true),
@@ -519,7 +524,7 @@ mod voice_sessions_table_tests {
             .expect("Failed to insert session");
 
         // Update leave_time
-        let new_leave_time = join_time + Duration::hours(1);
+        let new_leave_time = (join_time + Duration::hours(1)).trunc_subsecs(6);
         db.voice_sessions
             .update_leave_time(100, 300, &join_time, &new_leave_time)
             .await

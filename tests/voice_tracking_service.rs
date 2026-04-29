@@ -1,29 +1,33 @@
 //! Integration tests for voice tracking service.
 
 use chrono::Duration;
+use chrono::SubsecRound;
 use chrono::Utc;
+use pwr_bot::entity::DbU64;
+use pwr_bot::entity::Json;
 use pwr_bot::entity::ServerSettings;
 use pwr_bot::entity::ServerSettingsEntity;
 use pwr_bot::entity::VoiceSessionsEntity;
 use pwr_bot::entity::VoiceSettings;
+use pwr_bot::repo::traits::*;
 use pwr_bot::service::voice_tracking::VoiceTrackingService;
 
 mod common;
 
 #[tokio::test]
 async fn test_voice_tracking_service_new() {
-    let (db, db_path) = common::setup_db().await;
+    let db = common::setup_db().await;
 
     // Test creating the service
     let service = VoiceTrackingService::new(db.clone()).await;
     assert!(service.is_ok(), "Failed to create VoiceTrackingService");
 
-    common::teardown_db(db_path).await;
+    common::teardown_db(&db).await;
 }
 
 #[tokio::test]
 async fn test_is_enabled_default() {
-    let (db, db_path) = common::setup_db().await;
+    let db = common::setup_db().await;
     let service = VoiceTrackingService::new(db.clone())
         .await
         .expect("Failed to create service");
@@ -34,12 +38,12 @@ async fn test_is_enabled_default() {
     let is_enabled = service.is_enabled(guild_id).await;
     assert!(is_enabled, "Voice tracking should be enabled by default");
 
-    common::teardown_db(db_path).await;
+    common::teardown_db(&db).await;
 }
 
 #[tokio::test]
 async fn test_is_enabled_when_disabled() {
-    let (db, db_path) = common::setup_db().await;
+    let db = common::setup_db().await;
     let service = VoiceTrackingService::new(db.clone())
         .await
         .expect("Failed to create service");
@@ -63,12 +67,12 @@ async fn test_is_enabled_when_disabled() {
     let is_enabled = service.is_enabled(guild_id).await;
     assert!(!is_enabled, "Voice tracking should be disabled");
 
-    common::teardown_db(db_path).await;
+    common::teardown_db(&db).await;
 }
 
 #[tokio::test]
 async fn test_is_enabled_when_re_enabled() {
-    let (db, db_path) = common::setup_db().await;
+    let db = common::setup_db().await;
     let service = VoiceTrackingService::new(db.clone())
         .await
         .expect("Failed to create service");
@@ -105,17 +109,17 @@ async fn test_is_enabled_when_re_enabled() {
     let is_enabled = service.is_enabled(guild_id).await;
     assert!(is_enabled, "Voice tracking should be re-enabled");
 
-    common::teardown_db(db_path).await;
+    common::teardown_db(&db).await;
 }
 
 #[tokio::test]
 async fn test_insert_and_replace_voice_session() {
-    let (db, db_path) = common::setup_db().await;
+    let db = common::setup_db().await;
     let service = VoiceTrackingService::new(db.clone())
         .await
         .expect("Failed to create service");
 
-    let now = Utc::now();
+    let now = Utc::now().trunc_subsecs(6);
     let session = VoiceSessionsEntity {
         id: 0,
         user_id: 111111,
@@ -165,12 +169,12 @@ async fn test_insert_and_replace_voice_session() {
     assert_eq!(sessions.len(), 1);
     assert_eq!(sessions[0].leave_time, now + Duration::hours(2));
 
-    common::teardown_db(db_path).await;
+    common::teardown_db(&db).await;
 }
 
 #[tokio::test]
 async fn test_get_server_settings_default() {
-    let (db, db_path) = common::setup_db().await;
+    let db = common::setup_db().await;
     let service = VoiceTrackingService::new(db.clone())
         .await
         .expect("Failed to create service");
@@ -185,12 +189,12 @@ async fn test_get_server_settings_default() {
 
     assert!(settings.voice.enabled.is_none());
 
-    common::teardown_db(db_path).await;
+    common::teardown_db(&db).await;
 }
 
 #[tokio::test]
 async fn test_update_and_get_server_settings() {
-    let (db, db_path) = common::setup_db().await;
+    let db = common::setup_db().await;
     let service = VoiceTrackingService::new(db.clone())
         .await
         .expect("Failed to create service");
@@ -217,12 +221,12 @@ async fn test_update_and_get_server_settings() {
         .expect("Failed to get settings");
     assert_eq!(fetched.voice.enabled, Some(true));
 
-    common::teardown_db(db_path).await;
+    common::teardown_db(&db).await;
 }
 
 #[tokio::test]
 async fn test_get_leaderboard() {
-    let (db, db_path) = common::setup_db().await;
+    let db = common::setup_db().await;
     let service = VoiceTrackingService::new(db.clone())
         .await
         .expect("Failed to create service");
@@ -298,12 +302,12 @@ async fn test_get_leaderboard() {
     assert_eq!(leaderboard[2].user_id, 1002);
     assert_eq!(leaderboard[2].total_duration, 1800);
 
-    common::teardown_db(db_path).await;
+    common::teardown_db(&db).await;
 }
 
 #[tokio::test]
 async fn test_get_leaderboard_with_limit() {
-    let (db, db_path) = common::setup_db().await;
+    let db = common::setup_db().await;
     let service = VoiceTrackingService::new(db.clone())
         .await
         .expect("Failed to create service");
@@ -341,12 +345,12 @@ async fn test_get_leaderboard_with_limit() {
     assert_eq!(leaderboard[0].user_id, 2005);
     assert_eq!(leaderboard[0].total_duration, 5 * 3600);
 
-    common::teardown_db(db_path).await;
+    common::teardown_db(&db).await;
 }
 
 #[tokio::test]
 async fn test_get_leaderboard_with_offset() {
-    let (db, db_path) = common::setup_db().await;
+    let db = common::setup_db().await;
     let service = VoiceTrackingService::new(db.clone())
         .await
         .expect("Failed to create service");
@@ -388,12 +392,12 @@ async fn test_get_leaderboard_with_offset() {
     assert_eq!(leaderboard[1].user_id, 3002);
     assert_eq!(leaderboard[1].total_duration, 2 * 3600);
 
-    common::teardown_db(db_path).await;
+    common::teardown_db(&db).await;
 }
 
 #[tokio::test]
 async fn test_get_leaderboard_empty() {
-    let (db, db_path) = common::setup_db().await;
+    let db = common::setup_db().await;
     let service = VoiceTrackingService::new(db.clone())
         .await
         .expect("Failed to create service");
@@ -409,18 +413,18 @@ async fn test_get_leaderboard_empty() {
     // Should be empty
     assert!(leaderboard.is_empty());
 
-    common::teardown_db(db_path).await;
+    common::teardown_db(&db).await;
 }
 
 #[tokio::test]
 async fn test_disabled_guilds_cache_on_init() {
-    let (db, db_path) = common::setup_db().await;
+    let db = common::setup_db().await;
 
     // Pre-populate database with disabled guild
     let disabled_guild_id: u64 = 999999;
     let settings = ServerSettingsEntity {
-        guild_id: disabled_guild_id,
-        settings: sqlx::types::Json(ServerSettings {
+        guild_id: DbU64::from(disabled_guild_id),
+        settings: Json(ServerSettings {
             voice: VoiceSettings {
                 enabled: Some(false),
             },
@@ -445,12 +449,12 @@ async fn test_disabled_guilds_cache_on_init() {
     let is_enabled_new = service.is_enabled(111111).await;
     assert!(is_enabled_new, "New guild should be enabled by default");
 
-    common::teardown_db(db_path).await;
+    common::teardown_db(&db).await;
 }
 
 #[tokio::test]
 async fn test_get_leaderboard_includes_active_sessions() {
-    let (db, db_path) = common::setup_db().await;
+    let db = common::setup_db().await;
     let service = VoiceTrackingService::new(db.clone())
         .await
         .expect("Failed to create service");
@@ -527,12 +531,12 @@ async fn test_get_leaderboard_includes_active_sessions() {
         "User 2003 should have at least 1800 seconds"
     );
 
-    common::teardown_db(db_path).await;
+    common::teardown_db(&db).await;
 }
 
 #[tokio::test]
 async fn test_get_leaderboard_active_and_completed_mixed() {
-    let (db, db_path) = common::setup_db().await;
+    let db = common::setup_db().await;
     let service = VoiceTrackingService::new(db.clone())
         .await
         .expect("Failed to create service");
@@ -612,5 +616,5 @@ async fn test_get_leaderboard_active_and_completed_mixed() {
         "User 3001 should have at least 5400 seconds (3600 completed + ~1800 active)"
     );
 
-    common::teardown_db(db_path).await;
+    common::teardown_db(&db).await;
 }

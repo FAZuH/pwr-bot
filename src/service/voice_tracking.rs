@@ -16,6 +16,7 @@ use crate::entity::VoiceLeaderboardEntry;
 use crate::entity::VoiceLeaderboardOpt;
 use crate::entity::VoiceSessionsEntity;
 use crate::repo::Repository;
+use crate::repo::traits::*;
 use crate::service::settings::SettingsService;
 use crate::service::traits::VoiceTracker;
 
@@ -159,7 +160,7 @@ impl VoiceTrackingService {
 
         for model in all_settings {
             if let Some(false) = model.settings.0.voice.enabled {
-                disabled.insert(model.guild_id);
+                disabled.insert(*model.guild_id);
             }
         }
         drop(disabled);

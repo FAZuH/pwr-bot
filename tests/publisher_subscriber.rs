@@ -10,6 +10,7 @@ use pwr_bot::event::event_bus::EventBus;
 use pwr_bot::feed::FeedItem;
 use pwr_bot::feed::FeedSource;
 use pwr_bot::feed::Platforms;
+use pwr_bot::repo::traits::*;
 use pwr_bot::service::feed_subscription::FeedSubscriptionService;
 use pwr_bot::service::feed_subscription::SubscribeResult;
 use pwr_bot::service::feed_subscription::SubscriberTarget;
@@ -20,7 +21,7 @@ mod common;
 
 #[tokio::test]
 async fn test_subscription_and_publishing() {
-    let (db, db_path) = common::setup_db().await;
+    let db = common::setup_db().await;
     let event_bus = Arc::new(EventBus::new());
 
     // Setup Feeds
@@ -64,21 +65,26 @@ async fn test_subscription_and_publishing() {
         .await
         .expect("Failed to get or create subscriber");
 
-    let result = service
+    let feed_id = match service
         .subscribe(&url, &subscriber)
         .await
-        .expect("Subscribe failed");
-    match result {
+        .expect("Subscribe failed")
+    {
         SubscribeResult::Success { feed } => {
             assert_eq!(feed.name, "Test Name");
             assert_eq!(feed.source_url, url);
+            feed.id
         }
         _ => panic!("Expected Success"),
-    }
+    };
 
     // Verify DB
     let subs = db.feed_subscription.select_all().await.unwrap();
     assert_eq!(subs.len(), 1);
+
+    // Verify initial feed item exists
+    let initial_items = db.feed_item.select_all_by_feed_id(feed_id).await.unwrap();
+    assert!(!initial_items.is_empty(), "Initial feed item should exist");
 
     // 3. Test Publisher
     // Setup Event Listener
@@ -122,17 +128,21 @@ async fn test_subscription_and_publishing() {
     );
 
     // Verify DB update
+    let all_items = db.feed_item.select_all_by_feed_id(feed_id).await.unwrap();
+    assert!(
+        !all_items.is_empty(),
+        "Feed items should exist after publisher update"
+    );
     let db_latest = db
         .feed_item
-        .select_latest_by_feed_id(1)
+        .select_latest_by_feed_id(feed_id)
         .await
         .unwrap()
         .unwrap();
-    // Assuming feed ID is 1 because it's the first feed.
 
     assert_eq!(db_latest.description, "Chapter 2");
 
     // Cleanup
     publisher.stop().unwrap();
-    common::teardown_db(db_path).await;
+    common::teardown_db(&db).await;
 }

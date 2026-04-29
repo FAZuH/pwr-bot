@@ -12,7 +12,7 @@ use crate::bot::test_framework::assert::assert_eq_cmd;
 use crate::bot::test_framework::assert::assert_has_action;
 use crate::bot::test_framework::helpers::extract_actions;
 use crate::bot::test_framework::helpers::simulate_click;
-use crate::bot::view::ViewCommand;
+use crate::bot::view::ViewCmd;
 use crate::update::voice_leaderboard::VoiceLeaderboardModel;
 
 pub async fn test_voice_leaderboard(ctx: Context<'_>) -> Result<(), GuiTestError> {
@@ -33,7 +33,7 @@ pub async fn test_voice_leaderboard(ctx: Context<'_>) -> Result<(), GuiTestError
     let cmd = simulate_click(ctx, &mut handler, toggle_action, coordinator.clone())
         .await
         .map_err(|e| GuiTestError::execution_failed("voice_leaderboard toggle", e))?;
-    assert_eq_cmd(cmd, ViewCommand::Render, "voice_leaderboard toggle")
+    assert_eq_cmd(cmd, ViewCmd::Render, "voice_leaderboard toggle")
         .map_err(|e| GuiTestError::execution_failed("voice_leaderboard toggle", e))?;
 
     Ok(())
@@ -70,7 +70,7 @@ pub async fn test_voice_stats(ctx: Context<'_>) -> Result<(), GuiTestError> {
     let cmd = simulate_click(ctx, &mut handler, toggle_action, coordinator.clone())
         .await
         .map_err(|e| GuiTestError::execution_failed("voice_stats toggle", e))?;
-    assert_eq_cmd(cmd, ViewCommand::Render, "voice_stats toggle")
+    assert_eq_cmd(cmd, ViewCmd::Render, "voice_stats toggle")
         .map_err(|e| GuiTestError::execution_failed("voice_stats toggle", e))?;
 
     Ok(())

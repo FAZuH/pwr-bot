@@ -15,7 +15,7 @@ pub async fn about(ctx: Context<'_>) -> Result<(), Error> {
 }
 
 pub async fn invoke(coordinator: Arc<Coordinator<'_>>) -> Result<(), Error> {
-    coordinator.run(NavigationResult::SettingsAbout).await?;
+    coordinator.run(Navigation::SettingsAbout).await?;
     Ok(())
 }
 
@@ -133,11 +133,11 @@ impl ViewRender for AboutView {
 #[async_trait::async_trait]
 impl ViewHandler for AboutView {
     type Action = AboutAction;
-    async fn handle(&mut self, ctx: ViewContext<'_, AboutAction>) -> Result<ViewCommand, Error> {
+    async fn handle(&mut self, ctx: ViewContext<'_, AboutAction>) -> Result<ViewCmd, Error> {
         match ctx.action() {
             AboutAction::Back => {
-                ctx.coordinator.navigate(NavigationResult::SettingsMain);
-                Ok(ViewCommand::Exit)
+                ctx.coordinator.navigate(Navigation::SettingsMain).await;
+                Ok(ViewCmd::Exit)
             }
         }
     }

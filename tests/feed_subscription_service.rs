@@ -10,6 +10,7 @@ use pwr_bot::entity::SubscriberType;
 use pwr_bot::feed::FeedItem;
 use pwr_bot::feed::FeedSource;
 use pwr_bot::feed::Platforms;
+use pwr_bot::repo::traits::*;
 use pwr_bot::service::feed_subscription::FeedSubscriptionService;
 use pwr_bot::service::feed_subscription::SubscriberTarget;
 
@@ -17,7 +18,7 @@ mod common;
 
 #[tokio::test]
 async fn test_get_or_create_subscriber() {
-    let (db, db_path) = common::setup_db().await;
+    let db = common::setup_db().await;
     let feeds = Arc::new(Platforms::new());
     let service = FeedSubscriptionService::new(db.clone(), feeds.clone());
 
@@ -42,12 +43,12 @@ async fn test_get_or_create_subscriber() {
     assert_eq!(sub1.id, sub2.id);
     assert_eq!(sub1.target_id, sub2.target_id);
 
-    common::teardown_db(db_path).await;
+    common::teardown_db(&db).await;
 }
 
 #[tokio::test]
 async fn test_get_or_create_feed() {
-    let (db, db_path) = common::setup_db().await;
+    let db = common::setup_db().await;
 
     // Setup Mock Feed
     let mut feeds = Platforms::new();
@@ -119,12 +120,12 @@ async fn test_get_or_create_feed() {
     assert_eq!(feed3.id, feed4.id);
     assert_eq!(feed3.source_url, feed4.source_url);
 
-    common::teardown_db(db_path).await;
+    common::teardown_db(&db).await;
 }
 
 #[tokio::test]
 async fn test_server_settings_service() {
-    let (db, db_path) = common::setup_db().await;
+    let db = common::setup_db().await;
     let feeds = Arc::new(Platforms::new());
     let service = FeedSubscriptionService::new(db.clone(), feeds.clone());
 
@@ -170,12 +171,12 @@ async fn test_server_settings_service() {
         Some("role_456".to_string())
     );
 
-    common::teardown_db(db_path).await;
+    common::teardown_db(&db).await;
 }
 
 #[tokio::test]
 async fn test_list_paginated_subscriptions_optimization() {
-    let (db, db_path) = common::setup_db().await;
+    let db = common::setup_db().await;
     let feeds_platform = Arc::new(Platforms::new());
 
     let service = Arc::new(FeedSubscriptionService::new(
@@ -253,5 +254,5 @@ async fn test_list_paginated_subscriptions_optimization() {
         "Chapter 2"
     );
 
-    common::teardown_db(db_path).await;
+    common::teardown_db(&db).await;
 }

@@ -76,7 +76,7 @@ cmd_lint() {
 
 cmd_test() {
     print_info "Running tests..."
-    cargo test --all-features
+    cargo test --all-features -- --test-threads=1
     print_success "Tests completed"
 }
 

@@ -8,14 +8,33 @@ on:
     branches: [main, development]
 
 env:
-  SQLX_OFFLINE: true
   CARGO_TERM_COLOR: always
 
 jobs:
+  build:
+    name: Build
+    if: "! github.event.pull_request.draft"
+    uses: ./.github/workflows/build.yml
+
   format-and-test:
     name: Run Rust Tests
     if: "! github.event.pull_request.draft"
     runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: pwr_bot
+          POSTGRES_PASSWORD: pwr_bot
+          POSTGRES_DB: pwr_bot
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
       - name: Checkout
@@ -40,13 +59,10 @@ jobs:
           shared-key: "ci"
 
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y pkg-config libfontconfig1-dev
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libfontconfig1-dev libpq-dev
 
       - name: Check Format
         run: cargo +nightly fmt --all -- --check
-
-      - name: Build All Targets
-        run: cargo build --all-features --all-targets
 
       - name: Lint with Clippy
         run: cargo clippy --all-features --all-targets --no-deps -- -D warnings
@@ -54,4 +70,4 @@ jobs:
       - name: Run Tests
         run: |
           cp .env-example .env
-          cargo test --all-features --no-fail-fast
+          cargo test --all-features --no-fail-fast -- --test-threads=1

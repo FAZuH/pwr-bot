@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 // TODO: Improve error handling here in general
 // Especially with db results
-use sqlx::error::ErrorKind;
+use diesel::result::DatabaseErrorKind;
 
 use crate::entity::FeedEntity;
 use crate::entity::FeedItemEntity;
@@ -18,6 +18,7 @@ use crate::feed::PlatformInfo;
 use crate::feed::Platforms;
 use crate::feed::error::FeedError;
 use crate::repo::error::DatabaseError;
+use crate::repo::traits::*;
 use crate::service::Repository;
 use crate::service::error::ServiceError;
 use crate::service::settings::SettingsService;
@@ -164,9 +165,9 @@ impl FeedSubscriptionService {
         match self.create_subscription(feed.id, subscriber.id).await {
             Ok(_) => Ok(SubscribeResult::Success { feed }),
             Err(err) => {
-                if let ServiceError::DatabaseError(DatabaseError::BackendError(sqlx_err)) = &err
-                    && let Some(db_err) = sqlx_err.as_database_error()
-                    && matches!(db_err.kind(), ErrorKind::UniqueViolation)
+                if let ServiceError::DatabaseError(DatabaseError::BackendError(
+                    diesel::result::Error::DatabaseError(DatabaseErrorKind::UniqueViolation, _),
+                )) = &err
                 {
                     Ok(SubscribeResult::AlreadySubscribed { feed })
                 } else {

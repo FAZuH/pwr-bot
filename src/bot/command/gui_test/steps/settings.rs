@@ -13,7 +13,8 @@ use crate::bot::test_framework::helpers::extract_actions;
 use crate::bot::test_framework::helpers::simulate_click;
 use crate::bot::test_framework::helpers::simulate_select;
 use crate::bot::view::SelectValues;
-use crate::bot::view::ViewCommand;
+use crate::bot::view::ViewCmd;
+use crate::entity::Json;
 use crate::entity::ServerSettingsEntity;
 use crate::update::feed_settings::FeedSettingsModel;
 use crate::update::settings_main::SettingsMainModel;
@@ -34,8 +35,8 @@ pub async fn test_settings_main(ctx: Context<'_>) -> Result<(), GuiTestError> {
         .map_err(|e| GuiTestError::setup_failed("settings_main", e))?;
 
     let entity = ServerSettingsEntity {
-        guild_id: guild_id.into(),
-        settings: sqlx::types::Json(settings),
+        guild_id: guild_id.get().into(),
+        settings: Json(settings),
     };
 
     let model = SettingsMainModel::new(
@@ -66,9 +67,10 @@ pub async fn test_settings_main(ctx: Context<'_>) -> Result<(), GuiTestError> {
     let cmd = simulate_click(ctx, &mut handler, feeds_action, coordinator.clone())
         .await
         .map_err(|e| GuiTestError::execution_failed("settings_main feeds", e))?;
-    assert_eq_cmd(cmd, ViewCommand::Exit, "settings_main feeds click")
+    assert_eq_cmd(cmd, ViewCmd::Exit, "settings_main feeds click")
         .map_err(|e| GuiTestError::execution_failed("settings_main feeds", e))?;
-    assert_navigated_to(&coordinator, NavigationResult::SettingsFeeds)
+    assert_navigated_to(&coordinator, Navigation::SettingsFeeds)
+        .await
         .map_err(|e| GuiTestError::execution_failed("settings_main nav", e))?;
 
     // Test toggle
@@ -89,7 +91,7 @@ pub async fn test_settings_main(ctx: Context<'_>) -> Result<(), GuiTestError> {
     )
     .await
     .map_err(|e| GuiTestError::execution_failed("settings_main toggle", e))?;
-    assert_eq_cmd(cmd, ViewCommand::Render, "settings_main toggle")
+    assert_eq_cmd(cmd, ViewCmd::Render, "settings_main toggle")
         .map_err(|e| GuiTestError::execution_failed("settings_main toggle", e))?;
     if handler.model.feeds_enabled == initial_feeds {
         return Err(GuiTestError::assertion_failed(
@@ -140,7 +142,7 @@ pub async fn test_feed_settings(ctx: Context<'_>) -> Result<(), GuiTestError> {
     let cmd = simulate_click(ctx, &mut handler, toggle_action, coordinator.clone())
         .await
         .map_err(|e| GuiTestError::execution_failed("feed_settings toggle", e))?;
-    assert_eq_cmd(cmd, ViewCommand::Render, "feed_settings toggle")
+    assert_eq_cmd(cmd, ViewCmd::Render, "feed_settings toggle")
         .map_err(|e| GuiTestError::execution_failed("feed_settings toggle", e))?;
     if handler.model.is_enabled() == initial_enabled {
         return Err(GuiTestError::assertion_failed(
@@ -157,9 +159,10 @@ pub async fn test_feed_settings(ctx: Context<'_>) -> Result<(), GuiTestError> {
     let cmd = simulate_click(ctx, &mut handler, back_action, coordinator2.clone())
         .await
         .map_err(|e| GuiTestError::execution_failed("feed_settings back", e))?;
-    assert_eq_cmd(cmd, ViewCommand::Exit, "feed_settings back")
+    assert_eq_cmd(cmd, ViewCmd::Exit, "feed_settings back")
         .map_err(|e| GuiTestError::execution_failed("feed_settings back", e))?;
-    assert_navigated_to(&coordinator2, NavigationResult::SettingsMain)
+    assert_navigated_to(&coordinator2, Navigation::SettingsMain)
+        .await
         .map_err(|e| GuiTestError::execution_failed("feed_settings nav", e))?;
 
     Ok(())
@@ -189,7 +192,7 @@ pub async fn test_voice_settings(ctx: Context<'_>) -> Result<(), GuiTestError> {
     let cmd = simulate_click(ctx, &mut handler, toggle_action, coordinator.clone())
         .await
         .map_err(|e| GuiTestError::execution_failed("voice_settings toggle", e))?;
-    assert_eq_cmd(cmd, ViewCommand::Render, "voice_settings toggle")
+    assert_eq_cmd(cmd, ViewCmd::Render, "voice_settings toggle")
         .map_err(|e| GuiTestError::execution_failed("voice_settings toggle", e))?;
     if handler.settings.voice.enabled.unwrap_or(true) == initial_enabled {
         return Err(GuiTestError::assertion_failed(

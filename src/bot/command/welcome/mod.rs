@@ -24,7 +24,7 @@ const WELCOME_FILE: &str = "welcome_preview.png";
 #[poise::command(slash_command)]
 pub async fn welcome(ctx: Context<'_>) -> Result<(), Error> {
     Coordinator::new(ctx)
-        .run(NavigationResult::SettingsWelcome)
+        .run(Navigation::SettingsWelcome)
         .await?;
     Ok(())
 }
@@ -56,10 +56,10 @@ pub struct SettingsWelcomeHandler {
     pub model: WelcomeSettingsModel,
     pub settings: ServerSettings,
     pub current_image_bytes: Option<Vec<u8>>,
-    pub(crate) service: Arc<dyn FeedSubscriptionProvider>,
-    pub(crate) generator: Arc<WelcomeImageGenerator>,
-    pub(crate) guild_id: u64,
-    pub(crate) ctx_serenity: poise::serenity_prelude::Context,
+    pub service: Arc<dyn FeedSubscriptionProvider>,
+    pub generator: Arc<WelcomeImageGenerator>,
+    pub guild_id: u64,
+    pub ctx_serenity: poise::serenity_prelude::Context,
 }
 
 impl SettingsWelcomeHandler {
@@ -72,6 +72,10 @@ impl SettingsWelcomeHandler {
             WelcomeSettingsController::generate_preview_from(&self.settings, &self.generator).await;
         Ok(())
     }
+
+    fn update(&mut self, msg: WelcomeSettingsMsg) -> WelcomeSettingsCmd {
+        WelcomeSettingsUpdate::update(msg, &mut self.model)
+    }
 }
 
 #[async_trait::async_trait]
@@ -80,62 +84,21 @@ impl ViewHandler for SettingsWelcomeHandler {
     async fn handle(
         &mut self,
         ctx: ViewContext<'_, SettingsWelcomeAction>,
-    ) -> Result<ViewCommand, Error> {
+    ) -> Result<ViewCmd, Error> {
         use SettingsWelcomeAction::*;
 
         let action = ctx.action();
         match action {
             SetColor(None) => {
-                if let ViewEvent::Component(ref interaction) = ctx.event {
-                    let interaction = interaction.clone();
-                    let ctx_serenity = self.ctx_serenity.clone();
-
-                    ctx.spawn(async move {
-                        if let Ok(Some(modal_result)) =
-                            poise::execute_modal_on_component_interaction::<SetPrimaryColorModal>(
-                                &ctx_serenity,
-                                interaction,
-                                None,
-                                None,
-                            )
-                            .await
-                        {
-                            Some(SetColor(Some(modal_result)))
-                        } else {
-                            None
-                        }
-                    });
-                }
-                return Ok(ViewCommand::AlreadyResponded);
+                ctx.spawn_modal_component(|m| SetColor(Some(m))).await;
+                return Ok(ViewCmd::AlreadyResponded);
             }
             AddMessage(None) => {
-                if let ViewEvent::Component(ref interaction) = ctx.event {
-                    let interaction = interaction.clone();
-                    let ctx_serenity = self.ctx_serenity.clone();
-
-                    ctx.spawn(async move {
-                        if let Ok(Some(modal_result)) =
-                            poise::execute_modal_on_component_interaction::<AddWelcomeMessageModal>(
-                                &ctx_serenity,
-                                interaction,
-                                None,
-                                None,
-                            )
-                            .await
-                        {
-                            Some(AddMessage(Some(modal_result)))
-                        } else {
-                            None
-                        }
-                    });
-                }
-                return Ok(ViewCommand::AlreadyResponded);
+                ctx.spawn_modal_component(|m| AddMessage(Some(m))).await;
+                return Ok(ViewCmd::AlreadyResponded);
             }
             ToggleEnabled => {
-                let cmd = WelcomeSettingsUpdate::update(
-                    WelcomeSettingsMsg::ToggleEnabled,
-                    &mut self.model,
-                );
+                let cmd = self.update(WelcomeSettingsMsg::ToggleEnabled);
                 if matches!(cmd, WelcomeSettingsCmd::PersistSettings) {
                     self.persist_and_regenerate().await?;
                 }
@@ -143,10 +106,8 @@ impl ViewHandler for SettingsWelcomeHandler {
             ChannelSelect => {
                 if let Some(channel) = ctx.channel_select_values().and_then(|v| v.first().copied())
                 {
-                    let cmd = WelcomeSettingsUpdate::update(
-                        WelcomeSettingsMsg::SetChannel(Some(channel.to_string())),
-                        &mut self.model,
-                    );
+                    let cmd =
+                        self.update(WelcomeSettingsMsg::SetChannel(Some(channel.to_string())));
                     if matches!(cmd, WelcomeSettingsCmd::PersistSettings) {
                         self.persist_and_regenerate().await?;
                     }
@@ -155,10 +116,7 @@ impl ViewHandler for SettingsWelcomeHandler {
             TemplateSelect => {
                 if let Some(template) = ctx.string_select_values().and_then(|v| v.first().cloned())
                 {
-                    let cmd = WelcomeSettingsUpdate::update(
-                        WelcomeSettingsMsg::SetTemplate(Some(template)),
-                        &mut self.model,
-                    );
+                    let cmd = self.update(WelcomeSettingsMsg::SetTemplate(Some(template)));
                     if matches!(cmd, WelcomeSettingsCmd::PersistSettings) {
                         self.persist_and_regenerate().await?;
                     }
@@ -173,50 +131,40 @@ impl ViewHandler for SettingsWelcomeHandler {
                         }
                     }
                 }
-                WelcomeSettingsUpdate::update(
-                    WelcomeSettingsMsg::MarkRemoval(indices),
-                    &mut self.model,
-                );
+                self.update(WelcomeSettingsMsg::MarkRemoval(indices));
             }
             AddMessage(Some(modal)) => {
-                let cmd = WelcomeSettingsUpdate::update(
-                    WelcomeSettingsMsg::AddMessage(modal.message.clone()),
-                    &mut self.model,
-                );
+                let cmd = self.update(WelcomeSettingsMsg::AddMessage(modal.message.clone()));
                 if matches!(cmd, WelcomeSettingsCmd::PersistSettings) {
                     self.persist_and_regenerate().await?;
                 }
             }
             SetColor(Some(modal)) => {
-                let cmd = WelcomeSettingsUpdate::update(
-                    WelcomeSettingsMsg::SetColor(modal.color.clone()),
-                    &mut self.model,
-                );
+                let cmd = self.update(WelcomeSettingsMsg::SetColor(modal.color.clone()));
                 if matches!(cmd, WelcomeSettingsCmd::PersistSettings) {
                     self.persist_and_regenerate().await?;
                 }
             }
             SaveRemoval => {
-                let cmd =
-                    WelcomeSettingsUpdate::update(WelcomeSettingsMsg::SaveRemoval, &mut self.model);
+                let cmd = self.update(WelcomeSettingsMsg::SaveRemoval);
                 if matches!(cmd, WelcomeSettingsCmd::PersistSettings) {
                     self.persist_and_regenerate().await?;
                 }
             }
             CancelRemoval => {
-                WelcomeSettingsUpdate::update(WelcomeSettingsMsg::CancelRemoval, &mut self.model);
+                self.update(WelcomeSettingsMsg::CancelRemoval);
             }
             About => {
-                ctx.coordinator.navigate(NavigationResult::SettingsAbout);
-                return Ok(ViewCommand::Exit);
+                ctx.coordinator.navigate(Navigation::SettingsAbout).await;
+                return Ok(ViewCmd::Exit);
             }
             Back => {
-                ctx.coordinator.navigate(NavigationResult::SettingsMain);
-                return Ok(ViewCommand::Exit);
+                ctx.coordinator.navigate(Navigation::SettingsMain).await;
+                return Ok(ViewCmd::Exit);
             }
         }
 
-        Ok(ViewCommand::Render)
+        Ok(ViewCmd::Render)
     }
 }
 

@@ -217,7 +217,7 @@ impl VoiceStateSubscriber {
 
 #[async_trait::async_trait]
 impl Subscriber<VoiceStateEvent> for VoiceStateSubscriber {
-    /// From https://discord.com/developers/docs/events/gateway-events#voice-state-update:
+    /// From <https://discord.com/developers/docs/events/gateway-events#voice-state-update>:
     /// > Called when someone joins/leaves/moves voice channels. Inner payload is a voice state object.
     ///
     /// - event.old is None if and only if user joined a voice channel
@@ -272,14 +272,10 @@ mod tests {
     use crate::repo::Repository;
 
     async fn create_mock_subscriber() -> anyhow::Result<VoiceStateSubscriber> {
-        let t = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let db_path = format!("/tmp/pwr-bot-test-{t}.sqlite");
-        let db_url = format!("sqlite://{db_path}");
+        let db_url = std::env::var("DB_URL")
+            .unwrap_or("postgres://pwr_bot:pwr_bot@localhost:5432/pwr_bot".to_string());
 
-        let db = Repository::new(&db_url, &db_path).await.unwrap();
+        let db = Repository::new(&db_url).await.unwrap();
         db.run_migrations().await.unwrap();
         let services = Arc::new(Services::new(Arc::new(db), Arc::new(Platforms::new())).await?);
         Ok(VoiceStateSubscriber::new(services))

@@ -14,8 +14,8 @@ use crate::bot::command::voice::VoiceStatsTimeRange;
 /// Controllers return this enum to indicate where the coordinator should
 /// navigate next. Each domain (Settings, Feed, Voice) has its own section.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum NavigationResult {
-    // Settings section
+pub enum Navigation {
+    // -- Settings section --
     /// Navigate to main settings page
     SettingsMain,
     /// Navigate to feed settings page
@@ -27,7 +27,7 @@ pub enum NavigationResult {
     /// Navigate to about page (within settings context)
     SettingsAbout,
 
-    // Feed commands section
+    // -- Feed commands section --
     /// Show subscriptions list
     FeedSubscriptions { send_into: Option<SendInto> },
     /// Start subscribe flow
@@ -48,14 +48,14 @@ pub enum NavigationResult {
         time_range: VoiceLeaderboardTimeRange,
     },
 
-    // /vc stats
+    // -- /vc stats --
     VoiceStats {
         time_range: VoiceStatsTimeRange,
         target_user: Box<Option<User>>,
         stat_type: GuildStatType,
     },
 
-    // Universal navigation
+    // -- Universal navigation --
     /// Go back to previous controller (uses coordinator's stack)
     Back,
     /// Exit current coordinator session

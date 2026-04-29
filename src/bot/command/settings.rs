@@ -3,6 +3,7 @@
 use std::time::Duration;
 
 use crate::bot::command::prelude::*;
+use crate::entity::Json;
 use crate::entity::ServerSettings;
 use crate::entity::ServerSettingsEntity;
 use crate::update::Update;
@@ -24,7 +25,7 @@ pub struct Feature {
     /// Function to set the enabled state in ServerSettings
     pub set_enabled: fn(&mut ServerSettings, bool),
     /// Navigation result when configuring this feature
-    pub navigate: NavigationResult,
+    pub navigate: Navigation,
 }
 
 impl Feature {
@@ -52,21 +53,21 @@ impl FeatureRegistry {
                 label: "Feeds",
                 get_enabled: |s| s.feeds.enabled.unwrap_or(false),
                 set_enabled: |s, v| s.feeds.enabled = Some(v),
-                navigate: NavigationResult::SettingsFeeds,
+                navigate: Navigation::SettingsFeeds,
             },
             Feature {
                 id: "voice",
                 label: "Voice",
                 get_enabled: |s| s.voice.enabled.unwrap_or(false),
                 set_enabled: |s, v| s.voice.enabled = Some(v),
-                navigate: NavigationResult::SettingsVoice,
+                navigate: Navigation::SettingsVoice,
             },
             Feature {
                 id: "welcome",
                 label: "Welcome",
                 get_enabled: |s| s.welcome.enabled.unwrap_or(false),
                 set_enabled: |s, v| s.welcome.enabled = Some(v),
-                navigate: NavigationResult::SettingsWelcome,
+                navigate: Navigation::SettingsWelcome,
             },
         ];
         FEATURES
@@ -88,9 +89,7 @@ impl FeatureRegistry {
 /// Requires server administrator permissions.
 #[poise::command(slash_command)]
 pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
-    Coordinator::new(ctx)
-        .run(NavigationResult::SettingsMain)
-        .await?;
+    Coordinator::new(ctx).run(Navigation::SettingsMain).await?;
     Ok(())
 }
 
@@ -111,8 +110,8 @@ impl Controller for SettingsMainController<'_> {
             .await?;
 
         let settings = ServerSettingsEntity {
-            guild_id: guild_id.into(),
-            settings: sqlx::types::Json(settings),
+            guild_id: guild_id.get().into(),
+            settings: Json(settings),
         };
 
         let model = SettingsMainModel::new(
@@ -134,7 +133,7 @@ impl Controller for SettingsMainController<'_> {
             ctx.data()
                 .service
                 .feed_subscription
-                .update_server_settings(guild_id, settings_data)
+                .update_server_settings(*guild_id, settings_data)
                 .await?;
             engine.handler.done_update_settings()?;
         }
@@ -289,10 +288,7 @@ action_enum! {
 #[async_trait::async_trait]
 impl ViewHandler for SettingsMainHandler {
     type Action = SettingsMainAction;
-    async fn handle(
-        &mut self,
-        ctx: ViewContext<'_, SettingsMainAction>,
-    ) -> Result<ViewCommand, Error> {
+    async fn handle(&mut self, ctx: ViewContext<'_, SettingsMainAction>) -> Result<ViewCmd, Error> {
         use SettingsMainAction::*;
 
         let cor = ctx.coordinator.clone();
@@ -300,21 +296,21 @@ impl ViewHandler for SettingsMainHandler {
         match action {
             FeedsFeature => {
                 if let Some(feature) = FeatureRegistry::find_by_label("Feeds") {
-                    cor.navigate(feature.navigate.clone());
+                    cor.navigate(feature.navigate.clone()).await;
                 }
-                Ok(ViewCommand::Exit)
+                Ok(ViewCmd::Exit)
             }
             VoiceFeature => {
                 if let Some(feature) = FeatureRegistry::find_by_label("Voice") {
-                    cor.navigate(feature.navigate.clone());
+                    cor.navigate(feature.navigate.clone()).await;
                 }
-                Ok(ViewCommand::Exit)
+                Ok(ViewCmd::Exit)
             }
             WelcomeFeature => {
                 if let Some(feature) = FeatureRegistry::find_by_label("Welcome") {
-                    cor.navigate(feature.navigate.clone());
+                    cor.navigate(feature.navigate.clone()).await;
                 }
-                Ok(ViewCommand::Exit)
+                Ok(ViewCmd::Exit)
             }
             ToggleFeature => {
                 if let Some(values) = ctx.string_select_values() {
@@ -342,11 +338,11 @@ impl ViewHandler for SettingsMainHandler {
                         }
                     }
                 }
-                Ok(ViewCommand::Render)
+                Ok(ViewCmd::Render)
             }
             About => {
-                cor.navigate(NavigationResult::SettingsAbout);
-                Ok(ViewCommand::Exit)
+                cor.navigate(Navigation::SettingsAbout).await;
+                Ok(ViewCmd::Exit)
             }
         }
     }

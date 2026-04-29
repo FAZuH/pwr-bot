@@ -1,227 +1,36 @@
 //! Database table operations and implementations.
-use sqlx::SqlitePool;
-use sqlx::sqlite::SqliteArguments;
 
-use crate::entity::BotMetaEntity;
-use crate::entity::FeedEntity;
-use crate::entity::FeedItemEntity;
-use crate::entity::FeedSubscriptionEntity;
-use crate::entity::FeedWithLatestItemRow;
-use crate::entity::GuildDailyStats;
-use crate::entity::ServerSettingsEntity;
-use crate::entity::SubscriberEntity;
-use crate::entity::SubscriberType;
-use crate::entity::VoiceDailyActivity;
-use crate::entity::VoiceLeaderboardEntry;
-use crate::entity::VoiceLeaderboardOpt;
-use crate::entity::VoiceLeaderboardOptBuilder;
-use crate::entity::VoiceLeaderboardOptBuilderError;
-use crate::entity::VoiceSessionsEntity;
+use diesel::prelude::*;
+use diesel_async::RunQueryDsl;
+
+use crate::entity::*;
 use crate::error::AppError;
+use crate::repo::DbPool;
 use crate::repo::error::DatabaseError;
+use crate::repo::schema::*;
 use crate::repo::traits::*;
 
-/// Base table struct providing database pool access.
-#[derive(Clone)]
-pub struct BaseTable {
-    pub pool: SqlitePool,
-}
-
-impl BaseTable {
-    /// Creates a new base table with the given pool.
-    pub fn new(pool: SqlitePool) -> Self {
-        Self { pool }
-    }
-}
-
-/// Helper trait to handle binding parameters, especially for casting u64 to i64 for SQLite.
-pub trait BindParam<'q> {
-    fn bind_param<O>(
-        self,
-        query: sqlx::query::QueryAs<'q, sqlx::Sqlite, O, SqliteArguments<'q>>,
-    ) -> sqlx::query::QueryAs<'q, sqlx::Sqlite, O, SqliteArguments<'q>>;
-    fn bind_param_q(
-        self,
-        query: sqlx::query::Query<'q, sqlx::Sqlite, SqliteArguments<'q>>,
-    ) -> sqlx::query::Query<'q, sqlx::Sqlite, SqliteArguments<'q>>;
-}
-
-macro_rules! impl_bind_param {
-    ($t:ty) => {
-        impl<'q> BindParam<'q> for $t {
-            fn bind_param<O>(
-                self,
-                query: sqlx::query::QueryAs<'q, sqlx::Sqlite, O, SqliteArguments<'q>>,
-            ) -> sqlx::query::QueryAs<'q, sqlx::Sqlite, O, SqliteArguments<'q>> {
-                query.bind(self)
-            }
-            fn bind_param_q(
-                self,
-                query: sqlx::query::Query<'q, sqlx::Sqlite, SqliteArguments<'q>>,
-            ) -> sqlx::query::Query<'q, sqlx::Sqlite, SqliteArguments<'q>> {
-                query.bind(self)
-            }
-        }
-    };
-}
-
-// Implement for reference types that are passed to .bind()
-impl_bind_param!(&'q i32);
-impl_bind_param!(&'q i64);
-impl_bind_param!(&'q String);
-impl_bind_param!(&'q Option<String>);
-impl_bind_param!(&'q SubscriberType);
-impl_bind_param!(&'q chrono::DateTime<chrono::Utc>);
-impl_bind_param!(&'q bool);
-
-// For Json
-impl<'q, T: serde::Serialize + for<'a> serde::Deserialize<'a> + Send + Sync + 'static> BindParam<'q>
-    for &'q sqlx::types::Json<T>
-{
-    fn bind_param<O>(
-        self,
-        query: sqlx::query::QueryAs<'q, sqlx::Sqlite, O, SqliteArguments<'q>>,
-    ) -> sqlx::query::QueryAs<'q, sqlx::Sqlite, O, SqliteArguments<'q>> {
-        query.bind(self)
-    }
-    fn bind_param_q(
-        self,
-        query: sqlx::query::Query<'q, sqlx::Sqlite, SqliteArguments<'q>>,
-    ) -> sqlx::query::Query<'q, sqlx::Sqlite, SqliteArguments<'q>> {
-        query.bind(self)
-    }
-}
-
-// Special case for u64 (casting to i64)
-impl<'q> BindParam<'q> for &'q u64 {
-    fn bind_param<O>(
-        self,
-        query: sqlx::query::QueryAs<'q, sqlx::Sqlite, O, SqliteArguments<'q>>,
-    ) -> sqlx::query::QueryAs<'q, sqlx::Sqlite, O, SqliteArguments<'q>> {
-        query.bind(*self as i64)
-    }
-    fn bind_param_q(
-        self,
-        query: sqlx::query::Query<'q, sqlx::Sqlite, SqliteArguments<'q>>,
-    ) -> sqlx::query::Query<'q, sqlx::Sqlite, SqliteArguments<'q>> {
-        query.bind(*self as i64)
-    }
-}
-
-macro_rules! impl_table {
-    (
-        $struct_name:ident,
-        $model:ty,
-        $table:expr,
-        $pk:ident,
-        $id_type:ty,
-        $db_id_type:ty,
-        $create_sql:expr,
-        $cols:expr,
-        $vals:expr,
-        $update_set:expr,
-        [ $( $field:ident ),+ ]
-    ) => {
-        #[derive(Clone)]
-        pub struct $struct_name {
-            base: BaseTable,
-        }
-
-        impl $struct_name {
-            pub fn new(pool: SqlitePool) -> Self {
-                Self {
-                    base: BaseTable::new(pool),
-                }
-            }
-        }
-
+macro_rules! impl_table_base {
+    ($struct_name:ident, $table:path) => {
         #[async_trait::async_trait]
         impl TableBase for $struct_name {
             async fn create_table(&self) -> Result<(), DatabaseError> {
-                sqlx::query($create_sql)
-                    .execute(&self.base.pool)
-                    .await?;
+                // Tables are created by migrations; this is a no-op.
                 Ok(())
             }
 
             async fn drop_table(&self) -> Result<(), DatabaseError> {
-                sqlx::query(concat!("DROP TABLE IF EXISTS ", $table))
-                    .execute(&self.base.pool)
+                let mut conn = self.pool.get().await?;
+                diesel::sql_query(concat!("DROP TABLE IF EXISTS ", stringify!($table)))
+                    .execute(&mut conn)
                     .await?;
                 Ok(())
             }
 
             async fn delete_all(&self) -> Result<(), DatabaseError> {
-                sqlx::query(concat!("DELETE FROM ", $table))
-                    .execute(&self.base.pool)
-                    .await?;
+                let mut conn = self.pool.get().await?;
+                diesel::delete($table).execute(&mut conn).await?;
                 Ok(())
-            }
-        }
-
-        #[async_trait::async_trait]
-        impl CrudTable<$model, $id_type> for $struct_name {
-            async fn select_all(&self) -> Result<Vec<$model>, DatabaseError> {
-                Ok(sqlx::query_as::<_, $model>(concat!("SELECT * FROM ", $table))
-                    .fetch_all(&self.base.pool)
-                    .await?)
-            }
-
-            async fn select(&self, id: &$id_type) -> Result<Option<$model>, DatabaseError> {
-                let query = sqlx::query_as::<_, $model>(concat!("SELECT * FROM ", $table, " WHERE ", stringify!($pk), " = ?"));
-                let query = BindParam::bind_param(id, query);
-                Ok(
-                    query
-                        .fetch_optional(&self.base.pool)
-                        .await?,
-                )
-            }
-
-            async fn insert(&self, model: &$model) -> Result<$id_type, DatabaseError> {
-                let mut query = sqlx::query_as(concat!(
-                        "INSERT INTO ", $table, " (", $cols, ") VALUES (", $vals, ") RETURNING ", stringify!($pk)
-                    ));
-
-                $(
-                    query = BindParam::bind_param(&model.$field, query);
-                )+
-
-                let row: ($db_id_type,) = query.fetch_one(&self.base.pool).await?;
-                Ok(row.0 as $id_type)
-            }
-
-            async fn update(&self, model: &$model) -> Result<(), DatabaseError> {
-                let mut query = sqlx::query(concat!(
-                        "UPDATE ", $table, " SET ", $update_set, " WHERE ", stringify!($pk), " = ?"
-                    ));
-
-                $(
-                    query = BindParam::bind_param_q(&model.$field, query);
-                )+
-                query = BindParam::bind_param_q(&model.$pk, query);
-
-                query.execute(&self.base.pool).await?;
-                Ok(())
-            }
-
-            async fn delete(&self, id: &$id_type) -> Result<(), DatabaseError> {
-                let query = sqlx::query(concat!("DELETE FROM ", $table, " WHERE ", stringify!($pk), " = ?"));
-                let query = BindParam::bind_param_q(id, query);
-                query.execute(&self.base.pool).await?;
-                Ok(())
-            }
-
-            async fn replace(&self, model: &$model) -> Result<$id_type, DatabaseError> {
-                let mut query = sqlx::query_as(concat!(
-                        "REPLACE INTO ", $table, " (", $cols, ") VALUES (", $vals, ") RETURNING ", stringify!($pk)
-                    ));
-
-                $(
-                    query = BindParam::bind_param(&model.$field, query);
-                )+
-
-                let row: ($db_id_type,) = query.fetch_one(&self.base.pool).await?;
-                Ok(row.0 as $id_type)
             }
         }
     };
@@ -231,50 +40,103 @@ macro_rules! impl_table {
 // FeedTable
 // ============================================================================
 
-impl_table!(
-    FeedTable,
-    FeedEntity,
-    "feeds",
-    id,
-    i32,
-    i32,
-    r#"CREATE TABLE IF NOT EXISTS feeds (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        description TEXT DEFAULT NULL,
-        platform_id TEXT NOT NULL,
-        source_id TEXT NOT NULL,
-        items_id TEXT NOT NULL,
-        source_url TEXT NOT NULL,
-        cover_url TEXT DEFAULT NULL,
-        tags TEXT DEFAULT NULL,
-        UNIQUE(platform_id, source_id),
-        UNIQUE(source_url)
-    )"#,
-    "name, description, platform_id, source_id, items_id, source_url, cover_url, tags",
-    "?, ?, ?, ?, ?, ?, ?, ?",
-    "name = ?, description = ?, platform_id = ?, source_id = ?, items_id = ?, source_url = ?, cover_url = ?, tags = ?",
-    [
-        name,
-        description,
-        platform_id,
-        source_id,
-        items_id,
-        source_url,
-        cover_url,
-        tags
-    ]
-);
+#[derive(Clone)]
+pub struct FeedTable {
+    pool: DbPool,
+}
+
+impl FeedTable {
+    pub fn new(pool: DbPool) -> Self {
+        Self { pool }
+    }
+}
+
+impl_table_base!(FeedTable, feeds::table);
+
+#[async_trait::async_trait]
+impl CrudTable<FeedEntity, i32> for FeedTable {
+    async fn select_all(&self) -> Result<Vec<FeedEntity>, DatabaseError> {
+        let mut conn = self.pool.get().await?;
+        Ok(feeds::table
+            .select(FeedEntity::as_select())
+            .load(&mut conn)
+            .await?)
+    }
+
+    async fn insert(&self, model: &FeedEntity) -> Result<i32, DatabaseError> {
+        let mut conn = self.pool.get().await?;
+        let id = diesel::insert_into(feeds::table)
+            .values((
+                feeds::name.eq(&model.name),
+                feeds::description.eq(&model.description),
+                feeds::platform_id.eq(&model.platform_id),
+                feeds::source_id.eq(&model.source_id),
+                feeds::items_id.eq(&model.items_id),
+                feeds::source_url.eq(&model.source_url),
+                feeds::cover_url.eq(&model.cover_url),
+                feeds::tags.eq(&model.tags),
+            ))
+            .returning(feeds::id)
+            .get_result(&mut conn)
+            .await?;
+        Ok(id)
+    }
+
+    async fn select(&self, id: &i32) -> Result<Option<FeedEntity>, DatabaseError> {
+        let mut conn = self.pool.get().await?;
+        Ok(feeds::table
+            .find(id)
+            .select(FeedEntity::as_select())
+            .first(&mut conn)
+            .await
+            .optional()?)
+    }
+
+    async fn update(&self, model: &FeedEntity) -> Result<(), DatabaseError> {
+        let mut conn = self.pool.get().await?;
+        diesel::update(feeds::table.find(model.id))
+            .set((
+                feeds::name.eq(&model.name),
+                feeds::description.eq(&model.description),
+                feeds::platform_id.eq(&model.platform_id),
+                feeds::source_id.eq(&model.source_id),
+                feeds::items_id.eq(&model.items_id),
+                feeds::source_url.eq(&model.source_url),
+                feeds::cover_url.eq(&model.cover_url),
+                feeds::tags.eq(&model.tags),
+            ))
+            .execute(&mut conn)
+            .await?;
+        Ok(())
+    }
+
+    async fn delete(&self, id: &i32) -> Result<(), DatabaseError> {
+        let mut conn = self.pool.get().await?;
+        diesel::delete(feeds::table.find(id))
+            .execute(&mut conn)
+            .await?;
+        Ok(())
+    }
+
+    async fn replace(&self, model: &FeedEntity) -> Result<i32, DatabaseError> {
+        if model.id != 0 && self.select(&model.id).await?.is_some() {
+            self.update(model).await?;
+            return Ok(model.id);
+        }
+        self.insert(model).await
+    }
+}
 
 #[async_trait::async_trait]
 impl FeedRepository for FeedTable {
     async fn select_all_by_tag(&self, tag: &str) -> Result<Vec<FeedEntity>, DatabaseError> {
-        Ok(
-            sqlx::query_as::<_, FeedEntity>("SELECT * FROM feeds WHERE tags LIKE ?")
-                .bind(format!("%{}%", tag))
-                .fetch_all(&self.base.pool)
-                .await?,
-        )
+        let mut conn = self.pool.get().await?;
+        let pattern = format!("%{}%", tag);
+        Ok(feeds::table
+            .filter(feeds::tags.like(pattern))
+            .select(FeedEntity::as_select())
+            .load(&mut conn)
+            .await?)
     }
 
     async fn select_by_source_id(
@@ -282,13 +144,14 @@ impl FeedRepository for FeedTable {
         platform_id: &str,
         source_id: &str,
     ) -> Result<Option<FeedEntity>, DatabaseError> {
-        Ok(sqlx::query_as::<_, FeedEntity>(
-            "SELECT * FROM feeds WHERE platform_id = ? AND source_id = ?",
-        )
-        .bind(platform_id)
-        .bind(source_id)
-        .fetch_optional(&self.base.pool)
-        .await?)
+        let mut conn = self.pool.get().await?;
+        Ok(feeds::table
+            .filter(feeds::platform_id.eq(platform_id))
+            .filter(feeds::source_id.eq(source_id))
+            .select(FeedEntity::as_select())
+            .first(&mut conn)
+            .await
+            .optional()?)
     }
 
     async fn select_by_name_and_subscriber_id(
@@ -297,26 +160,25 @@ impl FeedRepository for FeedTable {
         name_search: &str,
         limit: Option<u32>,
     ) -> Result<Vec<FeedEntity>, DatabaseError> {
-        let limit = limit.unwrap_or(25);
-        let search_pattern = format!("%{}%", name_search.to_lowercase());
-        Ok(sqlx::query_as::<_, FeedEntity>(
-            r#"
-                SELECT * FROM feeds 
-                WHERE LOWER(name) LIKE ? 
-                    AND id IN (
-                        SELECT feed_id
-                        FROM feed_subscriptions
-                        WHERE subscriber_id = ?
-                    )
-                ORDER BY name
-                LIMIT ?
-                "#,
-        )
-        .bind(search_pattern)
-        .bind(subscriber_id)
-        .bind(limit)
-        .fetch_all(&self.base.pool)
-        .await?)
+        let mut conn = self.pool.get().await?;
+        let limit = limit.unwrap_or(25) as i64;
+        let pattern = format!("%{}%", name_search.to_lowercase());
+
+        Ok(feeds::table
+            .filter(
+                feeds::name.ilike(pattern).and(
+                    feeds::id.eq_any(
+                        feed_subscriptions::table
+                            .filter(feed_subscriptions::subscriber_id.eq(subscriber_id))
+                            .select(feed_subscriptions::feed_id),
+                    ),
+                ),
+            )
+            .order(feeds::name.asc())
+            .limit(limit)
+            .select(FeedEntity::as_select())
+            .load(&mut conn)
+            .await?)
     }
 }
 
@@ -324,62 +186,112 @@ impl FeedRepository for FeedTable {
 // FeedItemTable
 // ============================================================================
 
-impl_table!(
-    FeedItemTable,
-    FeedItemEntity,
-    "feed_items",
-    id,
-    i32,
-    i32,
-    r#"CREATE TABLE IF NOT EXISTS feed_items (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        feed_id INTEGER NOT NULL,
-        description TEXT NOT NULL,
-        published TIMESTAMP NOT NULL,
-        UNIQUE(feed_id, published),
-        FOREIGN KEY (feed_id) REFERENCES feeds(id)
-            ON DELETE CASCADE
-            ON UPDATE CASCADE
-    )"#,
-    "feed_id, description, published",
-    "?, ?, ?",
-    "feed_id = ?, description = ?, published = ?",
-    [feed_id, description, published]
-);
+#[derive(Clone)]
+pub struct FeedItemTable {
+    pool: DbPool,
+}
+
+impl FeedItemTable {
+    pub fn new(pool: DbPool) -> Self {
+        Self { pool }
+    }
+}
+
+impl_table_base!(FeedItemTable, feed_items::table);
+
+#[async_trait::async_trait]
+impl CrudTable<FeedItemEntity, i32> for FeedItemTable {
+    async fn select_all(&self) -> Result<Vec<FeedItemEntity>, DatabaseError> {
+        let mut conn = self.pool.get().await?;
+        Ok(feed_items::table
+            .select(FeedItemEntity::as_select())
+            .load(&mut conn)
+            .await?)
+    }
+
+    async fn insert(&self, model: &FeedItemEntity) -> Result<i32, DatabaseError> {
+        let mut conn = self.pool.get().await?;
+        let id = diesel::insert_into(feed_items::table)
+            .values((
+                feed_items::feed_id.eq(model.feed_id),
+                feed_items::description.eq(&model.description),
+                feed_items::published.eq(model.published),
+            ))
+            .returning(feed_items::id)
+            .get_result(&mut conn)
+            .await?;
+        Ok(id)
+    }
+
+    async fn select(&self, id: &i32) -> Result<Option<FeedItemEntity>, DatabaseError> {
+        let mut conn = self.pool.get().await?;
+        Ok(feed_items::table
+            .find(id)
+            .select(FeedItemEntity::as_select())
+            .first(&mut conn)
+            .await
+            .optional()?)
+    }
+
+    async fn update(&self, model: &FeedItemEntity) -> Result<(), DatabaseError> {
+        let mut conn = self.pool.get().await?;
+        diesel::update(feed_items::table.find(model.id))
+            .set((
+                feed_items::feed_id.eq(model.feed_id),
+                feed_items::description.eq(&model.description),
+                feed_items::published.eq(model.published),
+            ))
+            .execute(&mut conn)
+            .await?;
+        Ok(())
+    }
+
+    async fn delete(&self, id: &i32) -> Result<(), DatabaseError> {
+        let mut conn = self.pool.get().await?;
+        diesel::delete(feed_items::table.find(id))
+            .execute(&mut conn)
+            .await?;
+        Ok(())
+    }
+
+    async fn replace(&self, model: &FeedItemEntity) -> Result<i32, DatabaseError> {
+        self.insert(model).await
+    }
+}
 
 #[async_trait::async_trait]
 impl FeedItemRepository for FeedItemTable {
-    /// Get the latest version for a specific feed
     async fn select_latest_by_feed_id(
         &self,
         feed_id: i32,
     ) -> Result<Option<FeedItemEntity>, DatabaseError> {
-        Ok(sqlx::query_as::<_, FeedItemEntity>(
-            "SELECT * FROM feed_items WHERE feed_id = ? ORDER BY published DESC LIMIT 1",
-        )
-        .bind(feed_id)
-        .fetch_optional(&self.base.pool)
-        .await?)
+        let mut conn = self.pool.get().await?;
+        Ok(feed_items::table
+            .filter(feed_items::feed_id.eq(feed_id))
+            .order(feed_items::published.desc())
+            .select(FeedItemEntity::as_select())
+            .first(&mut conn)
+            .await
+            .optional()?)
     }
 
-    /// Get all versions for a specific feed, ordered by published date
     async fn select_all_by_feed_id(
         &self,
         feed_id: i32,
     ) -> Result<Vec<FeedItemEntity>, DatabaseError> {
-        Ok(sqlx::query_as::<_, FeedItemEntity>(
-            "SELECT * FROM feed_items WHERE feed_id = ? ORDER BY published DESC",
-        )
-        .bind(feed_id)
-        .fetch_all(&self.base.pool)
-        .await?)
+        let mut conn = self.pool.get().await?;
+        Ok(feed_items::table
+            .filter(feed_items::feed_id.eq(feed_id))
+            .order(feed_items::published.desc())
+            .select(FeedItemEntity::as_select())
+            .load(&mut conn)
+            .await?)
     }
 
-    /// Delete all versions for a specific feed
     async fn delete_all_by_feed_id(&self, feed_id: i32) -> Result<(), DatabaseError> {
-        sqlx::query("DELETE FROM feed_items WHERE feed_id = ?")
-            .bind(feed_id)
-            .execute(&self.base.pool)
+        let mut conn = self.pool.get().await?;
+        diesel::delete(feed_items::table.filter(feed_items::feed_id.eq(feed_id)))
+            .execute(&mut conn)
             .await?;
         Ok(())
     }
@@ -389,24 +301,76 @@ impl FeedItemRepository for FeedItemTable {
 // SubscriberTable
 // ============================================================================
 
-impl_table!(
-    SubscriberTable,
-    SubscriberEntity,
-    "subscribers",
-    id,
-    i32,
-    i32,
-    r#"CREATE TABLE IF NOT EXISTS subscribers (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        type TEXT NOT NULL,
-        target_id TEXT NOT NULL,
-        UNIQUE(type, target_id)
-    )"#,
-    "type, target_id",
-    "?, ?",
-    "type = ?, target_id = ?",
-    [r#type, target_id]
-);
+#[derive(Clone)]
+pub struct SubscriberTable {
+    pool: DbPool,
+}
+
+impl SubscriberTable {
+    pub fn new(pool: DbPool) -> Self {
+        Self { pool }
+    }
+}
+
+impl_table_base!(SubscriberTable, subscribers::table);
+
+#[async_trait::async_trait]
+impl CrudTable<SubscriberEntity, i32> for SubscriberTable {
+    async fn select_all(&self) -> Result<Vec<SubscriberEntity>, DatabaseError> {
+        let mut conn = self.pool.get().await?;
+        Ok(subscribers::table
+            .select(SubscriberEntity::as_select())
+            .load(&mut conn)
+            .await?)
+    }
+
+    async fn insert(&self, model: &SubscriberEntity) -> Result<i32, DatabaseError> {
+        let mut conn = self.pool.get().await?;
+        let id = diesel::insert_into(subscribers::table)
+            .values((
+                subscribers::type_.eq(model.r#type),
+                subscribers::target_id.eq(&model.target_id),
+            ))
+            .returning(subscribers::id)
+            .get_result(&mut conn)
+            .await?;
+        Ok(id)
+    }
+
+    async fn select(&self, id: &i32) -> Result<Option<SubscriberEntity>, DatabaseError> {
+        let mut conn = self.pool.get().await?;
+        Ok(subscribers::table
+            .find(id)
+            .select(SubscriberEntity::as_select())
+            .first(&mut conn)
+            .await
+            .optional()?)
+    }
+
+    async fn update(&self, model: &SubscriberEntity) -> Result<(), DatabaseError> {
+        let mut conn = self.pool.get().await?;
+        diesel::update(subscribers::table.find(model.id))
+            .set((
+                subscribers::type_.eq(model.r#type),
+                subscribers::target_id.eq(&model.target_id),
+            ))
+            .execute(&mut conn)
+            .await?;
+        Ok(())
+    }
+
+    async fn delete(&self, id: &i32) -> Result<(), DatabaseError> {
+        let mut conn = self.pool.get().await?;
+        diesel::delete(subscribers::table.find(id))
+            .execute(&mut conn)
+            .await?;
+        Ok(())
+    }
+
+    async fn replace(&self, model: &SubscriberEntity) -> Result<i32, DatabaseError> {
+        self.insert(model).await
+    }
+}
 
 #[async_trait::async_trait]
 impl SubscriberRepository for SubscriberTable {
@@ -415,21 +379,19 @@ impl SubscriberRepository for SubscriberTable {
         r#type: SubscriberType,
         feed_id: i32,
     ) -> Result<Vec<SubscriberEntity>, DatabaseError> {
-        Ok(sqlx::query_as::<_, SubscriberEntity>(
-            r#"
-            SELECT * FROM subscribers
-            WHERE type = ?
-                AND id IN (
-                    SELECT subscriber_id
-                    FROM feed_subscriptions
-                    WHERE feed_id = ?
-                )
-            "#,
-        )
-        .bind(r#type)
-        .bind(feed_id)
-        .fetch_all(&self.base.pool)
-        .await?)
+        let mut conn = self.pool.get().await?;
+        Ok(subscribers::table
+            .filter(subscribers::type_.eq(r#type))
+            .filter(
+                subscribers::id.eq_any(
+                    feed_subscriptions::table
+                        .filter(feed_subscriptions::feed_id.eq(feed_id))
+                        .select(feed_subscriptions::subscriber_id),
+                ),
+            )
+            .select(SubscriberEntity::as_select())
+            .load(&mut conn)
+            .await?)
     }
 
     async fn select_by_type_and_target(
@@ -437,13 +399,14 @@ impl SubscriberRepository for SubscriberTable {
         r#type: &SubscriberType,
         target_id: &str,
     ) -> Result<Option<SubscriberEntity>, DatabaseError> {
-        Ok(sqlx::query_as::<_, SubscriberEntity>(
-            "SELECT * FROM subscribers WHERE type = ? AND target_id = ? LIMIT 1",
-        )
-        .bind(r#type)
-        .bind(target_id)
-        .fetch_optional(&self.base.pool)
-        .await?)
+        let mut conn = self.pool.get().await?;
+        Ok(subscribers::table
+            .filter(subscribers::type_.eq(r#type))
+            .filter(subscribers::target_id.eq(target_id))
+            .select(SubscriberEntity::as_select())
+            .first(&mut conn)
+            .await
+            .optional()?)
     }
 }
 
@@ -451,110 +414,145 @@ impl SubscriberRepository for SubscriberTable {
 // FeedSubscriptionTable
 // ============================================================================
 
-impl_table!(
-    FeedSubscriptionTable,
-    FeedSubscriptionEntity,
-    "feed_subscriptions",
-    id,
-    i32,
-    i32,
-    r#"CREATE TABLE IF NOT EXISTS feed_subscriptions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        feed_id INTEGER NOT NULL,
-        subscriber_id INTEGER NOT NULL,
-        UNIQUE(feed_id, subscriber_id),
-        FOREIGN KEY (feed_id) REFERENCES feeds(id)
-            ON DELETE CASCADE
-            ON UPDATE CASCADE,
-        FOREIGN KEY (subscriber_id) REFERENCES subscribers(id)
-            ON DELETE CASCADE
-            ON UPDATE CASCADE
-    )"#,
-    "feed_id, subscriber_id",
-    "?, ?",
-    "feed_id = ?, subscriber_id = ?",
-    [feed_id, subscriber_id]
-);
+#[derive(Clone)]
+pub struct FeedSubscriptionTable {
+    pool: DbPool,
+}
+
+impl FeedSubscriptionTable {
+    pub fn new(pool: DbPool) -> Self {
+        Self { pool }
+    }
+}
+
+impl_table_base!(FeedSubscriptionTable, feed_subscriptions::table);
+
+#[async_trait::async_trait]
+impl CrudTable<FeedSubscriptionEntity, i32> for FeedSubscriptionTable {
+    async fn select_all(&self) -> Result<Vec<FeedSubscriptionEntity>, DatabaseError> {
+        let mut conn = self.pool.get().await?;
+        Ok(feed_subscriptions::table
+            .select(FeedSubscriptionEntity::as_select())
+            .load(&mut conn)
+            .await?)
+    }
+
+    async fn insert(&self, model: &FeedSubscriptionEntity) -> Result<i32, DatabaseError> {
+        let mut conn = self.pool.get().await?;
+        let id = diesel::insert_into(feed_subscriptions::table)
+            .values((
+                feed_subscriptions::feed_id.eq(model.feed_id),
+                feed_subscriptions::subscriber_id.eq(model.subscriber_id),
+            ))
+            .returning(feed_subscriptions::id)
+            .get_result(&mut conn)
+            .await?;
+        Ok(id)
+    }
+
+    async fn select(&self, id: &i32) -> Result<Option<FeedSubscriptionEntity>, DatabaseError> {
+        let mut conn = self.pool.get().await?;
+        Ok(feed_subscriptions::table
+            .find(id)
+            .select(FeedSubscriptionEntity::as_select())
+            .first(&mut conn)
+            .await
+            .optional()?)
+    }
+
+    async fn update(&self, model: &FeedSubscriptionEntity) -> Result<(), DatabaseError> {
+        let mut conn = self.pool.get().await?;
+        diesel::update(feed_subscriptions::table.find(model.id))
+            .set((
+                feed_subscriptions::feed_id.eq(model.feed_id),
+                feed_subscriptions::subscriber_id.eq(model.subscriber_id),
+            ))
+            .execute(&mut conn)
+            .await?;
+        Ok(())
+    }
+
+    async fn delete(&self, id: &i32) -> Result<(), DatabaseError> {
+        let mut conn = self.pool.get().await?;
+        diesel::delete(feed_subscriptions::table.find(id))
+            .execute(&mut conn)
+            .await?;
+        Ok(())
+    }
+
+    async fn replace(&self, model: &FeedSubscriptionEntity) -> Result<i32, DatabaseError> {
+        self.insert(model).await
+    }
+}
 
 #[async_trait::async_trait]
 impl FeedSubscriptionRepository for FeedSubscriptionTable {
-    /// Get all subscribers for a specific feed
     async fn select_all_by_feed_id(
         &self,
         feed_id: i32,
     ) -> Result<Vec<FeedSubscriptionEntity>, DatabaseError> {
-        Ok(sqlx::query_as::<_, FeedSubscriptionEntity>(
-            "SELECT * FROM feed_subscriptions WHERE feed_id = ?",
-        )
-        .bind(feed_id)
-        .fetch_all(&self.base.pool)
-        .await?)
+        let mut conn = self.pool.get().await?;
+        Ok(feed_subscriptions::table
+            .filter(feed_subscriptions::feed_id.eq(feed_id))
+            .select(FeedSubscriptionEntity::as_select())
+            .load(&mut conn)
+            .await?)
     }
 
-    /// Get all feeds a subscriber is following
     async fn select_all_by_subscriber_id(
         &self,
         subscriber_id: i32,
     ) -> Result<Vec<FeedSubscriptionEntity>, DatabaseError> {
-        Ok(sqlx::query_as::<_, FeedSubscriptionEntity>(
-            "SELECT * FROM feed_subscriptions WHERE subscriber_id = ?",
-        )
-        .bind(subscriber_id)
-        .fetch_all(&self.base.pool)
-        .await?)
+        let mut conn = self.pool.get().await?;
+        Ok(feed_subscriptions::table
+            .filter(feed_subscriptions::subscriber_id.eq(subscriber_id))
+            .select(FeedSubscriptionEntity::as_select())
+            .load(&mut conn)
+            .await?)
     }
 
-    /// Get count of feeds a subscriber is following
     async fn count_by_subscriber_id(&self, subscriber_id: i32) -> Result<u32, DatabaseError> {
-        let count: (u32,) =
-            sqlx::query_as("SELECT COUNT(*) FROM feed_subscriptions WHERE subscriber_id = ?")
-                .bind(subscriber_id)
-                .fetch_one(&self.base.pool)
-                .await?;
-        Ok(count.0)
+        let mut conn = self.pool.get().await?;
+        let count: i64 = feed_subscriptions::table
+            .filter(feed_subscriptions::subscriber_id.eq(subscriber_id))
+            .count()
+            .get_result(&mut conn)
+            .await?;
+        Ok(count as u32)
     }
 
-    /// Get a paginated list of feeds a subscriber is following
-    ///
-    /// # Arguments
-    /// * `page` - n-th page to show. Starts at 0.
-    /// * `per_page` - How many items to show per page.
     async fn select_paginated_by_subscriber_id(
         &self,
         subscriber_id: i32,
         page: u32,
         per_page: u32,
     ) -> Result<Vec<FeedSubscriptionEntity>, DatabaseError> {
-        let limit = per_page;
-        let offset = per_page * page;
-
-        Ok(sqlx::query_as::<_, FeedSubscriptionEntity>(
-            "SELECT * FROM feed_subscriptions WHERE subscriber_id = ? ORDER BY id LIMIT ? OFFSET ?",
-        )
-        .bind(subscriber_id)
-        .bind(limit)
-        .bind(offset)
-        .fetch_all(&self.base.pool)
-        .await?)
+        let mut conn = self.pool.get().await?;
+        let limit = per_page as i64;
+        let offset = (per_page * page) as i64;
+        Ok(feed_subscriptions::table
+            .filter(feed_subscriptions::subscriber_id.eq(subscriber_id))
+            .order(feed_subscriptions::id.asc())
+            .limit(limit)
+            .offset(offset)
+            .select(FeedSubscriptionEntity::as_select())
+            .load(&mut conn)
+            .await?)
     }
 
-    /// Get a paginated list of feeds a subscriber is following, with latest feed item
-    ///
-    /// # Arguments
-    /// * `page` - n-th page to show. Starts at 0.
-    /// * `per_page` - How many items to show per page.
     async fn select_paginated_with_latest_by_subscriber_id(
         &self,
         subscriber_id: i32,
         page: u32,
         per_page: u32,
     ) -> Result<Vec<FeedWithLatestItemRow>, DatabaseError> {
-        let limit = per_page;
-        let offset = per_page * page;
+        let mut conn = self.pool.get().await?;
+        let limit = per_page as i64;
+        let offset = (per_page * page) as i64;
 
-        Ok(sqlx::query_as::<_, FeedWithLatestItemRow>(
+        let rows = diesel::sql_query(
             r#"
-            SELECT 
+            SELECT
                 f.id, f.name, f.description, f.platform_id, f.source_id, f.items_id, f.source_url, f.cover_url, f.tags,
                 fi.id as item_id, fi.description as item_description, fi.published as item_published
             FROM feed_subscriptions fs
@@ -562,110 +560,215 @@ impl FeedSubscriptionRepository for FeedSubscriptionTable {
             LEFT JOIN feed_items fi ON fi.id = (
                 SELECT id FROM feed_items WHERE feed_id = f.id ORDER BY published DESC LIMIT 1
             )
-            WHERE fs.subscriber_id = ?
+            WHERE fs.subscriber_id = $1
             ORDER BY f.name
-            LIMIT ? OFFSET ?
-            "#
+            LIMIT $2 OFFSET $3
+            "#,
         )
-        .bind(subscriber_id)
-        .bind(limit)
-        .bind(offset)
-        .fetch_all(&self.base.pool)
-        .await?)
+        .bind::<diesel::sql_types::Integer, _>(subscriber_id)
+        .bind::<diesel::sql_types::BigInt, _>(limit)
+        .bind::<diesel::sql_types::BigInt, _>(offset)
+        .load::<FeedWithLatestItemRow>(&mut conn)
+        .await?;
+        Ok(rows)
     }
 
-    /// Check if a subscription exists
     async fn exists_by_feed_id(&self, feed_id: i32) -> Result<bool, DatabaseError> {
-        let count: (i32,) =
-            sqlx::query_as("SELECT COUNT(*) FROM feed_subscriptions WHERE feed_id = ?")
-                .bind(feed_id)
-                .fetch_one(&self.base.pool)
-                .await?;
-        Ok(count.0 > 0)
+        let mut conn = self.pool.get().await?;
+        let count: i64 = feed_subscriptions::table
+            .filter(feed_subscriptions::feed_id.eq(feed_id))
+            .count()
+            .get_result(&mut conn)
+            .await?;
+        Ok(count > 0)
     }
 
-    /// Delete a specific subscription
     async fn delete_subscription(
         &self,
         feed_id: i32,
         subscriber_id: i32,
     ) -> Result<bool, DatabaseError> {
-        let res =
-            sqlx::query("DELETE FROM feed_subscriptions WHERE feed_id = ? AND subscriber_id = ?")
-                .bind(feed_id)
-                .bind(subscriber_id)
-                .execute(&self.base.pool)
-                .await?;
-        Ok(res.rows_affected() > 0)
+        let mut conn = self.pool.get().await?;
+        let affected = diesel::delete(
+            feed_subscriptions::table
+                .filter(feed_subscriptions::feed_id.eq(feed_id))
+                .filter(feed_subscriptions::subscriber_id.eq(subscriber_id)),
+        )
+        .execute(&mut conn)
+        .await?;
+        Ok(affected > 0)
     }
 
-    /// Delete all subscriptions for a feed
     async fn delete_all_by_feed_id(&self, feed_id: i32) -> Result<(), DatabaseError> {
-        sqlx::query("DELETE FROM feed_subscriptions WHERE feed_id = ?")
-            .bind(feed_id)
-            .execute(&self.base.pool)
+        let mut conn = self.pool.get().await?;
+        diesel::delete(feed_subscriptions::table.filter(feed_subscriptions::feed_id.eq(feed_id)))
+            .execute(&mut conn)
             .await?;
         Ok(())
     }
 
-    /// Delete all subscriptions for a subscriber
     async fn delete_all_by_subscriber_id(&self, subscriber_id: i32) -> Result<(), DatabaseError> {
-        sqlx::query("DELETE FROM feed_subscriptions WHERE subscriber_id = ?")
-            .bind(subscriber_id)
-            .execute(&self.base.pool)
+        let mut conn = self.pool.get().await?;
+        diesel::delete(
+            feed_subscriptions::table.filter(feed_subscriptions::subscriber_id.eq(subscriber_id)),
+        )
+        .execute(&mut conn)
+        .await?;
+        Ok(())
+    }
+}
+
+// ============================================================================
+// ServerSettingsTable
+// ============================================================================
+
+#[derive(Clone)]
+pub struct ServerSettingsTable {
+    pool: DbPool,
+}
+
+impl ServerSettingsTable {
+    pub fn new(pool: DbPool) -> Self {
+        Self { pool }
+    }
+}
+
+impl_table_base!(ServerSettingsTable, server_settings::table);
+
+#[async_trait::async_trait]
+impl CrudTable<ServerSettingsEntity, u64> for ServerSettingsTable {
+    async fn select_all(&self) -> Result<Vec<ServerSettingsEntity>, DatabaseError> {
+        let mut conn = self.pool.get().await?;
+        Ok(server_settings::table
+            .select(ServerSettingsEntity::as_select())
+            .load(&mut conn)
+            .await?)
+    }
+
+    async fn insert(&self, model: &ServerSettingsEntity) -> Result<u64, DatabaseError> {
+        let mut conn = self.pool.get().await?;
+        let guild_id: DbU64 = diesel::insert_into(server_settings::table)
+            .values(model)
+            .returning(server_settings::guild_id)
+            .get_result(&mut conn)
+            .await?;
+        Ok(guild_id.into())
+    }
+
+    async fn select(&self, id: &u64) -> Result<Option<ServerSettingsEntity>, DatabaseError> {
+        let mut conn = self.pool.get().await?;
+        Ok(server_settings::table
+            .find(DbU64::from(*id))
+            .select(ServerSettingsEntity::as_select())
+            .first(&mut conn)
+            .await
+            .optional()?)
+    }
+
+    async fn update(&self, model: &ServerSettingsEntity) -> Result<(), DatabaseError> {
+        let mut conn = self.pool.get().await?;
+        diesel::update(server_settings::table.find(model.guild_id))
+            .set(model)
+            .execute(&mut conn)
             .await?;
         Ok(())
+    }
+
+    async fn delete(&self, id: &u64) -> Result<(), DatabaseError> {
+        let mut conn = self.pool.get().await?;
+        diesel::delete(server_settings::table.find(DbU64::from(*id)))
+            .execute(&mut conn)
+            .await?;
+        Ok(())
+    }
+
+    async fn replace(&self, model: &ServerSettingsEntity) -> Result<u64, DatabaseError> {
+        let gid: u64 = model.guild_id.into();
+        if self.select(&gid).await?.is_some() {
+            self.update(model).await?;
+            return Ok(gid);
+        }
+        self.insert(model).await
     }
 }
 
 #[async_trait::async_trait]
 impl ServerSettingsRepository for ServerSettingsTable {}
 
-impl_table!(
-    ServerSettingsTable,
-    ServerSettingsEntity,
-    "server_settings",
-    guild_id,
-    u64,
-    i64,
-    r#"CREATE TABLE IF NOT EXISTS server_settings (
-        guild_id INTEGER PRIMARY KEY,
-        settings TEXT NOT NULL
-    );"#,
-    "guild_id, settings",
-    "?, ?",
-    "guild_id = ?, settings = ?",
-    [guild_id, settings]
-);
-
 // ============================================================================
 // VoiceSessionsTable
 // ============================================================================
 
-impl_table!(
-    VoiceSessionsTable,
-    VoiceSessionsEntity,
-    "voice_sessions",
-    id,
-    i32,
-    i32,
-    r#"CREATE TABLE IF NOT EXISTS voice_sessions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER NOT NULL,
-        guild_id INTEGER NOT NULL,
-        channel_id INTEGER NOT NULL,
-        join_time TIMESTAMP NOT NULL,
-        leave_time TIMESTAMP NOT NULL,
-        is_active INTEGER NOT NULL DEFAULT 0,
-        UNIQUE(user_id, channel_id, join_time)
-    );"#,
-    "user_id, guild_id, channel_id, join_time, leave_time, is_active",
-    "?, ?, ?, ?, ?, ?",
-    "user_id = ?, guild_id = ?, channel_id = ?, join_time = ?, leave_time = ?, is_active = ?",
-    [
-        user_id, guild_id, channel_id, join_time, leave_time, is_active
-    ]
-);
+#[derive(Clone)]
+pub struct VoiceSessionsTable {
+    pool: DbPool,
+}
+
+impl VoiceSessionsTable {
+    pub fn new(pool: DbPool) -> Self {
+        Self { pool }
+    }
+}
+
+impl_table_base!(VoiceSessionsTable, voice_sessions::table);
+
+#[async_trait::async_trait]
+impl CrudTable<VoiceSessionsEntity, i32> for VoiceSessionsTable {
+    async fn select_all(&self) -> Result<Vec<VoiceSessionsEntity>, DatabaseError> {
+        let mut conn = self.pool.get().await?;
+        let rows: Vec<DbVoiceSession> = voice_sessions::table
+            .select(DbVoiceSession::as_select())
+            .load(&mut conn)
+            .await?;
+        Ok(rows.into_iter().map(Into::into).collect())
+    }
+
+    async fn insert(&self, model: &VoiceSessionsEntity) -> Result<i32, DatabaseError> {
+        let mut conn = self.pool.get().await?;
+        let id = diesel::insert_into(voice_sessions::table)
+            .values(&model.to_insertable())
+            .returning(voice_sessions::id)
+            .get_result(&mut conn)
+            .await?;
+        Ok(id)
+    }
+
+    async fn select(&self, id: &i32) -> Result<Option<VoiceSessionsEntity>, DatabaseError> {
+        let mut conn = self.pool.get().await?;
+        let result: Option<DbVoiceSession> = voice_sessions::table
+            .find(id)
+            .select(DbVoiceSession::as_select())
+            .first(&mut conn)
+            .await
+            .optional()?;
+        Ok(result.map(Into::into))
+    }
+
+    async fn update(&self, model: &VoiceSessionsEntity) -> Result<(), DatabaseError> {
+        let mut conn = self.pool.get().await?;
+        diesel::update(voice_sessions::table.find(model.id))
+            .set(&model.to_insertable())
+            .execute(&mut conn)
+            .await?;
+        Ok(())
+    }
+
+    async fn delete(&self, id: &i32) -> Result<(), DatabaseError> {
+        let mut conn = self.pool.get().await?;
+        diesel::delete(voice_sessions::table.find(id))
+            .execute(&mut conn)
+            .await?;
+        Ok(())
+    }
+
+    async fn replace(&self, model: &VoiceSessionsEntity) -> Result<i32, DatabaseError> {
+        if model.id != 0 && self.select(&model.id).await?.is_some() {
+            self.update(model).await?;
+            return Ok(model.id);
+        }
+        self.insert(model).await
+    }
+}
 
 #[async_trait::async_trait]
 impl VoiceSessionsRepository for VoiceSessionsTable {
@@ -673,43 +776,40 @@ impl VoiceSessionsRepository for VoiceSessionsTable {
         &self,
         opts: &VoiceLeaderboardOpt,
     ) -> Result<Vec<VoiceLeaderboardEntry>, DatabaseError> {
+        let mut conn = self.pool.get().await?;
         let limit = opts.limit.unwrap_or(10) as i64;
         let offset = opts.offset.unwrap_or(0) as i64;
-
-        // Use boundaries for clipping. If not provided, we use a wide range.
         let since_val = opts.since.unwrap_or(chrono::DateTime::UNIX_EPOCH);
-        // Default to far future if until is not provided to include all current sessions
         let until_val = opts
             .until
             .unwrap_or_else(|| chrono::Utc::now() + chrono::Duration::days(365));
 
-        // This query clips session durations to the requested time window [since, until].
-        // 1. It filters sessions that overlap with the window: join_time <= until AND (is_active=1 OR leave_time >= since)
-        // 2. It calculates the duration within the window as: MIN(until, session_end) - MAX(since, join_time)
-        let query = r#"
-            SELECT 
-                user_id, 
+        let rows: Vec<VoiceLeaderboardRow> = diesel::sql_query(
+            r#"
+            SELECT
+                user_id,
                 SUM(
-                    strftime('%s', MIN(?, CASE WHEN is_active = 1 THEN CURRENT_TIMESTAMP ELSE leave_time END)) - 
-                    strftime('%s', MAX(?, join_time))
-                ) as total_duration
+                    EXTRACT(EPOCH FROM LEAST($1, CASE WHEN is_active THEN CURRENT_TIMESTAMP ELSE leave_time END))::bigint -
+                    EXTRACT(EPOCH FROM GREATEST($2, join_time))::bigint
+                )::bigint as total_duration
             FROM voice_sessions
-            WHERE guild_id = ?
-            AND join_time <= ?
-            AND (is_active = 1 OR leave_time >= ?)
-            GROUP BY user_id ORDER BY total_duration DESC LIMIT ? OFFSET ?
-        "#;
+            WHERE guild_id = $3
+            AND join_time <= $4
+            AND (is_active OR leave_time >= $5)
+            GROUP BY user_id ORDER BY total_duration DESC LIMIT $6 OFFSET $7
+            "#,
+        )
+        .bind::<diesel::sql_types::Timestamptz, _>(until_val)
+        .bind::<diesel::sql_types::Timestamptz, _>(since_val)
+        .bind::<diesel::sql_types::BigInt, _>(opts.guild_id as i64)
+        .bind::<diesel::sql_types::Timestamptz, _>(until_val)
+        .bind::<diesel::sql_types::Timestamptz, _>(since_val)
+        .bind::<diesel::sql_types::BigInt, _>(limit)
+        .bind::<diesel::sql_types::BigInt, _>(offset)
+        .load(&mut conn)
+        .await?;
 
-        Ok(sqlx::query_as::<_, VoiceLeaderboardEntry>(query)
-            .bind(until_val)
-            .bind(since_val)
-            .bind(opts.guild_id as i64)
-            .bind(until_val)
-            .bind(since_val)
-            .bind(limit)
-            .bind(offset)
-            .fetch_all(&self.base.pool)
-            .await?)
+        Ok(rows.into_iter().map(Into::into).collect())
     }
 
     async fn get_leaderboard(
@@ -745,59 +845,54 @@ impl VoiceSessionsRepository for VoiceSessionsTable {
         opts: &VoiceLeaderboardOpt,
         target_user_id: u64,
     ) -> Result<Vec<VoiceLeaderboardEntry>, DatabaseError> {
+        let mut conn = self.pool.get().await?;
         let limit = opts.limit.unwrap_or(10) as i64;
         let offset = opts.offset.unwrap_or(0) as i64;
+        let since_val = opts.since.unwrap_or(chrono::DateTime::UNIX_EPOCH);
+        let until_val = opts
+            .until
+            .unwrap_or_else(|| chrono::Utc::now() + chrono::Duration::days(365));
 
-        let mut query = String::from(
+        let rows: Vec<VoiceLeaderboardRow> = diesel::sql_query(
             r#"
-            SELECT 
-                v2.user_id, 
+            SELECT
+                v2.user_id,
                 SUM(
-                    strftime('%s', MIN(
-                        CASE WHEN v1.is_active = 1 THEN CURRENT_TIMESTAMP ELSE v1.leave_time END, 
-                        CASE WHEN v2.is_active = 1 THEN CURRENT_TIMESTAMP ELSE v2.leave_time END
-                    )) - 
-                    strftime('%s', MAX(v1.join_time, v2.join_time))
-                ) as total_duration
-            FROM voice_sessions v1 
-            JOIN voice_sessions v2 
-                ON v1.guild_id = v2.guild_id 
-                AND v1.channel_id = v2.channel_id 
-                AND v1.user_id != v2.user_id 
-                AND MAX(v1.join_time, v2.join_time) < MIN(
-                    CASE WHEN v1.is_active = 1 THEN CURRENT_TIMESTAMP ELSE v1.leave_time END, 
-                    CASE WHEN v2.is_active = 1 THEN CURRENT_TIMESTAMP ELSE v2.leave_time END
+                    EXTRACT(EPOCH FROM LEAST(
+                        CASE WHEN v1.is_active THEN CURRENT_TIMESTAMP ELSE v1.leave_time END,
+                        CASE WHEN v2.is_active THEN CURRENT_TIMESTAMP ELSE v2.leave_time END
+                    ))::bigint -
+                    EXTRACT(EPOCH FROM GREATEST(v1.join_time, v2.join_time))::bigint
+                )::bigint as total_duration
+            FROM voice_sessions v1
+            JOIN voice_sessions v2
+                ON v1.guild_id = v2.guild_id
+                AND v1.channel_id = v2.channel_id
+                AND v1.user_id != v2.user_id
+                AND GREATEST(v1.join_time, v2.join_time) < LEAST(
+                    CASE WHEN v1.is_active THEN CURRENT_TIMESTAMP ELSE v1.leave_time END,
+                    CASE WHEN v2.is_active THEN CURRENT_TIMESTAMP ELSE v2.leave_time END
                 )
-            WHERE v1.user_id = ? AND v1.guild_id = ?
+            WHERE v1.user_id = $1 AND v1.guild_id = $2
+                AND v1.join_time >= $3 AND v2.join_time >= $4
+                AND v1.join_time <= $5 AND v2.join_time <= $6
+            GROUP BY v2.user_id ORDER BY total_duration DESC LIMIT $7 OFFSET $8
             "#,
-        );
+        )
+        .bind::<diesel::sql_types::BigInt, _>(target_user_id as i64)
+        .bind::<diesel::sql_types::BigInt, _>(opts.guild_id as i64)
+        .bind::<diesel::sql_types::Timestamptz, _>(since_val)
+        .bind::<diesel::sql_types::Timestamptz, _>(since_val)
+        .bind::<diesel::sql_types::Timestamptz, _>(until_val)
+        .bind::<diesel::sql_types::Timestamptz, _>(until_val)
+        .bind::<diesel::sql_types::BigInt, _>(limit)
+        .bind::<diesel::sql_types::BigInt, _>(offset)
+        .load(&mut conn)
+        .await?;
 
-        if opts.since.is_some() {
-            query.push_str(" AND v1.join_time >= ? AND v2.join_time >= ?");
-        }
-        if opts.until.is_some() {
-            query.push_str(" AND v1.join_time <= ? AND v2.join_time <= ?");
-        }
-
-        query.push_str(" GROUP BY v2.user_id ORDER BY total_duration DESC LIMIT ? OFFSET ?");
-
-        let mut q = sqlx::query_as::<_, VoiceLeaderboardEntry>(&query)
-            .bind(target_user_id as i64)
-            .bind(opts.guild_id as i64);
-
-        if let Some(since) = opts.since {
-            q = q.bind(since).bind(since);
-        }
-        if let Some(until) = opts.until {
-            q = q.bind(until).bind(until);
-        }
-
-        q = q.bind(limit).bind(offset);
-
-        Ok(q.fetch_all(&self.base.pool).await?)
+        Ok(rows.into_iter().map(Into::into).collect())
     }
 
-    /// Update leave_time for a specific session (user, channel, join_time combination)
     async fn update_leave_time(
         &self,
         user_id: u64,
@@ -805,23 +900,19 @@ impl VoiceSessionsRepository for VoiceSessionsTable {
         join_time: &chrono::DateTime<chrono::Utc>,
         leave_time: &chrono::DateTime<chrono::Utc>,
     ) -> Result<(), DatabaseError> {
-        sqlx::query(
-            r#"
-            UPDATE voice_sessions 
-            SET leave_time = ?
-            WHERE user_id = ? AND channel_id = ? AND join_time = ?
-            "#,
+        let mut conn = self.pool.get().await?;
+        diesel::update(
+            voice_sessions::table
+                .filter(voice_sessions::user_id.eq(DbU64::from(user_id)))
+                .filter(voice_sessions::channel_id.eq(DbU64::from(channel_id)))
+                .filter(voice_sessions::join_time.eq(join_time)),
         )
-        .bind(leave_time)
-        .bind(user_id as i64)
-        .bind(channel_id as i64)
-        .bind(join_time)
-        .execute(&self.base.pool)
+        .set(voice_sessions::leave_time.eq(leave_time))
+        .execute(&mut conn)
         .await?;
         Ok(())
     }
 
-    /// Close a session by setting leave_time and is_active = 0 atomically
     async fn close_session(
         &self,
         user_id: u64,
@@ -829,35 +920,32 @@ impl VoiceSessionsRepository for VoiceSessionsTable {
         join_time: &chrono::DateTime<chrono::Utc>,
         leave_time: &chrono::DateTime<chrono::Utc>,
     ) -> Result<(), DatabaseError> {
-        sqlx::query(
-            r#"
-            UPDATE voice_sessions 
-            SET leave_time = ?, is_active = 0
-            WHERE user_id = ? AND channel_id = ? AND join_time = ?
-            "#,
+        let mut conn = self.pool.get().await?;
+        diesel::update(
+            voice_sessions::table
+                .filter(voice_sessions::user_id.eq(DbU64::from(user_id)))
+                .filter(voice_sessions::channel_id.eq(DbU64::from(channel_id)))
+                .filter(voice_sessions::join_time.eq(join_time)),
         )
-        .bind(leave_time)
-        .bind(user_id as i64)
-        .bind(channel_id as i64)
-        .bind(join_time)
-        .execute(&self.base.pool)
+        .set((
+            voice_sessions::leave_time.eq(leave_time),
+            voice_sessions::is_active.eq(false),
+        ))
+        .execute(&mut conn)
         .await?;
         Ok(())
     }
 
-    /// Find all active sessions (where is_active = 1)
     async fn find_active_sessions(&self) -> Result<Vec<VoiceSessionsEntity>, DatabaseError> {
-        Ok(sqlx::query_as::<_, VoiceSessionsEntity>(
-            r#"
-            SELECT * FROM voice_sessions
-            WHERE is_active = 1
-            "#,
-        )
-        .fetch_all(&self.base.pool)
-        .await?)
+        let mut conn = self.pool.get().await?;
+        let rows: Vec<DbVoiceSession> = voice_sessions::table
+            .filter(voice_sessions::is_active.eq(true))
+            .select(DbVoiceSession::as_select())
+            .load(&mut conn)
+            .await?;
+        Ok(rows.into_iter().map(Into::into).collect())
     }
 
-    /// Get all sessions for a specific user (if given) or guild within a time range
     async fn get_sessions_in_range(
         &self,
         guild_id: u64,
@@ -865,40 +953,25 @@ impl VoiceSessionsRepository for VoiceSessionsTable {
         since: &chrono::DateTime<chrono::Utc>,
         until: &chrono::DateTime<chrono::Utc>,
     ) -> Result<Vec<VoiceSessionsEntity>, DatabaseError> {
+        let mut conn = self.pool.get().await?;
+        let mut query = voice_sessions::table
+            .filter(voice_sessions::guild_id.eq(DbU64::from(guild_id)))
+            .filter(voice_sessions::join_time.ge(since))
+            .filter(voice_sessions::join_time.le(until))
+            .into_boxed();
+
         if let Some(uid) = user_id {
-            Ok(sqlx::query_as::<_, VoiceSessionsEntity>(
-                r#"
-                SELECT *
-                FROM voice_sessions
-                WHERE user_id = ? AND guild_id = ? AND join_time >= ? AND join_time <= ?
-                ORDER BY join_time ASC
-                "#,
-            )
-            .bind(uid as i64)
-            .bind(guild_id as i64)
-            .bind(since)
-            .bind(until)
-            .fetch_all(&self.base.pool)
-            .await?)
-        } else {
-            Ok(sqlx::query_as::<_, VoiceSessionsEntity>(
-                r#"
-                SELECT *
-                FROM voice_sessions
-                WHERE guild_id = ? AND join_time >= ? AND join_time <= ?
-                ORDER BY join_time ASC
-                "#,
-            )
-            .bind(guild_id as i64)
-            .bind(since)
-            .bind(until)
-            .fetch_all(&self.base.pool)
-            .await?)
+            query = query.filter(voice_sessions::user_id.eq(DbU64::from(uid)));
         }
+
+        let rows: Vec<DbVoiceSession> = query
+            .order(voice_sessions::join_time.asc())
+            .select(DbVoiceSession::as_select())
+            .load(&mut conn)
+            .await?;
+        Ok(rows.into_iter().map(Into::into).collect())
     }
 
-    /// Get daily voice activity for a specific user in a guild.
-    /// Returns daily totals within the specified time range.
     async fn get_user_daily_activity(
         &self,
         user_id: u64,
@@ -906,130 +979,135 @@ impl VoiceSessionsRepository for VoiceSessionsTable {
         since: &chrono::DateTime<chrono::Utc>,
         until: &chrono::DateTime<chrono::Utc>,
     ) -> Result<Vec<VoiceDailyActivity>, DatabaseError> {
-        Ok(sqlx::query_as::<_, VoiceDailyActivity>(
+        let mut conn = self.pool.get().await?;
+        let rows = diesel::sql_query(
             r#"
-            SELECT 
-                date(join_time) as day,
+            SELECT
+                DATE(join_time) as day,
                 SUM(
-                    CASE 
-                        WHEN is_active = 1 
-                        THEN strftime('%s', 'now') - strftime('%s', join_time)
-                        ELSE strftime('%s', leave_time) - strftime('%s', join_time)
+                    CASE
+                        WHEN is_active
+                        THEN EXTRACT(EPOCH FROM NOW())::bigint - EXTRACT(EPOCH FROM join_time)::bigint
+                        ELSE EXTRACT(EPOCH FROM leave_time)::bigint - EXTRACT(EPOCH FROM join_time)::bigint
                     END
-                ) as total_seconds
+                )::bigint as total_seconds
             FROM voice_sessions
-            WHERE user_id = ? AND guild_id = ? AND join_time >= ? AND join_time <= ?
-            GROUP BY date(join_time)
+            WHERE user_id = $1 AND guild_id = $2 AND join_time >= $3 AND join_time <= $4
+            GROUP BY DATE(join_time)
             ORDER BY day
             "#,
         )
-        .bind(user_id as i64)
-        .bind(guild_id as i64)
-        .bind(since)
-        .bind(until)
-        .fetch_all(&self.base.pool)
-        .await?)
+        .bind::<diesel::sql_types::BigInt, _>(user_id as i64)
+        .bind::<diesel::sql_types::BigInt, _>(guild_id as i64)
+        .bind::<diesel::sql_types::Timestamptz, _>(since)
+        .bind::<diesel::sql_types::Timestamptz, _>(until)
+        .load::<VoiceDailyActivity>(&mut conn)
+        .await?;
+        Ok(rows)
     }
 
-    /// Get guild-wide daily statistics: total time.
     async fn get_guild_daily_total_time(
         &self,
         guild_id: u64,
         since: &chrono::DateTime<chrono::Utc>,
         until: &chrono::DateTime<chrono::Utc>,
     ) -> Result<Vec<GuildDailyStats>, DatabaseError> {
-        Ok(sqlx::query_as::<_, GuildDailyStats>(
+        let mut conn = self.pool.get().await?;
+        let rows = diesel::sql_query(
             r#"
-            SELECT 
+            SELECT
                 day,
-                SUM(user_daily_total) as value
+                SUM(user_daily_total)::bigint as value
             FROM (
-                SELECT 
+                SELECT
                     user_id,
-                    date(join_time) as day,
+                    DATE(join_time) as day,
                     SUM(
-                        CASE 
-                            WHEN is_active = 1 
-                            THEN strftime('%s', 'now') - strftime('%s', join_time)
-                            ELSE strftime('%s', leave_time) - strftime('%s', join_time)
+                        CASE
+                            WHEN is_active
+                            THEN EXTRACT(EPOCH FROM NOW())::bigint - EXTRACT(EPOCH FROM join_time)::bigint
+                            ELSE EXTRACT(EPOCH FROM leave_time)::bigint - EXTRACT(EPOCH FROM join_time)::bigint
                         END
-                    ) as user_daily_total
+                    )::bigint as user_daily_total
                 FROM voice_sessions
-                WHERE guild_id = ? AND join_time >= ? AND join_time <= ?
-                GROUP BY user_id, date(join_time)
+                WHERE guild_id = $1 AND join_time >= $2 AND join_time <= $3
+                GROUP BY user_id, DATE(join_time)
             ) user_totals
             GROUP BY day
             ORDER BY day
             "#,
         )
-        .bind(guild_id as i64)
-        .bind(since)
-        .bind(until)
-        .fetch_all(&self.base.pool)
-        .await?)
+        .bind::<diesel::sql_types::BigInt, _>(guild_id as i64)
+        .bind::<diesel::sql_types::Timestamptz, _>(since)
+        .bind::<diesel::sql_types::Timestamptz, _>(until)
+        .load::<GuildDailyStats>(&mut conn)
+        .await?;
+        Ok(rows)
     }
 
-    /// Get guild-wide daily statistics: average time per active user.
     async fn get_guild_daily_average_time(
         &self,
         guild_id: u64,
         since: &chrono::DateTime<chrono::Utc>,
         until: &chrono::DateTime<chrono::Utc>,
     ) -> Result<Vec<GuildDailyStats>, DatabaseError> {
-        Ok(sqlx::query_as::<_, GuildDailyStats>(
+        let mut conn = self.pool.get().await?;
+        let rows = diesel::sql_query(
             r#"
-            SELECT 
+            SELECT
                 day,
-                CAST(AVG(user_daily_total) AS INTEGER) as value
+                CAST(AVG(user_daily_total) AS BIGINT) as value
             FROM (
-                SELECT 
+                SELECT
                     user_id,
-                    date(join_time) as day,
+                    DATE(join_time) as day,
                     SUM(
-                        CASE 
-                            WHEN is_active = 1 
-                            THEN strftime('%s', 'now') - strftime('%s', join_time)
-                            ELSE strftime('%s', leave_time) - strftime('%s', join_time)
+                        CASE
+                            WHEN is_active
+                            THEN EXTRACT(EPOCH FROM NOW())::bigint - EXTRACT(EPOCH FROM join_time)::bigint
+                            ELSE EXTRACT(EPOCH FROM leave_time)::bigint - EXTRACT(EPOCH FROM join_time)::bigint
                         END
-                    ) as user_daily_total
+                    )::bigint as user_daily_total
                 FROM voice_sessions
-                WHERE guild_id = ? AND join_time >= ? AND join_time <= ?
-                GROUP BY user_id, date(join_time)
+                WHERE guild_id = $1 AND join_time >= $2 AND join_time <= $3
+                GROUP BY user_id, DATE(join_time)
             ) user_totals
             GROUP BY day
             ORDER BY day
             "#,
         )
-        .bind(guild_id as i64)
-        .bind(since)
-        .bind(until)
-        .fetch_all(&self.base.pool)
-        .await?)
+        .bind::<diesel::sql_types::BigInt, _>(guild_id as i64)
+        .bind::<diesel::sql_types::Timestamptz, _>(since)
+        .bind::<diesel::sql_types::Timestamptz, _>(until)
+        .load::<GuildDailyStats>(&mut conn)
+        .await?;
+        Ok(rows)
     }
 
-    /// Get guild-wide daily statistics: count of unique active users.
     async fn get_guild_daily_user_count(
         &self,
         guild_id: u64,
         since: &chrono::DateTime<chrono::Utc>,
         until: &chrono::DateTime<chrono::Utc>,
     ) -> Result<Vec<GuildDailyStats>, DatabaseError> {
-        Ok(sqlx::query_as::<_, GuildDailyStats>(
+        let mut conn = self.pool.get().await?;
+        let rows = diesel::sql_query(
             r#"
-            SELECT 
-                date(join_time) as day,
+            SELECT
+                DATE(join_time) as day,
                 COUNT(DISTINCT user_id) as value
             FROM voice_sessions
-            WHERE guild_id = ? AND join_time >= ? AND join_time <= ?
-            GROUP BY date(join_time)
+            WHERE guild_id = $1 AND join_time >= $2 AND join_time <= $3
+            GROUP BY DATE(join_time)
             ORDER BY day
             "#,
         )
-        .bind(guild_id as i64)
-        .bind(since)
-        .bind(until)
-        .fetch_all(&self.base.pool)
-        .await?)
+        .bind::<diesel::sql_types::BigInt, _>(guild_id as i64)
+        .bind::<diesel::sql_types::Timestamptz, _>(since)
+        .bind::<diesel::sql_types::Timestamptz, _>(until)
+        .load::<GuildDailyStats>(&mut conn)
+        .await?;
+        Ok(rows)
     }
 }
 
@@ -1043,31 +1121,88 @@ impl From<VoiceLeaderboardOptBuilderError> for AppError {
 // BotMetaTable
 // ============================================================================
 
-impl_table!(
-    BotMetaTable,
-    BotMetaEntity,
-    "bot_meta",
-    key,
-    String,
-    String,
-    r#"CREATE TABLE IF NOT EXISTS bot_meta (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL
-    )"#,
-    "key, value",
-    "?, ?",
-    "key = ?, value = ?",
-    [key, value]
-);
+#[derive(Clone)]
+pub struct BotMetaTable {
+    pool: DbPool,
+}
+
+impl BotMetaTable {
+    pub fn new(pool: DbPool) -> Self {
+        Self { pool }
+    }
+}
+
+impl_table_base!(BotMetaTable, bot_meta::table);
+
+#[async_trait::async_trait]
+impl CrudTable<BotMetaEntity, String> for BotMetaTable {
+    async fn select_all(&self) -> Result<Vec<BotMetaEntity>, DatabaseError> {
+        let mut conn = self.pool.get().await?;
+        Ok(bot_meta::table
+            .select(BotMetaEntity::as_select())
+            .load(&mut conn)
+            .await?)
+    }
+
+    async fn insert(&self, model: &BotMetaEntity) -> Result<String, DatabaseError> {
+        let mut conn = self.pool.get().await?;
+        let key = diesel::insert_into(bot_meta::table)
+            .values(model)
+            .returning(bot_meta::key)
+            .get_result(&mut conn)
+            .await?;
+        Ok(key)
+    }
+
+    async fn select(&self, id: &String) -> Result<Option<BotMetaEntity>, DatabaseError> {
+        let mut conn = self.pool.get().await?;
+        Ok(bot_meta::table
+            .find(id)
+            .select(BotMetaEntity::as_select())
+            .first(&mut conn)
+            .await
+            .optional()?)
+    }
+
+    async fn update(&self, model: &BotMetaEntity) -> Result<(), DatabaseError> {
+        let mut conn = self.pool.get().await?;
+        diesel::update(bot_meta::table.find(&model.key))
+            .set(model)
+            .execute(&mut conn)
+            .await?;
+        Ok(())
+    }
+
+    async fn delete(&self, id: &String) -> Result<(), DatabaseError> {
+        let mut conn = self.pool.get().await?;
+        diesel::delete(bot_meta::table.find(id))
+            .execute(&mut conn)
+            .await?;
+        Ok(())
+    }
+
+    async fn replace(&self, model: &BotMetaEntity) -> Result<String, DatabaseError> {
+        if self.select(&model.key).await?.is_some() {
+            self.update(model).await?;
+            return Ok(model.key.clone());
+        }
+        self.insert(model).await
+    }
+}
 
 #[async_trait::async_trait]
 impl BotMetaRepository for BotMetaTable {
-    /// Check if the bot_meta table exists
     async fn table_exists(&self) -> bool {
-        sqlx::query("SELECT name FROM sqlite_master WHERE type='table' AND name='bot_meta'")
-            .fetch_optional(&self.base.pool)
-            .await
-            .map(|opt| opt.is_some())
-            .unwrap_or(false)
+        let mut conn = match self.pool.get().await {
+            Ok(c) => c,
+            Err(_) => return false,
+        };
+        diesel::sql_query(
+            "SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'bot_meta'"
+        )
+        .execute(&mut conn)
+        .await
+        .map(|r| r > 0)
+        .unwrap_or(false)
     }
 }
