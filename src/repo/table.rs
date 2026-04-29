@@ -925,7 +925,8 @@ impl VoiceSessionsRepository for VoiceSessionsTable {
             voice_sessions::table
                 .filter(voice_sessions::user_id.eq(DbU64::from(user_id)))
                 .filter(voice_sessions::channel_id.eq(DbU64::from(channel_id)))
-                .filter(voice_sessions::join_time.eq(join_time)),
+                .filter(voice_sessions::join_time.eq(join_time))
+                .filter(voice_sessions::is_active.eq(true)),
         )
         .set((
             voice_sessions::leave_time.eq(leave_time),
@@ -940,6 +941,22 @@ impl VoiceSessionsRepository for VoiceSessionsTable {
         let mut conn = self.pool.get().await?;
         let rows: Vec<DbVoiceSession> = voice_sessions::table
             .filter(voice_sessions::is_active.eq(true))
+            .select(DbVoiceSession::as_select())
+            .load(&mut conn)
+            .await?;
+        Ok(rows.into_iter().map(Into::into).collect())
+    }
+
+    async fn find_active_sessions_by_user(
+        &self,
+        user_id: u64,
+        guild_id: u64,
+    ) -> Result<Vec<VoiceSessionsEntity>, DatabaseError> {
+        let mut conn = self.pool.get().await?;
+        let rows: Vec<DbVoiceSession> = voice_sessions::table
+            .filter(voice_sessions::is_active.eq(true))
+            .filter(voice_sessions::user_id.eq(DbU64::from(user_id)))
+            .filter(voice_sessions::guild_id.eq(DbU64::from(guild_id)))
             .select(DbVoiceSession::as_select())
             .load(&mut conn)
             .await?;

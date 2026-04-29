@@ -184,6 +184,12 @@ pub trait VoiceSessionsRepository: CrudTable<VoiceSessionsEntity, i32> + Send + 
     ) -> Result<(), DatabaseError>;
     /// Returns all sessions currently marked as active.
     async fn find_active_sessions(&self) -> Result<Vec<VoiceSessionsEntity>, DatabaseError>;
+    /// Returns all active sessions for a specific user in a guild.
+    async fn find_active_sessions_by_user(
+        &self,
+        user_id: u64,
+        guild_id: u64,
+    ) -> Result<Vec<VoiceSessionsEntity>, DatabaseError>;
     /// Returns all sessions within a specific time range.
     async fn get_sessions_in_range(
         &self,

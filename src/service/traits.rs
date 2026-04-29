@@ -184,6 +184,13 @@ pub trait VoiceTracker: Send + Sync {
     /// Returns all active voice sessions.
     async fn find_active_sessions(&self) -> anyhow::Result<Vec<VoiceSessionsEntity>>;
 
+    /// Returns all active voice sessions for a specific user in a guild.
+    async fn find_active_sessions_by_user(
+        &self,
+        user_id: u64,
+        guild_id: u64,
+    ) -> anyhow::Result<Vec<VoiceSessionsEntity>>;
+
     /// Returns all voice sessions within a time range.
     async fn get_sessions_in_range(
         &self,
