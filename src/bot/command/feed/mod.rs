@@ -41,7 +41,7 @@ pub async fn feed(_ctx: Context<'_>) -> Result<(), Error> {
 const UPDATE_INTERVAL_SECS: u64 = 2;
 
 /// Where to send feed notifications.
-#[derive(ChoiceParameter, Clone, Copy, Debug)]
+#[derive(ChoiceParameter, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SendInto {
     Server,
     DM,

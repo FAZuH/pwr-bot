@@ -317,10 +317,7 @@ impl ViewHandler for SettingsMainHandler {
                 Ok(ViewCommand::Exit)
             }
             ToggleFeature => {
-                if let ViewEvent::Component(interaction) = ctx.event
-                    && let ComponentInteractionDataKind::StringSelect { values } =
-                        &interaction.data.kind
-                {
+                if let Some(values) = ctx.string_select_values() {
                     for value in values {
                         match value.as_str() {
                             "Feeds" => {

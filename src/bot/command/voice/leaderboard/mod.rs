@@ -24,10 +24,10 @@ pub mod image_builder;
 pub mod image_generator;
 
 /// Filename for the voice leaderboard image attachment.
-pub const VOICE_LEADERBOARD_IMAGE_FILENAME: &str = "voice_leaderboard.jpg";
+pub const IMAGE_FILENAME: &str = "voice_leaderboard.jpg";
 
 /// Number of leaderboard entries per page.
-const LEADERBOARD_PER_PAGE: u32 = 10;
+pub const LEADERBOARD_PER_PAGE: u32 = 10;
 
 /// Display the voice activity leaderboard
 ///
@@ -269,12 +269,10 @@ impl ViewHandler for VoiceLeaderboardHandler<'_> {
                 changed_page = true;
             }
             TimeRange => {
-                if let ViewEvent::Component(ref interaction) = ctx.event
-                    && let ComponentInteractionDataKind::StringSelect { values } =
-                        &interaction.data.kind
-                    && let Some(time_range) = values
-                        .first()
-                        .and_then(|v| VoiceLeaderboardTimeRange::from_display_name(v))
+                if let Some(time_range) = ctx
+                    .string_select_values()
+                    .and_then(|v| v.first().cloned())
+                    .and_then(|v| VoiceLeaderboardTimeRange::from_display_name(&v))
                 {
                     let cmd = VoiceLeaderboardUpdate::update(
                         VoiceLeaderboardMsg::ChangeTimeRange(time_range),
@@ -291,19 +289,15 @@ impl ViewHandler for VoiceLeaderboardHandler<'_> {
                 fetch_new = matches!(cmd, VoiceLeaderboardCmd::RefetchData);
             }
             SelectUser => {
-                if let ViewEvent::Component(ref interaction) = ctx.event
-                    && let ComponentInteractionDataKind::UserSelect { values } =
-                        &interaction.data.kind
-                    && let Some(user_id) = values.first()
-                    && let Ok(user) = user_id.to_user(&self.http).await
-                {
-                    self.target_user = Some(user.clone());
-                    let cmd = VoiceLeaderboardUpdate::update(
-                        VoiceLeaderboardMsg::SetTargetUser(Some(user.id.get())),
-                        &mut self.model,
-                    );
-                    fetch_new = matches!(cmd, VoiceLeaderboardCmd::RefetchData);
-                }
+                if let Some(user_id) = ctx.user_select_values().and_then(|v| v.first().copied())
+                    && let Ok(user) = user_id.to_user(&self.http).await {
+                        self.target_user = Some(user.clone());
+                        let cmd = VoiceLeaderboardUpdate::update(
+                            VoiceLeaderboardMsg::SetTargetUser(Some(user.id.get())),
+                            &mut self.model,
+                        );
+                        fetch_new = matches!(cmd, VoiceLeaderboardCmd::RefetchData);
+                    }
             }
         }
 
@@ -388,10 +382,7 @@ impl ViewRender for VoiceLeaderboardHandler<'_> {
         } else {
             container.push(CreateContainerComponent::MediaGallery(
                 CreateMediaGallery::new(vec![CreateMediaGalleryItem::new(
-                    CreateUnfurledMediaItem::new(format!(
-                        "attachment://{}",
-                        VOICE_LEADERBOARD_IMAGE_FILENAME
-                    )),
+                    CreateUnfurledMediaItem::new(format!("attachment://{}", IMAGE_FILENAME)),
                 )]),
             ));
         }
@@ -467,8 +458,7 @@ impl ViewRender for VoiceLeaderboardHandler<'_> {
         let mut reply: poise::CreateReply<'_> = response.into();
 
         if let Some(ref bytes) = self.lb_img {
-            let attachment =
-                CreateAttachment::bytes(bytes.clone(), VOICE_LEADERBOARD_IMAGE_FILENAME);
+            let attachment = CreateAttachment::bytes(bytes.clone(), IMAGE_FILENAME);
             reply = reply.attachment(attachment);
         }
 

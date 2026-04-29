@@ -13,7 +13,7 @@ use crate::bot::command::voice::VoiceStatsTimeRange;
 ///
 /// Controllers return this enum to indicate where the coordinator should
 /// navigate next. Each domain (Settings, Feed, Voice) has its own section.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NavigationResult {
     // Settings section
     /// Navigate to main settings page

@@ -11,6 +11,7 @@ pub mod coordinator;
 pub mod error;
 pub mod error_handler;
 pub mod navigation;
+pub mod test_framework;
 pub mod utils;
 pub mod view;
 
