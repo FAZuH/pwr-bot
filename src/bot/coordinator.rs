@@ -26,7 +26,7 @@ use crate::bot::navigation::Navigation;
 /// Maximum number of navigation steps to keep in history.
 const MAX_NAV_HISTORY: usize = 10;
 
-type SharedReplyHandle<'a> = Arc<tokio::sync::Mutex<Option<ReplyHandle<'a>>>>;
+type SyncReplyHandle<'a> = tokio::sync::Mutex<Option<ReplyHandle<'a>>>;
 type NavHistory = tokio::sync::Mutex<VecDeque<Navigation>>;
 
 /// Orchestrator for controller navigation and shared state.
@@ -39,7 +39,7 @@ pub struct Coordinator<'a> {
     /// Stack of navigation steps for history tracking.
     nav_queue: NavHistory,
     /// Shared handle to the active message.
-    pub reply_handle: SharedReplyHandle<'a>,
+    reply_handle: SyncReplyHandle<'a>,
 }
 
 impl<'a> Coordinator<'a> {
@@ -48,7 +48,7 @@ impl<'a> Coordinator<'a> {
         Arc::new(Self {
             ctx,
             nav_queue: tokio::sync::Mutex::new(VecDeque::new()),
-            reply_handle: Arc::new(tokio::sync::Mutex::new(None)),
+            reply_handle: tokio::sync::Mutex::new(None),
         })
     }
 
@@ -71,6 +71,14 @@ impl<'a> Coordinator<'a> {
     /// Returns the most recent navigation target without removing it.
     pub async fn peek_navigation(&self) -> Option<Navigation> {
         self.nav_queue.lock().await.back().cloned()
+    }
+
+    pub async fn set_reply_handle(&self, new_reply: ReplyHandle<'a>) {
+        *self.reply_handle.lock().await = Some(new_reply)
+    }
+
+    pub async fn reply_handle(&self) -> tokio::sync::MutexGuard<'_, Option<ReplyHandle<'a>>> {
+        self.reply_handle.lock().await
     }
 
     /// Starts the navigation loop with an initial destination.

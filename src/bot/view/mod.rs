@@ -594,7 +594,7 @@ where
         self.render_view().await?;
 
         let msg_id = {
-            let lock = self.coordinator.reply_handle.lock().await;
+            let lock = self.coordinator.reply_handle().await;
             lock.as_ref()
                 .expect("reply_handle must exist after render_view")
                 .message()
@@ -682,16 +682,13 @@ where
         registry.clear();
         let reply = self.handler.create_reply(&mut registry);
 
-        let existing = {
-            let lock = self.coordinator.reply_handle.lock().await;
-            lock.as_ref().cloned()
-        };
+        let existing = { self.coordinator.reply_handle().await.as_ref().cloned() };
 
         if let Some(handle) = existing {
             handle.edit(self.ctx, reply).await?;
         } else {
             let handle = self.ctx.send(reply).await?;
-            *self.coordinator.reply_handle.lock().await = Some(handle);
+            self.coordinator.set_reply_handle(handle).await;
         }
 
         Ok(())
