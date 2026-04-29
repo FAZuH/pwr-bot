@@ -6,8 +6,6 @@
 
 use std::time::Duration;
 
-use poise::serenity_prelude::CreateEmbed;
-
 use crate::bot::command::prelude::*;
 use crate::bot::test_framework::TestStep;
 
@@ -56,58 +54,125 @@ const TEST_STEPS: &[TestStep] = &[
     ),
 ];
 
+/// Step status for rendering the live summary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StepStatus {
+    Pending,
+    Running,
+    Passed,
+    Failed,
+}
+
+impl StepStatus {
+    fn emoji(self) -> &'static str {
+        match self {
+            StepStatus::Pending => "⬜",
+            StepStatus::Running => "⏳",
+            StepStatus::Passed => "✅",
+            StepStatus::Failed => "❌",
+        }
+    }
+}
+
+/// Builds the Components V2 reply for the current test state.
+fn build_test_reply<'a>(
+    steps: &'a [(StepStatus, &'static str, &'static str)],
+    failed_at: Option<usize>,
+) -> CreateReply<'a> {
+    let total = steps.len();
+    let passed = steps
+        .iter()
+        .filter(|(s, _, _)| *s == StepStatus::Passed)
+        .count();
+
+    let title = if failed_at.is_some() {
+        "🔧 GUI Test Suite — FAILED"
+    } else if passed == total {
+        "🔧 GUI Test Suite — COMPLETE"
+    } else {
+        "🔧 GUI Test Suite"
+    };
+
+    let mut body_lines = vec![];
+
+    for (i, (status, name, desc)) in steps.iter().enumerate() {
+        let line = format!("{} **{}** — {}", status.emoji(), name, desc);
+        body_lines.push(line);
+
+        // If this step failed, stop listing here
+        if let Some(failed_idx) = failed_at
+            && i == failed_idx {
+                break;
+            }
+    }
+
+    let status_text = if let Some(idx) = failed_at {
+        format!("\n❌ **Failed at:** {}\n", steps[idx].1)
+    } else if passed == total {
+        format!("\n✅ **All {} steps passed.**\n", total)
+    } else {
+        format!("\n⏳ **Progress:** {}/{}\n", passed, total)
+    };
+
+    let text = format!("{}\n{}\n{}", title, body_lines.join("\n"), status_text);
+
+    let container = CreateComponent::Container(CreateContainer::new(vec![
+        CreateContainerComponent::TextDisplay(CreateTextDisplay::new(text)),
+    ]));
+
+    CreateReply::new()
+        .flags(MessageFlags::IS_COMPONENTS_V2)
+        .components(vec![container])
+}
+
 /// Run the automated GUI test suite
 ///
 /// Owner-only command that validates every interactive view by simulating
 /// clicks and asserting state transitions. Stops gracefully on first failure.
 #[poise::command(slash_command, owners_only, hide_in_help)]
 pub async fn gui_test(ctx: Context<'_>) -> Result<(), Error> {
-    ctx.send(
-        CreateReply::default().embed(
-            CreateEmbed::new()
-                .title("🔧 GUI Test Suite")
-                .description("Starting test run..."),
-        ),
-    )
-    .await?;
-
     let total = TEST_STEPS.len();
+    let mut statuses: Vec<StepStatus> = vec![StepStatus::Pending; total];
+
+    // Pre-build the static step info to avoid lifetime issues
+    let step_info: Vec<(&'static str, &'static str)> =
+        TEST_STEPS.iter().map(|s| (s.name, s.description)).collect();
+
+    // Send initial message
+    let steps_with_status: Vec<_> = statuses
+        .iter()
+        .zip(step_info.iter())
+        .map(|(s, (name, desc))| (*s, *name, *desc))
+        .collect();
+    let msg = ctx.send(build_test_reply(&steps_with_status, None)).await?;
 
     for (i, step) in TEST_STEPS.iter().enumerate() {
-        let progress = format!("Step {}/{}: {}", i + 1, total, step.name);
-        let running_msg = ctx
-            .send(
-                CreateReply::default().embed(
-                    CreateEmbed::new()
-                        .title("⏳ Running...")
-                        .description(progress.clone())
-                        .color(0xFFFF00),
-                ),
-            )
+        statuses[i] = StepStatus::Running;
+
+        let steps_with_status: Vec<_> = statuses
+            .iter()
+            .zip(step_info.iter())
+            .map(|(s, (name, desc))| (*s, *name, *desc))
+            .collect();
+        msg.edit(ctx, build_test_reply(&steps_with_status, None))
             .await?;
 
         match (step.run)(ctx).await {
             Ok(()) => {
-                running_msg
-                    .edit(
-                        ctx,
-                        CreateReply::default().embed(
-                            CreateEmbed::new()
-                                .title("✅ Passed")
-                                .description(progress)
-                                .color(0x00FF00),
-                        ),
-                    )
-                    .await?;
+                statuses[i] = StepStatus::Passed;
             }
             Err(e) => {
-                ctx.send(
-                    CreateReply::default().embed(
-                        CreateEmbed::new()
-                            .title("❌ FAILED")
-                            .description(format!("{}\n\n```\n{}\n```", progress, e))
-                            .color(0xFF0000),
-                    ),
+                statuses[i] = StepStatus::Failed;
+
+                let steps_with_status: Vec<_> = statuses
+                    .iter()
+                    .zip(step_info.iter())
+                    .map(|(s, (name, desc))| (*s, *name, *desc))
+                    .collect();
+                msg.edit(
+                    ctx,
+                    build_test_reply(&steps_with_status, Some(i))
+                        .content(format!("```\n{}\n```", e)),
                 )
                 .await?;
                 return Ok(());
@@ -117,15 +182,14 @@ pub async fn gui_test(ctx: Context<'_>) -> Result<(), Error> {
         tokio::time::sleep(Duration::from_millis(300)).await;
     }
 
-    ctx.send(
-        CreateReply::default().embed(
-            CreateEmbed::new()
-                .title("🔧 GUI Test Suite — COMPLETE")
-                .description(format!("✅ All {} steps passed.", total))
-                .color(0x00FF00),
-        ),
-    )
-    .await?;
+    // Final complete state
+    let steps_with_status: Vec<_> = statuses
+        .iter()
+        .zip(step_info.iter())
+        .map(|(s, (name, desc))| (*s, *name, *desc))
+        .collect();
+    msg.edit(ctx, build_test_reply(&steps_with_status, None))
+        .await?;
 
     Ok(())
 }
