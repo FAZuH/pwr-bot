@@ -45,6 +45,7 @@ plotters = "0.3.7"
 diesel = { version = "2.3", features = ["chrono", "returning_clauses_for_sqlite_3_35", "sqlite"] }
 diesel-async = { version = "0.8", features = ["deadpool", "sqlite"] }
 diesel_migrations = "2.3"
+deadpool = "0.13"
 
 [dev-dependencies]
 httpmock = "0.7.0"

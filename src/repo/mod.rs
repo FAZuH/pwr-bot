@@ -1,8 +1,12 @@
 //! Database module with SQLite storage and Diesel.
 
+use deadpool::managed::Metrics;
+use deadpool::managed::Pool;
+use deadpool::managed::RecycleResult;
 use diesel::SqliteConnection;
+use diesel_async::RunQueryDsl;
 use diesel_async::pooled_connection::AsyncDieselConnectionManager;
-use diesel_async::pooled_connection::deadpool::Pool;
+use diesel_async::pooled_connection::PoolError as DieselPoolError;
 use diesel_async::sync_connection_wrapper::SyncConnectionWrapper;
 use log::debug;
 use log::info;
@@ -16,7 +20,44 @@ pub mod schema;
 pub mod table;
 pub mod traits;
 
-pub type DbPool = Pool<SyncConnectionWrapper<SqliteConnection>>;
+/// Custom deadpool manager that sets `busy_timeout` on every new SQLite connection.
+pub struct SqliteConnectionManager {
+    inner: AsyncDieselConnectionManager<SyncConnectionWrapper<SqliteConnection>>,
+    busy_timeout_ms: i32,
+}
+
+impl SqliteConnectionManager {
+    pub fn new(database_url: impl Into<String>, busy_timeout_ms: i32) -> Self {
+        Self {
+            inner: AsyncDieselConnectionManager::new(database_url.into()),
+            busy_timeout_ms,
+        }
+    }
+}
+
+impl deadpool::managed::Manager for SqliteConnectionManager {
+    type Type = SyncConnectionWrapper<SqliteConnection>;
+    type Error = DieselPoolError;
+
+    async fn create(&self) -> Result<Self::Type, Self::Error> {
+        let mut conn = self.inner.create().await?;
+        diesel::sql_query(format!("PRAGMA busy_timeout = {}", self.busy_timeout_ms))
+            .execute(&mut conn)
+            .await
+            .map_err(DieselPoolError::QueryError)?;
+        Ok(conn)
+    }
+
+    async fn recycle(
+        &self,
+        conn: &mut Self::Type,
+        metrics: &Metrics,
+    ) -> RecycleResult<Self::Error> {
+        self.inner.recycle(conn, metrics).await
+    }
+}
+
+pub type DbPool = Pool<SqliteConnectionManager>;
 
 /// Main database struct containing all table handlers.
 pub struct Repository {
@@ -45,10 +86,16 @@ impl Repository {
         }
 
         debug!("Connecting to db...");
-        let config =
-            AsyncDieselConnectionManager::<SyncConnectionWrapper<SqliteConnection>>::new(db_url);
-        let pool = Pool::builder(config).build()?;
+        let manager = SqliteConnectionManager::new(db_url, 5000);
+        let pool = Pool::builder(manager).max_size(5).build()?;
         log::log!(log::Level::Info, "Connected to db.");
+
+        // Enable WAL mode for better concurrent read/write performance.
+        let mut conn = pool.get().await?;
+        diesel::sql_query("PRAGMA journal_mode = WAL")
+            .execute(&mut conn)
+            .await?;
+        drop(conn);
 
         let feed = Box::new(FeedTable::new(pool.clone()));
         let feed_item = Box::new(FeedItemTable::new(pool.clone()));
