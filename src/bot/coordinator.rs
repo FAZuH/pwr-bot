@@ -20,7 +20,7 @@ use crate::bot::command::voice::settings::VoiceSettingsController;
 use crate::bot::command::voice::stats::VoiceStatsController;
 use crate::bot::command::welcome::WelcomeSettingsController;
 use crate::bot::controller::Controller;
-use crate::bot::navigation::NavigationResult;
+use crate::bot::navigation::Navigation;
 use crate::bot::view::SharedReplyHandle;
 
 /// Maximum number of navigation steps to keep in history.
@@ -34,13 +34,13 @@ pub struct Coordinator<'a> {
     /// Poise command context.
     ctx: Context<'a>,
     /// Stack of navigation steps for history tracking.
-    nav_queue: Mutex<VecDeque<NavigationResult>>,
+    nav_queue: Mutex<VecDeque<Navigation>>,
     /// Shared handle to the active message.
     pub reply_handle: SharedReplyHandle<'a>,
 }
 
 impl<'a> Coordinator<'a> {
-    /// Creates a new coordinator without shared state.
+    /// Creates a new coordinator.
     pub fn new(ctx: Context<'a>) -> Arc<Self> {
         Arc::new(Self {
             ctx,
@@ -57,7 +57,7 @@ impl<'a> Coordinator<'a> {
     /// Pushes a new navigation target onto the stack.
     ///
     /// If history exceeds [`MAX_NAV_HISTORY`], the oldest step is removed.
-    pub fn navigate(&self, next: NavigationResult) {
+    pub fn navigate(&self, next: Navigation) {
         let mut queue = self.nav_queue.lock().unwrap();
         if queue.len() >= MAX_NAV_HISTORY {
             queue.pop_front();
@@ -66,7 +66,7 @@ impl<'a> Coordinator<'a> {
     }
 
     /// Returns the most recent navigation target without removing it.
-    pub fn peek_navigation(&self) -> Option<NavigationResult> {
+    pub fn peek_navigation(&self) -> Option<Navigation> {
         self.nav_queue.lock().unwrap().back().cloned()
     }
 
@@ -74,7 +74,7 @@ impl<'a> Coordinator<'a> {
     ///
     /// The loop continues as long as controllers return [`NavigationResult`]s,
     /// stopping when [`NavigationResult::Exit`] is reached or the history stack is empty.
-    pub async fn run(self: Arc<Self>, initial: NavigationResult) -> Result<(), Error> {
+    pub async fn run(self: Arc<Self>, initial: Navigation) -> Result<(), Error> {
         self.navigate(initial);
         while let Some(mut controller) = self.next_controller() {
             controller.run(self.clone()).await?;
@@ -83,13 +83,13 @@ impl<'a> Coordinator<'a> {
     }
 
     /// Pops the last navigation result from history.
-    fn pop_next(&self) -> Option<NavigationResult> {
+    fn pop_next(&self) -> Option<Navigation> {
         self.nav_queue.lock().unwrap().pop_back()
     }
 
     /// Instantiates the next controller based on the current navigation state.
     fn next_controller(&self) -> Option<Box<dyn Controller + 'a>> {
-        use NavigationResult::*;
+        use Navigation::*;
         let ctx = self.ctx;
 
         loop {

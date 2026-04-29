@@ -101,9 +101,10 @@ fn build_test_reply<'a>(
 
         // If this step failed, stop listing here
         if let Some(failed_idx) = failed_at
-            && i == failed_idx {
-                break;
-            }
+            && i == failed_idx
+        {
+            break;
+        }
     }
 
     let status_text = if let Some(idx) = failed_at {

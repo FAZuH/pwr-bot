@@ -19,9 +19,7 @@ use crate::update::feed_settings::FeedSettingsUpdate;
     default_member_permissions = "ADMINISTRATOR | MANAGE_GUILD"
 )]
 pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
-    Coordinator::new(ctx)
-        .run(NavigationResult::SettingsFeeds)
-        .await?;
+    Coordinator::new(ctx).run(Navigation::SettingsFeeds).await?;
     Ok(())
 }
 
@@ -120,11 +118,11 @@ impl<'a> ViewHandler for SettingsFeedHandler<'a> {
                 Ok(ViewCommand::Render)
             }
             SettingsFeedAction::Back => {
-                ctx.coordinator.navigate(NavigationResult::SettingsMain);
+                ctx.coordinator.navigate(Navigation::SettingsMain);
                 Ok(ViewCommand::Exit)
             }
             SettingsFeedAction::About => {
-                ctx.coordinator.navigate(NavigationResult::SettingsAbout);
+                ctx.coordinator.navigate(Navigation::SettingsAbout);
                 Ok(ViewCommand::Exit)
             }
         }

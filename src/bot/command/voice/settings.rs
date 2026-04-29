@@ -14,9 +14,7 @@ use crate::entity::ServerSettings;
     default_member_permissions = "ADMINISTRATOR | MANAGE_GUILD"
 )]
 pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
-    Coordinator::new(ctx)
-        .run(NavigationResult::SettingsVoice)
-        .await?;
+    Coordinator::new(ctx).run(Navigation::SettingsVoice).await?;
     Ok(())
 }
 
@@ -80,11 +78,11 @@ impl ViewHandler for SettingsVoiceHandler {
                 ViewCommand::Render
             }
             SettingsVoiceAction::Back => {
-                ctx.coordinator.navigate(NavigationResult::SettingsMain);
+                ctx.coordinator.navigate(Navigation::SettingsMain);
                 ViewCommand::Exit
             }
             SettingsVoiceAction::About => {
-                ctx.coordinator.navigate(NavigationResult::SettingsAbout);
+                ctx.coordinator.navigate(Navigation::SettingsAbout);
                 ViewCommand::Exit
             }
         };

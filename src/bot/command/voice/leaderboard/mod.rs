@@ -40,7 +40,7 @@ pub async fn leaderboard(
     time_range: Option<VoiceLeaderboardTimeRange>,
 ) -> Result<(), Error> {
     Coordinator::new(ctx)
-        .run(NavigationResult::VoiceLeaderboard {
+        .run(Navigation::VoiceLeaderboard {
             time_range: time_range.unwrap_or(VoiceLeaderboardTimeRange::ThisMonth),
         })
         .await?;

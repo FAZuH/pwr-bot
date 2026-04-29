@@ -29,7 +29,7 @@ pub async fn list(
 ) -> Result<(), Error> {
     let sent_into = sent_into.unwrap_or(SendInto::DM);
     Coordinator::new(ctx)
-        .run(NavigationResult::FeedList(Some(sent_into)))
+        .run(Navigation::FeedList(Some(sent_into)))
         .await?;
     Ok(())
 }

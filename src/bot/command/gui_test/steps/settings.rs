@@ -68,7 +68,7 @@ pub async fn test_settings_main(ctx: Context<'_>) -> Result<(), GuiTestError> {
         .map_err(|e| GuiTestError::execution_failed("settings_main feeds", e))?;
     assert_eq_cmd(cmd, ViewCommand::Exit, "settings_main feeds click")
         .map_err(|e| GuiTestError::execution_failed("settings_main feeds", e))?;
-    assert_navigated_to(&coordinator, NavigationResult::SettingsFeeds)
+    assert_navigated_to(&coordinator, Navigation::SettingsFeeds)
         .map_err(|e| GuiTestError::execution_failed("settings_main nav", e))?;
 
     // Test toggle
@@ -159,7 +159,7 @@ pub async fn test_feed_settings(ctx: Context<'_>) -> Result<(), GuiTestError> {
         .map_err(|e| GuiTestError::execution_failed("feed_settings back", e))?;
     assert_eq_cmd(cmd, ViewCommand::Exit, "feed_settings back")
         .map_err(|e| GuiTestError::execution_failed("feed_settings back", e))?;
-    assert_navigated_to(&coordinator2, NavigationResult::SettingsMain)
+    assert_navigated_to(&coordinator2, Navigation::SettingsMain)
         .map_err(|e| GuiTestError::execution_failed("feed_settings nav", e))?;
 
     Ok(())

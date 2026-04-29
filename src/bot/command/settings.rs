@@ -24,7 +24,7 @@ pub struct Feature {
     /// Function to set the enabled state in ServerSettings
     pub set_enabled: fn(&mut ServerSettings, bool),
     /// Navigation result when configuring this feature
-    pub navigate: NavigationResult,
+    pub navigate: Navigation,
 }
 
 impl Feature {
@@ -52,21 +52,21 @@ impl FeatureRegistry {
                 label: "Feeds",
                 get_enabled: |s| s.feeds.enabled.unwrap_or(false),
                 set_enabled: |s, v| s.feeds.enabled = Some(v),
-                navigate: NavigationResult::SettingsFeeds,
+                navigate: Navigation::SettingsFeeds,
             },
             Feature {
                 id: "voice",
                 label: "Voice",
                 get_enabled: |s| s.voice.enabled.unwrap_or(false),
                 set_enabled: |s, v| s.voice.enabled = Some(v),
-                navigate: NavigationResult::SettingsVoice,
+                navigate: Navigation::SettingsVoice,
             },
             Feature {
                 id: "welcome",
                 label: "Welcome",
                 get_enabled: |s| s.welcome.enabled.unwrap_or(false),
                 set_enabled: |s, v| s.welcome.enabled = Some(v),
-                navigate: NavigationResult::SettingsWelcome,
+                navigate: Navigation::SettingsWelcome,
             },
         ];
         FEATURES
@@ -88,9 +88,7 @@ impl FeatureRegistry {
 /// Requires server administrator permissions.
 #[poise::command(slash_command)]
 pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
-    Coordinator::new(ctx)
-        .run(NavigationResult::SettingsMain)
-        .await?;
+    Coordinator::new(ctx).run(Navigation::SettingsMain).await?;
     Ok(())
 }
 
@@ -345,7 +343,7 @@ impl ViewHandler for SettingsMainHandler {
                 Ok(ViewCommand::Render)
             }
             About => {
-                cor.navigate(NavigationResult::SettingsAbout);
+                cor.navigate(Navigation::SettingsAbout);
                 Ok(ViewCommand::Exit)
             }
         }

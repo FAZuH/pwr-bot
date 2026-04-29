@@ -1,7 +1,7 @@
 //! Assertion helpers for GUI test steps.
 
 use crate::bot::coordinator::Coordinator;
-use crate::bot::navigation::NavigationResult;
+use crate::bot::navigation::Navigation;
 use crate::bot::test_framework::GuiTestError;
 use crate::bot::view::Action;
 use crate::bot::view::ActionRegistry;
@@ -29,7 +29,7 @@ pub fn assert_has_action<T: Action + Clone>(
 /// Asserts that the coordinator's most recent navigation target matches.
 pub fn assert_navigated_to(
     coordinator: &Coordinator,
-    expected: NavigationResult,
+    expected: Navigation,
 ) -> Result<(), GuiTestError> {
     let actual = coordinator.peek_navigation();
     if actual.as_ref() == Some(&expected) {

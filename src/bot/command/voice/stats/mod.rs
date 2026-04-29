@@ -84,7 +84,7 @@ pub async fn command(
     };
 
     Coordinator::new(ctx)
-        .run(NavigationResult::VoiceStats {
+        .run(Navigation::VoiceStats {
             time_range,
             target_user: Box::new(target_user),
             stat_type,

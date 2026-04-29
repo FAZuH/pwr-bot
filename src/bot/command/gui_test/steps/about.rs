@@ -31,7 +31,7 @@ pub async fn test_about(ctx: Context<'_>) -> Result<(), GuiTestError> {
 
     assert_eq_cmd(cmd, ViewCommand::Exit, "about back")
         .map_err(|e| GuiTestError::execution_failed("about back", e))?;
-    assert_navigated_to(&coordinator, NavigationResult::SettingsMain)
+    assert_navigated_to(&coordinator, Navigation::SettingsMain)
         .map_err(|e| GuiTestError::execution_failed("about nav", e))?;
 
     Ok(())

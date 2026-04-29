@@ -681,9 +681,9 @@ where
 
     /// Re-renders the view, editing the existing message or sending a new one.
     async fn render_view(&self) -> Result<(), Error> {
-        let mut registry_write = self.registry.write().await;
-        registry_write.clear();
-        let reply = self.handler.create_reply(&mut registry_write);
+        let mut registry = self.registry.write().await;
+        registry.clear();
+        let reply = self.handler.create_reply(&mut registry);
 
         let existing = {
             let lock = self.coordinator.reply_handle.lock().await;

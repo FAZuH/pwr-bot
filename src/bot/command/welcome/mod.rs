@@ -24,7 +24,7 @@ const WELCOME_FILE: &str = "welcome_preview.png";
 #[poise::command(slash_command)]
 pub async fn welcome(ctx: Context<'_>) -> Result<(), Error> {
     Coordinator::new(ctx)
-        .run(NavigationResult::SettingsWelcome)
+        .run(Navigation::SettingsWelcome)
         .await?;
     Ok(())
 }
@@ -207,11 +207,11 @@ impl ViewHandler for SettingsWelcomeHandler {
                 WelcomeSettingsUpdate::update(WelcomeSettingsMsg::CancelRemoval, &mut self.model);
             }
             About => {
-                ctx.coordinator.navigate(NavigationResult::SettingsAbout);
+                ctx.coordinator.navigate(Navigation::SettingsAbout);
                 return Ok(ViewCommand::Exit);
             }
             Back => {
-                ctx.coordinator.navigate(NavigationResult::SettingsMain);
+                ctx.coordinator.navigate(Navigation::SettingsMain);
                 return Ok(ViewCommand::Exit);
             }
         }
