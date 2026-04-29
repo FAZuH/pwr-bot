@@ -133,11 +133,11 @@ impl ViewRender for AboutView {
 #[async_trait::async_trait]
 impl ViewHandler for AboutView {
     type Action = AboutAction;
-    async fn handle(&mut self, ctx: ViewContext<'_, AboutAction>) -> Result<ViewCommand, Error> {
+    async fn handle(&mut self, ctx: ViewContext<'_, AboutAction>) -> Result<ViewCmd, Error> {
         match ctx.action() {
             AboutAction::Back => {
                 ctx.coordinator.navigate(Navigation::SettingsMain).await;
-                Ok(ViewCommand::Exit)
+                Ok(ViewCmd::Exit)
             }
         }
     }

@@ -95,7 +95,7 @@ impl<T: Action> ActionRegistry<T> {
             .as_millis();
         Self {
             actions: HashMap::new(),
-            prefix: format!("{}:{}", type_name, timestamp),
+            prefix: format!("{type_name}:{timestamp}"),
             counter: 0,
         }
     }
@@ -169,7 +169,7 @@ impl RegisteredAction {
 
 /// Returned by [`ViewHandler::handle`] to control the engine loop.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ViewCommand {
+pub enum ViewCmd {
     /// Re-render the view and update the Discord message.
     Render,
     /// Render once then exit the view loop immediately.
@@ -200,9 +200,6 @@ pub enum SyntheticEvent {
 }
 
 /// An event that wakes up the [`ViewEngine`] loop.
-///
-/// Replaces the former separate `Trigger` enum — the action and its originating
-/// interaction are kept together, eliminating redundancy with [`ViewContext`].
 #[derive(Debug, Clone)]
 pub enum ViewEvent {
     /// A component interaction (button click, select menu choice).
@@ -276,7 +273,6 @@ impl Default for ViewChannelConfig {
 pub struct ViewChannel<T: Action + Send + Sync + 'static> {
     tx: mpsc::UnboundedSender<EventMessage<T>>,
     rx: mpsc::UnboundedReceiver<EventMessage<T>>,
-    /// Snapshot of custom_id → action, updated after every render_view().
     registry: Registry<T>,
     config: ViewChannelConfig,
 }
@@ -415,22 +411,15 @@ impl<'a, T: Action + 'static> ViewContext<'a, T> {
 
     /// Extracts select-menu values from the event, if any.
     pub fn select_values(&self) -> Option<SelectValues> {
+        use ComponentInteractionDataKind::*;
         match &self.event {
             ViewEvent::Component(interaction) => match &interaction.data.kind {
-                ComponentInteractionDataKind::StringSelect { values } => {
-                    Some(SelectValues::String(values.to_vec()))
-                }
-                ComponentInteractionDataKind::ChannelSelect { values } => {
-                    Some(SelectValues::Channel(
-                        values.iter().copied().map(GenericChannelId::from).collect(),
-                    ))
-                }
-                ComponentInteractionDataKind::RoleSelect { values } => {
-                    Some(SelectValues::Role(values.to_vec()))
-                }
-                ComponentInteractionDataKind::UserSelect { values } => {
-                    Some(SelectValues::User(values.to_vec()))
-                }
+                StringSelect { values } => Some(SelectValues::String(values.to_vec())),
+                ChannelSelect { values } => Some(SelectValues::Channel(
+                    values.iter().copied().map(GenericChannelId::from).collect(),
+                )),
+                RoleSelect { values } => Some(SelectValues::Role(values.to_vec())),
+                UserSelect { values } => Some(SelectValues::User(values.to_vec())),
                 _ => None,
             },
             ViewEvent::Synthetic(SyntheticEvent::Select(values)) => Some(values.clone()),
@@ -500,6 +489,24 @@ impl<'a, T: Action + 'static> ViewContext<'a, T> {
             }
         });
     }
+
+    pub async fn spawn_modal_component<M: poise::Modal + Send>(
+        &self,
+        modal_consumer: impl FnOnce(M) -> T + Send + 'static,
+    ) {
+        if let ViewEvent::Component(ref interaction) = self.event {
+            let i = interaction.clone();
+            let ctx = self.poise.serenity_context().clone();
+
+            self.spawn(async move {
+                poise::execute_modal_on_component_interaction::<M>(&ctx, i, None, None)
+                    .await
+                    .ok()
+                    .flatten()
+                    .map(modal_consumer)
+            });
+        }
+    }
 }
 
 /// Defines how a view translates its state into Discord components or an embed.
@@ -520,11 +527,11 @@ pub trait ViewHandler: Send + Sync {
     ///
     /// Receives the full [`ViewContext`] containing the event, action, sender,
     /// and coordinator. Returns a [`ViewCommand`] controlling the engine loop.
-    async fn handle(&mut self, ctx: ViewContext<'_, Self::Action>) -> Result<ViewCommand, Error>;
+    async fn handle(&mut self, ctx: ViewContext<'_, Self::Action>) -> Result<ViewCmd, Error>;
 
     /// Called when the view loop times out waiting for user input.
-    async fn on_timeout(&mut self) -> Result<ViewCommand, Error> {
-        Ok(ViewCommand::Exit)
+    async fn on_timeout(&mut self) -> Result<ViewCmd, Error> {
+        Ok(ViewCmd::Exit)
     }
 
     /// The channel config this view sets
@@ -614,7 +621,7 @@ where
         let coordinator = self.coordinator.clone();
         let tx_arc = channel.sender();
 
-        use ViewCommand::*;
+        use ViewCmd::*;
         while let Some((action, event)) = channel.recv().await {
             let cmd = match event {
                 ViewEvent::Timeout => self.handler.on_timeout().await?,

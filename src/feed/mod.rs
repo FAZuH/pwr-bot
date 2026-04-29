@@ -35,11 +35,11 @@ pub struct PlatformInfo {
     pub api_hostname: String,
     /// feed.tld
     pub api_domain: String,
-    /// https://api.feed.tld
+    /// <https://api.feed.tld>
     pub api_url: String,
     /// © feed 2067
     pub copyright_notice: String,
-    /// https://anilist.co/img/icons/icon.svg
+    /// <https://anilist.co/img/icons/icon.svg>
     pub logo_url: String,
     /// Platform tags. Mainly used for grouping and filtering
     pub tags: String,
@@ -117,7 +117,8 @@ pub struct FeedSource {
     pub name: String,
     /// Description of the source.
     pub description: String,
-    /// Url of the source, e.g., "https://mangadex.org/title/..."
+    #[allow(rustdoc::bare_urls)]
+    /// Url of the source, e.g., "<https://mangadex.org/title/..."
     pub source_url: String,
     /// Cover/Avatar url.
     pub image_url: Option<String>,

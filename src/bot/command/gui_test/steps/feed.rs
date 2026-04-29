@@ -8,7 +8,7 @@ use crate::bot::test_framework::assert::assert_eq_cmd;
 use crate::bot::test_framework::assert::assert_has_action;
 use crate::bot::test_framework::helpers::extract_actions;
 use crate::bot::test_framework::helpers::simulate_click;
-use crate::bot::view::ViewCommand;
+use crate::bot::view::ViewCmd;
 use crate::entity::FeedEntity;
 use crate::entity::SubscriberEntity;
 use crate::entity::SubscriberType;
@@ -58,7 +58,7 @@ pub async fn test_feed_list_empty(ctx: Context<'_>) -> Result<(), GuiTestError> 
     let cmd = simulate_click(ctx, &mut handler, edit_action, coordinator.clone())
         .await
         .map_err(|e| GuiTestError::execution_failed("feed_list_empty edit", e))?;
-    assert_eq_cmd(cmd, ViewCommand::Render, "feed_list_empty edit")
+    assert_eq_cmd(cmd, ViewCmd::Render, "feed_list_empty edit")
         .map_err(|e| GuiTestError::execution_failed("feed_list_empty edit", e))?;
 
     // Re-render in edit mode — should have View Mode button

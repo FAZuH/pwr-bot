@@ -287,10 +287,7 @@ action_enum! {
 #[async_trait::async_trait]
 impl ViewHandler for SettingsMainHandler {
     type Action = SettingsMainAction;
-    async fn handle(
-        &mut self,
-        ctx: ViewContext<'_, SettingsMainAction>,
-    ) -> Result<ViewCommand, Error> {
+    async fn handle(&mut self, ctx: ViewContext<'_, SettingsMainAction>) -> Result<ViewCmd, Error> {
         use SettingsMainAction::*;
 
         let cor = ctx.coordinator.clone();
@@ -300,19 +297,19 @@ impl ViewHandler for SettingsMainHandler {
                 if let Some(feature) = FeatureRegistry::find_by_label("Feeds") {
                     cor.navigate(feature.navigate.clone()).await;
                 }
-                Ok(ViewCommand::Exit)
+                Ok(ViewCmd::Exit)
             }
             VoiceFeature => {
                 if let Some(feature) = FeatureRegistry::find_by_label("Voice") {
                     cor.navigate(feature.navigate.clone()).await;
                 }
-                Ok(ViewCommand::Exit)
+                Ok(ViewCmd::Exit)
             }
             WelcomeFeature => {
                 if let Some(feature) = FeatureRegistry::find_by_label("Welcome") {
                     cor.navigate(feature.navigate.clone()).await;
                 }
-                Ok(ViewCommand::Exit)
+                Ok(ViewCmd::Exit)
             }
             ToggleFeature => {
                 if let Some(values) = ctx.string_select_values() {
@@ -340,11 +337,11 @@ impl ViewHandler for SettingsMainHandler {
                         }
                     }
                 }
-                Ok(ViewCommand::Render)
+                Ok(ViewCmd::Render)
             }
             About => {
                 cor.navigate(Navigation::SettingsAbout).await;
-                Ok(ViewCommand::Exit)
+                Ok(ViewCmd::Exit)
             }
         }
     }

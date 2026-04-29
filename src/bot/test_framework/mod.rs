@@ -1,7 +1,7 @@
 //! Test framework for automated GUI testing of Discord bot views.
 //!
 //! Provides synthetic events, assertion helpers, and test-step abstractions
-//! that drive [`ViewHandler`]s directly without a blocking [`ViewEngine`] loop.
+//! that drive [`crate::bot::view::ViewHandler`]s directly without a blocking [`crate::bot::view::ViewEngine`] loop.
 
 pub mod assert;
 pub mod helpers;
@@ -35,7 +35,11 @@ pub enum GuiTestError {
 
 impl GuiTestError {
     /// Constructs an assertion-failed error.
-    pub fn assertion_failed(step: impl ToString, expected: impl Display, actual: impl Display) -> Self {
+    pub fn assertion_failed(
+        step: impl ToString,
+        expected: impl Display,
+        actual: impl Display,
+    ) -> Self {
         Self::AssertionFailed {
             step: step.to_string(),
             expected: expected.to_string(),

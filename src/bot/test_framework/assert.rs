@@ -5,7 +5,7 @@ use crate::bot::navigation::Navigation;
 use crate::bot::test_framework::GuiTestError;
 use crate::bot::view::Action;
 use crate::bot::view::ActionRegistry;
-use crate::bot::view::ViewCommand;
+use crate::bot::view::ViewCmd;
 
 /// Finds an action in the registry by its label.
 pub fn assert_has_action<T: Action + Clone>(
@@ -20,7 +20,7 @@ pub fn assert_has_action<T: Action + Clone>(
         .ok_or_else(|| {
             GuiTestError::assertion_failed(
                 "render",
-                format!("action with label '{}'", label),
+                format!("action with label '{label}'"),
                 "not found",
             )
         })
@@ -37,25 +37,21 @@ pub async fn assert_navigated_to<'a>(
     } else {
         Err(GuiTestError::assertion_failed(
             "navigation",
-            format!("{:?}", expected),
-            format!("{:?}", actual),
+            format!("{expected:?}"),
+            format!("{actual:?}"),
         ))
     }
 }
 
-/// Asserts that two [`ViewCommand`]s are equal.
-pub fn assert_eq_cmd(
-    actual: ViewCommand,
-    expected: ViewCommand,
-    msg: &str,
-) -> Result<(), GuiTestError> {
+/// Asserts that two [`crate::bot::view::ViewCommand`]s are equal.
+pub fn assert_eq_cmd(actual: ViewCmd, expected: ViewCmd, msg: &str) -> Result<(), GuiTestError> {
     if actual == expected {
         Ok(())
     } else {
         Err(GuiTestError::assertion_failed(
             msg,
-            format!("{:?}", expected),
-            format!("{:?}", actual),
+            format!("{expected:?}"),
+            format!("{actual:?}"),
         ))
     }
 }

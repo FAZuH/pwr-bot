@@ -1,7 +1,7 @@
 //! Navigation coordinator for the MVC-C pattern.
 //!
 //! The `Coordinator` drives the interaction flow of a command by managing
-//! a stack of [`Controller`]s and processing [`NavigationResult`]s.
+//! a stack of [`Controller`]s and processing [`Navigation`]s.
 
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -24,7 +24,7 @@ use crate::bot::controller::Controller;
 use crate::bot::navigation::Navigation;
 
 /// Maximum number of navigation steps to keep in history.
-const MAX_NAV_HISTORY: usize = 10;
+pub const MAX_NAV_HISTORY: usize = 10;
 
 type SyncReplyHandle<'a> = tokio::sync::Mutex<Option<ReplyHandle<'a>>>;
 type NavHistory = tokio::sync::Mutex<VecDeque<Navigation>>;
@@ -32,7 +32,7 @@ type NavHistory = tokio::sync::Mutex<VecDeque<Navigation>>;
 /// Orchestrator for controller navigation and shared state.
 ///
 /// The `Coordinator` owns the Poise command context
-/// It maintains a history of [`NavigationResult`]s to support "Back" navigation.
+/// It maintains a history of [`Navigation`]s to support "Back" navigation.
 pub struct Coordinator<'a> {
     /// Poise command context.
     ctx: Context<'a>,
@@ -83,8 +83,8 @@ impl<'a> Coordinator<'a> {
 
     /// Starts the navigation loop with an initial destination.
     ///
-    /// The loop continues as long as controllers return [`NavigationResult`]s,
-    /// stopping when [`NavigationResult::Exit`] is reached or the history stack is empty.
+    /// The loop continues as long as controllers return [`Navigation`]s,
+    /// stopping when [`Navigation::Exit`] is reached or the history stack is empty.
     pub async fn run(self: Arc<Self>, initial: Navigation) -> Result<(), Error> {
         self.navigate(initial).await;
         while let Some(mut controller) = self.next_controller().await {

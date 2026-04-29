@@ -5,7 +5,7 @@ use crate::action_enum;
 use crate::bot::Error;
 use crate::bot::view::Action;
 use crate::bot::view::ActionRegistry;
-use crate::bot::view::ViewCommand;
+use crate::bot::view::ViewCmd;
 use crate::bot::view::ViewContext;
 use crate::bot::view::ViewHandler;
 
@@ -151,26 +151,23 @@ impl PaginationView {
 #[async_trait::async_trait]
 impl ViewHandler for PaginationView {
     type Action = PaginationAction;
-    async fn handle(
-        &mut self,
-        ctx: ViewContext<'_, PaginationAction>,
-    ) -> Result<ViewCommand, Error> {
+    async fn handle(&mut self, ctx: ViewContext<'_, PaginationAction>) -> Result<ViewCmd, Error> {
         match ctx.action() {
             PaginationAction::First => self.state.first_page(),
             PaginationAction::Prev => self.state.prev_page(),
             PaginationAction::Next => self.state.next_page(),
             PaginationAction::Last => self.state.last_page(),
-            _ => return Ok(ViewCommand::Continue),
+            _ => return Ok(ViewCmd::Continue),
         }
-        Ok(ViewCommand::Render)
+        Ok(ViewCmd::Render)
     }
 
-    async fn on_timeout(&mut self) -> Result<ViewCommand, Error> {
+    async fn on_timeout(&mut self) -> Result<ViewCmd, Error> {
         self.disabled = true;
         if self.state.pages > 1 {
-            Ok(ViewCommand::RenderOnce)
+            Ok(ViewCmd::RenderOnce)
         } else {
-            Ok(ViewCommand::Exit)
+            Ok(ViewCmd::Exit)
         }
     }
 }

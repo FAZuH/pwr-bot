@@ -252,7 +252,7 @@ impl ViewHandler for VoiceLeaderboardHandler<'_> {
     async fn handle(
         &mut self,
         ctx: ViewContext<'_, VoiceLeaderboardAction>,
-    ) -> Result<ViewCommand, Error> {
+    ) -> Result<ViewCmd, Error> {
         use VoiceLeaderboardAction::*;
 
         let mut changed_page = false;
@@ -309,15 +309,15 @@ impl ViewHandler for VoiceLeaderboardHandler<'_> {
             self.generate_img().await?
         }
 
-        Ok(ViewCommand::Render)
+        Ok(ViewCmd::Render)
     }
 
-    async fn on_timeout(&mut self) -> Result<ViewCommand, Error> {
+    async fn on_timeout(&mut self) -> Result<ViewCmd, Error> {
         self.pagination = false;
         if self.model.pages() > 1 {
-            Ok(ViewCommand::RenderOnce)
+            Ok(ViewCmd::RenderOnce)
         } else {
-            Ok(ViewCommand::Exit)
+            Ok(ViewCmd::Exit)
         }
     }
 }

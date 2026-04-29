@@ -70,20 +70,20 @@ impl ViewHandler for SettingsVoiceHandler {
     async fn handle(
         &mut self,
         ctx: ViewContext<'_, SettingsVoiceAction>,
-    ) -> Result<ViewCommand, Error> {
+    ) -> Result<ViewCmd, Error> {
         let ret = match ctx.action() {
             SettingsVoiceAction::ToggleEnabled => {
                 let current = self.settings.voice.enabled.unwrap_or(true);
                 self.settings.voice.enabled = Some(!current);
-                ViewCommand::Render
+                ViewCmd::Render
             }
             SettingsVoiceAction::Back => {
                 ctx.coordinator.navigate(Navigation::SettingsMain).await;
-                ViewCommand::Exit
+                ViewCmd::Exit
             }
             SettingsVoiceAction::About => {
                 ctx.coordinator.navigate(Navigation::SettingsAbout).await;
-                ViewCommand::Exit
+                ViewCmd::Exit
             }
         };
         Ok(ret)

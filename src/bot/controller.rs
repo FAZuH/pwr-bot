@@ -7,9 +7,9 @@ use crate::bot::coordinator::Coordinator;
 ///
 /// In the MVC-C pattern, a `Controller` is responsible for:
 /// 1. Fetching initial data from services.
-/// 2. Constructing and running a [`ViewEngine`](crate::bot::views::ViewEngine).
+/// 2. Constructing and running a [`ViewEngine`](crate::bot::view::ViewEngine).
 /// 3. Processing view actions and calling services.
-/// 4. Deciding where to navigate next by returning a [`NavigationResult`](crate::bot::navigation::NavigationResult).
+/// 4. Deciding where to navigate next by returning a [`NavigationResult`](crate::bot::navigation::Navigation).
 #[async_trait::async_trait]
 pub trait Controller: Send + Sync {
     /// Executes the controller logic.
