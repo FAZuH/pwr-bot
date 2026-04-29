@@ -3,7 +3,7 @@ LABEL org.opencontainers.image.source="https://github.com/FAZuH/pwr-bot"
 
 # Required by openssl-sys and boring-sys2
 RUN apt-get update && \
-    apt-get install -y pkg-config libssl-dev build-essential cmake libclang-dev git libfontconfig1-dev libsqlite3-dev && \
+    apt-get install -y pkg-config libssl-dev build-essential cmake libclang-dev git libfontconfig1-dev libpq-dev && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -24,7 +24,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo build --release
 
 FROM debian:bookworm-slim AS app
-RUN apt-get update && apt-get install -y libfontconfig1 libsqlite3-0 && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y libfontconfig1 libpq5 && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /app/migrations /app/migrations
 COPY --from=build /app/target/release/pwr-bot /app/pwr-bot
