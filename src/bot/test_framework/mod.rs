@@ -12,6 +12,8 @@ use std::pin::Pin;
 
 use crate::bot::command::Context;
 
+pub type RunStepResult<'a> = Pin<Box<dyn Future<Output = Result<(), GuiTestError>> + Send + 'a>>;
+
 /// Error type for GUI test failures.
 ///
 /// All failures are caught by the runner and sent as Discord messages.
@@ -65,9 +67,7 @@ pub struct TestStep {
     /// Brief description of what this step validates.
     pub description: &'static str,
     /// Async function that executes the test logic.
-    pub run: for<'a> fn(
-        Context<'a>,
-    ) -> Pin<Box<dyn Future<Output = Result<(), GuiTestError>> + Send + 'a>>,
+    pub run: for<'a> fn(Context<'a>) -> RunStepResult<'a>,
 }
 
 /// Convenience macro for declaring a [`TestStep`].

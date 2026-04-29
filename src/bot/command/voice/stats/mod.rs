@@ -537,14 +537,15 @@ impl ViewHandler for VoiceStatsHandler {
             }
             SelectUser => {
                 if let Some(user_id) = ctx.user_select_values().and_then(|v| v.first().copied())
-                    && let Ok(user) = user_id.to_user(ctx.poise.http()).await {
-                        self.user = user.clone();
-                        let cmd = VoiceStatsUpdate::update(
-                            VoiceStatsMsg::SetUser(Some(user.id.get())),
-                            &mut self.model,
-                        );
-                        changed = matches!(cmd, VoiceStatsCmd::RefetchData);
-                    }
+                    && let Ok(user) = user_id.to_user(ctx.poise.http()).await
+                {
+                    self.user = user.clone();
+                    let cmd = VoiceStatsUpdate::update(
+                        VoiceStatsMsg::SetUser(Some(user.id.get())),
+                        &mut self.model,
+                    );
+                    changed = matches!(cmd, VoiceStatsCmd::RefetchData);
+                }
             }
         }
 

@@ -290,14 +290,15 @@ impl ViewHandler for VoiceLeaderboardHandler<'_> {
             }
             SelectUser => {
                 if let Some(user_id) = ctx.user_select_values().and_then(|v| v.first().copied())
-                    && let Ok(user) = user_id.to_user(&self.http).await {
-                        self.target_user = Some(user.clone());
-                        let cmd = VoiceLeaderboardUpdate::update(
-                            VoiceLeaderboardMsg::SetTargetUser(Some(user.id.get())),
-                            &mut self.model,
-                        );
-                        fetch_new = matches!(cmd, VoiceLeaderboardCmd::RefetchData);
-                    }
+                    && let Ok(user) = user_id.to_user(&self.http).await
+                {
+                    self.target_user = Some(user.clone());
+                    let cmd = VoiceLeaderboardUpdate::update(
+                        VoiceLeaderboardMsg::SetTargetUser(Some(user.id.get())),
+                        &mut self.model,
+                    );
+                    fetch_new = matches!(cmd, VoiceLeaderboardCmd::RefetchData);
+                }
             }
         }
 
