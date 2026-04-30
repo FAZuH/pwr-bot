@@ -1,3 +1,5 @@
+## [0.3.2](https://github.com/FAZuH/pwr-bot/compare/v0.3.1...v0.3.2) (2026-04-30)
+
 ## [0.3.1](https://github.com/FAZuH/pwr-bot/compare/v0.3.0...v0.3.1) (2026-04-30)
 
 
@@ -36,6 +38,4 @@
 * **bot:** `/vc leaderboard` instant timeout when initial data is empty ([23c0370](https://github.com/FAZuH/pwr-bot/commit/23c0370019ebdc6ad4dcca4be04e39f55ad6ee61))
 
 ## [0.2.18](https://github.com/FAZuH/pwr-bot/compare/v0.2.17...v0.2.18) (2026-04-28)
-
-## [0.2.17](https://github.com/FAZuH/pwr-bot/compare/v0.2.16...v0.2.17) (2026-04-28)
 
