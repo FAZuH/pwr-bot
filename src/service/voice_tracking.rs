@@ -105,6 +105,14 @@ impl VoiceTracker for VoiceTrackingService {
         self.find_active_sessions().await
     }
 
+    async fn find_active_sessions_by_user(
+        &self,
+        user_id: u64,
+        guild_id: u64,
+    ) -> anyhow::Result<Vec<VoiceSessionsEntity>> {
+        self.find_active_sessions_by_user(user_id, guild_id).await
+    }
+
     async fn get_sessions_in_range(
         &self,
         guild_id: u64,
@@ -293,6 +301,19 @@ impl VoiceTrackingService {
     /// Find all active sessions from database
     pub async fn find_active_sessions(&self) -> anyhow::Result<Vec<VoiceSessionsEntity>> {
         Ok(self.db.voice_sessions.find_active_sessions().await?)
+    }
+
+    /// Find all active sessions for a specific user in a guild.
+    pub async fn find_active_sessions_by_user(
+        &self,
+        user_id: u64,
+        guild_id: u64,
+    ) -> anyhow::Result<Vec<VoiceSessionsEntity>> {
+        Ok(self
+            .db
+            .voice_sessions
+            .find_active_sessions_by_user(user_id, guild_id)
+            .await?)
     }
 
     pub async fn get_sessions_in_range(

@@ -56,6 +56,13 @@ jobs:
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y pkg-config libfontconfig1-dev libpq-dev
 
+      - name: Download Patched Cargo.toml
+        uses: actions/download-artifact@v4
+        with:
+          name: patched-cargo-toml
+          path: .
+        continue-on-error: true
+
       - name: Build
         run: cargo build ${{ inputs.cargo-build-args }}
 
@@ -75,6 +82,13 @@ jobs:
         with:
           submodules: recursive
           fetch-depth: 1
+
+      - name: Download Patched Cargo.toml
+        uses: actions/download-artifact@v4
+        with:
+          name: patched-cargo-toml
+          path: .
+        continue-on-error: true
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3

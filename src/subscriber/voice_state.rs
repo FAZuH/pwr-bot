@@ -40,6 +40,34 @@ impl VoiceStateSubscriber {
         }
     }
 
+    /// Closes all orphaned active sessions for a user in a guild.
+    async fn close_orphaned_sessions(&self, user_id: u64, guild_id: u64) -> Result<()> {
+        let now = Utc::now();
+        let orphaned = self
+            .services
+            .voice_tracking
+            .find_active_sessions_by_user(user_id, guild_id)
+            .await?;
+
+        for session in orphaned {
+            self.services
+                .voice_tracking
+                .close_session(
+                    session.user_id,
+                    session.channel_id,
+                    &session.join_time,
+                    &now,
+                )
+                .await?;
+            debug!(
+                "Closed orphaned session for user {} in channel {} (guild {})",
+                session.user_id, session.channel_id, session.guild_id
+            );
+        }
+
+        Ok(())
+    }
+
     /// Tracks an existing user in a voice channel (used on bot startup).
     pub async fn track_existing_user(
         &self,
@@ -49,10 +77,15 @@ impl VoiceStateSubscriber {
         session_id: &str,
     ) -> Result<()> {
         let now = Utc::now();
-        let mut sessions = self.active_sessions.lock().await;
+        let sessions = self.active_sessions.lock().await;
 
         // Only track if not already tracked
         if !sessions.contains_key(session_id) {
+            // Close any orphaned active sessions before creating a new one
+            drop(sessions);
+            self.close_orphaned_sessions(user_id, guild_id).await?;
+            let mut sessions = self.active_sessions.lock().await;
+
             let session = ActiveSession {
                 user_id,
                 guild_id,
@@ -98,6 +131,14 @@ impl VoiceStateSubscriber {
         let user_id = event.new.user_id.get();
         let session_id = event.new.session_id.to_string();
 
+        // Skip if already tracking this session (prevents duplicates on gateway reconnects)
+        if self.active_sessions.lock().await.contains_key(&session_id) {
+            return Ok(());
+        }
+
+        // Close any orphaned active sessions before creating a new one
+        self.close_orphaned_sessions(user_id, guild_id).await?;
+
         let session = ActiveSession {
             user_id,
             guild_id,
@@ -133,15 +174,26 @@ impl VoiceStateSubscriber {
         let old_state = event.old.as_ref().unwrap();
         let leave_time = Utc::now();
         let session_id = old_state.session_id.to_string();
+        let user_id = old_state.user_id.get();
+        let guild_id = old_state.guild_id.map(|g| g.get()).unwrap_or(0);
 
-        let session = self.active_sessions.lock().await.remove(&session_id);
+        // Remove from in-memory tracking
+        self.active_sessions.lock().await.remove(&session_id);
 
-        if let Some(session) = session {
+        // Close ALL active sessions for this user in the DB
+        // (not just the one tracked in memory, to handle orphaned sessions)
+        let active_sessions = self
+            .services
+            .voice_tracking
+            .find_active_sessions_by_user(user_id, guild_id)
+            .await?;
+
+        for session in active_sessions {
             self.services
                 .voice_tracking
                 .close_session(
-                    old_state.user_id.get(),
-                    old_channel_id.get(),
+                    session.user_id,
+                    session.channel_id,
                     &session.join_time,
                     &leave_time,
                 )
@@ -166,14 +218,30 @@ impl VoiceStateSubscriber {
         let now = Utc::now();
         let old_session_id = old_state.session_id.to_string();
         let new_session_id = event.new.session_id.to_string();
+        let user_id = event.new.user_id.get();
+        let guild_id = event
+            .new
+            .guild_id
+            .ok_or(anyhow::anyhow!("Missing guild_id"))?
+            .get();
 
-        // Close old session
-        if let Some(session) = self.active_sessions.lock().await.remove(&old_session_id) {
+        // Remove old session from in-memory tracking
+        self.active_sessions.lock().await.remove(&old_session_id);
+
+        // Close ALL active sessions for this user in the DB
+        // (handles orphaned sessions from previous crashes)
+        let active_sessions = self
+            .services
+            .voice_tracking
+            .find_active_sessions_by_user(user_id, guild_id)
+            .await?;
+
+        for session in active_sessions {
             self.services
                 .voice_tracking
                 .close_session(
-                    old_state.user_id.get(),
-                    old_channel_id.get(),
+                    session.user_id,
+                    session.channel_id,
                     &session.join_time,
                     &now,
                 )
@@ -181,13 +249,6 @@ impl VoiceStateSubscriber {
         }
 
         // Start new session
-        let guild_id = event
-            .new
-            .guild_id
-            .ok_or(anyhow::anyhow!("Missing guild_id"))?
-            .get();
-        let user_id = event.new.user_id.get();
-
         let session = ActiveSession {
             user_id,
             guild_id,
@@ -277,6 +338,15 @@ mod tests {
 
         let db = Repository::new(&db_url).await.unwrap();
         db.run_migrations().await.unwrap();
+
+        // Clean voice_sessions table to ensure test isolation
+        use diesel_async::RunQueryDsl;
+        let mut conn = db.pool().get().await.unwrap();
+        diesel::sql_query("TRUNCATE TABLE voice_sessions RESTART IDENTITY CASCADE")
+            .execute(&mut conn)
+            .await
+            .unwrap();
+
         let services = Arc::new(Services::new(Arc::new(db), Arc::new(Platforms::new())).await?);
         Ok(VoiceStateSubscriber::new(services))
     }
@@ -423,5 +493,148 @@ mod tests {
         assert!(sessions.contains_key("session1"));
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions.get("session1").unwrap().join_time, first_join_time);
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_handle_join_closes_orphaned_sessions() {
+        let sub = create_mock_subscriber().await.unwrap();
+        let user_id = 444u64;
+        let guild_id = 555u64;
+        let channel_id = 789u64;
+
+        // Simulate an orphaned active session (e.g., from a previous crash)
+        let orphaned = VoiceSessionsEntity {
+            id: 0,
+            user_id,
+            guild_id,
+            channel_id,
+            join_time: Utc::now() - chrono::Duration::hours(2),
+            leave_time: Utc::now() - chrono::Duration::hours(2),
+            is_active: true,
+        };
+        sub.services.voice_tracking.insert(&orphaned).await.unwrap();
+
+        // Verify the orphaned session exists in the DB
+        let active_before = sub
+            .services
+            .voice_tracking
+            .find_active_sessions_by_user(user_id, guild_id)
+            .await
+            .unwrap();
+        assert_eq!(active_before.len(), 1);
+
+        // Now simulate the user joining voice (should close the orphaned session first)
+        let event = VoiceStateEvent {
+            old: None,
+            new: create_voice_state(user_id, Some(guild_id), Some(channel_id), "session1"),
+        };
+
+        let result = sub.handle_join(&event, ChannelId::new(channel_id)).await;
+        assert!(result.is_ok());
+
+        // Verify the orphaned session was closed
+        let active_after = sub
+            .services
+            .voice_tracking
+            .find_active_sessions_by_user(user_id, guild_id)
+            .await
+            .unwrap();
+        assert_eq!(active_after.len(), 1);
+
+        // And the new session should be the one we just created
+        assert!(active_after[0].join_time > orphaned.join_time);
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_handle_leave_closes_all_active_sessions() {
+        let sub = create_mock_subscriber().await.unwrap();
+        let user_id = 555u64;
+        let guild_id = 666u64;
+
+        // Create multiple active sessions (simulating duplicates from crashes)
+        for channel_id in [789u64, 790, 791] {
+            let session = VoiceSessionsEntity {
+                id: 0,
+                user_id,
+                guild_id,
+                channel_id,
+                join_time: Utc::now() - chrono::Duration::hours(1),
+                leave_time: Utc::now() - chrono::Duration::hours(1),
+                is_active: true,
+            };
+            sub.services.voice_tracking.insert(&session).await.unwrap();
+        }
+
+        // Verify all 3 are active
+        let active_before = sub
+            .services
+            .voice_tracking
+            .find_active_sessions_by_user(user_id, guild_id)
+            .await
+            .unwrap();
+        assert_eq!(active_before.len(), 3);
+
+        // Now simulate the user leaving voice
+        let old_state = create_voice_state(user_id, Some(guild_id), Some(789), "session1");
+        let event = VoiceStateEvent {
+            old: Some(old_state),
+            new: create_voice_state(user_id, Some(guild_id), None, "session1"),
+        };
+
+        let result = sub.handle_leave(&event, ChannelId::new(789)).await;
+        assert!(result.is_ok());
+
+        // Verify ALL active sessions were closed
+        let active_after = sub
+            .services
+            .voice_tracking
+            .find_active_sessions_by_user(user_id, guild_id)
+            .await
+            .unwrap();
+        assert!(active_after.is_empty());
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_handle_join_dedup_same_session_id() {
+        let sub = create_mock_subscriber().await.unwrap();
+        let user_id = 666u64;
+        let guild_id = 777u64;
+        let channel_id = 888u64;
+
+        let event = VoiceStateEvent {
+            old: None,
+            new: create_voice_state(user_id, Some(guild_id), Some(channel_id), "session_dup"),
+        };
+
+        // First join should succeed
+        let result = sub.handle_join(&event, ChannelId::new(channel_id)).await;
+        assert!(result.is_ok());
+
+        let active_after_first = sub
+            .services
+            .voice_tracking
+            .find_active_sessions_by_user(user_id, guild_id)
+            .await
+            .unwrap();
+        assert_eq!(active_after_first.len(), 1);
+
+        // Second join with same session_id should be a no-op
+        let result = sub.handle_join(&event, ChannelId::new(channel_id)).await;
+        assert!(result.is_ok());
+
+        let active_after_second = sub
+            .services
+            .voice_tracking
+            .find_active_sessions_by_user(user_id, guild_id)
+            .await
+            .unwrap();
+        assert_eq!(active_after_second.len(), 1);
+        assert_eq!(
+            active_after_second[0].join_time,
+            active_after_first[0].join_time
+        );
     }
 }

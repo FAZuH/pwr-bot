@@ -801,7 +801,12 @@ mod voice_sessions_table_tests {
     });
 
     db_test!(get_guild_daily_user_count, |db| {
-        let now = Utc::now();
+        // Use a fixed midday time to avoid crossing midnight during test execution
+        let now = Utc::now()
+            .date_naive()
+            .and_hms_opt(12, 0, 0)
+            .unwrap()
+            .and_utc();
         let today = now.date_naive();
 
         // User 100: active today

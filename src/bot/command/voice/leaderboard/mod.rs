@@ -149,7 +149,8 @@ impl Controller for VoiceLeaderboardController<'_> {
         let author_id = ctx.author().id.get();
         let model = VoiceLeaderboardModel::from_entries(entries, author_id, LEADERBOARD_PER_PAGE);
 
-        let view = VoiceLeaderboardHandler::new(model, &ctx, guild_id, author_id);
+        let mut view = VoiceLeaderboardHandler::new(model, &ctx, guild_id, author_id);
+        view.generate_img().await?;
 
         let mut engine = ViewEngine::new(ctx, view, Duration::from_mins(2), coordinator.clone());
         engine.run().await?;
@@ -236,12 +237,8 @@ impl<'a> VoiceLeaderboardHandler<'a> {
             &mut self.model,
         );
 
-        if !self.model.is_empty() {
-            self.generate_img().await?;
-        } else {
-            self.lb_img = None;
-        }
-
+        self.pagination = self.model.is_empty();
+        self.generate_img().await?;
         Ok(())
     }
 }
@@ -261,11 +258,10 @@ impl ViewHandler for VoiceLeaderboardHandler<'_> {
         log::debug!("{:?}", ctx.event);
         match ctx.action() {
             Base(inner) => {
-                let cmd = VoiceLeaderboardUpdate::update(
+                VoiceLeaderboardUpdate::update(
                     VoiceLeaderboardMsg::Pagination(*inner),
                     &mut self.model,
                 );
-                assert!(matches!(cmd, VoiceLeaderboardCmd::None));
                 changed_page = true;
             }
             TimeRange => {
@@ -304,8 +300,7 @@ impl ViewHandler for VoiceLeaderboardHandler<'_> {
 
         if fetch_new {
             self.refetch_data().await?;
-        }
-        if changed_page && !self.model.is_empty() {
+        } else if changed_page {
             self.generate_img().await?
         }
 
@@ -383,7 +378,7 @@ impl ViewRender for VoiceLeaderboardHandler<'_> {
         } else {
             container.push(CreateContainerComponent::MediaGallery(
                 CreateMediaGallery::new(vec![CreateMediaGalleryItem::new(
-                    CreateUnfurledMediaItem::new(format!("attachment://{}", IMAGE_FILENAME)),
+                    CreateUnfurledMediaItem::new(format!("attachment://{IMAGE_FILENAME}")),
                 )]),
             ));
         }
