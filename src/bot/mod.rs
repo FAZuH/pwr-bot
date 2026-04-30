@@ -213,7 +213,12 @@ impl BotEventHandler {
                 continue;
             }
 
-            let voice_states = self.collect_voice_states(ctx, guild_id);
+            let voice_states = {
+                let Some(guild) = ctx.cache.guild(guild_id) else {
+                    continue;
+                };
+                self.collect_voice_states_from_guild(&guild)
+            };
 
             for (user_id, guild_id, channel_id, session_id) in voice_states {
                 match self
@@ -222,7 +227,7 @@ impl BotEventHandler {
                     .await
                 {
                     Ok(_) => tracked += 1,
-                    Err(e) => debug!(
+                    Err(e) => error!(
                         "Failed to track existing user {} in guild {}: {}",
                         user_id, guild_id, e
                     ),
@@ -238,18 +243,13 @@ impl BotEventHandler {
         }
     }
 
-    /// Collects voice state data from the cache for a guild.
-    /// Returns early with an empty vec if the guild is not cached.
-    fn collect_voice_states(
+    /// Collects voice state data from a guild reference.
+    /// For large guilds the member list may be incomplete on `GuildCreate`; in that case
+    /// we default to treating unknown users as non-bots (better to over-track than under-track).
+    fn collect_voice_states_from_guild(
         &self,
-        ctx: &poise::serenity_prelude::Context,
-        guild_id: GuildId,
+        guild: &Guild,
     ) -> Vec<(u64, u64, u64, small_fixed_array::FixedString)> {
-        let guild = match ctx.cache.guild(guild_id) {
-            Some(g) => g,
-            None => return vec![],
-        };
-
         guild
             .voice_states
             .iter()
@@ -269,7 +269,7 @@ impl BotEventHandler {
 
                 Some((
                     user_id.get(),
-                    guild_id.get(),
+                    guild.id.get(),
                     channel_id.get(),
                     voice_state.session_id.clone(),
                 ))
@@ -336,6 +336,43 @@ impl poise::serenity_prelude::EventHandler for BotEventHandler {
 
                 // Check if commands need to be re-registered
                 self.register_commands_if_needed().await;
+            }
+            FullEvent::GuildCreate { guild, .. } => {
+                let is_enabled = self
+                    .data
+                    .service
+                    .voice_tracking
+                    .is_enabled(guild.id.get())
+                    .await;
+
+                if !is_enabled {
+                    return;
+                }
+
+                let voice_states = self.collect_voice_states_from_guild(guild);
+                let mut tracked = 0u32;
+
+                for (user_id, guild_id, channel_id, session_id) in voice_states {
+                    match self
+                        .voice_subscriber
+                        .track_existing_user(user_id, guild_id, channel_id, &session_id)
+                        .await
+                    {
+                        Ok(_) => tracked += 1,
+                        Err(e) => error!(
+                            "Failed to track existing user {} in guild {}: {}",
+                            user_id, guild_id, e
+                        ),
+                    }
+                }
+
+                if tracked > 0 {
+                    info!(
+                        "Guild {} scan complete: {} users now being tracked",
+                        guild.id.get(),
+                        tracked
+                    );
+                }
             }
             FullEvent::VoiceStateUpdate { old, new, .. } => {
                 self.event_bus.publish(VoiceStateEvent {

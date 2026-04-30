@@ -80,38 +80,46 @@ impl VoiceStateSubscriber {
         let sessions = self.active_sessions.lock().await;
 
         // Only track if not already tracked
-        if !sessions.contains_key(session_id) {
-            // Close any orphaned active sessions before creating a new one
-            drop(sessions);
-            self.close_orphaned_sessions(user_id, guild_id).await?;
-            let mut sessions = self.active_sessions.lock().await;
-
-            let session = ActiveSession {
-                user_id,
-                guild_id,
-                channel_id,
-                join_time: now,
-            };
-
-            // Insert into database
-            let model = VoiceSessionsEntity {
-                user_id,
-                guild_id,
-                channel_id,
-                join_time: now,
-                leave_time: now,
-                is_active: true,
-                ..Default::default()
-            };
-
-            self.services.voice_tracking.insert(&model).await?;
-            sessions.insert(session_id.to_string(), session);
-
-            debug!(
-                "Started tracking existing user {} in voice channel {} (guild {})",
-                user_id, channel_id, guild_id
-            );
+        if sessions.contains_key(session_id) {
+            return Ok(());
         }
+
+        // Close any orphaned active sessions before creating a new one
+        drop(sessions);
+        self.close_orphaned_sessions(user_id, guild_id).await?;
+
+        // Re-check after await: another task may have inserted this session while we were
+        // closing orphaned sessions (e.g. concurrent VoiceStateUpdate on gateway reconnect).
+        let mut sessions = self.active_sessions.lock().await;
+        if sessions.contains_key(session_id) {
+            return Ok(());
+        }
+
+        let session = ActiveSession {
+            user_id,
+            guild_id,
+            channel_id,
+            join_time: now,
+        };
+
+        // Insert into database
+        let model = VoiceSessionsEntity {
+            user_id,
+            guild_id,
+            channel_id,
+            join_time: now,
+            leave_time: now,
+            is_active: true,
+            ..Default::default()
+        };
+
+        self.services.voice_tracking.insert(&model).await?;
+        sessions.insert(session_id.to_string(), session);
+
+        debug!(
+            "Started tracking existing user {} in voice channel {} (guild {})",
+            user_id, channel_id, guild_id
+        );
 
         Ok(())
     }
@@ -493,6 +501,56 @@ mod tests {
         assert!(sessions.contains_key("session1"));
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions.get("session1").unwrap().join_time, first_join_time);
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_track_existing_user_dedups_after_close_orphaned() {
+        let sub = create_mock_subscriber().await.unwrap();
+        let user_id = 999u64;
+        let guild_id = 888u64;
+        let channel_id = 777u64;
+        let session_id = "race_session";
+
+        // Simulate an orphaned active session
+        let orphaned = VoiceSessionsEntity {
+            id: 0,
+            user_id,
+            guild_id,
+            channel_id,
+            join_time: Utc::now() - chrono::Duration::hours(2),
+            leave_time: Utc::now() - chrono::Duration::hours(2),
+            is_active: true,
+        };
+        sub.services.voice_tracking.insert(&orphaned).await.unwrap();
+
+        // First call should close orphaned session and create a new one
+        sub.track_existing_user(user_id, guild_id, channel_id, session_id)
+            .await
+            .unwrap();
+
+        let active_first = sub
+            .services
+            .voice_tracking
+            .find_active_sessions_by_user(user_id, guild_id)
+            .await
+            .unwrap();
+        assert_eq!(active_first.len(), 1);
+        let first_join_time = active_first[0].join_time;
+
+        // Second call with same session_id should be a no-op
+        sub.track_existing_user(user_id, guild_id, channel_id, session_id)
+            .await
+            .unwrap();
+
+        let active_second = sub
+            .services
+            .voice_tracking
+            .find_active_sessions_by_user(user_id, guild_id)
+            .await
+            .unwrap();
+        assert_eq!(active_second.len(), 1);
+        assert_eq!(active_second[0].join_time, first_join_time);
     }
 
     #[tokio::test]
