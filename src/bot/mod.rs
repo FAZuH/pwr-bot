@@ -227,19 +227,15 @@ impl BotEventHandler {
                     .await
                 {
                     Ok(_) => tracked += 1,
-                    Err(e) => error!(
-                        "Failed to track existing user {} in guild {}: {}",
-                        user_id, guild_id, e
-                    ),
+                    Err(e) => {
+                        error!("Failed to track existing user {user_id} in guild {guild_id}: {e}")
+                    }
                 }
             }
         }
 
         if tracked > 0 {
-            info!(
-                "Voice channel scan complete: {} users now being tracked",
-                tracked
-            );
+            info!("Voice channel scan complete: {tracked} users now being tracked");
         }
     }
 
@@ -294,7 +290,7 @@ impl BotEventHandler {
 
         match stored_version {
             Ok(Some(version)) if version == current_version => {
-                debug!("Bot version unchanged ({})", current_version);
+                debug!("Bot version unchanged ({current_version})");
             }
             _ => {
                 // Version mismatch or not found - register commands globally
@@ -314,11 +310,11 @@ impl BotEventHandler {
                             .set_meta(BotMetaKey::BotVersion, current_version)
                             .await
                         {
-                            error!("Failed to update bot version in database: {}", e);
+                            error!("Failed to update bot version in database: {e}");
                         }
                     }
                     Err(e) => {
-                        error!("Failed to register commands globally: {}", e);
+                        error!("Failed to register commands globally: {e}");
                     }
                 }
             }
@@ -360,8 +356,7 @@ impl poise::serenity_prelude::EventHandler for BotEventHandler {
                     {
                         Ok(_) => tracked += 1,
                         Err(e) => error!(
-                            "Failed to track existing user {} in guild {}: {}",
-                            user_id, guild_id, e
+                            "Failed to track existing user {user_id} in guild {guild_id}: {e}"
                         ),
                     }
                 }

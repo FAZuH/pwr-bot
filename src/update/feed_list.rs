@@ -196,7 +196,7 @@ mod tests {
                 assert!(urls.contains("https://a.com"));
                 assert!(urls.contains("https://b.com"));
             }
-            other => panic!("expected SaveUnsubscribes, got {:?}", other),
+            other => panic!("expected SaveUnsubscribes, got {other:?}"),
         }
     }
 

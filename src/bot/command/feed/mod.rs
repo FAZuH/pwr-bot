@@ -110,7 +110,7 @@ impl From<UnsubscribeResult> for String {
                 )
             }
             UnsubscribeResult::NoneSubscribed { url } => {
-                format!("❌ You are **not subscribed** to <{}>", url)
+                format!("❌ You are **not subscribed** to <{url}>")
             }
         }
     }

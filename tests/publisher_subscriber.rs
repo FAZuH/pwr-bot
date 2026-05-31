@@ -32,11 +32,18 @@ async fn test_subscription_and_publishing() {
     let feeds = Arc::new(feeds);
 
     // Setup Service
-    let service = Arc::new(FeedSubscriptionService::new(Arc::new(db.feed.clone()), Arc::new(db.feed_item.clone()), Arc::new(db.subscriber.clone()), Arc::new(db.feed_subscription.clone()), Arc::new(db.server_settings.clone()), feeds.clone()));
+    let service = Arc::new(FeedSubscriptionService::new(
+        Arc::new(db.feed.clone()),
+        Arc::new(db.feed_item.clone()),
+        Arc::new(db.subscriber.clone()),
+        Arc::new(db.feed_subscription.clone()),
+        Arc::new(db.server_settings.clone()),
+        feeds.clone(),
+    ));
 
     // 1. Prepare Mock Data
     let source_id = "123";
-    let url = format!("https://{}/title/{}", mock_domain, source_id);
+    let url = format!("https://{mock_domain}/title/{source_id}");
 
     mock_feed.set_info(FeedSource {
         id: source_id.to_string(),

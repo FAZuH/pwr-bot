@@ -61,11 +61,11 @@ impl AboutView {
         let minutes = (duration.as_secs() % 3600) / 60;
 
         if days > 0 {
-            format!("{} days, {} hours, {} minutes", days, hours, minutes)
+            format!("{days} days, {hours} hours, {minutes} minutes")
         } else if hours > 0 {
-            format!("{} hours, {} minutes", hours, minutes)
+            format!("{hours} hours, {minutes} minutes")
         } else {
-            format!("{} minutes", minutes)
+            format!("{minutes} minutes")
         }
     }
 

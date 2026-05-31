@@ -27,7 +27,7 @@ async fn main() -> Result<()> {
         RgbaImage::from_pixel(total_width, total_height, image::Rgba([30, 31, 34, 255])); // Discord dark theme background
 
     for i in 1..=12 {
-        println!("Generating template {}...", i);
+        println!("Generating template {i}...");
 
         let data = WelcomeCardData {
             template_id: i.to_string(),
@@ -35,11 +35,11 @@ async fn main() -> Result<()> {
             user_tag: "@fazuh".to_string(),
             avatar_url: "https://cdn.discordapp.com/avatars/257428751560867840/9afb22958d5bbb3e91fb077ca546c821.png".to_string(),
             avatar_b64: None,
-            server_name: format!("Template #{}", i),
+            server_name: format!("Template #{i}"),
             member_count: "100".to_string(),
             member_number: "#100".to_string(),
             primary_color: "#5865F2".to_string(),
-            welcome_message: format!("Preview for Template {}", i),
+            welcome_message: format!("Preview for Template {i}"),
         };
 
         let png_bytes = generator.generate_card(data).await?;
@@ -87,7 +87,7 @@ async fn main() -> Result<()> {
     }
 
     combined_image.save(out_path)?;
-    println!("Successfully saved preview to {:?}", out_path);
+    println!("Successfully saved preview to {out_path:?}");
 
     Ok(())
 }

@@ -130,7 +130,7 @@ impl CrudTable<FeedEntity, i32> for PgFeedRepo {
 impl FeedRepository for PgFeedRepo {
     async fn select_all_by_tag(&self, tag: &str) -> Result<Vec<FeedEntity>, DatabaseError> {
         let mut conn = self.pool.get().await?;
-        let pattern = format!("%{}%", tag);
+        let pattern = format!("%{tag}%");
         Ok(feeds::table
             .filter(feeds::tags.like(pattern))
             .select(FeedEntity::as_select())

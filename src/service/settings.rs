@@ -42,8 +42,7 @@ impl SettingsService {
     /// # Performance
     /// * DB calls: 1
     pub async fn get_server_settings(&self, guild_id: u64) -> Result<ServerSettings, ServiceError> {
-        let result: Option<ServerSettingsEntity> =
-            self.server_settings.select(&guild_id).await?;
+        let result: Option<ServerSettingsEntity> = self.server_settings.select(&guild_id).await?;
         match result {
             Some(model) => Ok(model.settings.0),
             None => Ok(ServerSettings::default()),

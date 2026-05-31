@@ -49,7 +49,7 @@ pub fn generate_line_chart(
             x_min = 0;
             x_max = 23;
             for i in 0..=23 {
-                x_labels.push(format!("{:02}:00", i));
+                x_labels.push(format!("{i:02}:00"));
             }
         }
         VoiceStatsTimeRange::Weekly => {
@@ -64,7 +64,7 @@ pub fn generate_line_chart(
             x_min = 1;
             x_max = 31;
             for i in 1..=31 {
-                x_labels.push(format!("{}", i));
+                x_labels.push(format!("{i}"));
             }
         }
         _ => {}

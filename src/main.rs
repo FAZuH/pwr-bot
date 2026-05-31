@@ -80,7 +80,10 @@ async fn load_config() -> Result<Arc<Config>> {
     Ok(config)
 }
 
-async fn setup_database(config: &Config, init_start: Instant) -> Result<Arc<dyn Repos + Send + Sync>> {
+async fn setup_database(
+    config: &Config,
+    init_start: Instant,
+) -> Result<Arc<dyn Repos + Send + Sync>> {
     debug!("Setting up Database...");
     let repos = PgRepos::new(&config.db_url).await?;
 
@@ -114,7 +117,7 @@ async fn setup_voice_tracking(
     info!("Performing voice tracking crash recovery...");
     let recovered = voice_heartbeat.recover_from_crash().await?;
     if recovered > 0 {
-        info!("Recovered {} orphaned voice sessions", recovered);
+        info!("Recovered {recovered} orphaned voice sessions");
     }
 
     voice_heartbeat.clone().start().await;

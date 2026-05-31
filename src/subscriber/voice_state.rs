@@ -117,8 +117,7 @@ impl VoiceStateSubscriber {
         sessions.insert(session_id.to_string(), session);
 
         debug!(
-            "Started tracking existing user {} in voice channel {} (guild {})",
-            user_id, channel_id, guild_id
+            "Started tracking existing user {user_id} in voice channel {channel_id} (guild {guild_id})"
         );
 
         Ok(())

@@ -224,7 +224,7 @@ impl ViewRender for SettingsWelcomeHandler {
         let templates: Vec<_> = (1..=12)
             .map(|i| {
                 poise::serenity_prelude::CreateSelectMenuOption::new(
-                    format!("Template {}", i),
+                    format!("Template {i}"),
                     i.to_string(),
                 )
             })

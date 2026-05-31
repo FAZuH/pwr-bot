@@ -67,7 +67,7 @@ impl CommandUnregistrationView {
                 self.duration_ms.unwrap_or(0)
             )
         } else {
-            format!("### {}\nUnregistering all server commands...", title)
+            format!("### {title}\nUnregistering all server commands...")
         };
 
         let container = CreateComponent::Container(CreateContainer::new(vec![

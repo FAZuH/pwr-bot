@@ -242,10 +242,7 @@ impl VoiceTrackingService {
         guild_id: u64,
         limit: u32,
     ) -> anyhow::Result<Vec<VoiceLeaderboardEntry>> {
-        Ok(self
-            .voice_sessions
-            .get_leaderboard(guild_id, limit)
-            .await?)
+        Ok(self.voice_sessions.get_leaderboard(guild_id, limit).await?)
     }
 
     pub async fn get_leaderboard_with_offset(

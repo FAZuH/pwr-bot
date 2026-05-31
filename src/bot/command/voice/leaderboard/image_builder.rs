@@ -77,7 +77,7 @@ impl<'a> LeaderboardImageBuilder<'a> {
             .generate_leaderboard(&entries_for_image)
             .await
             .map_err(|e| {
-                AppError::internal_with_ref(format!("Failed to generate leaderboard image: {}", e))
+                AppError::internal_with_ref(format!("Failed to generate leaderboard image: {e}"))
             })?;
         trace!("generate_took {} ms", init_start.elapsed().as_millis());
 
