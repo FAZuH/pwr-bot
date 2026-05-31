@@ -3630,7 +3630,6 @@ dependencies = [
 name = "pwr-bot"
 version = "0.1.0"
 dependencies = [
- "ab_glyph",
  "anyhow",
  "async-trait",
  "base64 0.22.1",
@@ -3659,7 +3658,6 @@ dependencies = [
  "sysinfo",
  "thiserror 2.0.18",
  "tokio",
- "tracing",
  "tracing-appender",
  "tracing-subscriber",
  "uuid",

@@ -28,12 +28,10 @@ thiserror = "2.0.18"
 uuid = { version = "1.21.0", features = ["v4"] }
 governor = "0.10.4"
 tracing-appender = "0.2.4"
-tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 wreq = "5.3.0"
 wreq-util = "2.2.6"
 image = "0.25"
-ab_glyph = "0.2"
 html2md = "0.2.15"
 sysinfo = "0.33"
 derive_builder = "0.20.2"
