@@ -13,18 +13,13 @@ on:
         required: false
         type: boolean
         default: false
-      binary-artifact-name:
-        description: 'Name of the binary artifact'
+      release:
+        description: 'Whether this is a release build (affects artifact path)'
         required: false
-        type: string
-        default: 'pwr-bot'
-      binary-artifact-path:
-        description: 'Path to the binary artifact'
-        required: false
-        type: string
-        default: 'target/release/pwr-bot'
-      export-docker-image:
-        description: 'Whether to export the Docker image as an artifact'
+        type: boolean
+        default: false
+      require-patched-cargo:
+        description: 'Fail if patched Cargo.toml artifact is not found'
         required: false
         type: boolean
         default: false
@@ -45,8 +40,6 @@ jobs:
 
       - name: Set up Stable Rust
         uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
 
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
@@ -57,21 +50,35 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y pkg-config libfontconfig1-dev libpq-dev
 
       - name: Download Patched Cargo.toml
+        id: download-cargo
         uses: actions/download-artifact@v4
         with:
           name: patched-cargo-toml
           path: .
         continue-on-error: true
 
+      - name: Verify Patched Cargo.toml
+        if: inputs.require-patched-cargo && steps.download-cargo.outcome == 'failure'
+        run: |
+          echo "::error::Patched Cargo.toml artifact is required but was not found. Ensure patch-version ran before this job."
+          exit 1
+
       - name: Build
         run: cargo build ${{ inputs.cargo-build-args }}
 
+      - name: Prepare Artifact
+        if: inputs.upload-binary
+        run: |
+          mkdir -p artifacts
+          cp target/${{ inputs.release && 'release' || 'debug' }}/pwr-bot artifacts/pwr-bot-linux-x64
+          chmod +x artifacts/pwr-bot-linux-x64
+
       - name: Upload Binary Artifact
-        if: ${{ inputs.upload-binary }}
+        if: inputs.upload-binary
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ inputs.binary-artifact-name }}
-          path: ${{ inputs.binary-artifact-path }}
+          name: pwr-bot-linux-x64
+          path: artifacts/pwr-bot-linux-x64
 
   build-docker:
     name: Build Docker Image
@@ -105,11 +112,9 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Save Docker Image
-        if: ${{ inputs.export-docker-image }}
         run: docker save pwr-bot:build -o /tmp/docker-image.tar
 
       - name: Upload Docker Image Artifact
-        if: ${{ inputs.export-docker-image }}
         uses: actions/upload-artifact@v4
         with:
           name: docker-image

@@ -1,0 +1,62 @@
+name: Changelog Preview
+
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  merge_group:
+    branches: [main, development]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  changelog-preview:
+    name: Preview Changelog
+    if: "! github.event.pull_request.draft"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Fetch All Tags
+        run: git fetch --tags --force origin '+refs/tags/*:refs/tags/*'
+
+      - name: Prepare Tag for Preview
+        run: |
+          # Find the actual latest tag in the whole repo
+          LATEST_TAG=$(git tag -l 'v*' --sort=-version:refname | head -1)
+          
+          if [ -n "$LATEST_TAG" ]; then
+            # Find the common ancestor between HEAD and the tag branch point, or just use HEAD^
+            MERGE_BASE=$(git merge-base HEAD "$LATEST_TAG" 2>/dev/null || git rev-parse HEAD^)
+            # Forcefully move the tag to the ancestor (local only)
+            git tag -f "$LATEST_TAG" "$MERGE_BASE"
+          fi
+          
+          # Give the action the fallback version just in case
+          echo "{\"version\":\"${LATEST_TAG:-v0.0.0}\"}" > version.json
+
+      - name: Install changelog dependencies
+        run: npm install conventional-changelog-conventionalcommits@7.0.2
+
+      - name: Generate Changelog Preview
+        id: changelog
+        continue-on-error: true
+        uses: TriPSs/conventional-changelog-action@v6
+        with:
+          skip-commit: true
+          skip-tag: true
+          skip-version-file: true
+          skip-git-pull: true
+          skip-on-empty: false
+          git-push: false
+          output-file: "false"
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          config-file-path: ./.github/.config.js
+          version-file: ./version.json
+          preset: conventionalcommits

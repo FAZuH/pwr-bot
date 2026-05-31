@@ -1,0 +1,52 @@
+name: Patch Version
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: 'Version string to patch into Cargo.toml'
+        required: false
+        type: string
+        default: ''
+    outputs:
+      version:
+        description: 'The version that was patched'
+        value: ${{ jobs.patch.outputs.version }}
+
+jobs:
+  patch:
+    name: Patch Cargo.toml Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.set-version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine version
+        id: set-version
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo '')
+            if [ -z "$VERSION" ]; then
+              VERSION=$(grep '^version = ' Cargo.toml | head -n1 | sed 's/version = "\(.*\)"/\1/')
+            fi
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Patching version: $VERSION"
+
+      - name: Patch Cargo.toml
+        run: |
+          VERSION=${{ steps.set-version.outputs.version }}
+          VERSION=${VERSION#v}
+          sed -i "0,/^version = \".*\"/{s/^version = \".*\"/version = \"$VERSION\"/}" Cargo.toml
+
+      - name: Upload patched Cargo.toml
+        uses: actions/upload-artifact@v4
+        with:
+          name: patched-cargo-toml
+          path: Cargo.toml

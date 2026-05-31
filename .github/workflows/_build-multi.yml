@@ -1,0 +1,142 @@
+name: Build (Multi-Platform)
+
+on:
+  workflow_call:
+    inputs:
+      binary-name:
+        description: 'Binary name (e.g. tomo, lab-ops)'
+        required: true
+        type: string
+      apt-deps:
+        description: 'Extra apt packages to install on Linux'
+        required: false
+        type: string
+        default: 'pkg-config'
+      windows-sqlite:
+        description: 'Whether to install SQLite via vcpkg on Windows'
+        required: false
+        type: boolean
+        default: false
+      cargo-build-args:
+        description: 'Arguments to pass to cargo build'
+        required: false
+        type: string
+        default: '--all-features --all-targets'
+      upload-binary:
+        description: 'Whether to upload the binary artifact'
+        required: false
+        type: boolean
+        default: false
+      release:
+        description: 'Whether this is a release build (affects artifact path)'
+        required: false
+        type: boolean
+        default: false
+      require-patched-cargo:
+        description: 'Fail if patched Cargo.toml artifact is not found'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-binary:
+    name: Build Binary (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            binary: ${{ inputs.binary-name }}
+            asset_name: ${{ inputs.binary-name }}-linux-x64
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            binary: ${{ inputs.binary-name }}.exe
+            asset_name: ${{ inputs.binary-name }}-windows-x64.exe
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            binary: ${{ inputs.binary-name }}
+            asset_name: ${{ inputs.binary-name }}-macos-x64
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            binary: ${{ inputs.binary-name }}
+            asset_name: ${{ inputs.binary-name }}-macos-arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Set up Stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+          targets: ${{ matrix.target }}
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "ci-${{ matrix.target }}"
+
+      - name: Install dependencies (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y ${{ inputs.apt-deps }}
+
+      - name: Install dependencies (macOS)
+        if: matrix.os == 'macos-latest'
+        run: brew install pkg-config
+
+      - name: Cache vcpkg
+        if: matrix.os == 'windows-latest' && inputs.windows-sqlite
+        uses: actions/cache@v4
+        with:
+          path: C:/vcpkg/installed
+          key: vcpkg-sqlite3-x64-windows-static
+
+      - name: Install SQLite (Windows)
+        if: matrix.os == 'windows-latest' && inputs.windows-sqlite
+        run: |
+          vcpkg install sqlite3:x64-windows-static
+          echo "SQLITE3_LIB_DIR=C:/vcpkg/installed/x64-windows-static/lib" >> $env:GITHUB_ENV
+          echo "VCPKGRS_DYNAMIC=0" >> $env:GITHUB_ENV
+
+      - name: Download Patched Cargo.toml
+        id: download-cargo
+        uses: actions/download-artifact@v4
+        with:
+          name: patched-cargo-toml
+          path: .
+        continue-on-error: true
+
+      - name: Verify Patched Cargo.toml
+        if: inputs.require-patched-cargo && steps.download-cargo.outcome == 'failure'
+        run: |
+          echo "::error::Patched Cargo.toml artifact is required but was not found. Ensure patch-version ran before this job."
+          exit 1
+
+      - name: Build
+        run: cargo build --target ${{ matrix.target }} ${{ inputs.cargo-build-args }}
+
+      - name: Prepare Artifact (Unix)
+        if: matrix.os != 'windows-latest' && inputs.upload-binary
+        run: |
+          mkdir -p artifacts
+          cp target/${{ matrix.target }}/${{ inputs.release && 'release' || 'debug' }}/${{ matrix.binary }} artifacts/${{ matrix.asset_name }}
+          chmod +x artifacts/${{ matrix.asset_name }}
+
+      - name: Prepare Artifact (Windows)
+        if: matrix.os == 'windows-latest' && inputs.upload-binary
+        run: |
+          mkdir artifacts
+          copy target\${{ matrix.target }}\${{ inputs.release && 'release' || 'debug' }}\${{ matrix.binary }} artifacts\${{ matrix.asset_name }}
+
+      - name: Upload Binary Artifact
+        if: inputs.upload-binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: artifacts/${{ matrix.asset_name }}
