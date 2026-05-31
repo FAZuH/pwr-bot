@@ -19,6 +19,7 @@ use tokio::time::sleep;
 
 mod common;
 
+#[serial_test::serial]
 #[tokio::test]
 async fn test_subscription_and_publishing() {
     let db = common::setup_db().await;

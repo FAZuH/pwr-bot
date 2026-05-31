@@ -16,6 +16,7 @@ use pwr_bot::service::voice_tracking::VoiceTrackingService;
 
 mod common;
 
+#[serial_test::serial]
 #[tokio::test]
 async fn test_voice_tracking_service_new() {
     let db = common::setup_db().await;
@@ -31,6 +32,7 @@ async fn test_voice_tracking_service_new() {
     common::teardown_db(&db).await;
 }
 
+#[serial_test::serial]
 #[tokio::test]
 async fn test_is_enabled_default() {
     let db = common::setup_db().await;
@@ -50,6 +52,7 @@ async fn test_is_enabled_default() {
     common::teardown_db(&db).await;
 }
 
+#[serial_test::serial]
 #[tokio::test]
 async fn test_is_enabled_when_disabled() {
     let db = common::setup_db().await;
@@ -82,6 +85,7 @@ async fn test_is_enabled_when_disabled() {
     common::teardown_db(&db).await;
 }
 
+#[serial_test::serial]
 #[tokio::test]
 async fn test_is_enabled_when_re_enabled() {
     let db = common::setup_db().await;
@@ -127,6 +131,7 @@ async fn test_is_enabled_when_re_enabled() {
     common::teardown_db(&db).await;
 }
 
+#[serial_test::serial]
 #[tokio::test]
 async fn test_insert_and_replace_voice_session() {
     let db = common::setup_db().await;
@@ -190,6 +195,7 @@ async fn test_insert_and_replace_voice_session() {
     common::teardown_db(&db).await;
 }
 
+#[serial_test::serial]
 #[tokio::test]
 async fn test_get_server_settings_default() {
     let db = common::setup_db().await;
@@ -213,6 +219,7 @@ async fn test_get_server_settings_default() {
     common::teardown_db(&db).await;
 }
 
+#[serial_test::serial]
 #[tokio::test]
 async fn test_update_and_get_server_settings() {
     let db = common::setup_db().await;
@@ -248,6 +255,7 @@ async fn test_update_and_get_server_settings() {
     common::teardown_db(&db).await;
 }
 
+#[serial_test::serial]
 #[tokio::test]
 async fn test_get_leaderboard() {
     let db = common::setup_db().await;
@@ -332,6 +340,7 @@ async fn test_get_leaderboard() {
     common::teardown_db(&db).await;
 }
 
+#[serial_test::serial]
 #[tokio::test]
 async fn test_get_leaderboard_with_limit() {
     let db = common::setup_db().await;
@@ -378,6 +387,7 @@ async fn test_get_leaderboard_with_limit() {
     common::teardown_db(&db).await;
 }
 
+#[serial_test::serial]
 #[tokio::test]
 async fn test_get_leaderboard_with_offset() {
     let db = common::setup_db().await;
@@ -428,6 +438,7 @@ async fn test_get_leaderboard_with_offset() {
     common::teardown_db(&db).await;
 }
 
+#[serial_test::serial]
 #[tokio::test]
 async fn test_get_leaderboard_empty() {
     let db = common::setup_db().await;
@@ -452,6 +463,7 @@ async fn test_get_leaderboard_empty() {
     common::teardown_db(&db).await;
 }
 
+#[serial_test::serial]
 #[tokio::test]
 async fn test_disabled_guilds_cache_on_init() {
     let db = common::setup_db().await;
@@ -491,6 +503,7 @@ async fn test_disabled_guilds_cache_on_init() {
     common::teardown_db(&db).await;
 }
 
+#[serial_test::serial]
 #[tokio::test]
 async fn test_get_leaderboard_includes_active_sessions() {
     let db = common::setup_db().await;
@@ -576,6 +589,7 @@ async fn test_get_leaderboard_includes_active_sessions() {
     common::teardown_db(&db).await;
 }
 
+#[serial_test::serial]
 #[tokio::test]
 async fn test_get_leaderboard_active_and_completed_mixed() {
     let db = common::setup_db().await;

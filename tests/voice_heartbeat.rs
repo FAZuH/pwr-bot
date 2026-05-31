@@ -14,6 +14,7 @@ use pwr_bot::task::voice_heartbeat::VoiceHeartbeatManager;
 
 mod common;
 
+#[serial_test::serial]
 #[tokio::test]
 async fn test_heartbeat_read_write() {
     let db = common::setup_db().await;
@@ -44,6 +45,7 @@ async fn test_heartbeat_read_write() {
     common::teardown_db(&db).await;
 }
 
+#[serial_test::serial]
 #[tokio::test]
 async fn test_heartbeat_crash_recovery_no_sessions() {
     let db = common::setup_db().await;
@@ -82,6 +84,7 @@ async fn test_heartbeat_crash_recovery_no_sessions() {
     common::teardown_db(&db).await;
 }
 
+#[serial_test::serial]
 #[tokio::test]
 async fn test_heartbeat_crash_recovery_with_active_sessions() {
     let db = common::setup_db().await;
@@ -172,6 +175,7 @@ async fn test_heartbeat_crash_recovery_with_active_sessions() {
     common::teardown_db(&db).await;
 }
 
+#[serial_test::serial]
 #[tokio::test]
 async fn test_heartbeat_crash_recovery_no_heartbeat() {
     let db = common::setup_db().await;
@@ -236,6 +240,7 @@ async fn test_heartbeat_crash_recovery_no_heartbeat() {
     common::teardown_db(&db).await;
 }
 
+#[serial_test::serial]
 #[tokio::test]
 async fn test_find_active_sessions() {
     let db = common::setup_db().await;
@@ -303,6 +308,7 @@ async fn test_find_active_sessions() {
     common::teardown_db(&db).await;
 }
 
+#[serial_test::serial]
 #[tokio::test]
 async fn test_update_session_leave_time() {
     let db = common::setup_db().await;

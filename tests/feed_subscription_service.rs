@@ -16,6 +16,7 @@ use pwr_bot::service::feed_subscription::SubscriberTarget;
 
 mod common;
 
+#[serial_test::serial]
 #[tokio::test]
 async fn test_get_or_create_subscriber() {
     let db = common::setup_db().await;
@@ -53,6 +54,7 @@ async fn test_get_or_create_subscriber() {
     common::teardown_db(&db).await;
 }
 
+#[serial_test::serial]
 #[tokio::test]
 async fn test_get_or_create_feed() {
     let db = common::setup_db().await;
@@ -137,6 +139,7 @@ async fn test_get_or_create_feed() {
     common::teardown_db(&db).await;
 }
 
+#[serial_test::serial]
 #[tokio::test]
 async fn test_server_settings_service() {
     let db = common::setup_db().await;
@@ -195,6 +198,7 @@ async fn test_server_settings_service() {
     common::teardown_db(&db).await;
 }
 
+#[serial_test::serial]
 #[tokio::test]
 async fn test_list_paginated_subscriptions_optimization() {
     let db = common::setup_db().await;
