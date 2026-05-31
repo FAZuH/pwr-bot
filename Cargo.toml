@@ -9,8 +9,14 @@ version = "0.1.0"
 
 
 edition = "2024"
+authors = ["FAZuH <mail@fazuh.com>"]
+description = "Discord bot with feed subscriptions and voice channel tracking"
+license = "MIT"
+repository = "https://github.com/FAZuH/pwr-bot"
+keywords = ["discord", "bot", "serenity", "feed-reader", "voice"]
 
 [lints.clippy]
+uninlined_format_args = "warn"
 new_without_default = "allow"
 
 [dependencies]

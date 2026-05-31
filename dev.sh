@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# Development helper script for pwr-bot
+# Development helper script
 # Usage: ./dev.sh [command1] [command2] ...
-#   commands: format | lint | test | build | docs | all | help
+#   commands: format | lint | test | docs | all | help
 #   Multiple commands can be specified and will execute left to right
 
 set -e
@@ -34,17 +34,15 @@ print_warning() {
 # Help function
 show_help() {
     cat << EOF
-pwr-bot Development Helper
-
 Usage: ./dev.sh [command1] [command2] ...
 
 Commands:
   format    - Format code with "cargo +nightly fmt --all"
   lint      - Run linter with "cargo clippy --all-targets --all-features --fix --allow-dirty"
   test      - Run tests with "cargo test --all-features"
-  build     - Build Docker image
   docs      - Compile Mermaid diagrams to images
-  all       - Run format, lint, test, and build in sequence
+  demo      - Build release, alias, and run vhs demo tape
+  all       - Run format, lint, and test in sequence
   help      - Show this help message
 
 Multiple commands can be specified and will execute sequentially from left to right.
@@ -53,10 +51,10 @@ Examples:
   ./dev.sh format                  # Format code
   ./dev.sh lint                    # Run linter
   ./dev.sh test                    # Run tests
-  ./dev.sh build                   # Build Docker image
   ./dev.sh docs                    # Compile Mermaid diagrams
+  ./dev.sh demo                    # Build release, alias, and run demo tape
   ./dev.sh format lint             # Format then lint
-  ./dev.sh all                     # Run format, lint, test, and build
+  ./dev.sh all                     # Run format, lint, and test
 
 EOF
 }
@@ -70,20 +68,14 @@ cmd_format() {
 
 cmd_lint() {
     print_info "Linting code..."
-    cargo clippy --all-targets --all-features --no-deps --fix --allow-dirty
+    cargo clippy --workspace --all-targets --all-features --no-deps --fix --allow-dirty
     print_success "Linting completed"
 }
 
 cmd_test() {
     print_info "Running tests..."
-    cargo test --all-features -- --test-threads=1
+    cargo test --workspace --all-targets --all-features
     print_success "Tests completed"
-}
-
-cmd_build() {
-    print_info "Building Docker image..."
-    docker build -t pwr-bot:latest .
-    print_success "Docker image built"
 }
 
 cmd_docs() {
@@ -112,12 +104,37 @@ cmd_docs() {
     print_success "Mermaid diagrams compiled to docs/diagrams/"
 }
 
+cmd_demo() {
+    print_info "Building release binary..."
+    cargo build --release
+    print_success "Release build completed"
+
+    print_info "Creating wrapper script..."
+    local wrapper_dir="/tmp/tomo-demo-bin"
+    mkdir -p "$wrapper_dir"
+    cat > "$wrapper_dir/tomo" << SCRIPT
+#!/bin/bash
+exec $PWD/target/release/tomo --config-path /tmp/tomo-demo "\$@"
+SCRIPT
+    chmod +x "$wrapper_dir/tomo"
+    export PATH="$wrapper_dir:$PATH"
+    trap "rm -rf $wrapper_dir" EXIT
+    print_success "Wrapper created at $wrapper_dir/tomo"
+
+    if ! command -v vhs &> /dev/null; then
+        print_warning "vhs not found. Install it: https://github.com/charmbracelet/vhs"
+    fi
+
+    print_info "Running demo tape..."
+    vhs scripts/demo.tape
+    print_success "Demo tape completed"
+}
+
 cmd_all() {
     print_info "Running all tasks..."
     cmd_format
     cmd_lint
     cmd_test
-    cmd_build
     print_success "All tasks completed"
 }
 
@@ -135,11 +152,11 @@ execute_command() {
         test)
             cmd_test
             ;;
-        build)
-            cmd_build
-            ;;
         docs)
             cmd_docs
+            ;;
+        demo)
+            cmd_demo
             ;;
         all)
             cmd_all

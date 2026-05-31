@@ -16,7 +16,6 @@ jobs:
     with:
       binary-name: pwr-bot
       platforms: linux
-      publish-crates: true
     secrets: inherit
 
   push-image:
