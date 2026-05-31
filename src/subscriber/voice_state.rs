@@ -338,13 +338,13 @@ mod tests {
 
     use super::*;
     use crate::feed::Platforms;
-    use crate::repo::Repository;
+    use crate::repo::PgRepos;
 
     async fn create_mock_subscriber() -> anyhow::Result<VoiceStateSubscriber> {
         let db_url = std::env::var("DB_URL")
             .unwrap_or("postgres://pwr_bot:pwr_bot@localhost:5432/pwr_bot".to_string());
 
-        let db = Repository::new(&db_url).await.unwrap();
+        let db = PgRepos::new(&db_url).await.unwrap();
         db.run_migrations().await.unwrap();
 
         // Clean voice_sessions table to ensure test isolation

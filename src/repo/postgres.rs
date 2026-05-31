@@ -1,4 +1,4 @@
-//! Database table operations and implementations.
+//! PostgreSQL database operations and implementations.
 
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
@@ -15,7 +15,6 @@ macro_rules! impl_table_base {
         #[async_trait::async_trait]
         impl TableBase for $struct_name {
             async fn create_table(&self) -> Result<(), DatabaseError> {
-                // Tables are created by migrations; this is a no-op.
                 Ok(())
             }
 
@@ -37,24 +36,24 @@ macro_rules! impl_table_base {
 }
 
 // ============================================================================
-// FeedTable
+// PgFeedRepo
 // ============================================================================
 
 #[derive(Clone)]
-pub struct FeedTable {
+pub struct PgFeedRepo {
     pool: DbPool,
 }
 
-impl FeedTable {
+impl PgFeedRepo {
     pub fn new(pool: DbPool) -> Self {
         Self { pool }
     }
 }
 
-impl_table_base!(FeedTable, feeds::table);
+impl_table_base!(PgFeedRepo, feeds::table);
 
 #[async_trait::async_trait]
-impl CrudTable<FeedEntity, i32> for FeedTable {
+impl CrudTable<FeedEntity, i32> for PgFeedRepo {
     async fn select_all(&self) -> Result<Vec<FeedEntity>, DatabaseError> {
         let mut conn = self.pool.get().await?;
         Ok(feeds::table
@@ -128,7 +127,7 @@ impl CrudTable<FeedEntity, i32> for FeedTable {
 }
 
 #[async_trait::async_trait]
-impl FeedRepository for FeedTable {
+impl FeedRepository for PgFeedRepo {
     async fn select_all_by_tag(&self, tag: &str) -> Result<Vec<FeedEntity>, DatabaseError> {
         let mut conn = self.pool.get().await?;
         let pattern = format!("%{}%", tag);
@@ -183,24 +182,24 @@ impl FeedRepository for FeedTable {
 }
 
 // ============================================================================
-// FeedItemTable
+// PgFeedItemRepo
 // ============================================================================
 
 #[derive(Clone)]
-pub struct FeedItemTable {
+pub struct PgFeedItemRepo {
     pool: DbPool,
 }
 
-impl FeedItemTable {
+impl PgFeedItemRepo {
     pub fn new(pool: DbPool) -> Self {
         Self { pool }
     }
 }
 
-impl_table_base!(FeedItemTable, feed_items::table);
+impl_table_base!(PgFeedItemRepo, feed_items::table);
 
 #[async_trait::async_trait]
-impl CrudTable<FeedItemEntity, i32> for FeedItemTable {
+impl CrudTable<FeedItemEntity, i32> for PgFeedItemRepo {
     async fn select_all(&self) -> Result<Vec<FeedItemEntity>, DatabaseError> {
         let mut conn = self.pool.get().await?;
         Ok(feed_items::table
@@ -260,7 +259,7 @@ impl CrudTable<FeedItemEntity, i32> for FeedItemTable {
 }
 
 #[async_trait::async_trait]
-impl FeedItemRepository for FeedItemTable {
+impl FeedItemRepository for PgFeedItemRepo {
     async fn select_latest_by_feed_id(
         &self,
         feed_id: i32,
@@ -298,24 +297,24 @@ impl FeedItemRepository for FeedItemTable {
 }
 
 // ============================================================================
-// SubscriberTable
+// PgSubscriberRepo
 // ============================================================================
 
 #[derive(Clone)]
-pub struct SubscriberTable {
+pub struct PgSubscriberRepo {
     pool: DbPool,
 }
 
-impl SubscriberTable {
+impl PgSubscriberRepo {
     pub fn new(pool: DbPool) -> Self {
         Self { pool }
     }
 }
 
-impl_table_base!(SubscriberTable, subscribers::table);
+impl_table_base!(PgSubscriberRepo, subscribers::table);
 
 #[async_trait::async_trait]
-impl CrudTable<SubscriberEntity, i32> for SubscriberTable {
+impl CrudTable<SubscriberEntity, i32> for PgSubscriberRepo {
     async fn select_all(&self) -> Result<Vec<SubscriberEntity>, DatabaseError> {
         let mut conn = self.pool.get().await?;
         Ok(subscribers::table
@@ -373,7 +372,7 @@ impl CrudTable<SubscriberEntity, i32> for SubscriberTable {
 }
 
 #[async_trait::async_trait]
-impl SubscriberRepository for SubscriberTable {
+impl SubscriberRepository for PgSubscriberRepo {
     async fn select_all_by_type_and_feed(
         &self,
         r#type: SubscriberType,
@@ -411,24 +410,24 @@ impl SubscriberRepository for SubscriberTable {
 }
 
 // ============================================================================
-// FeedSubscriptionTable
+// PgFeedSubscriptionRepo
 // ============================================================================
 
 #[derive(Clone)]
-pub struct FeedSubscriptionTable {
+pub struct PgFeedSubscriptionRepo {
     pool: DbPool,
 }
 
-impl FeedSubscriptionTable {
+impl PgFeedSubscriptionRepo {
     pub fn new(pool: DbPool) -> Self {
         Self { pool }
     }
 }
 
-impl_table_base!(FeedSubscriptionTable, feed_subscriptions::table);
+impl_table_base!(PgFeedSubscriptionRepo, feed_subscriptions::table);
 
 #[async_trait::async_trait]
-impl CrudTable<FeedSubscriptionEntity, i32> for FeedSubscriptionTable {
+impl CrudTable<FeedSubscriptionEntity, i32> for PgFeedSubscriptionRepo {
     async fn select_all(&self) -> Result<Vec<FeedSubscriptionEntity>, DatabaseError> {
         let mut conn = self.pool.get().await?;
         Ok(feed_subscriptions::table
@@ -486,7 +485,7 @@ impl CrudTable<FeedSubscriptionEntity, i32> for FeedSubscriptionTable {
 }
 
 #[async_trait::async_trait]
-impl FeedSubscriptionRepository for FeedSubscriptionTable {
+impl FeedSubscriptionRepository for PgFeedSubscriptionRepo {
     async fn select_all_by_feed_id(
         &self,
         feed_id: i32,
@@ -619,24 +618,24 @@ impl FeedSubscriptionRepository for FeedSubscriptionTable {
 }
 
 // ============================================================================
-// ServerSettingsTable
+// PgServerSettingsRepo
 // ============================================================================
 
 #[derive(Clone)]
-pub struct ServerSettingsTable {
+pub struct PgServerSettingsRepo {
     pool: DbPool,
 }
 
-impl ServerSettingsTable {
+impl PgServerSettingsRepo {
     pub fn new(pool: DbPool) -> Self {
         Self { pool }
     }
 }
 
-impl_table_base!(ServerSettingsTable, server_settings::table);
+impl_table_base!(PgServerSettingsRepo, server_settings::table);
 
 #[async_trait::async_trait]
-impl CrudTable<ServerSettingsEntity, u64> for ServerSettingsTable {
+impl CrudTable<ServerSettingsEntity, u64> for PgServerSettingsRepo {
     async fn select_all(&self) -> Result<Vec<ServerSettingsEntity>, DatabaseError> {
         let mut conn = self.pool.get().await?;
         Ok(server_settings::table
@@ -693,27 +692,27 @@ impl CrudTable<ServerSettingsEntity, u64> for ServerSettingsTable {
 }
 
 #[async_trait::async_trait]
-impl ServerSettingsRepository for ServerSettingsTable {}
+impl ServerSettingsRepository for PgServerSettingsRepo {}
 
 // ============================================================================
-// VoiceSessionsTable
+// PgVoiceSessionsRepo
 // ============================================================================
 
 #[derive(Clone)]
-pub struct VoiceSessionsTable {
+pub struct PgVoiceSessionsRepo {
     pool: DbPool,
 }
 
-impl VoiceSessionsTable {
+impl PgVoiceSessionsRepo {
     pub fn new(pool: DbPool) -> Self {
         Self { pool }
     }
 }
 
-impl_table_base!(VoiceSessionsTable, voice_sessions::table);
+impl_table_base!(PgVoiceSessionsRepo, voice_sessions::table);
 
 #[async_trait::async_trait]
-impl CrudTable<VoiceSessionsEntity, i32> for VoiceSessionsTable {
+impl CrudTable<VoiceSessionsEntity, i32> for PgVoiceSessionsRepo {
     async fn select_all(&self) -> Result<Vec<VoiceSessionsEntity>, DatabaseError> {
         let mut conn = self.pool.get().await?;
         let rows: Vec<DbVoiceSession> = voice_sessions::table
@@ -771,7 +770,7 @@ impl CrudTable<VoiceSessionsEntity, i32> for VoiceSessionsTable {
 }
 
 #[async_trait::async_trait]
-impl VoiceSessionsRepository for VoiceSessionsTable {
+impl VoiceSessionsRepository for PgVoiceSessionsRepo {
     async fn get_leaderboard_opt(
         &self,
         opts: &VoiceLeaderboardOpt,
@@ -1135,24 +1134,24 @@ impl From<VoiceLeaderboardOptBuilderError> for AppError {
 }
 
 // ============================================================================
-// BotMetaTable
+// PgBotMetaRepo
 // ============================================================================
 
 #[derive(Clone)]
-pub struct BotMetaTable {
+pub struct PgBotMetaRepo {
     pool: DbPool,
 }
 
-impl BotMetaTable {
+impl PgBotMetaRepo {
     pub fn new(pool: DbPool) -> Self {
         Self { pool }
     }
 }
 
-impl_table_base!(BotMetaTable, bot_meta::table);
+impl_table_base!(PgBotMetaRepo, bot_meta::table);
 
 #[async_trait::async_trait]
-impl CrudTable<BotMetaEntity, String> for BotMetaTable {
+impl CrudTable<BotMetaEntity, String> for PgBotMetaRepo {
     async fn select_all(&self) -> Result<Vec<BotMetaEntity>, DatabaseError> {
         let mut conn = self.pool.get().await?;
         Ok(bot_meta::table
@@ -1208,7 +1207,7 @@ impl CrudTable<BotMetaEntity, String> for BotMetaTable {
 }
 
 #[async_trait::async_trait]
-impl BotMetaRepository for BotMetaTable {
+impl BotMetaRepository for PgBotMetaRepo {
     async fn table_exists(&self) -> bool {
         let mut conn = match self.pool.get().await {
             Ok(c) => c,

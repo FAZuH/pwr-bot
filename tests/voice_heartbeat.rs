@@ -18,11 +18,11 @@ mod common;
 async fn test_heartbeat_read_write() {
     let db = common::setup_db().await;
     let service = Arc::new(
-        VoiceTrackingService::new(db.clone())
+        VoiceTrackingService::new(Arc::new(db.voice_sessions.clone()), Arc::new(db.server_settings.clone()))
             .await
             .expect("Failed to create service"),
     );
-    let internal = Arc::new(InternalService::new(db.clone()));
+    let internal = Arc::new(InternalService::new(Arc::new(db.feed.clone()), Arc::new(db.feed_item.clone()), Arc::new(db.subscriber.clone()), Arc::new(db.feed_subscription.clone()), Arc::new(db.bot_meta.clone())));
     let heartbeat_manager = VoiceHeartbeatManager::new(internal, service);
 
     // Initially there should be no heartbeat
@@ -39,11 +39,11 @@ async fn test_heartbeat_read_write() {
 async fn test_heartbeat_crash_recovery_no_sessions() {
     let db = common::setup_db().await;
     let service = Arc::new(
-        VoiceTrackingService::new(db.clone())
+        VoiceTrackingService::new(Arc::new(db.voice_sessions.clone()), Arc::new(db.server_settings.clone()))
             .await
             .expect("Failed to create service"),
     );
-    let internal = Arc::new(InternalService::new(db.clone()));
+    let internal = Arc::new(InternalService::new(Arc::new(db.feed.clone()), Arc::new(db.feed_item.clone()), Arc::new(db.subscriber.clone()), Arc::new(db.feed_subscription.clone()), Arc::new(db.bot_meta.clone())));
 
     // Write a heartbeat timestamp directly to database
     let heartbeat_time = Utc::now() - Duration::minutes(5);
@@ -68,11 +68,11 @@ async fn test_heartbeat_crash_recovery_no_sessions() {
 async fn test_heartbeat_crash_recovery_with_active_sessions() {
     let db = common::setup_db().await;
     let service = Arc::new(
-        VoiceTrackingService::new(db.clone())
+        VoiceTrackingService::new(Arc::new(db.voice_sessions.clone()), Arc::new(db.server_settings.clone()))
             .await
             .expect("Failed to create service"),
     );
-    let internal = Arc::new(InternalService::new(db.clone()));
+    let internal = Arc::new(InternalService::new(Arc::new(db.feed.clone()), Arc::new(db.feed_item.clone()), Arc::new(db.subscriber.clone()), Arc::new(db.feed_subscription.clone()), Arc::new(db.bot_meta.clone())));
 
     // Create active sessions (leave_time == join_time)
     let now = Utc::now();
@@ -150,11 +150,11 @@ async fn test_heartbeat_crash_recovery_with_active_sessions() {
 async fn test_heartbeat_crash_recovery_no_heartbeat() {
     let db = common::setup_db().await;
     let service = Arc::new(
-        VoiceTrackingService::new(db.clone())
+        VoiceTrackingService::new(Arc::new(db.voice_sessions.clone()), Arc::new(db.server_settings.clone()))
             .await
             .expect("Failed to create service"),
     );
-    let internal = Arc::new(InternalService::new(db.clone()));
+    let internal = Arc::new(InternalService::new(Arc::new(db.feed.clone()), Arc::new(db.feed_item.clone()), Arc::new(db.subscriber.clone()), Arc::new(db.feed_subscription.clone()), Arc::new(db.bot_meta.clone())));
 
     let heartbeat_manager = VoiceHeartbeatManager::new(internal.clone(), service.clone());
 
@@ -204,7 +204,7 @@ async fn test_heartbeat_crash_recovery_no_heartbeat() {
 #[tokio::test]
 async fn test_find_active_sessions() {
     let db = common::setup_db().await;
-    let service = VoiceTrackingService::new(db.clone())
+    let service = VoiceTrackingService::new(Arc::new(db.voice_sessions.clone()), Arc::new(db.server_settings.clone()))
         .await
         .expect("Failed to create service");
 
@@ -268,7 +268,7 @@ async fn test_find_active_sessions() {
 #[tokio::test]
 async fn test_update_session_leave_time() {
     let db = common::setup_db().await;
-    let service = VoiceTrackingService::new(db.clone())
+    let service = VoiceTrackingService::new(Arc::new(db.voice_sessions.clone()), Arc::new(db.server_settings.clone()))
         .await
         .expect("Failed to create service");
 

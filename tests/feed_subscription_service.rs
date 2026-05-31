@@ -20,7 +20,7 @@ mod common;
 async fn test_get_or_create_subscriber() {
     let db = common::setup_db().await;
     let feeds = Arc::new(Platforms::new());
-    let service = FeedSubscriptionService::new(db.clone(), feeds.clone());
+    let service = FeedSubscriptionService::new(Arc::new(db.feed.clone()), Arc::new(db.feed_item.clone()), Arc::new(db.subscriber.clone()), Arc::new(db.feed_subscription.clone()), Arc::new(db.server_settings.clone()), feeds.clone());
 
     let target = SubscriberTarget {
         subscriber_type: SubscriberType::Dm,
@@ -57,7 +57,7 @@ async fn test_get_or_create_feed() {
     feeds.add_platform(mock_feed.clone());
     let feeds = Arc::new(feeds);
 
-    let service = FeedSubscriptionService::new(db.clone(), feeds.clone());
+    let service = FeedSubscriptionService::new(Arc::new(db.feed.clone()), Arc::new(db.feed_item.clone()), Arc::new(db.subscriber.clone()), Arc::new(db.feed_subscription.clone()), Arc::new(db.server_settings.clone()), feeds.clone());
 
     let source_id = "manga-1";
     let url = format!("https://{}/title/{}", mock_domain, source_id);
@@ -127,7 +127,7 @@ async fn test_get_or_create_feed() {
 async fn test_server_settings_service() {
     let db = common::setup_db().await;
     let feeds = Arc::new(Platforms::new());
-    let service = FeedSubscriptionService::new(db.clone(), feeds.clone());
+    let service = FeedSubscriptionService::new(Arc::new(db.feed.clone()), Arc::new(db.feed_item.clone()), Arc::new(db.subscriber.clone()), Arc::new(db.feed_subscription.clone()), Arc::new(db.server_settings.clone()), feeds.clone());
 
     use pwr_bot::entity::FeedsSettings;
 

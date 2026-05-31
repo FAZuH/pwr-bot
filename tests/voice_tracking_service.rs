@@ -19,7 +19,7 @@ async fn test_voice_tracking_service_new() {
     let db = common::setup_db().await;
 
     // Test creating the service
-    let service = VoiceTrackingService::new(db.clone()).await;
+    let service = VoiceTrackingService::new(Arc::new(db.voice_sessions.clone()), Arc::new(db.server_settings.clone())).await;
     assert!(service.is_ok(), "Failed to create VoiceTrackingService");
 
     common::teardown_db(&db).await;
@@ -28,7 +28,7 @@ async fn test_voice_tracking_service_new() {
 #[tokio::test]
 async fn test_is_enabled_default() {
     let db = common::setup_db().await;
-    let service = VoiceTrackingService::new(db.clone())
+    let service = VoiceTrackingService::new(Arc::new(db.voice_sessions.clone()), Arc::new(db.server_settings.clone()))
         .await
         .expect("Failed to create service");
 
@@ -44,7 +44,7 @@ async fn test_is_enabled_default() {
 #[tokio::test]
 async fn test_is_enabled_when_disabled() {
     let db = common::setup_db().await;
-    let service = VoiceTrackingService::new(db.clone())
+    let service = VoiceTrackingService::new(Arc::new(db.voice_sessions.clone()), Arc::new(db.server_settings.clone()))
         .await
         .expect("Failed to create service");
 
@@ -73,7 +73,7 @@ async fn test_is_enabled_when_disabled() {
 #[tokio::test]
 async fn test_is_enabled_when_re_enabled() {
     let db = common::setup_db().await;
-    let service = VoiceTrackingService::new(db.clone())
+    let service = VoiceTrackingService::new(Arc::new(db.voice_sessions.clone()), Arc::new(db.server_settings.clone()))
         .await
         .expect("Failed to create service");
 
@@ -115,7 +115,7 @@ async fn test_is_enabled_when_re_enabled() {
 #[tokio::test]
 async fn test_insert_and_replace_voice_session() {
     let db = common::setup_db().await;
-    let service = VoiceTrackingService::new(db.clone())
+    let service = VoiceTrackingService::new(Arc::new(db.voice_sessions.clone()), Arc::new(db.server_settings.clone()))
         .await
         .expect("Failed to create service");
 
@@ -175,7 +175,7 @@ async fn test_insert_and_replace_voice_session() {
 #[tokio::test]
 async fn test_get_server_settings_default() {
     let db = common::setup_db().await;
-    let service = VoiceTrackingService::new(db.clone())
+    let service = VoiceTrackingService::new(Arc::new(db.voice_sessions.clone()), Arc::new(db.server_settings.clone()))
         .await
         .expect("Failed to create service");
 
@@ -195,7 +195,7 @@ async fn test_get_server_settings_default() {
 #[tokio::test]
 async fn test_update_and_get_server_settings() {
     let db = common::setup_db().await;
-    let service = VoiceTrackingService::new(db.clone())
+    let service = VoiceTrackingService::new(Arc::new(db.voice_sessions.clone()), Arc::new(db.server_settings.clone()))
         .await
         .expect("Failed to create service");
 
@@ -227,7 +227,7 @@ async fn test_update_and_get_server_settings() {
 #[tokio::test]
 async fn test_get_leaderboard() {
     let db = common::setup_db().await;
-    let service = VoiceTrackingService::new(db.clone())
+    let service = VoiceTrackingService::new(Arc::new(db.voice_sessions.clone()), Arc::new(db.server_settings.clone()))
         .await
         .expect("Failed to create service");
 
@@ -308,7 +308,7 @@ async fn test_get_leaderboard() {
 #[tokio::test]
 async fn test_get_leaderboard_with_limit() {
     let db = common::setup_db().await;
-    let service = VoiceTrackingService::new(db.clone())
+    let service = VoiceTrackingService::new(Arc::new(db.voice_sessions.clone()), Arc::new(db.server_settings.clone()))
         .await
         .expect("Failed to create service");
 
@@ -351,7 +351,7 @@ async fn test_get_leaderboard_with_limit() {
 #[tokio::test]
 async fn test_get_leaderboard_with_offset() {
     let db = common::setup_db().await;
-    let service = VoiceTrackingService::new(db.clone())
+    let service = VoiceTrackingService::new(Arc::new(db.voice_sessions.clone()), Arc::new(db.server_settings.clone()))
         .await
         .expect("Failed to create service");
 
@@ -398,7 +398,7 @@ async fn test_get_leaderboard_with_offset() {
 #[tokio::test]
 async fn test_get_leaderboard_empty() {
     let db = common::setup_db().await;
-    let service = VoiceTrackingService::new(db.clone())
+    let service = VoiceTrackingService::new(Arc::new(db.voice_sessions.clone()), Arc::new(db.server_settings.clone()))
         .await
         .expect("Failed to create service");
 
@@ -437,7 +437,7 @@ async fn test_disabled_guilds_cache_on_init() {
         .expect("Failed to insert settings");
 
     // Create service - should load disabled guilds from database
-    let service = VoiceTrackingService::new(db.clone())
+    let service = VoiceTrackingService::new(Arc::new(db.voice_sessions.clone()), Arc::new(db.server_settings.clone()))
         .await
         .expect("Failed to create service");
 
@@ -455,7 +455,7 @@ async fn test_disabled_guilds_cache_on_init() {
 #[tokio::test]
 async fn test_get_leaderboard_includes_active_sessions() {
     let db = common::setup_db().await;
-    let service = VoiceTrackingService::new(db.clone())
+    let service = VoiceTrackingService::new(Arc::new(db.voice_sessions.clone()), Arc::new(db.server_settings.clone()))
         .await
         .expect("Failed to create service");
 
@@ -537,7 +537,7 @@ async fn test_get_leaderboard_includes_active_sessions() {
 #[tokio::test]
 async fn test_get_leaderboard_active_and_completed_mixed() {
     let db = common::setup_db().await;
-    let service = VoiceTrackingService::new(db.clone())
+    let service = VoiceTrackingService::new(Arc::new(db.voice_sessions.clone()), Arc::new(db.server_settings.clone()))
         .await
         .expect("Failed to create service");
 

@@ -5,7 +5,6 @@ use std::sync::Arc;
 use crate::entity::Json;
 use crate::entity::ServerSettings;
 use crate::entity::ServerSettingsEntity;
-use crate::repo::Repository;
 use crate::repo::traits::*;
 use crate::service::error::ServiceError;
 use crate::service::traits::SettingsProvider;
@@ -28,13 +27,13 @@ impl SettingsProvider for SettingsService {
 /// Service for managing server settings.
 /// Provides a single source of truth for all server configuration.
 pub struct SettingsService {
-    db: Arc<Repository>,
+    server_settings: Arc<dyn ServerSettingsRepository + Send + Sync>,
 }
 
 impl SettingsService {
     /// Creates a new settings service.
-    pub fn new(db: Arc<Repository>) -> Self {
-        Self { db }
+    pub fn new(server_settings: Arc<dyn ServerSettingsRepository + Send + Sync>) -> Self {
+        Self { server_settings }
     }
 
     /// Retrieves server settings for a guild.
@@ -44,7 +43,7 @@ impl SettingsService {
     /// * DB calls: 1
     pub async fn get_server_settings(&self, guild_id: u64) -> Result<ServerSettings, ServiceError> {
         let result: Option<ServerSettingsEntity> =
-            self.db.server_settings.select(&guild_id).await?;
+            self.server_settings.select(&guild_id).await?;
         match result {
             Some(model) => Ok(model.settings.0),
             None => Ok(ServerSettings::default()),
@@ -64,7 +63,7 @@ impl SettingsService {
             guild_id: guild_id.into(),
             settings: Json(settings),
         };
-        self.db.server_settings.replace(&model).await?;
+        self.server_settings.replace(&model).await?;
         Ok(())
     }
 }

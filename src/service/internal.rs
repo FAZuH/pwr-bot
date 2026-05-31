@@ -8,7 +8,6 @@ use crate::entity::FeedEntity;
 use crate::entity::FeedItemEntity;
 use crate::entity::FeedSubscriptionEntity;
 use crate::entity::SubscriberEntity;
-use crate::repo::Repository;
 use crate::repo::error::DatabaseError;
 use crate::repo::traits::*;
 use crate::service::traits::InternalOps;
@@ -30,18 +29,34 @@ impl InternalOps for InternalService {
 
 /// Internal service for metadata and maintenance operations.
 pub struct InternalService {
-    db: Arc<Repository>,
+    feed: Arc<dyn FeedRepository + Send + Sync>,
+    feed_item: Arc<dyn FeedItemRepository + Send + Sync>,
+    subscriber: Arc<dyn SubscriberRepository + Send + Sync>,
+    feed_subscription: Arc<dyn FeedSubscriptionRepository + Send + Sync>,
+    bot_meta: Arc<dyn BotMetaRepository + Send + Sync>,
 }
 
 impl InternalService {
     /// Creates a new internal service.
-    pub fn new(db: Arc<Repository>) -> Self {
-        Self { db }
+    pub fn new(
+        feed: Arc<dyn FeedRepository + Send + Sync>,
+        feed_item: Arc<dyn FeedItemRepository + Send + Sync>,
+        subscriber: Arc<dyn SubscriberRepository + Send + Sync>,
+        feed_subscription: Arc<dyn FeedSubscriptionRepository + Send + Sync>,
+        bot_meta: Arc<dyn BotMetaRepository + Send + Sync>,
+    ) -> Self {
+        Self {
+            feed,
+            feed_item,
+            subscriber,
+            feed_subscription,
+            bot_meta,
+        }
     }
 
     /// Get a metadata value by key.
     pub async fn get_meta(&self, key: BotMetaKey) -> Result<Option<String>, DatabaseError> {
-        let result: Option<BotMetaEntity> = self.db.bot_meta.select(&key.into()).await?;
+        let result: Option<BotMetaEntity> = self.bot_meta.select(&key.into()).await?;
         Ok(result.map(|m| m.value))
     }
 
@@ -55,16 +70,16 @@ impl InternalService {
             key: key.into(),
             value: value.into(),
         };
-        self.db.bot_meta.replace(&model).await?;
+        self.bot_meta.replace(&model).await?;
         Ok(())
     }
 
     /// Dumps all database tables for inspection.
     pub async fn dump_database(&self) -> anyhow::Result<DatabaseDump> {
-        let feeds = self.db.feed.select_all().await?;
-        let feed_items = self.db.feed_item.select_all().await?;
-        let subscribers = self.db.subscriber.select_all().await?;
-        let subscriptions = self.db.feed_subscription.select_all().await?;
+        let feeds = self.feed.select_all().await?;
+        let feed_items = self.feed_item.select_all().await?;
+        let subscribers = self.subscriber.select_all().await?;
+        let subscriptions = self.feed_subscription.select_all().await?;
 
         Ok(DatabaseDump {
             feeds,

@@ -235,3 +235,17 @@ pub trait BotMetaRepository: CrudTable<BotMetaEntity, String> + Send + Sync {
     /// Checks if the metadata table exists.
     async fn table_exists(&self) -> bool;
 }
+
+/// Factory trait providing access to individual repository handles.
+///
+/// Each method clones the underlying pool-backed handle and returns
+/// a boxed trait object. Call at service construction time, not per-operation.
+pub trait Repos: Send + Sync {
+    fn feed(&self) -> Box<dyn FeedRepository + Send + Sync>;
+    fn feed_item(&self) -> Box<dyn FeedItemRepository + Send + Sync>;
+    fn subscriber(&self) -> Box<dyn SubscriberRepository + Send + Sync>;
+    fn feed_subscription(&self) -> Box<dyn FeedSubscriptionRepository + Send + Sync>;
+    fn server_settings(&self) -> Box<dyn ServerSettingsRepository + Send + Sync>;
+    fn voice_sessions(&self) -> Box<dyn VoiceSessionsRepository + Send + Sync>;
+    fn bot_meta(&self) -> Box<dyn BotMetaRepository + Send + Sync>;
+}

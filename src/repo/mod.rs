@@ -1,8 +1,8 @@
 //! Data repository module.
 
 pub mod error;
+pub mod postgres;
 pub mod schema;
-pub mod table;
 pub mod traits;
 
 use diesel::Connection;
@@ -16,7 +16,7 @@ use diesel_migrations::embed_migrations;
 use log::info;
 use tokio::task;
 
-use crate::repo::table::*;
+use crate::repo::postgres::*;
 use crate::repo::traits::*;
 
 pub type DbPool = Pool<AsyncPgConnection>;
@@ -24,22 +24,25 @@ pub type DbConn = Object<AsyncPgConnection>;
 
 const MIGRATIONS: EmbeddedMigrations = embed_migrations!("migrations");
 
-/// Main database struct containing all table handlers.
-pub struct Repository {
-    pub feed: FeedTable,
-    pub feed_item: FeedItemTable,
-    pub subscriber: SubscriberTable,
-    pub feed_subscription: FeedSubscriptionTable,
-    pub server_settings: ServerSettingsTable,
-    pub voice_sessions: VoiceSessionsTable,
-    pub bot_meta: BotMetaTable,
+/// PostgreSQL factory providing access to individual repository handles.
+///
+/// Stores each concrete `Pg*Repo` as a `Box<dyn>`-compatible field. The `Repos`
+/// factory trait methods clone the inner handle and return a `Box<dyn Repo>`.
+/// Call factory methods at service construction time, not per-operation.
+pub struct PgRepos {
+    pub feed: PgFeedRepo,
+    pub feed_item: PgFeedItemRepo,
+    pub subscriber: PgSubscriberRepo,
+    pub feed_subscription: PgFeedSubscriptionRepo,
+    pub server_settings: PgServerSettingsRepo,
+    pub voice_sessions: PgVoiceSessionsRepo,
+    pub bot_meta: PgBotMetaRepo,
 
     pool: DbPool,
     db_url: String,
 }
 
-impl Repository {
-    /// Creates a new database connection and initializes table handlers.
+impl PgRepos {
     pub async fn new(db_url: impl Into<String>) -> anyhow::Result<Self> {
         let db_url = db_url.into();
         info!("connecting to db");
@@ -48,24 +51,22 @@ impl Repository {
         info!("connected to db");
 
         Ok(Self {
-            feed: FeedTable::new(pool.clone()),
-            feed_item: FeedItemTable::new(pool.clone()),
-            subscriber: SubscriberTable::new(pool.clone()),
-            feed_subscription: FeedSubscriptionTable::new(pool.clone()),
-            server_settings: ServerSettingsTable::new(pool.clone()),
-            voice_sessions: VoiceSessionsTable::new(pool.clone()),
-            bot_meta: BotMetaTable::new(pool.clone()),
+            feed: PgFeedRepo::new(pool.clone()),
+            feed_item: PgFeedItemRepo::new(pool.clone()),
+            subscriber: PgSubscriberRepo::new(pool.clone()),
+            feed_subscription: PgFeedSubscriptionRepo::new(pool.clone()),
+            server_settings: PgServerSettingsRepo::new(pool.clone()),
+            voice_sessions: PgVoiceSessionsRepo::new(pool.clone()),
+            bot_meta: PgBotMetaRepo::new(pool.clone()),
             pool,
             db_url,
         })
     }
 
-    /// Access the underlying connection pool.
     pub fn pool(&self) -> &DbPool {
         &self.pool
     }
 
-    /// Runs database migrations from the migrations directory.
     pub async fn run_migrations(&self) -> anyhow::Result<()> {
         let db_url = self.db_url.clone();
         task::spawn_blocking(move || {
@@ -78,7 +79,6 @@ impl Repository {
         Ok(())
     }
 
-    /// Drops all tables. Use with caution!
     pub async fn drop_all_tables(&self) -> anyhow::Result<()> {
         self.feed.drop_table().await?;
         self.feed_item.drop_table().await?;
@@ -90,7 +90,6 @@ impl Repository {
         Ok(())
     }
 
-    /// Deletes all data from all tables and resets sequences. Use with caution!
     pub async fn delete_all_tables(&self) -> anyhow::Result<()> {
         self.feed.delete_all().await?;
         self.feed_item.delete_all().await?;
@@ -100,5 +99,35 @@ impl Repository {
         self.voice_sessions.delete_all().await?;
         self.bot_meta.delete_all().await?;
         Ok(())
+    }
+}
+
+impl Repos for PgRepos {
+    fn feed(&self) -> Box<dyn FeedRepository + Send + Sync> {
+        Box::new(self.feed.clone())
+    }
+
+    fn feed_item(&self) -> Box<dyn FeedItemRepository + Send + Sync> {
+        Box::new(self.feed_item.clone())
+    }
+
+    fn subscriber(&self) -> Box<dyn SubscriberRepository + Send + Sync> {
+        Box::new(self.subscriber.clone())
+    }
+
+    fn feed_subscription(&self) -> Box<dyn FeedSubscriptionRepository + Send + Sync> {
+        Box::new(self.feed_subscription.clone())
+    }
+
+    fn server_settings(&self) -> Box<dyn ServerSettingsRepository + Send + Sync> {
+        Box::new(self.server_settings.clone())
+    }
+
+    fn voice_sessions(&self) -> Box<dyn VoiceSessionsRepository + Send + Sync> {
+        Box::new(self.voice_sessions.clone())
+    }
+
+    fn bot_meta(&self) -> Box<dyn BotMetaRepository + Send + Sync> {
+        Box::new(self.bot_meta.clone())
     }
 }
