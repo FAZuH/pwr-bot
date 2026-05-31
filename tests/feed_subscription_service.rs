@@ -16,11 +16,19 @@ use pwr_bot::service::feed_subscription::SubscriberTarget;
 
 mod common;
 
+#[serial_test::serial]
 #[tokio::test]
 async fn test_get_or_create_subscriber() {
     let db = common::setup_db().await;
     let feeds = Arc::new(Platforms::new());
-    let service = FeedSubscriptionService::new(db.clone(), feeds.clone());
+    let service = FeedSubscriptionService::new(
+        Arc::new(db.feed.clone()),
+        Arc::new(db.feed_item.clone()),
+        Arc::new(db.subscriber.clone()),
+        Arc::new(db.feed_subscription.clone()),
+        Arc::new(db.server_settings.clone()),
+        feeds.clone(),
+    );
 
     let target = SubscriberTarget {
         subscriber_type: SubscriberType::Dm,
@@ -46,6 +54,7 @@ async fn test_get_or_create_subscriber() {
     common::teardown_db(&db).await;
 }
 
+#[serial_test::serial]
 #[tokio::test]
 async fn test_get_or_create_feed() {
     let db = common::setup_db().await;
@@ -57,10 +66,17 @@ async fn test_get_or_create_feed() {
     feeds.add_platform(mock_feed.clone());
     let feeds = Arc::new(feeds);
 
-    let service = FeedSubscriptionService::new(db.clone(), feeds.clone());
+    let service = FeedSubscriptionService::new(
+        Arc::new(db.feed.clone()),
+        Arc::new(db.feed_item.clone()),
+        Arc::new(db.subscriber.clone()),
+        Arc::new(db.feed_subscription.clone()),
+        Arc::new(db.server_settings.clone()),
+        feeds.clone(),
+    );
 
     let source_id = "manga-1";
-    let url = format!("https://{}/title/{}", mock_domain, source_id);
+    let url = format!("https://{mock_domain}/title/{source_id}");
 
     mock_feed.set_info(FeedSource {
         id: source_id.to_string(),
@@ -96,7 +112,7 @@ async fn test_get_or_create_feed() {
 
     // 3. Get feed with empty latest
     let source_id = "manga-2";
-    let url = format!("https://{}/title/{}", mock_domain, source_id);
+    let url = format!("https://{mock_domain}/title/{source_id}");
     mock_feed.set_info(FeedSource {
         id: source_id.to_string(),
         items_id: "abc".to_string(),
@@ -123,11 +139,19 @@ async fn test_get_or_create_feed() {
     common::teardown_db(&db).await;
 }
 
+#[serial_test::serial]
 #[tokio::test]
 async fn test_server_settings_service() {
     let db = common::setup_db().await;
     let feeds = Arc::new(Platforms::new());
-    let service = FeedSubscriptionService::new(db.clone(), feeds.clone());
+    let service = FeedSubscriptionService::new(
+        Arc::new(db.feed.clone()),
+        Arc::new(db.feed_item.clone()),
+        Arc::new(db.subscriber.clone()),
+        Arc::new(db.feed_subscription.clone()),
+        Arc::new(db.server_settings.clone()),
+        feeds.clone(),
+    );
 
     use pwr_bot::entity::FeedsSettings;
 
@@ -174,13 +198,18 @@ async fn test_server_settings_service() {
     common::teardown_db(&db).await;
 }
 
+#[serial_test::serial]
 #[tokio::test]
 async fn test_list_paginated_subscriptions_optimization() {
     let db = common::setup_db().await;
     let feeds_platform = Arc::new(Platforms::new());
 
     let service = Arc::new(FeedSubscriptionService::new(
-        db.clone(),
+        Arc::new(db.feed.clone()),
+        Arc::new(db.feed_item.clone()),
+        Arc::new(db.subscriber.clone()),
+        Arc::new(db.feed_subscription.clone()),
+        Arc::new(db.server_settings.clone()),
         feeds_platform.clone(),
     ));
 
@@ -198,9 +227,9 @@ async fn test_list_paginated_subscriptions_optimization() {
         let feed = FeedEntity {
             name: name.to_string(),
             platform_id: "mock".to_string(),
-            source_id: format!("src_{}", i),
-            items_id: format!("items_{}", i),
-            source_url: format!("http://mock/{}/{}", i, name),
+            source_id: format!("src_{i}"),
+            items_id: format!("items_{i}"),
+            source_url: format!("http://mock/{i}/{name}"),
             ..Default::default()
         };
         let feed_id = db.feed.insert(&feed).await.unwrap();
@@ -216,7 +245,7 @@ async fn test_list_paginated_subscriptions_optimization() {
         if i % 2 == 0 {
             let item = FeedItemEntity {
                 feed_id,
-                description: format!("Chapter {}", i),
+                description: format!("Chapter {i}"),
                 published: Utc::now(),
                 ..Default::default()
             };

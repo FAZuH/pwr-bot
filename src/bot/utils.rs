@@ -15,24 +15,24 @@ pub const MAX_URLS_PER_REQUEST: usize = 10;
 /// - 90000 -> "1d 1h"
 pub fn format_duration(seconds: i64) -> String {
     if seconds < 60 {
-        format!("{}s", seconds)
+        format!("{seconds}s")
     } else if seconds < 3600 {
         format!("{}m", seconds / 60)
     } else if seconds < 86400 {
         let hours = seconds / 3600;
         let mins = (seconds % 3600) / 60;
         if mins > 0 {
-            format!("{}h {}m", hours, mins)
+            format!("{hours}h {mins}m")
         } else {
-            format!("{}h", hours)
+            format!("{hours}h")
         }
     } else {
         let days = seconds / 86400;
         let hours = (seconds % 86400) / 3600;
         if hours > 0 {
-            format!("{}d {}h", days, hours)
+            format!("{days}d {hours}h")
         } else {
-            format!("{}d", days)
+            format!("{days}d")
         }
     }
 }
@@ -50,8 +50,7 @@ pub fn validate_url_count(urls: &[&str]) -> Result<(), BotError> {
         return Err(BotError::InvalidCommandArgument {
             parameter: "links".to_string(),
             reason: format!(
-                "Too many links provided. Please provide no more than {} links at a time.",
-                MAX_URLS_PER_REQUEST
+                "Too many links provided. Please provide no more than {MAX_URLS_PER_REQUEST} links at a time."
             ),
         });
     }

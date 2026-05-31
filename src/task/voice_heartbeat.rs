@@ -37,7 +37,7 @@ impl VoiceHeartbeatManager {
             Some(ts_str) => {
                 let timestamp = DateTime::parse_from_rfc3339(&ts_str)
                     .map(|dt| dt.with_timezone(&Utc))
-                    .map_err(|e| anyhow::anyhow!("Invalid heartbeat timestamp: {}", e))?;
+                    .map_err(|e| anyhow::anyhow!("Invalid heartbeat timestamp: {e}"))?;
                 Ok(Some(timestamp))
             }
             None => Ok(None),
@@ -55,10 +55,7 @@ impl VoiceHeartbeatManager {
             }
         });
 
-        info!(
-            "Voice session heartbeat started (interval: {}s)",
-            HEARTBEAT_INTERVAL_SECS
-        );
+        info!("Voice session heartbeat started (interval: {HEARTBEAT_INTERVAL_SECS}s)");
     }
 
     /// Handles recovery from a crash by closing orphaned sessions.
@@ -71,10 +68,7 @@ impl VoiceHeartbeatManager {
             }
         };
 
-        info!(
-            "Recovering from potential crash. Last heartbeat was at {}",
-            last_heartbeat
-        );
+        info!("Recovering from potential crash. Last heartbeat was at {last_heartbeat}");
 
         // Find all active (unterminated) sessions
         let active_sessions = self.service.find_active_sessions().await?;
@@ -102,10 +96,7 @@ impl VoiceHeartbeatManager {
             );
         }
 
-        info!(
-            "Crash recovery complete: closed {} orphaned sessions",
-            closed
-        );
+        info!("Crash recovery complete: closed {closed} orphaned sessions");
         Ok(closed)
     }
 
@@ -118,9 +109,9 @@ impl VoiceHeartbeatManager {
             .set_meta(BotMetaKey::VoiceHeartbeat, now.to_rfc3339())
             .await
         {
-            error!("Failed to write heartbeat to database: {}", e);
+            error!("Failed to write heartbeat to database: {e}");
         } else {
-            debug!("Heartbeat written to database: {}", now);
+            debug!("Heartbeat written to database: {now}");
         }
     }
 }

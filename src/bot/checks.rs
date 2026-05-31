@@ -86,7 +86,7 @@ fn check_permissions_inner(
         let msg = if silent {
             "You do not have the required roles to perform this action.".to_string()
         } else {
-            format!("You need the <@&{}> role to perform this action.", id)
+            format!("You need the <@&{id}> role to perform this action.")
         };
         return Err(BotError::PermissionDenied(msg));
     }

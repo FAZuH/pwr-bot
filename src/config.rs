@@ -55,7 +55,7 @@ impl Config {
             .ok()
             .map(|v| {
                 v.parse::<u64>().map_err(|_| AppError::ConfigurationError {
-                    msg: format!("DISCORD_APPLICATION_ID '{}' is not a valid number", v),
+                    msg: format!("DISCORD_APPLICATION_ID '{v}' is not a valid number"),
                 })
             })
             .transpose()?;

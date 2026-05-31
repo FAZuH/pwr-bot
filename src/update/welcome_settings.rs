@@ -252,7 +252,7 @@ mod tests {
     #[test]
     fn test_add_message_cap_at_25() {
         let mut model = empty_model();
-        model.settings.messages = Some((0..25).map(|i| format!("msg{}", i)).collect());
+        model.settings.messages = Some((0..25).map(|i| format!("msg{i}")).collect());
 
         let cmd = WelcomeSettingsUpdate::update(
             WelcomeSettingsMsg::AddMessage("overflow".to_string()),

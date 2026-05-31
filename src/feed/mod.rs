@@ -146,31 +146,31 @@ pub trait Platform: Send + Sync {
 
         // Try to extract common API error fields
         if let Some(title) = error.get("title").and_then(|v| v.as_str()) {
-            parts.push(format!("title: {}", title));
+            parts.push(format!("title: {title}"));
         }
 
         if let Some(detail) = error.get("detail").and_then(|v| v.as_str()) {
-            parts.push(format!("detail: {}", detail));
+            parts.push(format!("detail: {detail}"));
         }
 
         if let Some(status) = error.get("status").and_then(|v| v.as_str()) {
-            parts.push(format!("status: {}", status));
+            parts.push(format!("status: {status}"));
         }
 
         if let Some(code) = error.get("code").and_then(|v| v.as_str()) {
-            parts.push(format!("code: {}", code));
+            parts.push(format!("code: {code}"));
         }
 
         // Fallback to message if available
         if parts.is_empty()
             && let Some(message) = error.get("message").and_then(|v| v.as_str())
         {
-            parts.push(format!("message: {}", message));
+            parts.push(format!("message: {message}"));
         }
 
         // If we still have nothing useful, dump the whole error object
         if parts.is_empty() {
-            format!("raw_error: {}", error)
+            format!("raw_error: {error}")
         } else {
             parts.join(", ")
         }

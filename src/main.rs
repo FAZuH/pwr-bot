@@ -16,7 +16,8 @@ use pwr_bot::event::VoiceStateEvent;
 use pwr_bot::event::event_bus::EventBus;
 use pwr_bot::feed::Platforms;
 use pwr_bot::logging::setup_logging;
-use pwr_bot::repo::Repository;
+use pwr_bot::repo::PgRepos;
+use pwr_bot::repo::traits::Repos;
 use pwr_bot::service::Services;
 use pwr_bot::subscriber::discord_dm::DiscordDmSubscriber;
 use pwr_bot::subscriber::discord_guild::DiscordGuildSubscriber;
@@ -32,9 +33,9 @@ async fn main() -> Result<()> {
     let config = load_config().await?;
     let event_bus = Arc::new(EventBus::new());
 
-    let db = setup_database(&config, init_start).await?;
+    let repos = setup_database(&config, init_start).await?;
     let platforms = Arc::new(Platforms::new());
-    let services = setup_services(db.clone(), platforms.clone()).await?;
+    let services = setup_services(repos.clone(), platforms.clone()).await?;
 
     let voice_heartbeat = setup_voice_tracking(&services, init_start).await?;
 
@@ -79,23 +80,29 @@ async fn load_config() -> Result<Arc<Config>> {
     Ok(config)
 }
 
-async fn setup_database(config: &Config, init_start: Instant) -> Result<Arc<Repository>> {
+async fn setup_database(
+    config: &Config,
+    init_start: Instant,
+) -> Result<Arc<dyn Repos + Send + Sync>> {
     debug!("Setting up Database...");
-    let db = Arc::new(Repository::new(&config.db_url).await?);
+    let repos = PgRepos::new(&config.db_url).await?;
 
     info!("Running database migrations...");
-    db.run_migrations().await?;
+    repos.run_migrations().await?;
     info!(
         "Database setup complete ({:.2}s).",
         init_start.elapsed().as_secs_f64()
     );
 
-    Ok(db)
+    Ok(Arc::new(repos))
 }
 
-async fn setup_services(db: Arc<Repository>, platforms: Arc<Platforms>) -> Result<Arc<Services>> {
+async fn setup_services(
+    repos: Arc<dyn Repos + Send + Sync>,
+    platforms: Arc<Platforms>,
+) -> Result<Arc<Services>> {
     debug!("Setting up Services...");
-    Ok(Arc::new(Services::new(db, platforms).await?))
+    Ok(Arc::new(Services::new(repos, platforms).await?))
 }
 
 async fn setup_voice_tracking(
@@ -110,7 +117,7 @@ async fn setup_voice_tracking(
     info!("Performing voice tracking crash recovery...");
     let recovered = voice_heartbeat.recover_from_crash().await?;
     if recovered > 0 {
-        info!("Recovered {} orphaned voice sessions", recovered);
+        info!("Recovered {recovered} orphaned voice sessions");
     }
 
     voice_heartbeat.clone().start().await;

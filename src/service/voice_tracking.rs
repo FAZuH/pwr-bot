@@ -15,7 +15,6 @@ use crate::entity::VoiceDailyActivity;
 use crate::entity::VoiceLeaderboardEntry;
 use crate::entity::VoiceLeaderboardOpt;
 use crate::entity::VoiceSessionsEntity;
-use crate::repo::Repository;
 use crate::repo::traits::*;
 use crate::service::settings::SettingsService;
 use crate::service::traits::VoiceTracker;
@@ -149,21 +148,26 @@ impl VoiceTracker for VoiceTrackingService {
 
 /// Service for tracking voice channel activity.
 pub struct VoiceTrackingService {
-    db: Arc<Repository>,
+    voice_sessions: Arc<dyn VoiceSessionsRepository + Send + Sync>,
+    server_settings: Arc<dyn ServerSettingsRepository + Send + Sync>,
     settings: Arc<SettingsService>,
     disabled_guilds: Arc<RwLock<HashSet<u64>>>,
 }
 
 impl VoiceTrackingService {
     /// Creates a new voice tracking service and loads disabled guilds.
-    pub async fn new(db: Arc<Repository>) -> anyhow::Result<Self> {
-        let settings = Arc::new(SettingsService::new(db.clone()));
+    pub async fn new(
+        voice_sessions: Arc<dyn VoiceSessionsRepository + Send + Sync>,
+        server_settings: Arc<dyn ServerSettingsRepository + Send + Sync>,
+    ) -> anyhow::Result<Self> {
+        let settings = Arc::new(SettingsService::new(server_settings.clone()));
         let _self = Self {
-            db,
-            settings: settings.clone(),
+            voice_sessions,
+            server_settings,
+            settings: Arc::clone(&settings),
             disabled_guilds: Arc::new(RwLock::new(HashSet::new())),
         };
-        let all_settings: Vec<ServerSettingsEntity> = _self.db.server_settings.select_all().await?;
+        let all_settings: Vec<ServerSettingsEntity> = _self.server_settings.select_all().await?;
         let mut disabled = _self.disabled_guilds.write().await;
 
         for model in all_settings {
@@ -182,11 +186,11 @@ impl VoiceTrackingService {
     }
 
     pub async fn insert(&self, model: &VoiceSessionsEntity) -> anyhow::Result<()> {
-        self.db.voice_sessions.insert(model).await?;
+        self.voice_sessions.insert(model).await?;
         Ok(())
     }
     pub async fn replace(&self, model: &VoiceSessionsEntity) -> anyhow::Result<()> {
-        self.db.voice_sessions.replace(model).await?;
+        self.voice_sessions.replace(model).await?;
         Ok(())
     }
 
@@ -219,7 +223,7 @@ impl VoiceTrackingService {
         &self,
         options: &VoiceLeaderboardOpt,
     ) -> anyhow::Result<Vec<VoiceLeaderboardEntry>> {
-        Ok(self.db.voice_sessions.get_leaderboard_opt(options).await?)
+        Ok(self.voice_sessions.get_leaderboard_opt(options).await?)
     }
 
     pub async fn get_partner_leaderboard(
@@ -228,7 +232,6 @@ impl VoiceTrackingService {
         target_user_id: u64,
     ) -> anyhow::Result<Vec<VoiceLeaderboardEntry>> {
         Ok(self
-            .db
             .voice_sessions
             .get_partner_leaderboard(options, target_user_id)
             .await?)
@@ -239,11 +242,7 @@ impl VoiceTrackingService {
         guild_id: u64,
         limit: u32,
     ) -> anyhow::Result<Vec<VoiceLeaderboardEntry>> {
-        Ok(self
-            .db
-            .voice_sessions
-            .get_leaderboard(guild_id, limit)
-            .await?)
+        Ok(self.voice_sessions.get_leaderboard(guild_id, limit).await?)
     }
 
     pub async fn get_leaderboard_with_offset(
@@ -253,7 +252,6 @@ impl VoiceTrackingService {
         limit: u32,
     ) -> anyhow::Result<Vec<VoiceLeaderboardEntry>> {
         Ok(self
-            .db
             .voice_sessions
             .get_leaderboard_with_offset(guild_id, offset, limit)
             .await?)
@@ -276,8 +274,7 @@ impl VoiceTrackingService {
         join_time: &DateTime<Utc>,
         leave_time: &DateTime<Utc>,
     ) -> anyhow::Result<()> {
-        self.db
-            .voice_sessions
+        self.voice_sessions
             .update_leave_time(user_id, channel_id, join_time, leave_time)
             .await?;
         Ok(())
@@ -291,8 +288,7 @@ impl VoiceTrackingService {
         join_time: &DateTime<Utc>,
         leave_time: &DateTime<Utc>,
     ) -> anyhow::Result<()> {
-        self.db
-            .voice_sessions
+        self.voice_sessions
             .close_session(user_id, channel_id, join_time, leave_time)
             .await?;
         Ok(())
@@ -300,7 +296,7 @@ impl VoiceTrackingService {
 
     /// Find all active sessions from database
     pub async fn find_active_sessions(&self) -> anyhow::Result<Vec<VoiceSessionsEntity>> {
-        Ok(self.db.voice_sessions.find_active_sessions().await?)
+        Ok(self.voice_sessions.find_active_sessions().await?)
     }
 
     /// Find all active sessions for a specific user in a guild.
@@ -310,7 +306,6 @@ impl VoiceTrackingService {
         guild_id: u64,
     ) -> anyhow::Result<Vec<VoiceSessionsEntity>> {
         Ok(self
-            .db
             .voice_sessions
             .find_active_sessions_by_user(user_id, guild_id)
             .await?)
@@ -324,7 +319,6 @@ impl VoiceTrackingService {
         until: &DateTime<Utc>,
     ) -> anyhow::Result<Vec<VoiceSessionsEntity>> {
         Ok(self
-            .db
             .voice_sessions
             .get_sessions_in_range(guild_id, user_id, since, until)
             .await?)
@@ -339,7 +333,6 @@ impl VoiceTrackingService {
         until: &DateTime<Utc>,
     ) -> anyhow::Result<Vec<VoiceDailyActivity>> {
         Ok(self
-            .db
             .voice_sessions
             .get_user_daily_activity(user_id, guild_id, since, until)
             .await?)
@@ -355,17 +348,14 @@ impl VoiceTrackingService {
     ) -> anyhow::Result<Vec<GuildDailyStats>> {
         match stat_type {
             GuildStatType::AverageTime => Ok(self
-                .db
                 .voice_sessions
                 .get_guild_daily_average_time(guild_id, since, until)
                 .await?),
             GuildStatType::ActiveUserCount => Ok(self
-                .db
                 .voice_sessions
                 .get_guild_daily_user_count(guild_id, since, until)
                 .await?),
             GuildStatType::TotalTime => Ok(self
-                .db
                 .voice_sessions
                 .get_guild_daily_total_time(guild_id, since, until)
                 .await?),

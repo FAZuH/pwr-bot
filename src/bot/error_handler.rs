@@ -39,7 +39,7 @@ impl ErrorHandler {
             }
             error => {
                 if let Err(e) = poise::builtins::on_error(error).await {
-                    error!("Error while handling error: {}", e);
+                    error!("Error while handling error: {e}");
                 }
             }
         }
@@ -64,8 +64,7 @@ impl ErrorHandler {
             (
                 "❌ Internal Error",
                 format!(
-                    "An unexpected error occurred. Please contact the bot developer.\n-# Reference ID: {}",
-                    ref_id
+                    "An unexpected error occurred. Please contact the bot developer.\n-# Reference ID: {ref_id}"
                 ),
             )
         }

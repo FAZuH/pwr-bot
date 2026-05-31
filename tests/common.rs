@@ -10,14 +10,14 @@ use pwr_bot::feed::FeedSource;
 use pwr_bot::feed::Platform;
 use pwr_bot::feed::PlatformInfo;
 use pwr_bot::feed::error::FeedError;
-use pwr_bot::repo::Repository;
+use pwr_bot::repo::PgRepos;
 
 /// Sets up a test database connection to PostgreSQL.
-pub async fn setup_db() -> Arc<Repository> {
+pub async fn setup_db() -> Arc<PgRepos> {
     let db_url = std::env::var("DB_URL")
         .unwrap_or("postgres://pwr_bot:pwr_bot@localhost:5432/pwr_bot".to_string());
 
-    let db = Repository::new(&db_url)
+    let db = PgRepos::new(&db_url)
         .await
         .expect("Failed to connect to database");
 
@@ -31,7 +31,7 @@ pub async fn setup_db() -> Arc<Repository> {
 }
 
 /// Cleans up the test database by deleting all data.
-pub async fn teardown_db(db: &Repository) {
+pub async fn teardown_db(db: &PgRepos) {
     db.delete_all_tables()
         .await
         .expect("Failed to clean database");
@@ -62,9 +62,9 @@ impl MockFeed {
         let info = PlatformInfo {
             name: "MockFeed".to_string(),
             feed_item_name: "Chapter".to_string(),
-            api_hostname: format!("api.{}", domain),
+            api_hostname: format!("api.{domain}"),
             api_domain: domain.to_string(),
-            api_url: format!("https://api.{}", domain),
+            api_url: format!("https://api.{domain}"),
             copyright_notice: "Mock".to_string(),
             logo_url: "".to_string(),
             tags: "series".to_string(),

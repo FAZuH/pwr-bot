@@ -330,7 +330,7 @@ impl ViewRender for VoiceLeaderboardHandler<'_> {
                     .as_ref()
                     .map(|u| u.name.to_string())
                     .unwrap_or_else(|| "Your".to_string());
-                format!("### {} Voice Partners", display_name)
+                format!("### {display_name} Voice Partners")
             } else {
                 "### Voice Leaderboard".to_string()
             }),
@@ -345,8 +345,7 @@ impl ViewRender for VoiceLeaderboardHandler<'_> {
 
             container.push(CreateContainerComponent::TextDisplay(
                 CreateTextDisplay::new(format!(
-                    "\nYou are ranked **#{}** on this server with **{}** of voice activity.",
-                    rank, duration_text
+                    "\nYou are ranked **#{rank}** on this server with **{duration_text}** of voice activity."
                 )),
             ));
         } else if !self.model.target_is_author() {
@@ -604,11 +603,10 @@ mod tests {
 
         for range in ranges {
             let (since, until) = range.to_range();
-            assert!(since <= until, "Time range {:?} has since > until", range);
+            assert!(since <= until, "Time range {range:?} has since > until");
             assert!(
                 until >= now || range == VoiceLeaderboardTimeRange::AllTime,
-                "Until should be around now for {:?}",
-                range
+                "Until should be around now for {range:?}"
             );
 
             // Verify round-trip through ChoiceParameter name
@@ -616,9 +614,7 @@ mod tests {
             let recovered = VoiceLeaderboardTimeRange::from_name(name);
             assert!(
                 recovered.is_some(),
-                "Should be able to recover {:?} from name '{}'",
-                range,
-                name
+                "Should be able to recover {range:?} from name '{name}'"
             );
             assert_eq!(
                 recovered.unwrap() as i32,

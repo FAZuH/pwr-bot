@@ -1,5 +1,7 @@
 //! Integration tests for voice tracking service.
 
+use std::sync::Arc;
+
 use chrono::Duration;
 use chrono::SubsecRound;
 use chrono::Utc;
@@ -14,23 +16,32 @@ use pwr_bot::service::voice_tracking::VoiceTrackingService;
 
 mod common;
 
+#[serial_test::serial]
 #[tokio::test]
 async fn test_voice_tracking_service_new() {
     let db = common::setup_db().await;
 
     // Test creating the service
-    let service = VoiceTrackingService::new(db.clone()).await;
+    let service = VoiceTrackingService::new(
+        Arc::new(db.voice_sessions.clone()),
+        Arc::new(db.server_settings.clone()),
+    )
+    .await;
     assert!(service.is_ok(), "Failed to create VoiceTrackingService");
 
     common::teardown_db(&db).await;
 }
 
+#[serial_test::serial]
 #[tokio::test]
 async fn test_is_enabled_default() {
     let db = common::setup_db().await;
-    let service = VoiceTrackingService::new(db.clone())
-        .await
-        .expect("Failed to create service");
+    let service = VoiceTrackingService::new(
+        Arc::new(db.voice_sessions.clone()),
+        Arc::new(db.server_settings.clone()),
+    )
+    .await
+    .expect("Failed to create service");
 
     let guild_id: u64 = 123456789;
 
@@ -41,12 +52,16 @@ async fn test_is_enabled_default() {
     common::teardown_db(&db).await;
 }
 
+#[serial_test::serial]
 #[tokio::test]
 async fn test_is_enabled_when_disabled() {
     let db = common::setup_db().await;
-    let service = VoiceTrackingService::new(db.clone())
-        .await
-        .expect("Failed to create service");
+    let service = VoiceTrackingService::new(
+        Arc::new(db.voice_sessions.clone()),
+        Arc::new(db.server_settings.clone()),
+    )
+    .await
+    .expect("Failed to create service");
 
     let guild_id: u64 = 123456789;
 
@@ -70,12 +85,16 @@ async fn test_is_enabled_when_disabled() {
     common::teardown_db(&db).await;
 }
 
+#[serial_test::serial]
 #[tokio::test]
 async fn test_is_enabled_when_re_enabled() {
     let db = common::setup_db().await;
-    let service = VoiceTrackingService::new(db.clone())
-        .await
-        .expect("Failed to create service");
+    let service = VoiceTrackingService::new(
+        Arc::new(db.voice_sessions.clone()),
+        Arc::new(db.server_settings.clone()),
+    )
+    .await
+    .expect("Failed to create service");
 
     let guild_id: u64 = 123456789;
 
@@ -112,12 +131,16 @@ async fn test_is_enabled_when_re_enabled() {
     common::teardown_db(&db).await;
 }
 
+#[serial_test::serial]
 #[tokio::test]
 async fn test_insert_and_replace_voice_session() {
     let db = common::setup_db().await;
-    let service = VoiceTrackingService::new(db.clone())
-        .await
-        .expect("Failed to create service");
+    let service = VoiceTrackingService::new(
+        Arc::new(db.voice_sessions.clone()),
+        Arc::new(db.server_settings.clone()),
+    )
+    .await
+    .expect("Failed to create service");
 
     let now = Utc::now().trunc_subsecs(6);
     let session = VoiceSessionsEntity {
@@ -172,12 +195,16 @@ async fn test_insert_and_replace_voice_session() {
     common::teardown_db(&db).await;
 }
 
+#[serial_test::serial]
 #[tokio::test]
 async fn test_get_server_settings_default() {
     let db = common::setup_db().await;
-    let service = VoiceTrackingService::new(db.clone())
-        .await
-        .expect("Failed to create service");
+    let service = VoiceTrackingService::new(
+        Arc::new(db.voice_sessions.clone()),
+        Arc::new(db.server_settings.clone()),
+    )
+    .await
+    .expect("Failed to create service");
 
     let guild_id: u64 = 123456789;
 
@@ -192,12 +219,16 @@ async fn test_get_server_settings_default() {
     common::teardown_db(&db).await;
 }
 
+#[serial_test::serial]
 #[tokio::test]
 async fn test_update_and_get_server_settings() {
     let db = common::setup_db().await;
-    let service = VoiceTrackingService::new(db.clone())
-        .await
-        .expect("Failed to create service");
+    let service = VoiceTrackingService::new(
+        Arc::new(db.voice_sessions.clone()),
+        Arc::new(db.server_settings.clone()),
+    )
+    .await
+    .expect("Failed to create service");
 
     let guild_id: u64 = 123456789;
 
@@ -224,12 +255,16 @@ async fn test_update_and_get_server_settings() {
     common::teardown_db(&db).await;
 }
 
+#[serial_test::serial]
 #[tokio::test]
 async fn test_get_leaderboard() {
     let db = common::setup_db().await;
-    let service = VoiceTrackingService::new(db.clone())
-        .await
-        .expect("Failed to create service");
+    let service = VoiceTrackingService::new(
+        Arc::new(db.voice_sessions.clone()),
+        Arc::new(db.server_settings.clone()),
+    )
+    .await
+    .expect("Failed to create service");
 
     let guild_id: u64 = 555555;
     let now = Utc::now();
@@ -305,12 +340,16 @@ async fn test_get_leaderboard() {
     common::teardown_db(&db).await;
 }
 
+#[serial_test::serial]
 #[tokio::test]
 async fn test_get_leaderboard_with_limit() {
     let db = common::setup_db().await;
-    let service = VoiceTrackingService::new(db.clone())
-        .await
-        .expect("Failed to create service");
+    let service = VoiceTrackingService::new(
+        Arc::new(db.voice_sessions.clone()),
+        Arc::new(db.server_settings.clone()),
+    )
+    .await
+    .expect("Failed to create service");
 
     let guild_id: u64 = 666666;
     let now = Utc::now();
@@ -348,12 +387,16 @@ async fn test_get_leaderboard_with_limit() {
     common::teardown_db(&db).await;
 }
 
+#[serial_test::serial]
 #[tokio::test]
 async fn test_get_leaderboard_with_offset() {
     let db = common::setup_db().await;
-    let service = VoiceTrackingService::new(db.clone())
-        .await
-        .expect("Failed to create service");
+    let service = VoiceTrackingService::new(
+        Arc::new(db.voice_sessions.clone()),
+        Arc::new(db.server_settings.clone()),
+    )
+    .await
+    .expect("Failed to create service");
 
     let guild_id: u64 = 777777;
     let now = Utc::now();
@@ -395,12 +438,16 @@ async fn test_get_leaderboard_with_offset() {
     common::teardown_db(&db).await;
 }
 
+#[serial_test::serial]
 #[tokio::test]
 async fn test_get_leaderboard_empty() {
     let db = common::setup_db().await;
-    let service = VoiceTrackingService::new(db.clone())
-        .await
-        .expect("Failed to create service");
+    let service = VoiceTrackingService::new(
+        Arc::new(db.voice_sessions.clone()),
+        Arc::new(db.server_settings.clone()),
+    )
+    .await
+    .expect("Failed to create service");
 
     let guild_id: u64 = 888888;
 
@@ -416,6 +463,7 @@ async fn test_get_leaderboard_empty() {
     common::teardown_db(&db).await;
 }
 
+#[serial_test::serial]
 #[tokio::test]
 async fn test_disabled_guilds_cache_on_init() {
     let db = common::setup_db().await;
@@ -437,9 +485,12 @@ async fn test_disabled_guilds_cache_on_init() {
         .expect("Failed to insert settings");
 
     // Create service - should load disabled guilds from database
-    let service = VoiceTrackingService::new(db.clone())
-        .await
-        .expect("Failed to create service");
+    let service = VoiceTrackingService::new(
+        Arc::new(db.voice_sessions.clone()),
+        Arc::new(db.server_settings.clone()),
+    )
+    .await
+    .expect("Failed to create service");
 
     // Check that the pre-populated disabled guild is in the cache
     let is_enabled = service.is_enabled(disabled_guild_id).await;
@@ -452,12 +503,16 @@ async fn test_disabled_guilds_cache_on_init() {
     common::teardown_db(&db).await;
 }
 
+#[serial_test::serial]
 #[tokio::test]
 async fn test_get_leaderboard_includes_active_sessions() {
     let db = common::setup_db().await;
-    let service = VoiceTrackingService::new(db.clone())
-        .await
-        .expect("Failed to create service");
+    let service = VoiceTrackingService::new(
+        Arc::new(db.voice_sessions.clone()),
+        Arc::new(db.server_settings.clone()),
+    )
+    .await
+    .expect("Failed to create service");
 
     let guild_id: u64 = 999999;
     let now = Utc::now();
@@ -534,12 +589,16 @@ async fn test_get_leaderboard_includes_active_sessions() {
     common::teardown_db(&db).await;
 }
 
+#[serial_test::serial]
 #[tokio::test]
 async fn test_get_leaderboard_active_and_completed_mixed() {
     let db = common::setup_db().await;
-    let service = VoiceTrackingService::new(db.clone())
-        .await
-        .expect("Failed to create service");
+    let service = VoiceTrackingService::new(
+        Arc::new(db.voice_sessions.clone()),
+        Arc::new(db.server_settings.clone()),
+    )
+    .await
+    .expect("Failed to create service");
 
     let guild_id: u64 = 888888;
     let now = Utc::now();

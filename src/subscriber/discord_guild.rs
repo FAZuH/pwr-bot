@@ -73,7 +73,7 @@ impl DiscordGuildSubscriber {
 
         let channel_id = ChannelId::from_str(&channel_id_str)?;
 
-        debug!("Fetching channel id `{}`.", channel_id);
+        debug!("Fetching channel id `{channel_id}`.");
         let channel = channel_id
             .to_guild_channel(&self.bot.http, Some(guild_id))
             .await?;

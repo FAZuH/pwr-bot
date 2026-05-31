@@ -577,8 +577,7 @@ impl ViewRender for VoiceStatsHandler {
             container_components.push(CreateContainerComponent::MediaGallery(
                 CreateMediaGallery::new(vec![CreateMediaGalleryItem::new(
                     CreateUnfurledMediaItem::new(format!(
-                        "attachment://{}",
-                        VOICE_STATS_IMAGE_FILENAME
+                        "attachment://{VOICE_STATS_IMAGE_FILENAME}"
                     )),
                 )]),
             ));

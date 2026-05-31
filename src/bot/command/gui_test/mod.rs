@@ -110,9 +110,9 @@ fn build_test_reply<'a>(
     let status_text = if let Some(idx) = failed_at {
         format!("\n❌ **Failed at:** {}\n", steps[idx].1)
     } else if passed == total {
-        format!("\n✅ **All {} steps passed.**\n", total)
+        format!("\n✅ **All {total} steps passed.**\n")
     } else {
-        format!("\n⏳ **Progress:** {}/{}\n", passed, total)
+        format!("\n⏳ **Progress:** {passed}/{total}\n")
     };
 
     let text = format!("{}\n{}\n{}", title, body_lines.join("\n"), status_text);
@@ -172,8 +172,7 @@ pub async fn gui_test(ctx: Context<'_>) -> Result<(), Error> {
                     .collect();
                 msg.edit(
                     ctx,
-                    build_test_reply(&steps_with_status, Some(i))
-                        .content(format!("```\n{}\n```", e)),
+                    build_test_reply(&steps_with_status, Some(i)).content(format!("```\n{e}\n```")),
                 )
                 .await?;
                 return Ok(());
