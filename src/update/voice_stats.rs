@@ -123,7 +123,7 @@ mod tests {
     // ── ChangeTimeRange ─────────────────────────────────────────────────────
 
     #[test]
-    fn test_change_time_range_updates_and_refetches() {
+    fn change_time_range_updates_and_refetches() {
         let mut model = VoiceStatsModel::new(100);
         assert_eq!(model.time_range, VoiceStatsTimeRange::Yearly);
 
@@ -137,7 +137,7 @@ mod tests {
     }
 
     #[test]
-    fn test_change_time_range_same_returns_none() {
+    fn change_time_range_same_returns_none() {
         let mut model = VoiceStatsModel::new(100);
         model.time_range = VoiceStatsTimeRange::Monthly;
 
@@ -152,7 +152,7 @@ mod tests {
     // ── ChangeStatType ──────────────────────────────────────────────────────
 
     #[test]
-    fn test_change_stat_type_updates_and_refetches() {
+    fn change_stat_type_updates_and_refetches() {
         let mut model = VoiceStatsModel::new(100);
         assert_eq!(model.stat_type, GuildStatType::AverageTime);
 
@@ -166,7 +166,7 @@ mod tests {
     }
 
     #[test]
-    fn test_change_stat_type_same_returns_none() {
+    fn change_stat_type_same_returns_none() {
         let mut model = VoiceStatsModel::new(100);
         model.stat_type = GuildStatType::ActiveUserCount;
 
@@ -181,7 +181,7 @@ mod tests {
     // ── ToggleDataMode ──────────────────────────────────────────────────────
 
     #[test]
-    fn test_toggle_from_guild_to_user() {
+    fn toggle_from_guild_to_user() {
         let mut model = VoiceStatsModel::new(100);
         assert!(!model.is_user_stats());
 
@@ -193,7 +193,7 @@ mod tests {
     }
 
     #[test]
-    fn test_toggle_from_user_to_guild() {
+    fn toggle_from_user_to_guild() {
         let mut model = VoiceStatsModel::new(100);
         model.user_id = Some(100);
 
@@ -205,7 +205,7 @@ mod tests {
     }
 
     #[test]
-    fn test_toggle_uses_current_fallback() {
+    fn toggle_uses_current_fallback() {
         let mut model = VoiceStatsModel::new(100);
         model.fallback_user_id = 200;
 
@@ -216,7 +216,7 @@ mod tests {
     // ── SetUser ─────────────────────────────────────────────────────────────
 
     #[test]
-    fn test_set_user_changes_target_and_refetches() {
+    fn set_user_changes_target_and_refetches() {
         let mut model = VoiceStatsModel::new(100);
 
         let cmd = VoiceStatsUpdate::update(VoiceStatsMsg::SetUser(Some(200)), &mut model);
@@ -227,7 +227,7 @@ mod tests {
     }
 
     #[test]
-    fn test_set_user_same_returns_none() {
+    fn set_user_same_returns_none() {
         let mut model = VoiceStatsModel::new(100);
         model.user_id = Some(200);
 
@@ -238,7 +238,7 @@ mod tests {
     }
 
     #[test]
-    fn test_set_user_clear() {
+    fn set_user_clear() {
         let mut model = VoiceStatsModel::new(100);
         model.user_id = Some(200);
 
@@ -249,7 +249,7 @@ mod tests {
     }
 
     #[test]
-    fn test_set_user_none_to_none() {
+    fn set_user_none_to_none() {
         let mut model = VoiceStatsModel::new(100);
         model.user_id = None;
 
@@ -259,7 +259,7 @@ mod tests {
     }
 
     #[test]
-    fn test_set_user_updates_fallback_only_when_some() {
+    fn set_user_updates_fallback_only_when_some() {
         let mut model = VoiceStatsModel::new(100);
 
         VoiceStatsUpdate::update(VoiceStatsMsg::SetUser(None), &mut model);
@@ -269,7 +269,7 @@ mod tests {
     // ── Model helpers ───────────────────────────────────────────────────────
 
     #[test]
-    fn test_is_user_stats() {
+    fn is_user_stats() {
         let mut model = VoiceStatsModel::new(100);
         assert!(!model.is_user_stats());
 
@@ -281,7 +281,7 @@ mod tests {
     }
 
     #[test]
-    fn test_new_defaults_to_guild_mode() {
+    fn new_defaults_to_guild_mode() {
         let model = VoiceStatsModel::new(42);
         assert_eq!(model.user_id, None);
         assert_eq!(model.fallback_user_id, 42);

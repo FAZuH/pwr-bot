@@ -485,7 +485,7 @@ mod tests {
     use crate::bot::command::voice::leaderboard::image_builder::LeaderboardEntry;
 
     #[test]
-    fn test_leaderboard_session_data_from_entries() {
+    fn leaderboard_session_data_from_entries() {
         let entries = vec![
             VoiceLeaderboardEntry {
                 user_id: 100,
@@ -513,7 +513,7 @@ mod tests {
     }
 
     #[test]
-    fn test_voice_leaderboard_time_range_to_range() {
+    fn voice_leaderboard_time_range_to_range() {
         // Test that to_range returns valid datetime range
         let (since, until) = VoiceLeaderboardTimeRange::Past24Hours.to_range();
         assert!(since <= until);
@@ -524,7 +524,7 @@ mod tests {
     }
 
     #[test]
-    fn test_voice_leaderboard_time_range_into_datetime() {
+    fn voice_leaderboard_time_range_into_datetime() {
         let now = Utc::now();
         let past_24h_start: DateTime<Utc> = VoiceLeaderboardTimeRange::Past24Hours.into();
         assert!(past_24h_start <= now);
@@ -534,7 +534,7 @@ mod tests {
     }
 
     #[test]
-    fn test_voice_leaderboard_time_range_equality() {
+    fn voice_leaderboard_time_range_equality() {
         let range1 = VoiceLeaderboardTimeRange::Past24Hours;
         let range2 = VoiceLeaderboardTimeRange::Past24Hours;
         let range3 = VoiceLeaderboardTimeRange::ThisMonth;
@@ -544,7 +544,7 @@ mod tests {
     }
 
     #[test]
-    fn test_format_duration_edge_cases() {
+    fn format_duration_edge_cases() {
         // Test zero
         assert_eq!(format_duration(0), "0s");
 
@@ -563,7 +563,7 @@ mod tests {
     }
 
     #[test]
-    fn test_format_duration_comprehensive() {
+    fn format_duration_comprehensive() {
         // Seconds
         assert_eq!(format_duration(45), "45s");
 
@@ -588,7 +588,7 @@ mod tests {
     }
 
     #[test]
-    fn test_voice_leaderboard_time_range_all_variants() {
+    fn voice_leaderboard_time_range_all_variants() {
         // Test all time range variants can be converted to datetime
         let ranges = vec![
             VoiceLeaderboardTimeRange::Today,
@@ -625,7 +625,7 @@ mod tests {
     }
 
     #[test]
-    fn test_time_range_date_boundaries() {
+    fn time_range_date_boundaries() {
         let now = Utc::now();
 
         // Today should start at midnight today
@@ -655,7 +655,7 @@ mod tests {
     }
 
     #[test]
-    fn test_time_range_relative_durations() {
+    fn time_range_relative_durations() {
         let now = Utc::now();
 
         // This week should be within the last 7 days
@@ -678,7 +678,7 @@ mod tests {
     }
 
     #[test]
-    fn test_leaderboard_entry_clone() {
+    fn leaderboard_entry_clone() {
         let entry = LeaderboardEntry {
             rank: 1,
             user_id: 123456789012345678,

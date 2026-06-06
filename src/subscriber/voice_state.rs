@@ -381,7 +381,7 @@ mod tests {
 
     #[tokio::test]
     #[serial_test::serial]
-    async fn test_handle_join_logic() {
+    async fn handle_join_logic() {
         let sub = create_mock_subscriber().await.unwrap();
         let event = VoiceStateEvent {
             old: None,
@@ -397,7 +397,7 @@ mod tests {
 
     #[tokio::test]
     #[serial_test::serial]
-    async fn test_handle_leave_logic() {
+    async fn handle_leave_logic() {
         let sub = create_mock_subscriber().await.unwrap();
         let join_time = Utc::now();
         let session = ActiveSession {
@@ -426,7 +426,7 @@ mod tests {
 
     #[tokio::test]
     #[serial_test::serial]
-    async fn test_handle_move_logic() {
+    async fn handle_move_logic() {
         let sub = create_mock_subscriber().await.unwrap();
         let join_time = Utc::now();
         let session = ActiveSession {
@@ -460,7 +460,7 @@ mod tests {
 
     #[tokio::test]
     #[serial_test::serial]
-    async fn test_track_existing_user() {
+    async fn track_existing_user() {
         let sub = create_mock_subscriber().await.unwrap();
 
         // Track an existing user (simulating startup scan)
@@ -477,7 +477,7 @@ mod tests {
 
     #[tokio::test]
     #[serial_test::serial]
-    async fn test_track_existing_user_already_tracked() {
+    async fn track_existing_user_already_tracked() {
         let sub = create_mock_subscriber().await.unwrap();
 
         // Track user first time
@@ -504,7 +504,7 @@ mod tests {
 
     #[tokio::test]
     #[serial_test::serial]
-    async fn test_track_existing_user_dedups_after_close_orphaned() {
+    async fn track_existing_user_dedups_after_close_orphaned() {
         let sub = create_mock_subscriber().await.unwrap();
         let user_id = 999u64;
         let guild_id = 888u64;
@@ -554,7 +554,7 @@ mod tests {
 
     #[tokio::test]
     #[serial_test::serial]
-    async fn test_handle_join_closes_orphaned_sessions() {
+    async fn handle_join_closes_orphaned_sessions() {
         let sub = create_mock_subscriber().await.unwrap();
         let user_id = 444u64;
         let guild_id = 555u64;
@@ -605,7 +605,7 @@ mod tests {
 
     #[tokio::test]
     #[serial_test::serial]
-    async fn test_handle_leave_closes_all_active_sessions() {
+    async fn handle_leave_closes_all_active_sessions() {
         let sub = create_mock_subscriber().await.unwrap();
         let user_id = 555u64;
         let guild_id = 666u64;
@@ -655,7 +655,7 @@ mod tests {
 
     #[tokio::test]
     #[serial_test::serial]
-    async fn test_handle_join_dedup_same_session_id() {
+    async fn handle_join_dedup_same_session_id() {
         let sub = create_mock_subscriber().await.unwrap();
         let user_id = 666u64;
         let guild_id = 777u64;

@@ -18,7 +18,7 @@ mod common;
 
 #[serial_test::serial]
 #[tokio::test]
-async fn test_voice_tracking_service_new() {
+async fn voice_tracking_service_new() {
     let db = common::setup_db().await;
 
     // Test creating the service
@@ -34,7 +34,7 @@ async fn test_voice_tracking_service_new() {
 
 #[serial_test::serial]
 #[tokio::test]
-async fn test_is_enabled_default() {
+async fn is_enabled_default() {
     let db = common::setup_db().await;
     let service = VoiceTrackingService::new(
         Arc::new(db.voice_sessions.clone()),
@@ -54,7 +54,7 @@ async fn test_is_enabled_default() {
 
 #[serial_test::serial]
 #[tokio::test]
-async fn test_is_enabled_when_disabled() {
+async fn is_enabled_when_disabled() {
     let db = common::setup_db().await;
     let service = VoiceTrackingService::new(
         Arc::new(db.voice_sessions.clone()),
@@ -87,7 +87,7 @@ async fn test_is_enabled_when_disabled() {
 
 #[serial_test::serial]
 #[tokio::test]
-async fn test_is_enabled_when_re_enabled() {
+async fn is_enabled_when_re_enabled() {
     let db = common::setup_db().await;
     let service = VoiceTrackingService::new(
         Arc::new(db.voice_sessions.clone()),
@@ -133,7 +133,7 @@ async fn test_is_enabled_when_re_enabled() {
 
 #[serial_test::serial]
 #[tokio::test]
-async fn test_insert_and_replace_voice_session() {
+async fn insert_and_replace_voice_session() {
     let db = common::setup_db().await;
     let service = VoiceTrackingService::new(
         Arc::new(db.voice_sessions.clone()),
@@ -197,7 +197,7 @@ async fn test_insert_and_replace_voice_session() {
 
 #[serial_test::serial]
 #[tokio::test]
-async fn test_get_server_settings_default() {
+async fn get_server_settings_default() {
     let db = common::setup_db().await;
     let service = VoiceTrackingService::new(
         Arc::new(db.voice_sessions.clone()),
@@ -221,7 +221,7 @@ async fn test_get_server_settings_default() {
 
 #[serial_test::serial]
 #[tokio::test]
-async fn test_update_and_get_server_settings() {
+async fn update_and_get_server_settings() {
     let db = common::setup_db().await;
     let service = VoiceTrackingService::new(
         Arc::new(db.voice_sessions.clone()),
@@ -257,7 +257,7 @@ async fn test_update_and_get_server_settings() {
 
 #[serial_test::serial]
 #[tokio::test]
-async fn test_get_leaderboard() {
+async fn get_leaderboard() {
     let db = common::setup_db().await;
     let service = VoiceTrackingService::new(
         Arc::new(db.voice_sessions.clone()),
@@ -342,7 +342,7 @@ async fn test_get_leaderboard() {
 
 #[serial_test::serial]
 #[tokio::test]
-async fn test_get_leaderboard_with_limit() {
+async fn get_leaderboard_with_limit() {
     let db = common::setup_db().await;
     let service = VoiceTrackingService::new(
         Arc::new(db.voice_sessions.clone()),
@@ -389,7 +389,7 @@ async fn test_get_leaderboard_with_limit() {
 
 #[serial_test::serial]
 #[tokio::test]
-async fn test_get_leaderboard_with_offset() {
+async fn get_leaderboard_with_offset() {
     let db = common::setup_db().await;
     let service = VoiceTrackingService::new(
         Arc::new(db.voice_sessions.clone()),
@@ -440,7 +440,7 @@ async fn test_get_leaderboard_with_offset() {
 
 #[serial_test::serial]
 #[tokio::test]
-async fn test_get_leaderboard_empty() {
+async fn get_leaderboard_empty() {
     let db = common::setup_db().await;
     let service = VoiceTrackingService::new(
         Arc::new(db.voice_sessions.clone()),
@@ -465,7 +465,7 @@ async fn test_get_leaderboard_empty() {
 
 #[serial_test::serial]
 #[tokio::test]
-async fn test_disabled_guilds_cache_on_init() {
+async fn disabled_guilds_cache_on_init() {
     let db = common::setup_db().await;
 
     // Pre-populate database with disabled guild
@@ -505,7 +505,7 @@ async fn test_disabled_guilds_cache_on_init() {
 
 #[serial_test::serial]
 #[tokio::test]
-async fn test_get_leaderboard_includes_active_sessions() {
+async fn get_leaderboard_includes_active_sessions() {
     let db = common::setup_db().await;
     let service = VoiceTrackingService::new(
         Arc::new(db.voice_sessions.clone()),
@@ -591,7 +591,7 @@ async fn test_get_leaderboard_includes_active_sessions() {
 
 #[serial_test::serial]
 #[tokio::test]
-async fn test_get_leaderboard_active_and_completed_mixed() {
+async fn get_leaderboard_active_and_completed_mixed() {
     let db = common::setup_db().await;
     let service = VoiceTrackingService::new(
         Arc::new(db.voice_sessions.clone()),

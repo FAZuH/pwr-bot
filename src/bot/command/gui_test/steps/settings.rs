@@ -19,7 +19,7 @@ use crate::entity::ServerSettingsEntity;
 use crate::update::feed_settings::FeedSettingsModel;
 use crate::update::settings_main::SettingsMainModel;
 
-pub async fn test_settings_main(ctx: Context<'_>) -> Result<(), GuiTestError> {
+pub async fn settings_main(ctx: Context<'_>) -> Result<(), GuiTestError> {
     let guild_id = ctx.guild_id().ok_or(GuiTestError::assertion_failed(
         "settings_main",
         "guild context",
@@ -104,7 +104,7 @@ pub async fn test_settings_main(ctx: Context<'_>) -> Result<(), GuiTestError> {
     Ok(())
 }
 
-pub async fn test_feed_settings(ctx: Context<'_>) -> Result<(), GuiTestError> {
+pub async fn feed_settings(ctx: Context<'_>) -> Result<(), GuiTestError> {
     let guild_id = ctx.guild_id().ok_or(GuiTestError::assertion_failed(
         "feed_settings",
         "guild context",
@@ -168,7 +168,7 @@ pub async fn test_feed_settings(ctx: Context<'_>) -> Result<(), GuiTestError> {
     Ok(())
 }
 
-pub async fn test_voice_settings(ctx: Context<'_>) -> Result<(), GuiTestError> {
+pub async fn voice_settings(ctx: Context<'_>) -> Result<(), GuiTestError> {
     let guild_id = ctx.guild_id().ok_or(GuiTestError::assertion_failed(
         "voice_settings",
         "guild context",

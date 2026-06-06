@@ -79,7 +79,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_toggle_feeds() {
+    fn toggle_feeds() {
         let mut model = SettingsMainModel::new(false, false, false);
         assert!(!model.feeds_enabled);
 
@@ -91,7 +91,7 @@ mod tests {
     }
 
     #[test]
-    fn test_toggle_voice() {
+    fn toggle_voice() {
         let mut model = SettingsMainModel::new(false, true, false);
 
         let cmd = SettingsMainUpdate::update(SettingsMainMsg::ToggleVoice, &mut model);
@@ -102,7 +102,7 @@ mod tests {
     }
 
     #[test]
-    fn test_toggle_welcome() {
+    fn toggle_welcome() {
         let mut model = SettingsMainModel::new(false, false, true);
 
         let cmd = SettingsMainUpdate::update(SettingsMainMsg::ToggleWelcome, &mut model);
@@ -113,7 +113,7 @@ mod tests {
     }
 
     #[test]
-    fn test_multiple_toggles() {
+    fn multiple_toggles() {
         let mut model = SettingsMainModel::new(true, true, true);
 
         SettingsMainUpdate::update(SettingsMainMsg::ToggleFeeds, &mut model);
@@ -126,7 +126,7 @@ mod tests {
     }
 
     #[test]
-    fn test_is_modified_sticks() {
+    fn is_modified_sticks() {
         let mut model = SettingsMainModel::new(false, false, false);
         assert!(!model.is_modified);
 
@@ -139,7 +139,7 @@ mod tests {
     }
 
     #[test]
-    fn test_new_preserves_initial_state() {
+    fn new_preserves_initial_state() {
         let model = SettingsMainModel::new(true, false, true);
         assert!(model.feeds_enabled);
         assert!(!model.voice_enabled);

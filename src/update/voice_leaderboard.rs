@@ -199,7 +199,7 @@ mod tests {
     // ── SetEntries ──────────────────────────────────────────────────────────
 
     #[test]
-    fn test_set_entries_computes_rank_and_duration() {
+    fn set_entries_computes_rank_and_duration() {
         let mut model = VoiceLeaderboardModel {
             author_id: 200,
             per_page: 10,
@@ -224,7 +224,7 @@ mod tests {
     }
 
     #[test]
-    fn test_set_entries_author_not_in_list() {
+    fn set_entries_author_not_in_list() {
         let mut model = model_with(vec![entry(1, 100), entry(2, 200)], 10);
         model.author_id = 999;
 
@@ -239,7 +239,7 @@ mod tests {
     }
 
     #[test]
-    fn test_set_entries_clamps_page() {
+    fn set_entries_clamps_page() {
         let mut model = model_with(vec![entry(1, 100); 25], 10);
         model.current_page = 5; // out of bounds
 
@@ -254,7 +254,7 @@ mod tests {
     }
 
     #[test]
-    fn test_set_entries_empty() {
+    fn set_entries_empty() {
         let mut model = model_with(vec![entry(1, 100)], 10);
 
         let cmd =
@@ -269,7 +269,7 @@ mod tests {
     // ── ChangeTimeRange ─────────────────────────────────────────────────────
 
     #[test]
-    fn test_change_time_range_returns_refetch() {
+    fn change_time_range_returns_refetch() {
         let mut model = model_with(vec![], 10);
         model.time_range = VoiceLeaderboardTimeRange::ThisMonth;
 
@@ -283,7 +283,7 @@ mod tests {
     }
 
     #[test]
-    fn test_change_time_range_same_returns_none() {
+    fn change_time_range_same_returns_none() {
         let mut model = model_with(vec![], 10);
         model.time_range = VoiceLeaderboardTimeRange::ThisMonth;
 
@@ -298,7 +298,7 @@ mod tests {
     // ── ToggleMode ──────────────────────────────────────────────────────────
 
     #[test]
-    fn test_toggle_mode() {
+    fn toggle_mode() {
         let mut model = model_with(vec![], 10);
         assert!(!model.is_partner_mode);
 
@@ -316,7 +316,7 @@ mod tests {
     // ── SetTargetUser ───────────────────────────────────────────────────────
 
     #[test]
-    fn test_set_target_user_in_partner_mode_refetches() {
+    fn set_target_user_in_partner_mode_refetches() {
         let mut model = model_with(vec![], 10);
         model.is_partner_mode = true;
 
@@ -330,7 +330,7 @@ mod tests {
     }
 
     #[test]
-    fn test_set_target_user_not_partner_mode_no_refetch() {
+    fn set_target_user_not_partner_mode_no_refetch() {
         let mut model = model_with(vec![], 10);
         model.is_partner_mode = false;
 
@@ -344,7 +344,7 @@ mod tests {
     }
 
     #[test]
-    fn test_set_target_user_clear() {
+    fn set_target_user_clear() {
         let mut model = model_with(vec![], 10);
         model.target_user_id = Some(42);
 
@@ -358,7 +358,7 @@ mod tests {
     // ── Pagination ──────────────────────────────────────────────────────────
 
     #[test]
-    fn test_pagination_first() {
+    fn pagination_first() {
         let mut model = model_with(vec![entry(1, 100); 25], 10);
         model.current_page = 3;
 
@@ -372,7 +372,7 @@ mod tests {
     }
 
     #[test]
-    fn test_pagination_prev() {
+    fn pagination_prev() {
         let mut model = model_with(vec![entry(1, 100); 25], 10);
         model.current_page = 2;
 
@@ -386,7 +386,7 @@ mod tests {
     }
 
     #[test]
-    fn test_pagination_prev_does_not_go_below_one() {
+    fn pagination_prev_does_not_go_below_one() {
         let mut model = model_with(vec![entry(1, 100); 25], 10);
         model.current_page = 1;
 
@@ -400,7 +400,7 @@ mod tests {
     }
 
     #[test]
-    fn test_pagination_next() {
+    fn pagination_next() {
         let mut model = model_with(vec![entry(1, 100); 25], 10);
         model.current_page = 1;
 
@@ -414,7 +414,7 @@ mod tests {
     }
 
     #[test]
-    fn test_pagination_next_does_not_exceed_pages() {
+    fn pagination_next_does_not_exceed_pages() {
         let mut model = model_with(vec![entry(1, 100); 25], 10);
         model.current_page = 3; // last page
 
@@ -428,7 +428,7 @@ mod tests {
     }
 
     #[test]
-    fn test_pagination_last() {
+    fn pagination_last() {
         let mut model = model_with(vec![entry(1, 100); 25], 10);
         model.current_page = 1;
 
@@ -442,7 +442,7 @@ mod tests {
     }
 
     #[test]
-    fn test_pagination_page_is_no_op() {
+    fn pagination_page_is_no_op() {
         let mut model = model_with(vec![entry(1, 100); 25], 10);
         model.current_page = 2;
 
@@ -458,7 +458,7 @@ mod tests {
     // ── Model helpers ───────────────────────────────────────────────────────
 
     #[test]
-    fn test_current_page_indices() {
+    fn current_page_indices() {
         let model = model_with(vec![entry(1, 100); 25], 10);
         assert_eq!(model.current_page_indices(), (0, 10));
 
@@ -472,13 +472,13 @@ mod tests {
     }
 
     #[test]
-    fn test_current_page_indices_empty() {
+    fn current_page_indices_empty() {
         let model = model_with(vec![], 10);
         assert_eq!(model.current_page_indices(), (0, 0));
     }
 
     #[test]
-    fn test_current_page_rank_offset() {
+    fn current_page_rank_offset() {
         let mut model = model_with(vec![entry(1, 100); 25], 10);
         assert_eq!(model.current_page_rank_offset(), 0);
 
@@ -490,7 +490,7 @@ mod tests {
     }
 
     #[test]
-    fn test_current_page_entries() {
+    fn current_page_entries() {
         let entries: Vec<_> = (1..=25).map(|i| entry(i, i as i64 * 100)).collect();
         let mut model = model_with(entries.clone(), 10);
 
@@ -507,7 +507,7 @@ mod tests {
     }
 
     #[test]
-    fn test_target_is_author() {
+    fn target_is_author() {
         let mut model = model_with(vec![], 10);
         model.author_id = 100;
         model.target_user_id = Some(100);
@@ -521,7 +521,7 @@ mod tests {
     }
 
     #[test]
-    fn test_pages_calculation() {
+    fn pages_calculation() {
         let model = model_with(vec![entry(1, 100); 5], 10);
         assert_eq!(model.pages(), 1);
 
@@ -536,13 +536,13 @@ mod tests {
     }
 
     #[test]
-    fn test_pages_empty() {
+    fn pages_empty() {
         let model = model_with(vec![], 10);
         assert_eq!(model.pages(), 1);
     }
 
     #[test]
-    fn test_from_entries() {
+    fn from_entries() {
         let entries = vec![entry(100, 3600), entry(200, 1800), entry(300, 900)];
         let model = VoiceLeaderboardModel::from_entries(entries.clone(), 200, 10);
 

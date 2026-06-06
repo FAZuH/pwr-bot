@@ -62,13 +62,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_validate_urls_accepts_valid_count() {
+    fn validate_urls_accepts_valid_count() {
         let urls = vec!["url1", "url2", "url3"];
         assert!(validate_url_count(&urls).is_ok());
     }
 
     #[test]
-    fn test_validate_urls_rejects_too_many() {
+    fn validate_urls_rejects_too_many() {
         let urls = vec!["url"; 11];
         let result = validate_url_count(&urls);
         assert!(result.is_err());
@@ -82,34 +82,34 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_urls_accepts_exactly_ten() {
+    fn validate_urls_accepts_exactly_ten() {
         let urls = vec!["url"; 10];
         assert!(validate_url_count(&urls).is_ok());
     }
 
     #[test]
-    fn test_parse_and_validate_splits_comma_separated() {
+    fn parse_and_validate_splits_comma_separated() {
         let input = "url1, url2 ,url3";
         let urls = parse_and_validate_urls(input).unwrap();
         assert_eq!(urls, vec!["url1", "url2", "url3"]);
     }
 
     #[test]
-    fn test_format_duration_seconds() {
+    fn format_duration_seconds() {
         assert_eq!(format_duration(30), "30s");
         assert_eq!(format_duration(0), "0s");
         assert_eq!(format_duration(59), "59s");
     }
 
     #[test]
-    fn test_format_duration_minutes() {
+    fn format_duration_minutes() {
         assert_eq!(format_duration(60), "1m");
         assert_eq!(format_duration(120), "2m");
         assert_eq!(format_duration(3599), "59m");
     }
 
     #[test]
-    fn test_format_duration_hours() {
+    fn format_duration_hours() {
         assert_eq!(format_duration(3600), "1h");
         assert_eq!(format_duration(3660), "1h 1m");
         assert_eq!(format_duration(7200), "2h");
@@ -117,7 +117,7 @@ mod tests {
     }
 
     #[test]
-    fn test_format_duration_days() {
+    fn format_duration_days() {
         assert_eq!(format_duration(86400), "1d");
         assert_eq!(format_duration(90000), "1d 1h");
         assert_eq!(format_duration(172800), "2d");
@@ -125,7 +125,7 @@ mod tests {
     }
 
     #[test]
-    fn test_format_duration_large_values() {
+    fn format_duration_large_values() {
         assert_eq!(format_duration(8640000), "100d"); // 100 days exactly
         assert_eq!(format_duration(8640000 + 3600), "100d 1h"); // 100 days + 1 hour
     }

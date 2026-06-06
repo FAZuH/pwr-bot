@@ -725,13 +725,13 @@ mod tests {
     }
 
     #[test]
-    fn test_action_registry_new() {
+    fn action_registry_new() {
         let registry = ActionRegistry::<TestAction>::new();
         assert!(registry.actions.is_empty());
     }
 
     #[test]
-    fn test_action_registry_register() {
+    fn action_registry_register() {
         let mut registry = ActionRegistry::<TestAction>::new();
 
         let id1 = registry.register(TestAction::First);

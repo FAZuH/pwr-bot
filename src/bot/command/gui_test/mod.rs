@@ -12,46 +12,38 @@ use crate::bot::test_framework::TestStep;
 mod steps;
 
 const TEST_STEPS: &[TestStep] = &[
-    crate::test_step!(
-        "/about",
-        "Bot info and statistics",
-        steps::about::test_about
-    ),
+    crate::test_step!("/about", "Bot info and statistics", steps::about::about),
     crate::test_step!(
         "/settings",
         "Main settings page",
-        steps::settings::test_settings_main
+        steps::settings::settings_main
     ),
     crate::test_step!(
         "/settings > feeds",
         "Feed settings",
-        steps::settings::test_feed_settings
+        steps::settings::feed_settings
     ),
     crate::test_step!(
         "/settings > voice",
         "Voice settings",
-        steps::settings::test_voice_settings
+        steps::settings::voice_settings
     ),
     crate::test_step!(
         "/settings > welcome",
         "Welcome settings",
-        steps::welcome::test_welcome_settings
+        steps::welcome::welcome_settings
     ),
     crate::test_step!(
         "/feed list",
         "Subscription list (empty)",
-        steps::feed::test_feed_list_empty
+        steps::feed::feed_list_empty
     ),
     crate::test_step!(
         "/vc leaderboard",
         "Voice leaderboard",
-        steps::voice::test_voice_leaderboard
+        steps::voice::voice_leaderboard
     ),
-    crate::test_step!(
-        "/vc stats",
-        "Voice statistics",
-        steps::voice::test_voice_stats
-    ),
+    crate::test_step!("/vc stats", "Voice statistics", steps::voice::voice_stats),
 ];
 
 /// Step status for rendering the live summary.

@@ -284,7 +284,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_duration_capping() {
+    fn duration_capping() {
         let now = Utc::now();
         // create a ghost session 30 days ago
         let session = VoiceSessionsEntity {

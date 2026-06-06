@@ -182,7 +182,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_get_nth_path_from_url() {
+    fn get_nth_path_from_url() {
         let info = PlatformInfo {
             name: "Test".to_string(),
             feed_item_name: "Type".to_string(),

@@ -78,7 +78,7 @@ mod tests {
     // ── ToggleEnabled ───────────────────────────────────────────────────────
 
     #[test]
-    fn test_toggle_enabled_from_true() {
+    fn toggle_enabled_from_true() {
         let mut model = FeedSettingsModel::default();
         assert!(model.is_enabled());
 
@@ -89,7 +89,7 @@ mod tests {
     }
 
     #[test]
-    fn test_toggle_enabled_from_false() {
+    fn toggle_enabled_from_false() {
         let mut model = FeedSettingsModel {
             enabled: Some(false),
             ..Default::default()
@@ -104,7 +104,7 @@ mod tests {
     // ── SetChannel ──────────────────────────────────────────────────────────
 
     #[test]
-    fn test_set_channel() {
+    fn set_channel() {
         let mut model = FeedSettingsModel::default();
 
         let cmd = FeedSettingsUpdate::update(
@@ -117,7 +117,7 @@ mod tests {
     }
 
     #[test]
-    fn test_set_channel_none() {
+    fn set_channel_none() {
         let mut model = FeedSettingsModel {
             channel_id: Some("123".to_string()),
             ..Default::default()
@@ -132,7 +132,7 @@ mod tests {
     // ── SetSubRole ──────────────────────────────────────────────────────────
 
     #[test]
-    fn test_set_sub_role() {
+    fn set_sub_role() {
         let mut model = FeedSettingsModel::default();
 
         let cmd = FeedSettingsUpdate::update(
@@ -147,7 +147,7 @@ mod tests {
     // ── SetUnsubRole ────────────────────────────────────────────────────────
 
     #[test]
-    fn test_set_unsub_role() {
+    fn set_unsub_role() {
         let mut model = FeedSettingsModel::default();
 
         let cmd = FeedSettingsUpdate::update(
@@ -162,13 +162,13 @@ mod tests {
     // ── Model helpers ───────────────────────────────────────────────────────
 
     #[test]
-    fn test_is_enabled_defaults_to_true() {
+    fn is_enabled_defaults_to_true() {
         let model = FeedSettingsModel::default();
         assert!(model.is_enabled());
     }
 
     #[test]
-    fn test_model_default() {
+    fn model_default() {
         let model = FeedSettingsModel::default();
         assert_eq!(model.enabled, None);
         assert_eq!(model.channel_id, None);

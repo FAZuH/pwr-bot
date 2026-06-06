@@ -16,7 +16,7 @@ mod common;
 
 #[serial_test::serial]
 #[tokio::test]
-async fn test_heartbeat_read_write() {
+async fn heartbeat_read_write() {
     let db = common::setup_db().await;
     let service = Arc::new(
         VoiceTrackingService::new(
@@ -47,7 +47,7 @@ async fn test_heartbeat_read_write() {
 
 #[serial_test::serial]
 #[tokio::test]
-async fn test_heartbeat_crash_recovery_no_sessions() {
+async fn heartbeat_crash_recovery_no_sessions() {
     let db = common::setup_db().await;
     let service = Arc::new(
         VoiceTrackingService::new(
@@ -86,7 +86,7 @@ async fn test_heartbeat_crash_recovery_no_sessions() {
 
 #[serial_test::serial]
 #[tokio::test]
-async fn test_heartbeat_crash_recovery_with_active_sessions() {
+async fn heartbeat_crash_recovery_with_active_sessions() {
     let db = common::setup_db().await;
     let service = Arc::new(
         VoiceTrackingService::new(
@@ -177,7 +177,7 @@ async fn test_heartbeat_crash_recovery_with_active_sessions() {
 
 #[serial_test::serial]
 #[tokio::test]
-async fn test_heartbeat_crash_recovery_no_heartbeat() {
+async fn heartbeat_crash_recovery_no_heartbeat() {
     let db = common::setup_db().await;
     let service = Arc::new(
         VoiceTrackingService::new(
@@ -242,7 +242,7 @@ async fn test_heartbeat_crash_recovery_no_heartbeat() {
 
 #[serial_test::serial]
 #[tokio::test]
-async fn test_find_active_sessions() {
+async fn find_active_sessions() {
     let db = common::setup_db().await;
     let service = VoiceTrackingService::new(
         Arc::new(db.voice_sessions.clone()),
@@ -310,7 +310,7 @@ async fn test_find_active_sessions() {
 
 #[serial_test::serial]
 #[tokio::test]
-async fn test_update_session_leave_time() {
+async fn update_session_leave_time() {
     let db = common::setup_db().await;
     let service = VoiceTrackingService::new(
         Arc::new(db.voice_sessions.clone()),
