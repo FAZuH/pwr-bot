@@ -39,7 +39,7 @@ pub async fn leaderboard(
     #[description = "Time period to filter voice activity. Defaults to \"This month\""]
     time_range: Option<VoiceLeaderboardTimeRange>,
 ) -> Result<(), Error> {
-    Coordinator::new(ctx)
+    Router::new(ctx)
         .run(Navigation::VoiceLeaderboard {
             time_range: time_range.unwrap_or(VoiceLeaderboardTimeRange::ThisMonth),
         })
@@ -136,8 +136,8 @@ impl<'a> VoiceLeaderboardController<'a> {
 }
 
 #[async_trait::async_trait]
-impl Controller for VoiceLeaderboardController<'_> {
-    async fn run(&mut self, coordinator: std::sync::Arc<Coordinator<'_>>) -> Result<(), Error> {
+impl CommandHandler for VoiceLeaderboardController<'_> {
+    async fn run(&mut self, coordinator: std::sync::Arc<Router<'_>>) -> Result<(), Error> {
         let controller_start = Instant::now();
 
         let ctx = *coordinator.context();

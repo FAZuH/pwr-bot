@@ -1,4 +1,4 @@
-//! Navigation coordinator for the MVC-C pattern.
+//! Navigation router which handles routing between [`CommandHandler`]s
 //!
 //! The `Coordinator` drives the interaction flow of a command by managing
 //! a stack of [`Controller`]s and processing [`Navigation`]s.
@@ -20,7 +20,7 @@ use crate::bot::command::voice::leaderboard::VoiceLeaderboardController;
 use crate::bot::command::voice::settings::VoiceSettingsController;
 use crate::bot::command::voice::stats::VoiceStatsController;
 use crate::bot::command::welcome::WelcomeSettingsController;
-use crate::bot::controller::Controller;
+use crate::bot::controller::CommandHandler;
 use crate::bot::navigation::Navigation;
 
 /// Maximum number of navigation steps to keep in history.
@@ -33,7 +33,7 @@ type NavHistory = tokio::sync::Mutex<VecDeque<Navigation>>;
 ///
 /// The `Coordinator` owns the Poise command context
 /// It maintains a history of [`Navigation`]s to support "Back" navigation.
-pub struct Coordinator<'a> {
+pub struct Router<'a> {
     /// Poise command context.
     ctx: Context<'a>,
     /// Stack of navigation steps for history tracking.
@@ -42,7 +42,7 @@ pub struct Coordinator<'a> {
     reply_handle: SyncReplyHandle<'a>,
 }
 
-impl<'a> Coordinator<'a> {
+impl<'a> Router<'a> {
     /// Creates a new coordinator.
     pub fn new(ctx: Context<'a>) -> Arc<Self> {
         Arc::new(Self {
@@ -99,13 +99,13 @@ impl<'a> Coordinator<'a> {
     }
 
     /// Instantiates the next controller based on the current navigation state.
-    async fn next_controller(&self) -> Option<Box<dyn Controller + 'a>> {
+    async fn next_controller(&self) -> Option<Box<dyn CommandHandler + 'a>> {
         use Navigation::*;
         let ctx = self.ctx;
 
         loop {
             let nav = self.pop_next().await?;
-            let res: Box<dyn Controller> = match nav {
+            let res: Box<dyn CommandHandler> = match nav {
                 SettingsMain => Box::new(SettingsMainController::new(ctx)),
                 SettingsFeeds => Box::new(FeedSettingsController::new(ctx)),
                 SettingsVoice => Box::new(VoiceSettingsController::new(ctx)),

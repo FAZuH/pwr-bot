@@ -83,7 +83,7 @@ pub async fn command(
         Some(ctx.author().clone())
     };
 
-    Coordinator::new(ctx)
+    Router::new(ctx)
         .run(Navigation::VoiceStats {
             time_range,
             target_user: Box::new(target_user),
@@ -788,8 +788,8 @@ impl<'a> VoiceStatsController<'a> {
 }
 
 #[async_trait::async_trait]
-impl Controller for VoiceStatsController<'_> {
-    async fn run(&mut self, coordinator: std::sync::Arc<Coordinator<'_>>) -> Result<(), Error> {
+impl CommandHandler for VoiceStatsController<'_> {
+    async fn run(&mut self, coordinator: std::sync::Arc<Router<'_>>) -> Result<(), Error> {
         let ctx = *coordinator.context();
         ctx.defer().await?;
 

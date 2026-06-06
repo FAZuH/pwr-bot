@@ -28,7 +28,7 @@ pub async fn list(
     >,
 ) -> Result<(), Error> {
     let sent_into = sent_into.unwrap_or(SendInto::DM);
-    Coordinator::new(ctx)
+    Router::new(ctx)
         .run(Navigation::FeedList(Some(sent_into)))
         .await?;
     Ok(())
@@ -39,8 +39,8 @@ controller! { pub struct FeedListController<'a> {
 } }
 
 #[async_trait::async_trait]
-impl Controller for FeedListController<'_> {
-    async fn run(&mut self, coordinator: std::sync::Arc<Coordinator<'_>>) -> Result<(), Error> {
+impl CommandHandler for FeedListController<'_> {
+    async fn run(&mut self, coordinator: std::sync::Arc<Router<'_>>) -> Result<(), Error> {
         let ctx = *coordinator.context();
         ctx.defer().await?;
 

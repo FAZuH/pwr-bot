@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::bot::command::Context;
 use crate::bot::command::Error;
-use crate::bot::coordinator::Coordinator;
+use crate::bot::coordinator::Router;
 use crate::bot::view::Action;
 use crate::bot::view::ActionRegistry;
 use crate::bot::view::SelectValues;
@@ -45,7 +45,7 @@ pub async fn simulate_click<'a, T, H>(
     ctx: Context<'a>,
     handler: &mut H,
     action: T,
-    coordinator: Arc<Coordinator<'a>>,
+    coordinator: Arc<Router<'a>>,
 ) -> Result<ViewCmd, Error>
 where
     H: ViewHandler<Action = T>,
@@ -67,7 +67,7 @@ pub async fn simulate_select<'a, T, H>(
     handler: &mut H,
     action: T,
     values: SelectValues,
-    coordinator: Arc<Coordinator<'a>>,
+    coordinator: Arc<Router<'a>>,
 ) -> Result<ViewCmd, Error>
 where
     H: ViewHandler<Action = T>,

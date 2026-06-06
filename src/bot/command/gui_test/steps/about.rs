@@ -22,7 +22,7 @@ pub async fn test_about(ctx: Context<'_>) -> Result<(), GuiTestError> {
     assert_has_action(&registry, "❮ Back")
         .map_err(|e| GuiTestError::execution_failed("about render", e))?;
 
-    let coordinator = Coordinator::new(ctx);
+    let coordinator = Router::new(ctx);
     let back_action = assert_has_action(&registry, "❮ Back")
         .map_err(|e| GuiTestError::execution_failed("about", e))?;
     let cmd = simulate_click(ctx, &mut view, back_action, coordinator.clone())

@@ -20,7 +20,7 @@ pub async fn subscribe(
         SendInto,
     >,
 ) -> Result<(), Error> {
-    Coordinator::new(ctx)
+    Router::new(ctx)
         .run(Navigation::FeedSubscribe { links, send_into })
         .await?;
     Ok(())
@@ -32,8 +32,8 @@ controller! { pub struct FeedSubscribeController<'a> {
 } }
 
 #[async_trait::async_trait]
-impl Controller for FeedSubscribeController<'_> {
-    async fn run(&mut self, coordinator: std::sync::Arc<Coordinator<'_>>) -> Result<(), Error> {
+impl CommandHandler for FeedSubscribeController<'_> {
+    async fn run(&mut self, coordinator: std::sync::Arc<Router<'_>>) -> Result<(), Error> {
         let ctx = *coordinator.context();
         ctx.defer().await?;
 

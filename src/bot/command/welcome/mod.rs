@@ -23,9 +23,7 @@ const WELCOME_FILE: &str = "welcome_preview.png";
 /// Configure welcome cards for new members
 #[poise::command(slash_command)]
 pub async fn welcome(ctx: Context<'_>) -> Result<(), Error> {
-    Coordinator::new(ctx)
-        .run(Navigation::SettingsWelcome)
-        .await?;
+    Router::new(ctx).run(Navigation::SettingsWelcome).await?;
     Ok(())
 }
 
@@ -417,8 +415,8 @@ impl<'a> WelcomeSettingsController<'a> {
 }
 
 #[async_trait::async_trait]
-impl Controller for WelcomeSettingsController<'_> {
-    async fn run(&mut self, coordinator: std::sync::Arc<Coordinator<'_>>) -> Result<(), Error> {
+impl CommandHandler for WelcomeSettingsController<'_> {
+    async fn run(&mut self, coordinator: std::sync::Arc<Router<'_>>) -> Result<(), Error> {
         let ctx = *coordinator.context();
         ctx.defer().await?;
 

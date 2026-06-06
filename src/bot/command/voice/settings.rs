@@ -14,15 +14,15 @@ use crate::entity::ServerSettings;
     default_member_permissions = "ADMINISTRATOR | MANAGE_GUILD"
 )]
 pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
-    Coordinator::new(ctx).run(Navigation::SettingsVoice).await?;
+    Router::new(ctx).run(Navigation::SettingsVoice).await?;
     Ok(())
 }
 
 controller! { pub struct VoiceSettingsController<'a> {} }
 
 #[async_trait::async_trait]
-impl Controller for VoiceSettingsController<'_> {
-    async fn run(&mut self, coordinator: std::sync::Arc<Coordinator<'_>>) -> Result<(), Error> {
+impl CommandHandler for VoiceSettingsController<'_> {
+    async fn run(&mut self, coordinator: std::sync::Arc<Router<'_>>) -> Result<(), Error> {
         let ctx = *coordinator.context();
         ctx.defer().await?;
         let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?.get();

@@ -1,19 +1,12 @@
-//! Controller trait for the MVC-C pattern.
+//! Controller trait
 
 use crate::bot::command::Error;
-use crate::bot::coordinator::Coordinator;
+use crate::bot::coordinator::Router;
 
-/// Trait for command controllers that manage state and view lifecycle.
-///
-/// In the MVC-C pattern, a `Controller` is responsible for:
-/// 1. Fetching initial data from services.
-/// 2. Constructing and running a [`ViewEngine`](crate::bot::view::ViewEngine).
-/// 3. Processing view actions and calling services.
-/// 4. Deciding where to navigate next by returning a [`NavigationResult`](crate::bot::navigation::Navigation).
 #[async_trait::async_trait]
-pub trait Controller: Send + Sync {
+pub trait CommandHandler: Send + Sync {
     /// Executes the controller logic.
     ///
     /// The `coordinator` provides access to shared state and navigation.
-    async fn run(&mut self, coordinator: std::sync::Arc<Coordinator<'_>>) -> Result<(), Error>;
+    async fn run(&mut self, coordinator: std::sync::Arc<Router<'_>>) -> Result<(), Error>;
 }

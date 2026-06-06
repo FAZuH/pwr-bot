@@ -25,7 +25,7 @@ use tokio::sync::mpsc;
 
 use crate::bot::command::Context;
 use crate::bot::command::Error;
-use crate::bot::coordinator::Coordinator;
+use crate::bot::coordinator::Router;
 
 /// Type alias for a thread-safe, shared handle to a Discord message.
 type EventMessage<T> = (Option<T>, ViewEvent);
@@ -127,7 +127,7 @@ impl<T: Action> ActionRegistry<T> {
         self.actions.get(id)
     }
 
-    /// Clears all registered actions. Called before re-rendering.
+    /// Clears all registered actions. Called by [`ViewEngine`] before re-rendering.
     pub fn clear(&mut self) {
         self.actions.clear();
     }
@@ -398,7 +398,7 @@ pub struct ViewContext<'a, T: Action> {
     /// Sender for dispatching further events back to the engine loop.
     pub tx: Arc<dyn ViewSender<T>>,
     /// Shared coordinator — provides access to the reply handle and nav state.
-    pub coordinator: Arc<Coordinator<'a>>,
+    pub coordinator: Arc<Router<'a>>,
 }
 
 impl<'a, T: Action + 'static> ViewContext<'a, T> {
@@ -564,7 +564,7 @@ where
     /// Inactivity timeout for the interaction collector.
     timeout: Duration,
     /// Shared handle to the active message.
-    coordinator: Arc<Coordinator<'a>>,
+    coordinator: Arc<Router<'a>>,
 }
 
 impl<'a, T, H> ViewEngine<'a, T, H>
@@ -576,7 +576,7 @@ where
         ctx: Context<'a>,
         handler: H,
         timeout: Duration,
-        coordinator: Arc<Coordinator<'a>>,
+        coordinator: Arc<Router<'a>>,
     ) -> Self {
         Self {
             ctx,

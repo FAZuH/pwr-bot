@@ -89,15 +89,15 @@ impl FeatureRegistry {
 /// Requires server administrator permissions.
 #[poise::command(slash_command)]
 pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
-    Coordinator::new(ctx).run(Navigation::SettingsMain).await?;
+    Router::new(ctx).run(Navigation::SettingsMain).await?;
     Ok(())
 }
 
 controller! { pub struct SettingsMainController<'a> {} }
 
 #[async_trait::async_trait]
-impl Controller for SettingsMainController<'_> {
-    async fn run(&mut self, coordinator: std::sync::Arc<Coordinator<'_>>) -> Result<(), Error> {
+impl CommandHandler for SettingsMainController<'_> {
+    async fn run(&mut self, coordinator: std::sync::Arc<Router<'_>>) -> Result<(), Error> {
         let ctx = *coordinator.context();
         is_author_guild_admin(ctx).await?;
         let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?;

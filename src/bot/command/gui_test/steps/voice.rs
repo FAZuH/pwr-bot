@@ -29,7 +29,7 @@ pub async fn test_voice_leaderboard(ctx: Context<'_>) -> Result<(), GuiTestError
     let registry = extract_actions(&handler);
     let toggle_action = assert_has_action(&registry, "ToggleMode")
         .map_err(|e| GuiTestError::execution_failed("voice_leaderboard render", e))?;
-    let coordinator = Coordinator::new(ctx);
+    let coordinator = Router::new(ctx);
     let cmd = simulate_click(ctx, &mut handler, toggle_action, coordinator.clone())
         .await
         .map_err(|e| GuiTestError::execution_failed("voice_leaderboard toggle", e))?;
@@ -66,7 +66,7 @@ pub async fn test_voice_stats(ctx: Context<'_>) -> Result<(), GuiTestError> {
     let registry = extract_actions(&handler);
     let toggle_action = assert_has_action(&registry, "ToggleDataMode")
         .map_err(|e| GuiTestError::execution_failed("voice_stats render", e))?;
-    let coordinator = Coordinator::new(ctx);
+    let coordinator = Router::new(ctx);
     let cmd = simulate_click(ctx, &mut handler, toggle_action, coordinator.clone())
         .await
         .map_err(|e| GuiTestError::execution_failed("voice_stats toggle", e))?;

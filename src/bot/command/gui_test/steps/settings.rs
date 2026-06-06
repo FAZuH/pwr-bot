@@ -57,7 +57,7 @@ pub async fn test_settings_main(ctx: Context<'_>) -> Result<(), GuiTestError> {
     }
 
     // Test Feeds navigation
-    let coordinator = Coordinator::new(ctx);
+    let coordinator = Router::new(ctx);
     let feeds_action = registry
         .actions
         .values()
@@ -74,7 +74,7 @@ pub async fn test_settings_main(ctx: Context<'_>) -> Result<(), GuiTestError> {
         .map_err(|e| GuiTestError::execution_failed("settings_main nav", e))?;
 
     // Test toggle
-    let coordinator2 = Coordinator::new(ctx);
+    let coordinator2 = Router::new(ctx);
     let toggle_action = registry
         .actions
         .values()
@@ -138,7 +138,7 @@ pub async fn test_feed_settings(ctx: Context<'_>) -> Result<(), GuiTestError> {
 
     // Test toggle enabled
     let initial_enabled = handler.model.is_enabled();
-    let coordinator = Coordinator::new(ctx);
+    let coordinator = Router::new(ctx);
     let cmd = simulate_click(ctx, &mut handler, toggle_action, coordinator.clone())
         .await
         .map_err(|e| GuiTestError::execution_failed("feed_settings toggle", e))?;
@@ -153,7 +153,7 @@ pub async fn test_feed_settings(ctx: Context<'_>) -> Result<(), GuiTestError> {
     }
 
     // Test Back navigation
-    let coordinator2 = Coordinator::new(ctx);
+    let coordinator2 = Router::new(ctx);
     let back_action = assert_has_action(&registry, "❮ Back")
         .map_err(|e| GuiTestError::execution_failed("feed_settings", e))?;
     let cmd = simulate_click(ctx, &mut handler, back_action, coordinator2.clone())
@@ -188,7 +188,7 @@ pub async fn test_voice_settings(ctx: Context<'_>) -> Result<(), GuiTestError> {
         .map_err(|e| GuiTestError::execution_failed("voice_settings render", e))?;
 
     let initial_enabled = handler.settings.voice.enabled.unwrap_or(true);
-    let coordinator = Coordinator::new(ctx);
+    let coordinator = Router::new(ctx);
     let cmd = simulate_click(ctx, &mut handler, toggle_action, coordinator.clone())
         .await
         .map_err(|e| GuiTestError::execution_failed("voice_settings toggle", e))?;

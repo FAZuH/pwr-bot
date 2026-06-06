@@ -45,7 +45,7 @@ pub async fn test_welcome_settings(ctx: Context<'_>) -> Result<(), GuiTestError>
         .map_err(|e| GuiTestError::execution_failed("welcome_settings render", e))?;
 
     let initial_enabled = handler.model.is_enabled();
-    let coordinator = Coordinator::new(ctx);
+    let coordinator = Router::new(ctx);
     let cmd = simulate_click(ctx, &mut handler, toggle_action, coordinator.clone())
         .await
         .map_err(|e| GuiTestError::execution_failed("welcome_settings toggle", e))?;

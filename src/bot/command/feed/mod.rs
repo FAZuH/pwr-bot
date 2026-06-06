@@ -118,7 +118,7 @@ impl From<UnsubscribeResult> for String {
 
 /// Processes a batch of subscription/unsubscription operations.
 async fn process_subscription_batch(
-    coordinator: Arc<Coordinator<'_>>,
+    coordinator: Arc<Router<'_>>,
     urls: &[&str],
     subscriber: &SubscriberEntity,
     is_subscribe: bool,

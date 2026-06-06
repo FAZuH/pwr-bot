@@ -54,7 +54,7 @@ pub async fn test_feed_list_empty(ctx: Context<'_>) -> Result<(), GuiTestError> 
     // Click Edit -> should switch to edit mode
     let edit_action = assert_has_action(&registry, "✎ Edit Subscriptions")
         .map_err(|e| GuiTestError::execution_failed("feed_list_empty", e))?;
-    let coordinator = Coordinator::new(ctx);
+    let coordinator = Router::new(ctx);
     let cmd = simulate_click(ctx, &mut handler, edit_action, coordinator.clone())
         .await
         .map_err(|e| GuiTestError::execution_failed("feed_list_empty edit", e))?;

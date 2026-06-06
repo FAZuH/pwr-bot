@@ -11,10 +11,10 @@ use crate::bot::command::prelude::*;
 /// Show information about the bot
 #[poise::command(slash_command)]
 pub async fn about(ctx: Context<'_>) -> Result<(), Error> {
-    invoke(Coordinator::new(ctx)).await
+    invoke(Router::new(ctx)).await
 }
 
-pub async fn invoke(coordinator: Arc<Coordinator<'_>>) -> Result<(), Error> {
+pub async fn invoke(coordinator: Arc<Router<'_>>) -> Result<(), Error> {
     coordinator.run(Navigation::SettingsAbout).await?;
     Ok(())
 }
@@ -22,8 +22,8 @@ pub async fn invoke(coordinator: Arc<Coordinator<'_>>) -> Result<(), Error> {
 controller! { pub struct AboutController<'a> {} }
 
 #[async_trait::async_trait]
-impl Controller for AboutController<'_> {
-    async fn run(&mut self, coordinator: Arc<Coordinator<'_>>) -> Result<(), Error> {
+impl CommandHandler for AboutController<'_> {
+    async fn run(&mut self, coordinator: Arc<Router<'_>>) -> Result<(), Error> {
         let ctx = *coordinator.context();
         ctx.defer().await?;
 
