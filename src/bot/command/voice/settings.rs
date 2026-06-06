@@ -18,10 +18,10 @@ pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-handler! { pub struct VoiceSettingsController<'a> {} }
+handler! { pub struct VoiceSettingsHandler<'a> {} }
 
 #[async_trait::async_trait]
-impl CommandHandler for VoiceSettingsController<'_> {
+impl CommandHandler for VoiceSettingsHandler<'_> {
     async fn run(&mut self, coordinator: std::sync::Arc<Router<'_>>) -> Result<(), Error> {
         let ctx = *coordinator.context();
         ctx.defer().await?;

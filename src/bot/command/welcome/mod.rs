@@ -67,7 +67,7 @@ impl SettingsWelcomeHandler {
             .update_server_settings(self.guild_id, self.settings.clone())
             .await?;
         self.current_image_bytes =
-            WelcomeSettingsController::generate_preview_from(&self.settings, &self.generator).await;
+            WelcomeSettingsHandler::generate_preview_from(&self.settings, &self.generator).await;
         Ok(())
     }
 
@@ -368,14 +368,12 @@ impl ViewRender for SettingsWelcomeHandler {
     }
 }
 
-// ── Controller ───────────────────────────────────────────────────────────────
+// ── Handler ───────────────────────────────────────────────────────────────
 
-handler! { pub struct WelcomeSettingsController<'a> {} }
+handler! { pub struct WelcomeSettingsHandler<'a> {} }
 
-impl<'a> WelcomeSettingsController<'a> {
+impl<'a> WelcomeSettingsHandler<'a> {
     /// Generates a welcome card preview given settings and generator.
-    /// Extracted as a free helper so both the controller (initial render)
-    /// and the handler (after each mutation) can call it.
     pub async fn generate_preview_from(
         settings: &ServerSettings,
         generator: &WelcomeImageGenerator,
@@ -415,7 +413,7 @@ impl<'a> WelcomeSettingsController<'a> {
 }
 
 #[async_trait::async_trait]
-impl CommandHandler for WelcomeSettingsController<'_> {
+impl CommandHandler for WelcomeSettingsHandler<'_> {
     async fn run(&mut self, coordinator: std::sync::Arc<Router<'_>>) -> Result<(), Error> {
         let ctx = *coordinator.context();
         ctx.defer().await?;

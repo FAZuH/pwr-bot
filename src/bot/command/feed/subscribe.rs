@@ -26,13 +26,13 @@ pub async fn subscribe(
     Ok(())
 }
 
-handler! { pub struct FeedSubscribeController<'a> {
+handler! { pub struct FeedSubscribeHandler<'a> {
     links: String,
     send_into: Option<SendInto>,
 } }
 
 #[async_trait::async_trait]
-impl CommandHandler for FeedSubscribeController<'_> {
+impl CommandHandler for FeedSubscribeHandler<'_> {
     async fn run(&mut self, coordinator: std::sync::Arc<Router<'_>>) -> Result<(), Error> {
         let ctx = *coordinator.context();
         ctx.defer().await?;

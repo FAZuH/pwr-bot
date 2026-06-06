@@ -3,7 +3,7 @@
 use crate::bot::command::feed::settings::SettingsFeedHandler;
 use crate::bot::command::prelude::*;
 use crate::bot::command::settings::SettingsMainAction;
-use crate::bot::command::settings::SettingsMainHandler;
+use crate::bot::command::settings::SettingsMainView;
 use crate::bot::command::voice::settings::SettingsVoiceHandler;
 use crate::bot::test_framework::GuiTestError;
 use crate::bot::test_framework::assert::assert_eq_cmd;
@@ -45,12 +45,12 @@ pub async fn settings_main(ctx: Context<'_>) -> Result<(), GuiTestError> {
         entity.settings.0.welcome.enabled.unwrap_or(false),
     );
 
-    let mut handler = SettingsMainHandler {
+    let mut view = SettingsMainView {
         settings: entity,
         model,
     };
 
-    let registry = extract_actions(&handler);
+    let registry = extract_actions(&view);
     for label in ["Feeds", "Voice", "Welcome", "🛈 About"] {
         assert_has_action(&registry, label)
             .map_err(|e| GuiTestError::execution_failed("settings_main render", e))?;
@@ -64,7 +64,7 @@ pub async fn settings_main(ctx: Context<'_>) -> Result<(), GuiTestError> {
         .find(|a| a.label() == "Feeds")
         .cloned()
         .unwrap();
-    let cmd = simulate_click(ctx, &mut handler, feeds_action, coordinator.clone())
+    let cmd = simulate_click(ctx, &mut view, feeds_action, coordinator.clone())
         .await
         .map_err(|e| GuiTestError::execution_failed("settings_main feeds", e))?;
     assert_eq_cmd(cmd, ViewCmd::Exit, "settings_main feeds click")
@@ -81,10 +81,10 @@ pub async fn settings_main(ctx: Context<'_>) -> Result<(), GuiTestError> {
         .find(|a| matches!(a, SettingsMainAction::ToggleFeature))
         .cloned()
         .unwrap();
-    let initial_feeds = handler.model.feeds_enabled;
+    let initial_feeds = view.model.feeds_enabled;
     let cmd = simulate_select(
         ctx,
-        &mut handler,
+        &mut view,
         toggle_action,
         SelectValues::String(vec!["Feeds".to_string()]),
         coordinator2.clone(),
@@ -93,7 +93,7 @@ pub async fn settings_main(ctx: Context<'_>) -> Result<(), GuiTestError> {
     .map_err(|e| GuiTestError::execution_failed("settings_main toggle", e))?;
     assert_eq_cmd(cmd, ViewCmd::Render, "settings_main toggle")
         .map_err(|e| GuiTestError::execution_failed("settings_main toggle", e))?;
-    if handler.model.feeds_enabled == initial_feeds {
+    if view.model.feeds_enabled == initial_feeds {
         return Err(GuiTestError::assertion_failed(
             "settings_main toggle",
             !initial_feeds,

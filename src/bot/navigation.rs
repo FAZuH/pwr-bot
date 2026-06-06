@@ -1,6 +1,6 @@
 //! Navigation system for bot command router.
 //!
-//! Provides unified navigation enum for cross-domain controller navigation.
+//! Provides unified navigation enum for cross-domain handler navigation.
 
 use poise::serenity_prelude::User;
 
@@ -9,9 +9,9 @@ use crate::bot::command::voice::GuildStatType;
 use crate::bot::command::voice::VoiceLeaderboardTimeRange;
 use crate::bot::command::voice::VoiceStatsTimeRange;
 
-/// Result type for controller navigation.
+/// Result type for handler navigation.
 ///
-/// Controllers return this enum to indicate where the coordinator should
+/// Handlers return this enum to indicate where the coordinator should
 /// navigate next. Each domain (Settings, Feed, Voice) has its own section.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Navigation {
@@ -56,7 +56,7 @@ pub enum Navigation {
     },
 
     // -- Universal navigation --
-    /// Go back to previous controller (uses coordinator's stack)
+    /// Go back to previous handler
     Back,
     /// Exit current coordinator session
     Exit,

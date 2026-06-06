@@ -34,12 +34,12 @@ pub async fn list(
     Ok(())
 }
 
-handler! { pub struct FeedListController<'a> {
+handler! { pub struct FeedListHandler<'a> {
     send_into: SendInto
 } }
 
 #[async_trait::async_trait]
-impl CommandHandler for FeedListController<'_> {
+impl CommandHandler for FeedListHandler<'_> {
     async fn run(&mut self, coordinator: std::sync::Arc<Router<'_>>) -> Result<(), Error> {
         let ctx = *coordinator.context();
         ctx.defer().await?;
@@ -52,7 +52,7 @@ impl CommandHandler for FeedListController<'_> {
             .list_paginated_subscriptions(&subscriber, 1u32, SUBSCRIPTIONS_PER_PAGE)
             .await?;
 
-        let view = FeedListHandler {
+        let view = FeedListView {
             subscriptions,
             model: FeedListModel::new(SUBSCRIPTIONS_PER_PAGE),
             service: service.clone(),
@@ -67,14 +67,14 @@ impl CommandHandler for FeedListController<'_> {
     }
 }
 
-pub struct FeedListHandler {
+pub struct FeedListView {
     pub subscriptions: Vec<Subscription>,
     pub model: FeedListModel,
     pub service: std::sync::Arc<dyn FeedSubscriptionProvider>,
     pub subscriber: SubscriberEntity,
 }
 
-impl FeedListHandler {
+impl FeedListView {
     /// Creates an empty state view.
     fn create_empty<'b>() -> Vec<CreateComponent<'b>> {
         vec![CreateComponent::Container(CreateContainer::new(vec![
@@ -174,11 +174,11 @@ impl FeedListHandler {
     }
 }
 
-impl ViewRender for FeedListHandler {
+impl ViewRender for FeedListView {
     type Action = FeedListAction;
     fn render(&self, registry: &mut ActionRegistry<FeedListAction>) -> ResponseKind<'_> {
         if self.subscriptions.is_empty() {
-            return FeedListHandler::create_empty().into();
+            return FeedListView::create_empty().into();
         }
 
         let sections: Vec<CreateContainerComponent<'_>> = self
@@ -216,7 +216,7 @@ action_extends! { FeedListAction extends PaginationAction {
 }}
 
 #[async_trait::async_trait]
-impl ViewHandler for FeedListHandler {
+impl ViewHandler for FeedListView {
     type Action = FeedListAction;
     async fn handle(&mut self, ctx: ViewContext<'_, FeedListAction>) -> Result<ViewCmd, Error> {
         use FeedListAction::*;

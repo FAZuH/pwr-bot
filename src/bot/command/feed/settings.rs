@@ -23,10 +23,10 @@ pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-handler! { pub struct FeedSettingsController<'a> {} }
+handler! { pub struct FeedSettingsHandler<'a> {} }
 
 #[async_trait::async_trait]
-impl CommandHandler for FeedSettingsController<'_> {
+impl CommandHandler for FeedSettingsHandler<'_> {
     async fn run(&mut self, coordinator: std::sync::Arc<Router<'_>>) -> Result<(), Error> {
         let ctx = *coordinator.context();
         ctx.defer().await?;

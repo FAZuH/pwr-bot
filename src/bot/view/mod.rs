@@ -1,7 +1,7 @@
 //! Discord Components V2 view system.
 //!
 //! Provides traits and utilities for building interactive UI components using a
-//! View-Controller pattern. This system manages the lifecycle of Discord message
+//! View-Handler pattern. This system manages the lifecycle of Discord message
 //! components (buttons, select menus) and handles user interactions via an event loop.
 //!
 //! ### Architecture Overview

@@ -31,16 +31,16 @@ use poise::Command;
 use poise::ReplyHandle;
 
 use crate::bot::Data;
-use crate::bot::command::about::AboutHandler as AboutHandler;
-use crate::bot::command::feed::list::FeedListController;
-use crate::bot::command::feed::settings::FeedSettingsController;
-use crate::bot::command::feed::subscribe::FeedSubscribeController;
-use crate::bot::command::feed::unsubscribe::FeedUnsubscribeController;
-use crate::bot::command::settings::SettingsMainController;
-use crate::bot::command::voice::leaderboard::VoiceLeaderboardController;
-use crate::bot::command::voice::settings::VoiceSettingsController;
-use crate::bot::command::voice::stats::VoiceStatsController;
-use crate::bot::command::welcome::WelcomeSettingsController;
+use crate::bot::command::about::AboutHandler;
+use crate::bot::command::feed::list::FeedListHandler;
+use crate::bot::command::feed::settings::FeedSettingsHandler;
+use crate::bot::command::feed::subscribe::FeedSubscribeHandler;
+use crate::bot::command::feed::unsubscribe::FeedUnsubscribeHandler;
+use crate::bot::command::settings::SettingsMainHandler;
+use crate::bot::command::voice::leaderboard::VoiceLeaderboardHandler;
+use crate::bot::command::voice::settings::VoiceSettingsHandler;
+use crate::bot::command::voice::stats::VoiceStatsHandler;
+use crate::bot::command::welcome::WelcomeSettingsHandler;
 use crate::bot::navigation::Navigation;
 
 /// Trait for command modules (Cogs) that provide a set of Discord commands.
@@ -80,7 +80,7 @@ pub const MAX_NAV_HISTORY: usize = 10;
 type SyncReplyHandle<'a> = tokio::sync::Mutex<Option<ReplyHandle<'a>>>;
 type NavHistory = tokio::sync::Mutex<VecDeque<Navigation>>;
 
-/// Orchestrator for controller navigation and shared state.
+/// Orchestrator for command navigation.
 ///
 /// The `Coordinator` owns the Poise command context
 /// It maintains a history of [`Navigation`]s to support "Back" navigation.
@@ -134,12 +134,12 @@ impl<'a> Router<'a> {
 
     /// Starts the navigation loop with an initial destination.
     ///
-    /// The loop continues as long as controllers return [`Navigation`]s,
+    /// The loop continues as long as handlers return [`Navigation`]s,
     /// stopping when [`Navigation::Exit`] is reached or the history stack is empty.
     pub async fn run(self: Arc<Self>, initial: Navigation) -> Result<(), Error> {
         self.navigate(initial).await;
-        while let Some(mut controller) = self.next_controller().await {
-            controller.run(self.clone()).await?;
+        while let Some(mut handler) = self.next_handler().await {
+            handler.run(self.clone()).await?;
         }
         Ok(())
     }
@@ -149,37 +149,35 @@ impl<'a> Router<'a> {
         self.nav_queue.lock().await.pop_back()
     }
 
-    /// Instantiates the next controller based on the current navigation state.
-    async fn next_controller(&self) -> Option<Box<dyn CommandHandler + 'a>> {
+    /// Instantiates the next handler based on the current navigation state.
+    async fn next_handler(&self) -> Option<Box<dyn CommandHandler + 'a>> {
         use Navigation::*;
         let ctx = self.ctx;
 
         loop {
             let nav = self.pop_next().await?;
             let res: Box<dyn CommandHandler> = match nav {
-                SettingsMain => Box::new(SettingsMainController::new(ctx)),
-                SettingsFeeds => Box::new(FeedSettingsController::new(ctx)),
-                SettingsVoice => Box::new(VoiceSettingsController::new(ctx)),
-                SettingsWelcome => Box::new(WelcomeSettingsController::new(ctx)),
+                SettingsMain => Box::new(SettingsMainHandler::new(ctx)),
+                SettingsFeeds => Box::new(FeedSettingsHandler::new(ctx)),
+                SettingsVoice => Box::new(VoiceSettingsHandler::new(ctx)),
+                SettingsWelcome => Box::new(WelcomeSettingsHandler::new(ctx)),
                 SettingsAbout => Box::new(AboutHandler::new(ctx)),
-                FeedSubscriptions { send_into } => {
-                    Box::new(FeedListController::new(ctx, send_into?))
-                }
+                FeedSubscriptions { send_into } => Box::new(FeedListHandler::new(ctx, send_into?)),
                 FeedSubscribe { links, send_into } => {
-                    Box::new(FeedSubscribeController::new(ctx, links, send_into))
+                    Box::new(FeedSubscribeHandler::new(ctx, links, send_into))
                 }
                 FeedUnsubscribe { links, send_into } => {
-                    Box::new(FeedUnsubscribeController::new(ctx, links, send_into))
+                    Box::new(FeedUnsubscribeHandler::new(ctx, links, send_into))
                 }
-                FeedList(send_into) => Box::new(FeedListController::new(ctx, send_into?)),
+                FeedList(send_into) => Box::new(FeedListHandler::new(ctx, send_into?)),
                 VoiceLeaderboard { time_range } => {
-                    Box::new(VoiceLeaderboardController::new(ctx, time_range))
+                    Box::new(VoiceLeaderboardHandler::new(ctx, time_range))
                 }
                 VoiceStats {
                     time_range,
                     target_user,
                     stat_type,
-                } => Box::new(VoiceStatsController::new(
+                } => Box::new(VoiceStatsHandler::new(
                     ctx,
                     time_range,
                     *target_user,
@@ -195,7 +193,7 @@ impl<'a> Router<'a> {
 
 #[async_trait::async_trait]
 pub trait CommandHandler: Send + Sync {
-    /// Executes the controller logic.
+    /// Executes the handler logic.
     ///
     /// The `coordinator` provides access to shared state and navigation.
     async fn run(&mut self, coordinator: std::sync::Arc<Router<'_>>) -> Result<(), Error>;

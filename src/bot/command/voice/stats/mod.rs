@@ -220,7 +220,7 @@ impl VoiceStatsData {
     }
 }
 
-pub struct VoiceStatsHandler {
+pub struct VoiceStatsView {
     pub model: VoiceStatsModel,
     pub data: VoiceStatsData,
     pub image_bytes: Option<Vec<u8>>,
@@ -229,7 +229,7 @@ pub struct VoiceStatsHandler {
     pub user: User,
 }
 
-impl VoiceStatsHandler {
+impl VoiceStatsView {
     pub(crate) fn new(
         data: VoiceStatsData,
         service: std::sync::Arc<dyn VoiceTracker>,
@@ -469,7 +469,7 @@ impl VoiceStatsHandler {
 }
 
 #[async_trait::async_trait]
-impl ViewHandler for VoiceStatsHandler {
+impl ViewHandler for VoiceStatsView {
     type Action = VoiceStatsAction;
     async fn handle(&mut self, ctx: ViewContext<'_, VoiceStatsAction>) -> Result<ViewCmd, Error> {
         use VoiceStatsAction::*;
@@ -554,7 +554,7 @@ impl ViewHandler for VoiceStatsHandler {
     }
 }
 
-impl ViewRender for VoiceStatsHandler {
+impl ViewRender for VoiceStatsView {
     type Action = VoiceStatsAction;
     fn render(&self, registry: &mut ActionRegistry<VoiceStatsAction>) -> ResponseKind<'_> {
         use VoiceStatsAction::*;
@@ -698,8 +698,8 @@ impl ViewRender for VoiceStatsHandler {
     }
 }
 
-/// Controller for voice stats display and interaction.
-pub struct VoiceStatsController<'a> {
+/// Handler for voice stats display and interaction.
+pub struct VoiceStatsHandler<'a> {
     #[allow(dead_code)]
     ctx: Context<'a>,
     pub time_range: VoiceStatsTimeRange,
@@ -707,8 +707,8 @@ pub struct VoiceStatsController<'a> {
     pub stat_type: GuildStatType,
 }
 
-impl<'a> VoiceStatsController<'a> {
-    /// Creates a new stats controller.
+impl<'a> VoiceStatsHandler<'a> {
+    /// Creates a new stats handler.
     pub fn new(
         ctx: Context<'a>,
         time_range: VoiceStatsTimeRange,
@@ -788,12 +788,12 @@ impl<'a> VoiceStatsController<'a> {
 }
 
 #[async_trait::async_trait]
-impl CommandHandler for VoiceStatsController<'_> {
+impl CommandHandler for VoiceStatsHandler<'_> {
     async fn run(&mut self, coordinator: std::sync::Arc<Router<'_>>) -> Result<(), Error> {
         let ctx = *coordinator.context();
         ctx.defer().await?;
 
-        let controller_start = Instant::now();
+        let start = Instant::now();
 
         // Fetch initial data
         let data = self.fetch_data(&ctx).await?;
@@ -807,7 +807,7 @@ impl CommandHandler for VoiceStatsController<'_> {
             .clone()
             .unwrap_or_else(|| ctx.author().clone());
 
-        let mut view = VoiceStatsHandler::new(
+        let mut view = VoiceStatsView::new(
             data,
             ctx.data().service.voice_tracking.clone(),
             guild_id,
@@ -825,10 +825,7 @@ impl CommandHandler for VoiceStatsController<'_> {
 
         let mut engine = ViewEngine::new(ctx, view, Duration::from_secs(120), coordinator.clone());
 
-        trace!(
-            "stats_controller_initial_response {} ms",
-            controller_start.elapsed().as_millis()
-        );
+        trace!("stats_initial_response {} ms", start.elapsed().as_millis());
 
         engine.run().await?;
 
