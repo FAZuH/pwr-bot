@@ -13,7 +13,7 @@ use crate::bot::test_framework::helpers::simulate_click;
 use crate::bot::view::ViewCmd;
 use crate::update::welcome_settings::WelcomeSettingsModel;
 
-pub async fn test_welcome_settings(ctx: Context<'_>) -> Result<(), GuiTestError> {
+pub async fn welcome_settings(ctx: Context<'_>) -> Result<(), GuiTestError> {
     let guild_id = ctx.guild_id().ok_or(GuiTestError::assertion_failed(
         "welcome_settings",
         "guild context",

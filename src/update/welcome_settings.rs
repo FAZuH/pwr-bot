@@ -140,7 +140,7 @@ mod tests {
     // ── ToggleEnabled ───────────────────────────────────────────────────────
 
     #[test]
-    fn test_toggle_enabled_from_false() {
+    fn toggle_enabled_from_false() {
         let mut model = empty_model();
         assert!(!model.is_enabled());
 
@@ -151,7 +151,7 @@ mod tests {
     }
 
     #[test]
-    fn test_toggle_enabled_from_true() {
+    fn toggle_enabled_from_true() {
         let mut model = empty_model();
         model.settings.enabled = Some(true);
 
@@ -164,7 +164,7 @@ mod tests {
     // ── SetChannel ──────────────────────────────────────────────────────────
 
     #[test]
-    fn test_set_channel() {
+    fn set_channel() {
         let mut model = empty_model();
 
         let cmd = WelcomeSettingsUpdate::update(
@@ -177,7 +177,7 @@ mod tests {
     }
 
     #[test]
-    fn test_set_channel_none() {
+    fn set_channel_none() {
         let mut model = empty_model();
         model.settings.channel_id = Some("123".to_string());
 
@@ -190,7 +190,7 @@ mod tests {
     // ── SetTemplate ─────────────────────────────────────────────────────────
 
     #[test]
-    fn test_set_template() {
+    fn set_template() {
         let mut model = empty_model();
 
         let cmd = WelcomeSettingsUpdate::update(
@@ -205,7 +205,7 @@ mod tests {
     // ── MarkRemoval ─────────────────────────────────────────────────────────
 
     #[test]
-    fn test_mark_removal() {
+    fn mark_removal() {
         let mut model = empty_model();
         let mut indices = HashSet::new();
         indices.insert(1);
@@ -223,7 +223,7 @@ mod tests {
     // ── AddMessage ──────────────────────────────────────────────────────────
 
     #[test]
-    fn test_add_message() {
+    fn add_message() {
         let mut model = empty_model();
 
         let cmd = WelcomeSettingsUpdate::update(
@@ -237,7 +237,7 @@ mod tests {
     }
 
     #[test]
-    fn test_add_message_empty_ignored() {
+    fn add_message_empty_ignored() {
         let mut model = empty_model();
 
         let cmd = WelcomeSettingsUpdate::update(
@@ -250,7 +250,7 @@ mod tests {
     }
 
     #[test]
-    fn test_add_message_cap_at_25() {
+    fn add_message_cap_at_25() {
         let mut model = empty_model();
         model.settings.messages = Some((0..25).map(|i| format!("msg{i}")).collect());
 
@@ -266,7 +266,7 @@ mod tests {
     // ── SetColor ────────────────────────────────────────────────────────────
 
     #[test]
-    fn test_set_color_valid() {
+    fn set_color_valid() {
         let mut model = empty_model();
 
         let cmd = WelcomeSettingsUpdate::update(
@@ -279,7 +279,7 @@ mod tests {
     }
 
     #[test]
-    fn test_set_color_invalid_ignored() {
+    fn set_color_invalid_ignored() {
         let mut model = empty_model();
 
         let cmd = WelcomeSettingsUpdate::update(
@@ -294,7 +294,7 @@ mod tests {
     // ── SaveRemoval ─────────────────────────────────────────────────────────
 
     #[test]
-    fn test_save_removal() {
+    fn save_removal() {
         let mut model = empty_model();
         model.settings.messages = Some(vec![
             "a".to_string(),
@@ -316,7 +316,7 @@ mod tests {
     }
 
     #[test]
-    fn test_save_removal_empty_messages() {
+    fn save_removal_empty_messages() {
         let mut model = empty_model();
         model.marked_removal.insert(0);
 
@@ -330,7 +330,7 @@ mod tests {
     // ── CancelRemoval ───────────────────────────────────────────────────────
 
     #[test]
-    fn test_cancel_removal() {
+    fn cancel_removal() {
         let mut model = empty_model();
         model.marked_removal.insert(1);
         model.marked_removal.insert(2);
@@ -344,7 +344,7 @@ mod tests {
     // ── Model helpers ───────────────────────────────────────────────────────
 
     #[test]
-    fn test_message_count() {
+    fn message_count() {
         let mut model = empty_model();
         assert_eq!(model.message_count(), 0);
 
@@ -353,7 +353,7 @@ mod tests {
     }
 
     #[test]
-    fn test_is_enabled_default() {
+    fn is_enabled_default() {
         let model = empty_model();
         assert!(!model.is_enabled());
     }

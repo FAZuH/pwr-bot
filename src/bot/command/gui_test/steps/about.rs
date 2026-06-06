@@ -10,7 +10,7 @@ use crate::bot::test_framework::assert::assert_navigated_to;
 use crate::bot::test_framework::helpers::extract_actions;
 use crate::bot::test_framework::helpers::simulate_click;
 
-pub async fn test_about(ctx: Context<'_>) -> Result<(), GuiTestError> {
+pub async fn about(ctx: Context<'_>) -> Result<(), GuiTestError> {
     let stats = AboutStats::gather_stats(&ctx)
         .await
         .map_err(|e| GuiTestError::setup_failed("about", e))?;

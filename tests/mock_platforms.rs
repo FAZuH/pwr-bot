@@ -19,7 +19,7 @@ fn get_response(filename: &str) -> String {
 }
 
 #[tokio::test]
-async fn test_anilist_fetch_source() {
+async fn anilist_fetch_source() {
     let server = MockServer::start();
     let mut platform = AniListPlatform::new();
     platform.base.info.api_url = server.url("");
@@ -54,7 +54,7 @@ async fn test_anilist_fetch_source() {
 }
 
 #[tokio::test]
-async fn test_anilist_fetch_latest() {
+async fn anilist_fetch_latest() {
     let server = MockServer::start();
     let mut platform = AniListPlatform::new();
     platform.base.info.api_url = server.url("");
@@ -81,7 +81,7 @@ async fn test_anilist_fetch_latest() {
 }
 
 #[tokio::test]
-async fn test_mangadex_fetch_source() {
+async fn mangadex_fetch_source() {
     let server = MockServer::start();
     let mut platform = MangaDexPlatform::new();
     platform.base.info.api_url = server.url("");
@@ -113,7 +113,7 @@ async fn test_mangadex_fetch_source() {
 }
 
 #[tokio::test]
-async fn test_mangadex_fetch_latest() {
+async fn mangadex_fetch_latest() {
     let server = MockServer::start();
     let mut platform = MangaDexPlatform::new();
     platform.base.info.api_url = server.url("");
@@ -140,7 +140,7 @@ async fn test_mangadex_fetch_latest() {
 }
 
 #[tokio::test]
-async fn test_comick_fetch_source() {
+async fn comick_fetch_source() {
     let server = MockServer::start();
     let mut platform = ComickPlatform::new();
     platform.base.info.api_url = server.url("");
@@ -168,7 +168,7 @@ async fn test_comick_fetch_source() {
 }
 
 #[tokio::test]
-async fn test_comick_fetch_latest() {
+async fn comick_fetch_latest() {
     let server = MockServer::start();
     let mut platform = ComickPlatform::new();
     platform.base.info.api_url = server.url("");

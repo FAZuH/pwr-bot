@@ -167,7 +167,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_feed_interval_calculation() {
+    fn feed_interval_calculation() {
         assert_eq!(
             SeriesFeedPublisher::calculate_feed_interval(10, &Duration::from_secs(60)),
             Duration::from_secs(6)

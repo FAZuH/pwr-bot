@@ -15,7 +15,7 @@ use crate::entity::SubscriberType;
 use crate::service::feed_subscription::Subscription;
 use crate::update::feed_list::FeedListModel;
 
-pub async fn test_feed_list_empty(ctx: Context<'_>) -> Result<(), GuiTestError> {
+pub async fn feed_list_empty(ctx: Context<'_>) -> Result<(), GuiTestError> {
     let subscriber = SubscriberEntity {
         id: 0,
         r#type: SubscriberType::Dm,

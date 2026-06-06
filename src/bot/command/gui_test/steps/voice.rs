@@ -15,7 +15,7 @@ use crate::bot::test_framework::helpers::simulate_click;
 use crate::bot::view::ViewCmd;
 use crate::update::voice_leaderboard::VoiceLeaderboardModel;
 
-pub async fn test_voice_leaderboard(ctx: Context<'_>) -> Result<(), GuiTestError> {
+pub async fn voice_leaderboard(ctx: Context<'_>) -> Result<(), GuiTestError> {
     let guild_id = ctx.guild_id().ok_or(GuiTestError::assertion_failed(
         "voice_leaderboard",
         "guild context",
@@ -39,7 +39,7 @@ pub async fn test_voice_leaderboard(ctx: Context<'_>) -> Result<(), GuiTestError
     Ok(())
 }
 
-pub async fn test_voice_stats(ctx: Context<'_>) -> Result<(), GuiTestError> {
+pub async fn voice_stats(ctx: Context<'_>) -> Result<(), GuiTestError> {
     let guild_id = ctx.guild_id().ok_or(GuiTestError::assertion_failed(
         "voice_stats",
         "guild context",

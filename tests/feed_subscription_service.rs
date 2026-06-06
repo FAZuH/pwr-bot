@@ -18,7 +18,7 @@ mod common;
 
 #[serial_test::serial]
 #[tokio::test]
-async fn test_get_or_create_subscriber() {
+async fn get_or_create_subscriber() {
     let db = common::setup_db().await;
     let feeds = Arc::new(Platforms::new());
     let service = FeedSubscriptionService::new(
@@ -56,7 +56,7 @@ async fn test_get_or_create_subscriber() {
 
 #[serial_test::serial]
 #[tokio::test]
-async fn test_get_or_create_feed() {
+async fn get_or_create_feed() {
     let db = common::setup_db().await;
 
     // Setup Mock Feed
@@ -141,7 +141,7 @@ async fn test_get_or_create_feed() {
 
 #[serial_test::serial]
 #[tokio::test]
-async fn test_server_settings_service() {
+async fn server_settings_service() {
     let db = common::setup_db().await;
     let feeds = Arc::new(Platforms::new());
     let service = FeedSubscriptionService::new(
@@ -200,7 +200,7 @@ async fn test_server_settings_service() {
 
 #[serial_test::serial]
 #[tokio::test]
-async fn test_list_paginated_subscriptions_optimization() {
+async fn list_paginated_subscriptions_optimization() {
     let db = common::setup_db().await;
     let feeds_platform = Arc::new(Platforms::new());
 

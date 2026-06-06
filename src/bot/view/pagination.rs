@@ -177,7 +177,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_pagination_new() {
+    fn pagination_new() {
         // Normal case
         let p = PaginationModel::new(10, 5, 1);
         assert_eq!(p.pages, 10);
@@ -199,7 +199,7 @@ mod tests {
     }
 
     #[test]
-    fn test_pagination_navigation() {
+    fn pagination_navigation() {
         let mut p = PaginationModel::new(5, 10, 3);
 
         p.prev_page();

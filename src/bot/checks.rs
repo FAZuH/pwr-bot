@@ -98,7 +98,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_check_permissions_with_required_role() {
+    fn check_permissions_with_required_role() {
         let role_id = RoleId::new(123);
         let user_roles = vec![role_id];
         let result = check_permissions_inner(&user_roles, &[RoleId::new(123)], true);
@@ -106,7 +106,7 @@ mod tests {
     }
 
     #[test]
-    fn test_check_permissions_without_required_role_fails() {
+    fn check_permissions_without_required_role_fails() {
         let user_roles = vec![RoleId::new(456)];
         let result = check_permissions_inner(&user_roles, &[RoleId::new(123)], true);
         assert!(result.is_err());

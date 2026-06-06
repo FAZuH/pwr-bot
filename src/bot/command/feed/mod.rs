@@ -329,7 +329,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_send_into_to_subscriber_type() {
+    fn send_into_to_subscriber_type() {
         assert!(matches!(
             SubscriberType::from(&SendInto::DM),
             SubscriberType::Dm
@@ -341,19 +341,19 @@ mod tests {
     }
 
     #[test]
-    fn test_send_into_display() {
+    fn send_into_display() {
         assert_eq!(SendInto::DM.to_string(), "dm");
         assert_eq!(SendInto::Server.to_string(), "server");
     }
 
     #[test]
-    fn test_get_target_id_dm_returns_author_id() {
+    fn get_target_id_dm_returns_author_id() {
         let result = get_target_id(Some(GuildId::new(999)), UserId::new(12345), &SendInto::DM);
         assert_eq!(result.unwrap(), "12345");
     }
 
     #[test]
-    fn test_get_target_id_server_returns_guild_id() {
+    fn get_target_id_server_returns_guild_id() {
         let result = get_target_id(
             Some(GuildId::new(999)),
             UserId::new(12345),
@@ -363,7 +363,7 @@ mod tests {
     }
 
     #[test]
-    fn test_get_target_id_server_without_guild_fails() {
+    fn get_target_id_server_without_guild_fails() {
         let result = get_target_id(None, UserId::new(12345), &SendInto::Server);
         assert!(result.is_err());
         match result.unwrap_err() {

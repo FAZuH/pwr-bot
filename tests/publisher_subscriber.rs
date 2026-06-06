@@ -21,7 +21,7 @@ mod common;
 
 #[serial_test::serial]
 #[tokio::test]
-async fn test_subscription_and_publishing() {
+async fn subscription_and_publishing() {
     let db = common::setup_db().await;
     let event_bus = Arc::new(EventBus::new());
 

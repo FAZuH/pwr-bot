@@ -127,7 +127,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_edit_sets_state() {
+    fn edit_sets_state() {
         let mut model = FeedListModel::new(10);
         assert_eq!(model.state, FeedListViewState::View);
 
@@ -138,7 +138,7 @@ mod tests {
     }
 
     #[test]
-    fn test_view_sets_state() {
+    fn view_sets_state() {
         let mut model = FeedListModel::new(10);
         model.state = FeedListViewState::Edit;
 
@@ -149,7 +149,7 @@ mod tests {
     }
 
     #[test]
-    fn test_toggle_unsub_adds() {
+    fn toggle_unsub_adds() {
         let mut model = FeedListModel::new(10);
 
         let cmd = FeedListUpdate::update(
@@ -164,7 +164,7 @@ mod tests {
     }
 
     #[test]
-    fn test_toggle_unsub_removes() {
+    fn toggle_unsub_removes() {
         let mut model = FeedListModel::new(10);
         model.marked_unsub.insert("https://example.com".to_string());
 
@@ -180,7 +180,7 @@ mod tests {
     }
 
     #[test]
-    fn test_save_with_marked_returns_save_cmd() {
+    fn save_with_marked_returns_save_cmd() {
         let mut model = FeedListModel::new(10);
         model.state = FeedListViewState::Edit;
         model.marked_unsub.insert("https://a.com".to_string());
@@ -201,7 +201,7 @@ mod tests {
     }
 
     #[test]
-    fn test_save_empty_returns_refetch() {
+    fn save_empty_returns_refetch() {
         let mut model = FeedListModel::new(10);
         model.state = FeedListViewState::Edit;
 
@@ -212,7 +212,7 @@ mod tests {
     }
 
     #[test]
-    fn test_pagination_first() {
+    fn pagination_first() {
         let mut model = FeedListModel::new(10);
         model.current_page = 5;
 
@@ -224,7 +224,7 @@ mod tests {
     }
 
     #[test]
-    fn test_pagination_prev() {
+    fn pagination_prev() {
         let mut model = FeedListModel::new(10);
         model.current_page = 3;
 
@@ -236,7 +236,7 @@ mod tests {
     }
 
     #[test]
-    fn test_pagination_prev_does_not_go_below_one() {
+    fn pagination_prev_does_not_go_below_one() {
         let mut model = FeedListModel::new(10);
         model.current_page = 1;
 
@@ -248,7 +248,7 @@ mod tests {
     }
 
     #[test]
-    fn test_model_new_defaults() {
+    fn model_new_defaults() {
         let model = FeedListModel::new(10);
         assert_eq!(model.state, FeedListViewState::View);
         assert!(model.marked_unsub.is_empty());
