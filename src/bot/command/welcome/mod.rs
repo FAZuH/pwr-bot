@@ -370,7 +370,7 @@ impl ViewRender for SettingsWelcomeHandler {
 
 // ── Controller ───────────────────────────────────────────────────────────────
 
-controller! { pub struct WelcomeSettingsController<'a> {} }
+handler! { pub struct WelcomeSettingsController<'a> {} }
 
 impl<'a> WelcomeSettingsController<'a> {
     /// Generates a welcome card preview given settings and generator.

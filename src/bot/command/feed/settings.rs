@@ -23,7 +23,7 @@ pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-controller! { pub struct FeedSettingsController<'a> {} }
+handler! { pub struct FeedSettingsController<'a> {} }
 
 #[async_trait::async_trait]
 impl CommandHandler for FeedSettingsController<'_> {

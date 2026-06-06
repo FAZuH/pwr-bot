@@ -26,7 +26,7 @@ pub async fn unsubscribe(
     Ok(())
 }
 
-controller! { pub struct FeedUnsubscribeController<'a> {
+handler! { pub struct FeedUnsubscribeController<'a> {
     links: String,
     send_into: Option<SendInto>,
 } }

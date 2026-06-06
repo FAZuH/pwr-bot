@@ -93,7 +93,7 @@ pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-controller! { pub struct SettingsMainController<'a> {} }
+handler! { pub struct SettingsMainController<'a> {} }
 
 #[async_trait::async_trait]
 impl CommandHandler for SettingsMainController<'_> {

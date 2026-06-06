@@ -18,7 +18,7 @@ pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-controller! { pub struct VoiceSettingsController<'a> {} }
+handler! { pub struct VoiceSettingsController<'a> {} }
 
 #[async_trait::async_trait]
 impl CommandHandler for VoiceSettingsController<'_> {

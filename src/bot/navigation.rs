@@ -1,4 +1,4 @@
-//! Navigation system for the MVC-C pattern.
+//! Navigation system for bot command router.
 //!
 //! Provides unified navigation enum for cross-domain controller navigation.
 

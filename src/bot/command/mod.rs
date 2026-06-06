@@ -31,7 +31,7 @@ use poise::Command;
 use poise::ReplyHandle;
 
 use crate::bot::Data;
-use crate::bot::command::about::AboutController;
+use crate::bot::command::about::AboutHandler as AboutHandler;
 use crate::bot::command::feed::list::FeedListController;
 use crate::bot::command::feed::settings::FeedSettingsController;
 use crate::bot::command::feed::subscribe::FeedSubscribeController;
@@ -161,7 +161,7 @@ impl<'a> Router<'a> {
                 SettingsFeeds => Box::new(FeedSettingsController::new(ctx)),
                 SettingsVoice => Box::new(VoiceSettingsController::new(ctx)),
                 SettingsWelcome => Box::new(WelcomeSettingsController::new(ctx)),
-                SettingsAbout => Box::new(AboutController::new(ctx)),
+                SettingsAbout => Box::new(AboutHandler::new(ctx)),
                 FeedSubscriptions { send_into } => {
                     Box::new(FeedListController::new(ctx, send_into?))
                 }

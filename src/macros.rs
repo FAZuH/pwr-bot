@@ -104,7 +104,7 @@ macro_rules! with_data {
 /// }
 /// ```
 #[macro_export]
-macro_rules! controller {
+macro_rules! handler {
     (
         $(#[$meta:meta])*
         $vis:vis struct $name:ident<$lt:lifetime> {

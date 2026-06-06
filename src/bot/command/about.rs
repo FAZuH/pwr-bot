@@ -19,10 +19,10 @@ pub async fn invoke(coordinator: Arc<Router<'_>>) -> Result<(), Error> {
     Ok(())
 }
 
-controller! { pub struct AboutController<'a> {} }
+handler! { pub struct AboutHandler<'a> {} }
 
 #[async_trait::async_trait]
-impl CommandHandler for AboutController<'_> {
+impl CommandHandler for AboutHandler<'_> {
     async fn run(&mut self, coordinator: Arc<Router<'_>>) -> Result<(), Error> {
         let ctx = *coordinator.context();
         ctx.defer().await?;

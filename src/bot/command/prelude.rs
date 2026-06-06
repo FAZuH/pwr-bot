@@ -17,5 +17,5 @@ pub use crate::bot::view::Action;
 pub use crate::bot::view::pagination::PaginationAction;
 pub use crate::bot::view::pagination::PaginationView;
 pub use crate::bot::view::*;
-pub use crate::controller;
+pub use crate::handler;
 pub use crate::error::AppError;

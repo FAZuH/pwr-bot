@@ -26,7 +26,7 @@ pub async fn subscribe(
     Ok(())
 }
 
-controller! { pub struct FeedSubscribeController<'a> {
+handler! { pub struct FeedSubscribeController<'a> {
     links: String,
     send_into: Option<SendInto>,
 } }

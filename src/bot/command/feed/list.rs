@@ -34,7 +34,7 @@ pub async fn list(
     Ok(())
 }
 
-controller! { pub struct FeedListController<'a> {
+handler! { pub struct FeedListController<'a> {
     send_into: SendInto
 } }
 
