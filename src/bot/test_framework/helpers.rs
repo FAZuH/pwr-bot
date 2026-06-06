@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::bot::command::Context;
 use crate::bot::command::Error;
-use crate::bot::coordinator::Router;
+use crate::bot::command::prelude::Router;
 use crate::bot::view::Action;
 use crate::bot::view::ActionRegistry;
 use crate::bot::view::SelectValues;

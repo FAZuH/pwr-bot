@@ -1,6 +1,6 @@
 //! Assertion helpers for GUI test steps.
 
-use crate::bot::coordinator::Router;
+use crate::bot::command::prelude::Router;
 use crate::bot::navigation::Navigation;
 use crate::bot::test_framework::GuiTestError;
 use crate::bot::view::Action;

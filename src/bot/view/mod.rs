@@ -25,7 +25,7 @@ use tokio::sync::mpsc;
 
 use crate::bot::command::Context;
 use crate::bot::command::Error;
-use crate::bot::coordinator::Router;
+use crate::bot::command::prelude::Router;
 
 /// Type alias for a thread-safe, shared handle to a Discord message.
 type EventMessage<T> = (Option<T>, ViewEvent);
