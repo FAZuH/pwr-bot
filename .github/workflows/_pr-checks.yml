@@ -39,6 +39,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: "ci"
+          add-job-id-key: false
 
       - name: Install dependencies
         if: ${{ inputs.apt-deps != '' }}

@@ -24,6 +24,10 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          fetch-tags: true
+
+      - name: Fetch All Tags
+        run: git fetch --tags --force origin '+refs/tags/*:refs/tags/*'
 
       - name: Determine version
         id: set-version
@@ -31,7 +35,8 @@ jobs:
           if [ -n "${{ inputs.version }}" ]; then
             VERSION="${{ inputs.version }}"
           else
-            VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo '')
+            LATEST_TAG=$(git tag -l 'v*' --sort=-version:refname | head -1)
+            VERSION="${LATEST_TAG:-}"
             if [ -z "$VERSION" ]; then
               VERSION=$(grep '^version = ' Cargo.toml | head -n1 | sed 's/version = "\(.*\)"/\1/')
             fi
@@ -39,14 +44,96 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Patching version: $VERSION"
 
-      - name: Patch Cargo.toml
+      - name: Patch root Cargo.toml
         run: |
           VERSION=${{ steps.set-version.outputs.version }}
           VERSION=${VERSION#v}
           sed -i "0,/^version = \".*\"/{s/^version = \".*\"/version = \"$VERSION\"/}" Cargo.toml
 
-      - name: Upload patched Cargo.toml
+      - name: Patch workspace members
+        id: workspace
+        run: |
+          if ! grep -q '^\[workspace\]' Cargo.toml; then
+            echo "No workspace section found — skipping member patching"
+            exit 0
+          fi
+
+          VERSION=${{ steps.set-version.outputs.version }}
+          VERSION=${VERSION#v}
+
+          # Find workspace member directories (convention: listed under crates/)
+          MEMBERS=$(find crates -maxdepth 2 -name Cargo.toml -exec dirname {} \; | sed 's|^crates/||' | sort -u)
+          if [ -z "$MEMBERS" ]; then
+            echo "No workspace members found under crates/"
+            exit 0
+          fi
+
+          # Determine previous release tag
+          TAGS=$(git tag -l 'v*' --sort=-version:refname)
+          TAG_COUNT=$(echo "$TAGS" | grep -c . || true)
+          if [ "$TAG_COUNT" -lt 1 ]; then
+            # First release: bump all members
+            CHANGED="$MEMBERS"
+            echo "No previous tag found — bumping all members"
+          else
+            PREV_TAG=$(echo "$TAGS" | head -1)
+            echo "Previous tag: $PREV_TAG"
+
+            # Detect members with file changes since last tag
+            CHANGED=""
+            for member in $MEMBERS; do
+              if git diff --name-only "$PREV_TAG"..HEAD -- "crates/$member/" | grep -q .; then
+                CHANGED="$CHANGED $member"
+              fi
+            done
+
+            # If nothing changed in subcrates, bump the root only
+            if [ -z "$CHANGED" ]; then
+              echo "No member changes detected — root only"
+              exit 0
+            fi
+          fi
+
+          echo "members=$CHANGED" >> "$GITHUB_OUTPUT"
+          echo "Patching changed members: $CHANGED"
+
+          for member in $CHANGED; do
+            CURRENT=$(grep '^version = ' "crates/$member/Cargo.toml" | head -n1 | sed 's/version = "\(.*\)"/\1/')
+            BUMP="patch"
+
+            if [ -n "$PREV_TAG" ]; then
+              while IFS= read -r commit; do
+                if echo "$commit" | grep -q '^chore!(major)'; then
+                  BUMP="major"; break
+                elif echo "$commit" | grep -q '^chore!(minor)'; then
+                  BUMP="minor"
+                fi
+              done < <(git log "$PREV_TAG..HEAD" --no-merges --format="%s" -- "crates/$member/")
+            fi
+
+            MAJOR=$(echo "$CURRENT" | cut -d. -f1)
+            MINOR=$(echo "$CURRENT" | cut -d. -f2)
+            PATCH=$(echo "$CURRENT" | cut -d. -f3)
+            case "$BUMP" in
+              major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+              minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+              patch) PATCH=$((PATCH + 1)) ;;
+            esac
+            MEMBER_VERSION="$MAJOR.$MINOR.$PATCH"
+
+            echo "  crates/$member: $CURRENT -> $MEMBER_VERSION ($BUMP)"
+            sed -i "0,/^version = \".*\"/{s/^version = \".*\"/version = \"$MEMBER_VERSION\"/}" "crates/$member/Cargo.toml"
+
+            if grep -q "^$member = {" Cargo.toml; then
+              echo "  Updating workspace dependency: $member -> $MEMBER_VERSION"
+              sed -i "/^$member = {/,/}/s/version = \"[^\"]*\"/version = \"$MEMBER_VERSION\"/" Cargo.toml
+            fi
+          done
+
+      - name: Upload patched Cargo.tomls
         uses: actions/upload-artifact@v4
         with:
           name: patched-cargo-toml
-          path: Cargo.toml
+          path: |
+            Cargo.toml
+            crates/**/Cargo.toml
