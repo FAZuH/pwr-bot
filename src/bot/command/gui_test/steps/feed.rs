@@ -1,6 +1,6 @@
 //! Test step for the `/feed list` command.
 
-use crate::bot::command::feed::list::FeedListHandler;
+use crate::bot::command::feed::list::FeedListView;
 use crate::bot::command::feed::list::SUBSCRIPTIONS_PER_PAGE;
 use crate::bot::command::prelude::*;
 use crate::bot::test_framework::GuiTestError;
@@ -39,7 +39,7 @@ pub async fn feed_list_empty(ctx: Context<'_>) -> Result<(), GuiTestError> {
         feed_latest: None,
     };
 
-    let mut handler = FeedListHandler {
+    let mut view = FeedListView {
         subscriptions: vec![subscription],
         model: FeedListModel::new(SUBSCRIPTIONS_PER_PAGE),
         service: ctx.data().service.feed_subscription.clone(),
@@ -47,22 +47,22 @@ pub async fn feed_list_empty(ctx: Context<'_>) -> Result<(), GuiTestError> {
     };
 
     // Initial view mode should have Edit button
-    let registry = extract_actions(&handler);
+    let registry = extract_actions(&view);
     assert_has_action(&registry, "✎ Edit Subscriptions")
         .map_err(|e| GuiTestError::execution_failed("feed_list_empty render", e))?;
 
     // Click Edit -> should switch to edit mode
     let edit_action = assert_has_action(&registry, "✎ Edit Subscriptions")
         .map_err(|e| GuiTestError::execution_failed("feed_list_empty", e))?;
-    let coordinator = Coordinator::new(ctx);
-    let cmd = simulate_click(ctx, &mut handler, edit_action, coordinator.clone())
+    let coordinator = Router::new(ctx);
+    let cmd = simulate_click(ctx, &mut view, edit_action, coordinator.clone())
         .await
         .map_err(|e| GuiTestError::execution_failed("feed_list_empty edit", e))?;
     assert_eq_cmd(cmd, ViewCmd::Render, "feed_list_empty edit")
         .map_err(|e| GuiTestError::execution_failed("feed_list_empty edit", e))?;
 
     // Re-render in edit mode — should have View Mode button
-    let registry2 = extract_actions(&handler);
+    let registry2 = extract_actions(&view);
     assert_has_action(&registry2, "👁 View Mode")
         .map_err(|e| GuiTestError::execution_failed("feed_list_empty edit render", e))?;
 

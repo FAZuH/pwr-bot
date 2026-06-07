@@ -89,15 +89,15 @@ impl FeatureRegistry {
 /// Requires server administrator permissions.
 #[poise::command(slash_command)]
 pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
-    Coordinator::new(ctx).run(Navigation::SettingsMain).await?;
+    Router::new(ctx).run(Navigation::SettingsMain).await?;
     Ok(())
 }
 
-controller! { pub struct SettingsMainController<'a> {} }
+handler! { pub struct SettingsMainHandler<'a> {} }
 
 #[async_trait::async_trait]
-impl Controller for SettingsMainController<'_> {
-    async fn run(&mut self, coordinator: std::sync::Arc<Coordinator<'_>>) -> Result<(), Error> {
+impl CommandHandler for SettingsMainHandler<'_> {
+    async fn run(&mut self, coordinator: std::sync::Arc<Router<'_>>) -> Result<(), Error> {
         let ctx = *coordinator.context();
         is_author_guild_admin(ctx).await?;
         let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?;
@@ -119,7 +119,7 @@ impl Controller for SettingsMainController<'_> {
             settings.settings.0.voice.enabled.unwrap_or(false),
             settings.settings.0.welcome.enabled.unwrap_or(false),
         );
-        let view = SettingsMainHandler { settings, model };
+        let view = SettingsMainView { settings, model };
 
         let mut engine = ViewEngine::new(ctx, view, Duration::from_secs(120), coordinator.clone());
 
@@ -142,12 +142,12 @@ impl Controller for SettingsMainController<'_> {
     }
 }
 
-pub struct SettingsMainHandler {
+pub struct SettingsMainView {
     pub settings: ServerSettingsEntity,
     pub model: SettingsMainModel,
 }
 
-impl SettingsMainHandler {
+impl SettingsMainView {
     pub fn settings_mut(&mut self) -> &mut ServerSettings {
         &mut self.settings.settings.0
     }
@@ -174,7 +174,7 @@ impl SettingsMainHandler {
     }
 }
 
-impl ViewRender for SettingsMainHandler {
+impl ViewRender for SettingsMainView {
     type Action = SettingsMainAction;
     fn render(&self, registry: &mut ActionRegistry<SettingsMainAction>) -> ResponseKind<'_> {
         let text_settings = CreateTextDisplay::new("-# **Settings**");
@@ -286,7 +286,7 @@ action_enum! {
 }
 
 #[async_trait::async_trait]
-impl ViewHandler for SettingsMainHandler {
+impl ViewHandler for SettingsMainView {
     type Action = SettingsMainAction;
     async fn handle(&mut self, ctx: ViewContext<'_, SettingsMainAction>) -> Result<ViewCmd, Error> {
         use SettingsMainAction::*;

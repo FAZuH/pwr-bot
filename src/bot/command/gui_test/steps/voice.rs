@@ -4,9 +4,9 @@ use crate::bot::command::prelude::*;
 use crate::bot::command::voice::GuildStatType;
 use crate::bot::command::voice::VoiceStatsTimeRange;
 use crate::bot::command::voice::leaderboard::LEADERBOARD_PER_PAGE;
-use crate::bot::command::voice::leaderboard::VoiceLeaderboardHandler;
+use crate::bot::command::voice::leaderboard::VoiceLeaderboardView;
 use crate::bot::command::voice::stats::VoiceStatsData;
-use crate::bot::command::voice::stats::VoiceStatsHandler;
+use crate::bot::command::voice::stats::VoiceStatsView;
 use crate::bot::test_framework::GuiTestError;
 use crate::bot::test_framework::assert::assert_eq_cmd;
 use crate::bot::test_framework::assert::assert_has_action;
@@ -24,13 +24,13 @@ pub async fn voice_leaderboard(ctx: Context<'_>) -> Result<(), GuiTestError> {
     let author_id = ctx.author().id.get();
 
     let model = VoiceLeaderboardModel::from_entries(vec![], author_id, LEADERBOARD_PER_PAGE);
-    let mut handler = VoiceLeaderboardHandler::new(model, &ctx, guild_id.get(), author_id);
+    let mut view = VoiceLeaderboardView::new(model, &ctx, guild_id.get(), author_id);
 
-    let registry = extract_actions(&handler);
+    let registry = extract_actions(&view);
     let toggle_action = assert_has_action(&registry, "ToggleMode")
         .map_err(|e| GuiTestError::execution_failed("voice_leaderboard render", e))?;
-    let coordinator = Coordinator::new(ctx);
-    let cmd = simulate_click(ctx, &mut handler, toggle_action, coordinator.clone())
+    let coordinator = Router::new(ctx);
+    let cmd = simulate_click(ctx, &mut view, toggle_action, coordinator.clone())
         .await
         .map_err(|e| GuiTestError::execution_failed("voice_leaderboard toggle", e))?;
     assert_eq_cmd(cmd, ViewCmd::Render, "voice_leaderboard toggle")
@@ -56,18 +56,18 @@ pub async fn voice_stats(ctx: Context<'_>) -> Result<(), GuiTestError> {
         raw_sessions: vec![],
     };
 
-    let mut handler = VoiceStatsHandler::new(
+    let mut view = VoiceStatsView::new(
         data,
         ctx.data().service.voice_tracking.clone(),
         guild_id.get(),
         ctx.author().clone(),
     );
 
-    let registry = extract_actions(&handler);
+    let registry = extract_actions(&view);
     let toggle_action = assert_has_action(&registry, "ToggleDataMode")
         .map_err(|e| GuiTestError::execution_failed("voice_stats render", e))?;
-    let coordinator = Coordinator::new(ctx);
-    let cmd = simulate_click(ctx, &mut handler, toggle_action, coordinator.clone())
+    let coordinator = Router::new(ctx);
+    let cmd = simulate_click(ctx, &mut view, toggle_action, coordinator.clone())
         .await
         .map_err(|e| GuiTestError::execution_failed("voice_stats toggle", e))?;
     assert_eq_cmd(cmd, ViewCmd::Render, "voice_stats toggle")

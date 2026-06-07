@@ -19,15 +19,15 @@ use crate::update::feed_settings::FeedSettingsUpdate;
     default_member_permissions = "ADMINISTRATOR | MANAGE_GUILD"
 )]
 pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
-    Coordinator::new(ctx).run(Navigation::SettingsFeeds).await?;
+    Router::new(ctx).run(Navigation::SettingsFeeds).await?;
     Ok(())
 }
 
-controller! { pub struct FeedSettingsController<'a> {} }
+handler! { pub struct FeedSettingsHandler<'a> {} }
 
 #[async_trait::async_trait]
-impl Controller for FeedSettingsController<'_> {
-    async fn run(&mut self, coordinator: std::sync::Arc<Coordinator<'_>>) -> Result<(), Error> {
+impl CommandHandler for FeedSettingsHandler<'_> {
+    async fn run(&mut self, coordinator: std::sync::Arc<Router<'_>>) -> Result<(), Error> {
         let ctx = *coordinator.context();
         ctx.defer().await?;
         let service = ctx.data().service.feed_subscription.clone();

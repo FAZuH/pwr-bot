@@ -39,7 +39,7 @@ pub async fn leaderboard(
     #[description = "Time period to filter voice activity. Defaults to \"This month\""]
     time_range: Option<VoiceLeaderboardTimeRange>,
 ) -> Result<(), Error> {
-    Coordinator::new(ctx)
+    Router::new(ctx)
         .run(Navigation::VoiceLeaderboard {
             time_range: time_range.unwrap_or(VoiceLeaderboardTimeRange::ThisMonth),
         })
@@ -83,15 +83,15 @@ impl Deref for LeaderboardSessionData {
     }
 }
 
-/// Controller for voice leaderboard display and interaction.
-pub struct VoiceLeaderboardController<'a> {
+/// Handler for voice leaderboard display and interaction.
+pub struct VoiceLeaderboardHandler<'a> {
     #[allow(dead_code)]
     ctx: Context<'a>,
     pub time_range: VoiceLeaderboardTimeRange,
 }
 
-impl<'a> VoiceLeaderboardController<'a> {
-    /// Creates a new leaderboard controller.
+impl<'a> VoiceLeaderboardHandler<'a> {
+    /// Creates a new leaderboard handler.
     pub fn new(ctx: Context<'a>, time_range: VoiceLeaderboardTimeRange) -> Self {
         Self { ctx, time_range }
     }
@@ -136,9 +136,9 @@ impl<'a> VoiceLeaderboardController<'a> {
 }
 
 #[async_trait::async_trait]
-impl Controller for VoiceLeaderboardController<'_> {
-    async fn run(&mut self, coordinator: std::sync::Arc<Coordinator<'_>>) -> Result<(), Error> {
-        let controller_start = Instant::now();
+impl CommandHandler for VoiceLeaderboardHandler<'_> {
+    async fn run(&mut self, coordinator: std::sync::Arc<Router<'_>>) -> Result<(), Error> {
+        let start = Instant::now();
 
         let ctx = *coordinator.context();
         ctx.defer().await?;
@@ -149,21 +149,18 @@ impl Controller for VoiceLeaderboardController<'_> {
         let author_id = ctx.author().id.get();
         let model = VoiceLeaderboardModel::from_entries(entries, author_id, LEADERBOARD_PER_PAGE);
 
-        let mut view = VoiceLeaderboardHandler::new(model, &ctx, guild_id, author_id);
+        let mut view = VoiceLeaderboardView::new(model, &ctx, guild_id, author_id);
         view.generate_img().await?;
 
         let mut engine = ViewEngine::new(ctx, view, Duration::from_mins(2), coordinator.clone());
         engine.run().await?;
 
-        trace!(
-            "controller_total {} ms",
-            controller_start.elapsed().as_millis()
-        );
+        trace!("total {} ms", start.elapsed().as_millis());
         Ok(())
     }
 }
 
-pub struct VoiceLeaderboardHandler<'a> {
+pub struct VoiceLeaderboardView<'a> {
     pub model: VoiceLeaderboardModel,
     pub img_builder: LeaderboardImageBuilder<'a>,
     pub lb_img: Option<Vec<u8>>,
@@ -175,7 +172,7 @@ pub struct VoiceLeaderboardHandler<'a> {
     pub pagination: bool,
 }
 
-impl<'a> VoiceLeaderboardHandler<'a> {
+impl<'a> VoiceLeaderboardView<'a> {
     pub fn new(
         model: VoiceLeaderboardModel,
         ctx: &'a Context<'a>,
@@ -244,7 +241,7 @@ impl<'a> VoiceLeaderboardHandler<'a> {
 }
 
 #[async_trait::async_trait]
-impl ViewHandler for VoiceLeaderboardHandler<'_> {
+impl ViewHandler for VoiceLeaderboardView<'_> {
     type Action = VoiceLeaderboardAction;
     async fn handle(
         &mut self,
@@ -317,7 +314,7 @@ impl ViewHandler for VoiceLeaderboardHandler<'_> {
     }
 }
 
-impl ViewRender for VoiceLeaderboardHandler<'_> {
+impl ViewRender for VoiceLeaderboardView<'_> {
     type Action = VoiceLeaderboardAction;
     fn render(&self, registry: &mut ActionRegistry<VoiceLeaderboardAction>) -> ResponseKind<'_> {
         use VoiceLeaderboardAction::*;
