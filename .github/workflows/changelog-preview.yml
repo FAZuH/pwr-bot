@@ -4,17 +4,25 @@ on:
   workflow_dispatch:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+  issue_comment:
+    types: [created]
   merge_group:
     branches: [main, development]
 
 permissions:
   pull-requests: write
+  issues: write
   contents: read
 
 jobs:
   preview:
     name: Preview Changelog
-    if: "! github.event.pull_request.draft"
+    if: |
+      (github.event_name == 'pull_request' && !github.event.pull_request.draft) ||
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'merge_group' ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request &&
+       (contains(github.event.comment.body, '## Override Changelog') || contains(github.event.comment.body, '## Bump')))
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -123,24 +131,19 @@ jobs:
             });
             const parseSections = function (text) {
               const bumps = {};
-              const bumpMatch = text.match(/^## Bump\s*\n([\s\S]*?)(?=^## |\n## |\n\n## |\z)/m);
+              const bumpMatch = text.match(/^## Bump\s*\n([\s\S]*?)(?=(?:^|\n)\s*##(?!#)|(?![\s\S]))/m);
               if (bumpMatch) {
                 bumpMatch[1].split('\n').forEach(function (line) {
                   const parts = line.trim().match(/^([a-z-]+)\s*:\s*(major|minor|patch)$/);
                   if (parts) bumps[parts[1]] = parts[2];
                 });
               }
-              const overrideMatch = text.match(/^## Override Changelog\s*\n([\s\S]*?)(?=^## |\n## |\z)/m);
+              const overrideMatch = text.match(/^## Override Changelog\s*\n([\s\S]*?)(?=(?:^|\n)\s*##(?!#)|(?![\s\S]))/m);
               const cl = overrideMatch ? overrideMatch[1].trim() : null;
               return { bumps, cl };
             };
             for (const comment of prComments.reverse()) {
-              const { data: perm } = await github.rest.repos.getCollaboratorPermissionLevel({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                username: comment.user.login,
-              });
-              if (!['write', 'admin'].includes(perm.permission)) continue;
+              if (!['OWNER', 'MEMBER', 'COLLABORATOR'].includes(comment.author_association)) continue;
               const { bumps, cl } = parseSections(comment.body || '');
               if (Object.keys(bumps).length > 0) bumpOverrides = bumps;
               if (cl) changelog = cl;

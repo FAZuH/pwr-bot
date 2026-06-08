@@ -191,6 +191,20 @@ jobs:
           skip-version-file: true
           skip-git-pull: true
           skip-on-empty: false
+          git-push: false
+
+      - name: Clean stale artifacts and push release
+        run: |
+          git config user.name "faz-bot"
+          git config user.email "mail@fazuh.com"
+          git remote set-url origin "https://x-access-token:${{ secrets.PRIVATE_TOKEN }}@github.com/${{ github.repository }}"
+          TAG="${{ steps.commit.outputs.tag }}"
+          git rm --cached -rf --ignore-unmatch node_modules/ version.json
+          git commit --amend --no-edit
+          if [ -n "$TAG" ]; then
+            git tag -f "$TAG"
+          fi
+          git push origin release --tags
 
       - name: Sync version bump to main
         run: |
@@ -199,7 +213,7 @@ jobs:
           git remote set-url origin "https://x-access-token:${{ secrets.PRIVATE_TOKEN }}@github.com/${{ github.repository }}"
           git fetch origin main
           git checkout -B main origin/main
-          git merge origin/release --no-edit -m "chore(release): sync version bump to main [skip ci]"
+          git merge release --no-edit -m "chore(release): sync version bump to main [skip ci]"
           git push origin main
 
   release-github:
