@@ -5,7 +5,7 @@
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                    Presentation Layer                       │
-│              bot/ — commands, views, controllers            │
+│          bot/ — commands (Router → CommandHandler)          │
 ├─────────────────────────────────────────────────────────────┤
 │                   Application Layer                         │
 │         event/  subscriber/  task/  — cross-cutting         │
@@ -17,7 +17,7 @@
 │           feed/  entity/ — models and platforms             │
 ├─────────────────────────────────────────────────────────────┤
 │                 Infrastructure Layer                        │
-│              repository/ — PostgreSQL via Diesel            │
+│                   repo/ — PostgreSQL via Diesel             │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -42,16 +42,16 @@ Commands are organized by domain. Each top-level module is a command group; subc
 | `unregister.rs` | `/unregister` |
 | `dump_db.rs` | `/dump_db` |
 
-### MVC-C Pattern
+### Router → CommandHandler → View Flow
 
-Interactive commands follow a **Coordinator → Controller → View** flow:
+Interactive commands follow a **Router → CommandHandler → View** flow:
 
-- **`Coordinator`** — receives the Poise context, owns navigation state, drives controllers.
-- **`Controller`** — fetches data via services, constructs views, mediates between view actions and service calls.
-- **`NavigationResult`** — enum signalling the next navigation step (e.g. `Back`, `Exit`, `SettingsMain`).
+- **`Router`** — receives the Poise context, owns navigation state, drives handlers. Defined in `src/bot/command/mod.rs`.
+- **`CommandHandler`** — trait for handler run loops. Each domain has a concrete handler (e.g. `FeedListHandler`, `VoiceStatsHandler`).
+- **`Navigation`** — enum signalling the next navigation step (e.g. `Back`, `Exit`, `SettingsMain`). Defined in `src/bot/navigation.rs`.
 - **`ViewEngine`** — the event loop runner that drives the view life cycle.
 
-### View System (`src/bot/views.rs`)
+### View System (`src/bot/view/mod.rs`)
 
 The view system is built on a trait-based architecture driven by the **ViewEngine**.
 
@@ -59,20 +59,20 @@ The view system is built on a trait-based architecture driven by the **ViewEngin
 |-----------|---------------|
 | `Action` | Trait for enums representing user actions (buttons, select menus). |
 | `ViewRender<T>` | Trait defining how to translate state into Discord UI components. |
-| `ViewHandler<T, S>` | Trait for business logic and state mutations in response to actions. `S` is optional shared state (default `()`). |
+| `ViewHandler` | Trait for business logic and state mutations in response to actions. |
 | `ViewEngine<T, H>` | The event loop runner that multiplexes interactions, async events, and timeouts. |
-| `ViewContext<T>` | Context passed to handlers, containing the event, action, sender, and coordinator. |
+| `ViewContext<T>` | Context passed to handlers, containing the event, action, sender, and router. |
 
 #### View Lifecycle
 
-1. **Initialization**: `ViewEngine::new(ctx, handler, timeout, coordinator)` is created with a handler that implements `ViewRender` and `ViewHandler`.
+1. **Initialization**: `ViewEngine::new(ctx, handler, timeout, router)` is created with a handler that implements `ViewRender` and `ViewHandler`.
 2. **Rendering**: The engine calls `handler.render(&mut registry)` to build the Discord message. The `ActionRegistry::register` method returns a `RegisteredAction` which provides helper methods like `.as_button()` or `.as_select()` to create Discord components.
 3. **Event Loop**: `ViewEngine::run()` starts a `tokio::select!` loop listening for:
    - **Component Interactions**: Matches `custom_id` back to an `Action`.
    - **Async Events**: Dispatched via `ctx.spawn()` or `ctx.tx.send()`.
    - **Modals/Messages**: Can be integrated into the same event stream via `ViewEvent`.
    - **Timeouts**: Triggers `on_timeout()` on the handler.
-4. **Command Processing**: Handlers return a `ViewCommand` to control the loop:
+4. **Command Processing**: Handlers return a `ViewCmd` to control the loop:
    - `Render`: Re-renders the view and updates the message.
    - `RenderOnce`: Renders once and exits immediately (useful for intermediate states).
    - `Continue`: Continues the loop without re-rendering.
@@ -81,7 +81,7 @@ The view system is built on a trait-based architecture driven by the **ViewEngin
 
 #### Delegation Pattern
 
-Child views are integrated using `ctx.map(child_action, ParentAction::Child)`. This creates a sub-context that wraps child actions into parent actions, allowing child views to be handled independently within a parent's `handle` method. This allows composition without the parent needing to know the child's internal state or action structure.
+Child views are integrated using `ctx.map(wrap, ParentAction::Child)`. This creates a `MappedViewSender` that wraps child actions into parent actions, allowing child views to be handled independently within a parent's `handle` method. This allows composition without the parent needing to know the child's internal state or action structure.
 
 ---
 
@@ -119,14 +119,14 @@ React to application events, call services, send Discord messages.
 
 ## Service Layer (`src/service/`)
 
-The only layer that enforces business rules. Controllers call services; services orchestrate repositories and platforms. Nothing above this layer touches data directly.
+The only layer that enforces business rules. Handlers call services; services orchestrate repositories and platforms. Nothing above this layer touches data directly.
 
-| Service | Responsibility |
+| Service (trait) | Responsibility |
 |---------|---------------|
-| `FeedSubscriptionService` | Feed subscription lifecycle — create, delete, list, validate |
-| `VoiceTrackingService` | Voice session lifecycle — start, stop, query stats |
-| `SettingsService` | Server configuration management |
-| `InternalService` | Bot metadata and internal operations |
+| `FeedSubscriptionProvider` | Feed subscription lifecycle — create, delete, list, validate |
+| `VoiceTracker` | Voice session lifecycle — start, stop, query stats |
+| `SettingsProvider` | Server configuration management |
+| `InternalOps` | Bot metadata and internal operations |
 
 ---
 
@@ -142,9 +142,11 @@ Plain domain objects and platform abstractions. Entities have no database concer
 | `FeedItemEntity` | An individual update (chapter, episode) |
 | `SubscriberEntity` | A notification target (guild or DM) |
 | `FeedSubscriptionEntity` | Link between a feed and a subscriber |
-| `ServerSettingsEntity` | Per-guild configuration |
+| `ServerSettingsEntity` | Per-guild configuration, includes nested `WelcomeSettings`, `FeedsSettings`, `VoiceSettings` |
 | `VoiceSessionsEntity` | Voice channel session record |
 | `BotMetaEntity` | Key-value bot metadata |
+| `DbVoiceSession` | Raw voice session for persistence |
+| `VoiceLeaderboardEntry` / `VoiceLeaderboardRow` | Leaderboard query results |
 
 ### Platforms (`feed/`)
 
@@ -158,24 +160,36 @@ Implements the **Strategy pattern** — `FeedSubscriptionService` depends on the
 
 ---
 
-## Infrastructure Layer (`src/repository/`)
+## Infrastructure Layer (`src/repo/`)
 
 Data access. Repositories depend on domain entities, not the other way around. Owns all Diesel query logic, the connection pool, and migrations.
 
+A factory trait `Repos` defines the repo access interface. The concrete `PgRepos` struct holds per-table `Pg*Repo` handles and implements the factory:
+
 ```rust
-pub struct Repository {
+pub trait Repos: Send + Sync {
+    fn feed(&self) -> Box<dyn FeedRepository + Send + Sync>;
+    fn feed_item(&self) -> Box<dyn FeedItemRepository + Send + Sync>;
+    fn subscriber(&self) -> Box<dyn SubscriberRepository + Send + Sync>;
+    fn feed_subscription(&self) -> Box<dyn FeedSubscriptionRepository + Send + Sync>;
+    fn server_settings(&self) -> Box<dyn ServerSettingsRepository + Send + Sync>;
+    fn voice_sessions(&self) -> Box<dyn VoiceSessionsRepository + Send + Sync>;
+    fn bot_meta(&self) -> Box<dyn BotMetaRepository + Send + Sync>;
+}
+
+pub struct PgRepos {
+    pub feed: PgFeedRepo,
+    pub feed_item: PgFeedItemRepo,
+    pub subscriber: PgSubscriberRepo,
+    pub feed_subscription: PgFeedSubscriptionRepo,
+    pub server_settings: PgServerSettingsRepo,
+    pub voice_sessions: PgVoiceSessionsRepo,
+    pub bot_meta: PgBotMetaRepo,
     pool: DbPool,
-    pub feed: Box<dyn FeedRepository>,
-    pub feed_item: Box<dyn FeedItemRepository>,
-    pub subscriber: Box<dyn SubscriberRepository>,
-    pub feed_subscription: Box<dyn FeedSubscriptionRepository>,
-    pub server_settings: Box<dyn ServerSettingsRepository>,
-    pub voice_sessions: Box<dyn VoiceSessionsRepository>,
-    pub bot_meta: Box<dyn BotMetaRepository>,
 }
 ```
 
-Each table struct is responsible for CRUD operations on its domain area.
+Each table struct (`Pg*Repo`) implements a `CrudTable<T, ID>` trait alongside domain-specific repository traits.
 
 ---
 
@@ -186,9 +200,9 @@ Each table struct is responsible for CRUD operations on its domain area.
 ```
 Discord interaction
   → Poise routes to command entry function
-  → Coordinator::new(ctx)
-  → Coordinator::run(initial_route)   starts navigation loop
-      → Controller::run(coordinator)
+  → Router::new(ctx)
+  → Router::run(initial)             starts navigation loop
+      → CommandHandler::run(router)
           → Service::fetch(...)          fetch required data
           → ViewHandler::new(...)        construct handler state
           → ViewEngine::run(...)         start event loop (tokio::select!)
@@ -196,10 +210,10 @@ Discord interaction
               → [Event Loop]
                   → Discord interaction / Async event / Modal
                   → ViewHandler::handle(ctx)  process action → state mutation
-                  → ViewCommand::Render       re-render view
-              → ViewCommand::Exit
-          → coordinator.navigate(next)   signal next navigation step
-      → Coordinator routes to next Controller or exits
+                  → ViewCmd::Render           re-render view
+              → ViewCmd::Exit
+          → router.navigate(next)      signal next navigation step
+      → Router routes to next CommandHandler or exits
 ```
 
 ### Background Feed Update
@@ -221,7 +235,7 @@ Discord gateway event
   → EventBus::publish(VoiceStateEvent)
   → VoiceStateSubscriber
   → VoiceTrackingService             update session state
-  → Repository                       persist to PostgreSQL
+  → PgRepos                          persist to PostgreSQL
 ```
 
 ---
@@ -230,9 +244,10 @@ Discord gateway event
 
 | Pattern | Where | Purpose |
 |---------|-------|---------|
-| MVC-C | Presentation | Coordinator → Controller → View navigation |
+| Router → CommandHandler | Presentation | Navigation loop driving per-domain handlers |
 | ViewHandler | Presentation | Separates interaction state from view machinery |
 | Strategy | Domain | Swappable platform implementations |
-| Repository | Infrastructure | Database abstraction |
+| Repository (factory) | Infrastructure | `Repos` trait with `PgRepos` concrete impl |
 | Event Bus | Application | Decoupled pub/sub communication |
-| Service | Service | Business logic encapsulation |
+| Service | Application | Business logic via trait objects (`SettingsProvider`, `FeedSubscriptionProvider`, etc.) |
+| Update (TEA) | Application | Pure state mutations separated from side effects |

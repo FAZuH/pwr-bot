@@ -16,8 +16,8 @@ classDiagram
         action: Option~T~
         event: ViewEvent
         tx: Arc~dyn ViewSender~T~~
-        coordinator: Arc~Coordinator~
-        map(action, wrap) ViewContext~C~
+        coordinator: Arc~Router~
+        map(wrap, action) ViewContext~C~
         spawn(future)
         select_values() Option~SelectValues~
         string_select_values() Option~Vec~String~~
@@ -41,7 +41,7 @@ classDiagram
         handler: H
         registry: Registry~T~
         timeout: Duration
-        coordinator: Arc~Coordinator~
+        coordinator: Arc~Router~
         should_acknowledge: bool
         render_view() Result
         run() Result
@@ -78,16 +78,16 @@ classDiagram
         as_select_option() CreateSelectMenuOption
     }
 
-    class Coordinator {
+    class Router {
         ctx: Context
-        nav_queue: Mutex~VecDeque~NavigationResult~~
+        nav_queue: Mutex~VecDeque~Navigation~~
         reply_handle: SharedReplyHandle
         context() Context
         navigate(next)
-        run(initial_route)
+        run(initial)
     }
 
-    class NavigationResult {
+    class Navigation {
         <<enum>>
         Back
         Exit
@@ -95,7 +95,7 @@ classDiagram
         ...
     }
 
-    class ViewCommand {
+    class ViewCmd {
         <<enum>>
         Render
         RenderOnce
@@ -156,8 +156,8 @@ classDiagram
     class ViewHandler {
         <<trait>>
         type Action: Action
-        handle(ctx) Result~ViewCommand~
-        on_timeout() Result~ViewCommand~
+        handle(ctx) Result~ViewCmd~
+        on_timeout() Result~ViewCmd~
         channel_config() ViewChannelConfig
     }
 
@@ -174,9 +174,9 @@ classDiagram
         send(message: EventMessage~T~)
     }
 
-    class Controller {
+    class CommandHandler {
         <<trait>>
-        run(coordinator: Arc~Coordinator~) Result
+        run(router: Arc~Router~) Result
     }
 
     class GuiTestError {
@@ -196,8 +196,8 @@ classDiagram
         <<module>>
         noop_sender() Arc~dyn ViewSender~
         extract_actions(handler) ActionRegistry
-        simulate_click(ctx, handler, action, coord) Result~ViewCommand~
-        simulate_select(ctx, handler, action, values, coord) Result~ViewCommand~
+        simulate_click(ctx, handler, action, coord) Result~ViewCmd~
+        simulate_select(ctx, handler, action, values, coord) Result~ViewCmd~
     }
 
     %% ── Concrete Update examples ──────────────────────────────────
@@ -249,7 +249,7 @@ classDiagram
     ViewEngine --> ViewChannel : drives
     ViewEngine --> ActionRegistry : owns
     ViewChannel --> ActionRegistry : reads
-    ViewHandler ..> ViewCommand : returns
+    ViewHandler ..> ViewCmd : returns
     ViewHandler ..> ViewEvent : receives via ctx
     ViewHandler ..> ViewContext : receives
     ViewHandler ..> ViewChannelConfig : configures
@@ -259,8 +259,8 @@ classDiagram
     ActionRegistry ..> RegisteredAction : produces
     MappedViewSender ..> ViewSender : implements
     ViewSender ..> EventMessage : sends
-    Coordinator ..> Controller : drives
-    Controller ..> NavigationResult : returns
+    Router ..> CommandHandler : drives
+    CommandHandler ..> Navigation : returns
     ViewContext ..> ViewSender : uses
     ViewContext ..> MappedViewSender : creates via map()
     ViewContext ..> SelectValues : uses

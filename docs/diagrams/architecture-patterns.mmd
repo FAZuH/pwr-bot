@@ -21,17 +21,17 @@ graph LR
         Cogs2 -->|collects| FeedCmd & VoiceCmd & OtherCmds
     end
 
-    subgraph MVCC["MVC-C Pattern"]
+    subgraph RouterHandler["Router → CommandHandler"]
         direction TB
         Entry["Entry fn<br/>command handler"]
-        Coord["Coordinator<br/>navigation loop"]
-        Ctrl["Controller<br/>run()"]
+        Router["Router<br/>navigation loop"]
+        Handler["CommandHandler<br/>run()"]
         View2["ViewEngine<br/>run()"]
-        Nav["NavigationResult<br/>Back · Exit · Settings*"]
-        Entry --> Coord -->|drives| Ctrl
-        Ctrl --> View2
-        Ctrl -->|calls navigate| Nav
-        Nav -.->|queued in| Coord
+        Nav["Navigation<br/>Back · Exit · Settings*"]
+        Entry --> Router -->|drives| Handler
+        Handler --> View2
+        Handler -->|calls navigate| Nav
+        Nav -.->|queued in| Router
     end
 
     subgraph TEA["TEA Update Pattern"]
@@ -81,18 +81,18 @@ graph LR
         SimClick & SimSelect -->|injects| Handler["ViewHandler::handle()"]
     end
 
-    subgraph RepoPat["Repository Pattern"]
+    subgraph RepoPat["Repos Factory Pattern"]
         direction TB
         Cogs["Cogs / Commands"]
-        Controllers["Controllers"]
+        Handlers["CommandHandlers"]
         BusinessLogic["Business Logic Layer<br/>single access point"]
-        RepTrait["Repository"]
-        Tables["FeedTable<br/>VoiceTable<br/>SubscriberTable<br/>SettingsTable"]
+        RepTrait["Repos trait"]
+        Tables["PgFeedRepo<br/>PgVoiceSessionsRepo<br/>PgSubscriberRepo<br/>PgServerSettingsRepo"]
         DB["PostgreSQL / Diesel"]
-        Cogs --> Controllers --> BusinessLogic --> RepTrait --> Tables --> DB
+        Cogs --> Handlers --> BusinessLogic --> RepTrait --> Tables --> DB
     end
 
-    style MVCC fill:#1a2a3a,stroke:#818cf8,stroke-width:2px
+    style RouterHandler fill:#1a2a3a,stroke:#818cf8,stroke-width:2px
     style TEA fill:#1a3a1a,stroke:#4ade80,stroke-width:2px
     style PubSub2 fill:#1a3a3a,stroke:#2dd4bf,stroke-width:2px
     style Strategy fill:#1a3a1a,stroke:#4ade80,stroke-width:2px
@@ -101,7 +101,7 @@ graph LR
     style Bus fill:#2d2d2d,stroke:#2dd4bf
     style PT fill:#2d2d2d,stroke:#4ade80
     style RepTrait fill:#2d2d2d,stroke:#f87171
-    style Ctrl fill:#2d2d2d,stroke:#818cf8
+    style Handler fill:#2d2d2d,stroke:#818cf8
     style CogTrait fill:#2d2d2d,stroke:#fbbf24
     style Upd fill:#2d2d2d,stroke:#4ade80
     style Model fill:#2d2d2d,stroke:#4ade80

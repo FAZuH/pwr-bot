@@ -24,11 +24,11 @@ graph TB
             Cogs --> FeedCmd & VoiceCmd & SettingsCmd & UtilityCmds
         end
 
-        subgraph MVC["MVC-C Pattern"]
-            Coordinator["Coordinator<br/>context + state"]
-            Controllers["Controllers<br/>run() → NavigationResult"]
+        subgraph Nav["Router → Handler Flow"]
+            Router["Router<br/>context + state"]
+            Handlers["CommandHandlers<br/>run() → Navigation"]
             Views["Views<br/>ViewRender / ViewHandler / ViewEngine"]
-            Coordinator --> Controllers --> Views
+            Router --> Handlers --> Views
         end
 
         subgraph TestFW["Test Framework  ·  src/bot/test_framework/"]
@@ -40,7 +40,7 @@ graph TB
         end
 
         Bot --> EventHandler & Cogs
-        FeedCmd & VoiceCmd & SettingsCmd --> Coordinator
+        FeedCmd & VoiceCmd & SettingsCmd --> Router
     end
 
     subgraph Application["Application Layer  ·  src/event/  src/subscriber/  src/task/"]
@@ -101,25 +101,25 @@ graph TB
         Entities["Domain Entities<br/>FeedEntity · SubscriberEntity · VoiceSessionsEntity"]
     end
 
-    subgraph Infrastructure["Infrastructure Layer  ·  src/repository.rs  src/repository/"]
-        subgraph Repository["Repository Pattern"]
-            Repo["Repository<br/>connection pool"]
-            FeedTable["FeedTable"]
-            FeedItemTable["FeedItemTable"]
-            SubscriberTable["SubscriberTable"]
-            VoiceTable["VoiceSessionsTable"]
-            SettingsTable["ServerSettingsTable"]
-            BotMetaTable["BotMetaTable"]
-            Repo --> FeedTable & FeedItemTable & SubscriberTable & VoiceTable & SettingsTable & BotMetaTable
+    subgraph Infrastructure["Infrastructure Layer  ·  src/repo/"]
+        subgraph Repository["Repos Factory Pattern"]
+            Repo["PgRepos + Repos trait<br/>factory"]
+            FeedRepo["PgFeedRepo"]
+            FeedItemRepo["PgFeedItemRepo"]
+            SubscriberRepo["PgSubscriberRepo"]
+            VoiceRepo["PgVoiceSessionsRepo"]
+            SettingsRepo["PgServerSettingsRepo"]
+            BotMetaRepo["PgBotMetaRepo"]
+            Repo --> FeedRepo & FeedItemRepo & SubscriberRepo & VoiceRepo & SettingsRepo & BotMetaRepo
         end
         PostgreSQL["PostgreSQL  ·  Diesel async"]
-        FeedTable & FeedItemTable & SubscriberTable & VoiceTable & SettingsTable --> PostgreSQL
+        FeedRepo & FeedItemRepo & SubscriberRepo & VoiceRepo & SettingsRepo --> PostgreSQL
     end
 
     Config["Config<br/>env vars + feature flags"]
 
     %% Cross-layer
-    Controllers --> BusinessLogic
+    Handlers --> BusinessLogic
     Subscribers --> BusinessLogic
     Tasks --> BusinessLogic
     Views --> UpdateSystem
