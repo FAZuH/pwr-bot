@@ -370,9 +370,9 @@ impl ViewRender for SettingsWelcomeHandler {
 
 // ── Handler ───────────────────────────────────────────────────────────────
 
-handler! { pub struct WelcomeSettingsHandler<'a> {} }
+handler! { pub struct WelcomeSettingsHandler {} }
 
-impl<'a> WelcomeSettingsHandler<'a> {
+impl WelcomeSettingsHandler {
     /// Generates a welcome card preview given settings and generator.
     pub async fn generate_preview_from(
         settings: &ServerSettings,
@@ -413,10 +413,10 @@ impl<'a> WelcomeSettingsHandler<'a> {
 }
 
 #[async_trait::async_trait]
-impl CommandHandler for WelcomeSettingsHandler<'_> {
+impl CommandHandler for WelcomeSettingsHandler {
     async fn run(&mut self, coordinator: std::sync::Arc<Router<'_>>) -> Result<(), Error> {
         let ctx = *coordinator.context();
-        ctx.defer().await?;
+        self.host_ctx.defer().await?;
 
         let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?.get();
         let service = ctx.data().service.feed_subscription.clone();

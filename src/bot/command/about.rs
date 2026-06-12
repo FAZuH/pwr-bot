@@ -19,13 +19,13 @@ pub async fn invoke(coordinator: Arc<Router<'_>>) -> Result<(), Error> {
     Ok(())
 }
 
-handler! { pub struct AboutHandler<'a> {} }
+handler! { pub struct AboutHandler {} }
 
 #[async_trait::async_trait]
-impl CommandHandler for AboutHandler<'_> {
+impl CommandHandler for AboutHandler {
     async fn run(&mut self, coordinator: Arc<Router<'_>>) -> Result<(), Error> {
         let ctx = *coordinator.context();
-        ctx.defer().await?;
+        self.host_ctx.defer().await?;
 
         let stats = AboutStats::gather_stats(&ctx).await?;
         let avatar_url = ctx.cache().current_user().face();

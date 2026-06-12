@@ -699,24 +699,23 @@ impl ViewRender for VoiceStatsView {
 }
 
 /// Handler for voice stats display and interaction.
-pub struct VoiceStatsHandler<'a> {
-    #[allow(dead_code)]
-    ctx: Context<'a>,
+pub struct VoiceStatsHandler {
+    pub host_ctx: std::sync::Arc<PoiseHostCtx>,
     pub time_range: VoiceStatsTimeRange,
     pub target_user: Option<User>,
     pub stat_type: GuildStatType,
 }
 
-impl<'a> VoiceStatsHandler<'a> {
+impl VoiceStatsHandler {
     /// Creates a new stats handler.
     pub fn new(
-        ctx: Context<'a>,
+        host_ctx: std::sync::Arc<PoiseHostCtx>,
         time_range: VoiceStatsTimeRange,
         target_user: Option<User>,
         stat_type: GuildStatType,
     ) -> Self {
         Self {
-            ctx,
+            host_ctx,
             time_range,
             target_user,
             stat_type,
@@ -788,10 +787,10 @@ impl<'a> VoiceStatsHandler<'a> {
 }
 
 #[async_trait::async_trait]
-impl CommandHandler for VoiceStatsHandler<'_> {
+impl CommandHandler for VoiceStatsHandler {
     async fn run(&mut self, coordinator: std::sync::Arc<Router<'_>>) -> Result<(), Error> {
         let ctx = *coordinator.context();
-        ctx.defer().await?;
+        self.host_ctx.defer().await?;
 
         let start = Instant::now();
 

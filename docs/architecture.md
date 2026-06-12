@@ -240,6 +240,99 @@ Discord gateway event
 
 ---
 
+---
+
+## Plugin System (`crates/pwr_bot_sdk/`, `src/bot/plugin/`)
+
+Plugins are loaded as dynamic shared libraries (`.so`) at startup. They communicate with the host through a stable C ABI defined in the `pwr_bot_sdk` crate.
+
+### Architecture
+
+```
+Discord interaction
+  → Poise routes to command
+  → [Built-in] Router → CommandHandler → ViewEngine
+  → [Plugin]   invocation::dispatch → FFI invoke() → host callbacks
+```
+
+### HostCtx Abstraction
+
+The [`HostCtx`](src/bot/host_ctx.rs) trait decouples handler logic from poise internals:
+
+| Implementation | Backing | Use case |
+|----------------|---------|----------|
+| `PoiseHostCtx` | `Context<'_>` (poise) | Built-in commands |
+| `FfiHostCtx` | `HostCallbacks` (FFI) | Plugin commands |
+
+Handlers use `host_ctx.defer()`, `host_ctx.data()`, etc. instead of raw poise context calls. ViewEngine creation still requires the underlying `Context<'_>` for component lifecycle management.
+
+### SDK Crate (`crates/pwr_bot_sdk/`)
+
+| Module | Contents |
+|--------|----------|
+| `abi.rs` | `PluginVTable`, `InvokeRequest`/`InvokeResponse`, `HostCallbacks` — all `#[repr(C)]` |
+| `host.rs` | `PluginHost` — safe wrapper around FFI callbacks |
+| `plugin.rs` | `BotPlugin` trait, `CommandSpec`, `ResponsePayload` |
+| `macros.rs` | `export_plugin!` — generates `extern "C"` entry point |
+
+### ABI Contract
+
+```rust
+#[repr(C)]
+pub struct PluginVTable {
+    pub api_version: u32,
+    pub commands:     unsafe extern "C" fn() -> CommandList,
+    pub invoke:       unsafe extern "C" fn(req: *const InvokeRequest, resp: *mut InvokeResponse),
+    pub free_command_list: unsafe extern "C" fn(list: CommandList),
+    pub free_response:     unsafe extern "C" fn(resp: *mut InvokeResponse),
+}
+```
+
+The host calls `commands()` at load time to discover slash commands (returned as a JSON-encoded array via `CommandList.json`). When a user invokes a plugin command, the host serializes the arguments into `InvokeRequest`, calls `invoke()`, and processes the `InvokeResponse`.
+
+### Plugin Lifecycle
+
+1. **Load**: `loader::load_plugins("plugins/")` — `dlopen` each `.so`, lookup `pwr_bot_plugin_entry`, validate `api_version`
+2. **Register**: `registry::PluginRegistry::register()` — parse `CommandList` JSON, construct poise `Command` objects
+3. **Invoke**: `invocation::dispatch()` — serialize args, call FFI `invoke()`, deserialize `ResponsePayload`, send to Discord
+4. **Teardown**: Plugins are never unloaded — library handles are leaked intentionally so vtable pointers remain valid
+
+### Writing a Plugin
+
+```rust
+use pwr_bot_sdk::{BotPlugin, CommandSpec, ArgSpec, ArgKind, ResponsePayload, PluginHost};
+
+struct MyPlugin;
+
+#[async_trait]
+impl BotPlugin for MyPlugin {
+    fn name(&self) -> &'static str { "my-plugin" }
+    fn description(&self) -> &'static str { "Example plugin" }
+    fn version(&self) -> &'static str { "0.1.0" }
+
+    fn commands(&self) -> Vec<CommandSpec> {
+        vec![CommandSpec {
+            name: "hello".to_string(),
+            description: "Says hello".to_string(),
+            args: vec![],
+        }]
+    }
+
+    async fn invoke(&self, _cmd: &str, _args: serde_json::Value, host: &PluginHost) -> Result<ResponsePayload, String> {
+        unsafe { host.send_reply(r#"{"content":"Hello from plugin!"}"#) }
+            .map_err(|e| e.to_string())?;
+        Ok(ResponsePayload {
+            content: Some("Hello from plugin!".to_string()),
+            ephemeral: false,
+            components_json: None,
+            embed_json: None,
+        })
+    }
+}
+
+export_plugin!(MyPlugin, MyPlugin);
+```
+
 ## Design Patterns Summary
 
 | Pattern | Where | Purpose |

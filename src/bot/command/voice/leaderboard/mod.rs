@@ -84,16 +84,21 @@ impl Deref for LeaderboardSessionData {
 }
 
 /// Handler for voice leaderboard display and interaction.
-pub struct VoiceLeaderboardHandler<'a> {
-    #[allow(dead_code)]
-    ctx: Context<'a>,
+pub struct VoiceLeaderboardHandler {
+    pub host_ctx: std::sync::Arc<PoiseHostCtx>,
     pub time_range: VoiceLeaderboardTimeRange,
 }
 
-impl<'a> VoiceLeaderboardHandler<'a> {
+impl VoiceLeaderboardHandler {
     /// Creates a new leaderboard handler.
-    pub fn new(ctx: Context<'a>, time_range: VoiceLeaderboardTimeRange) -> Self {
-        Self { ctx, time_range }
+    pub fn new(
+        host_ctx: std::sync::Arc<PoiseHostCtx>,
+        time_range: VoiceLeaderboardTimeRange,
+    ) -> Self {
+        Self {
+            host_ctx,
+            time_range,
+        }
     }
 
     /// Fetches leaderboard entries for the current time range.
@@ -136,12 +141,12 @@ impl<'a> VoiceLeaderboardHandler<'a> {
 }
 
 #[async_trait::async_trait]
-impl CommandHandler for VoiceLeaderboardHandler<'_> {
+impl CommandHandler for VoiceLeaderboardHandler {
     async fn run(&mut self, coordinator: std::sync::Arc<Router<'_>>) -> Result<(), Error> {
         let start = Instant::now();
 
         let ctx = *coordinator.context();
-        ctx.defer().await?;
+        self.host_ctx.defer().await?;
 
         // Fetch initial entries
         let entries = Self::fetch_entries(&ctx, self.time_range, false, None).await?;

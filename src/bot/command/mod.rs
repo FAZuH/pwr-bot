@@ -41,6 +41,7 @@ use crate::bot::command::voice::leaderboard::VoiceLeaderboardHandler;
 use crate::bot::command::voice::settings::VoiceSettingsHandler;
 use crate::bot::command::voice::stats::VoiceStatsHandler;
 use crate::bot::command::welcome::WelcomeSettingsHandler;
+use crate::bot::host_ctx::PoiseHostCtx;
 use crate::bot::navigation::Navigation;
 
 /// Trait for command modules (Cogs) that provide a set of Discord commands.
@@ -82,8 +83,9 @@ type NavHistory = tokio::sync::Mutex<VecDeque<Navigation>>;
 
 /// Orchestrator for command navigation.
 ///
-/// The `Coordinator` owns the Poise command context
-/// It maintains a history of [`Navigation`]s to support "Back" navigation.
+/// The `Router` owns the Poise command context and maintains a history of
+/// [`Navigation`]s to support "Back" navigation. It also carries a
+/// [`PoiseHostCtx`] for abstracted access to the Discord interaction.
 pub struct Router<'a> {
     /// Poise command context.
     ctx: Context<'a>,
@@ -91,21 +93,30 @@ pub struct Router<'a> {
     nav_queue: NavHistory,
     /// Shared handle to the active message.
     reply_handle: SyncReplyHandle<'a>,
+    /// Abstracted bot context for handler boilerplate.
+    host_ctx: Arc<PoiseHostCtx>,
 }
 
 impl<'a> Router<'a> {
-    /// Creates a new coordinator.
+    /// Creates a new Router from a poise context.
     pub fn new(ctx: Context<'a>) -> Arc<Self> {
+        let host_ctx = PoiseHostCtx::new(ctx);
         Arc::new(Self {
             ctx,
             nav_queue: tokio::sync::Mutex::new(VecDeque::new()),
             reply_handle: tokio::sync::Mutex::new(None),
+            host_ctx,
         })
     }
 
-    /// Returns the Poise context.
+    /// Returns the Poise command context.
     pub fn context(&self) -> &Context<'a> {
         &self.ctx
+    }
+
+    /// Returns the abstracted bot context.
+    pub fn host_ctx(&self) -> &Arc<PoiseHostCtx> {
+        &self.host_ctx
     }
 
     /// Pushes a new navigation target onto the stack.
@@ -152,37 +163,42 @@ impl<'a> Router<'a> {
     /// Instantiates the next handler based on the current navigation state.
     async fn next_handler(&self) -> Option<Box<dyn CommandHandler + 'a>> {
         use Navigation::*;
-        let ctx = self.ctx;
 
         loop {
             let nav = self.pop_next().await?;
+            let hc = self.host_ctx.clone();
             let res: Box<dyn CommandHandler> = match nav {
-                SettingsMain => Box::new(SettingsMainHandler::new(ctx)),
-                SettingsFeeds => Box::new(FeedSettingsHandler::new(ctx)),
-                SettingsVoice => Box::new(VoiceSettingsHandler::new(ctx)),
-                SettingsWelcome => Box::new(WelcomeSettingsHandler::new(ctx)),
-                SettingsAbout => Box::new(AboutHandler::new(ctx)),
-                FeedSubscriptions { send_into } => Box::new(FeedListHandler::new(ctx, send_into?)),
+                SettingsMain => Box::new(SettingsMainHandler::new(hc)),
+                SettingsFeeds => Box::new(FeedSettingsHandler::new(hc)),
+                SettingsVoice => Box::new(VoiceSettingsHandler::new(hc)),
+                SettingsWelcome => Box::new(WelcomeSettingsHandler::new(hc)),
+                SettingsAbout => Box::new(AboutHandler::new(hc)),
+                FeedSubscriptions { send_into } => Box::new(FeedListHandler::new(hc, send_into?)),
                 FeedSubscribe { links, send_into } => {
-                    Box::new(FeedSubscribeHandler::new(ctx, links, send_into))
+                    Box::new(FeedSubscribeHandler::new(hc, links, send_into))
                 }
                 FeedUnsubscribe { links, send_into } => {
-                    Box::new(FeedUnsubscribeHandler::new(ctx, links, send_into))
+                    Box::new(FeedUnsubscribeHandler::new(hc, links, send_into))
                 }
-                FeedList(send_into) => Box::new(FeedListHandler::new(ctx, send_into?)),
+                FeedList(send_into) => Box::new(FeedListHandler::new(hc, send_into?)),
                 VoiceLeaderboard { time_range } => {
-                    Box::new(VoiceLeaderboardHandler::new(ctx, time_range))
+                    Box::new(VoiceLeaderboardHandler::new(hc, time_range))
                 }
                 VoiceStats {
                     time_range,
                     target_user,
                     stat_type,
                 } => Box::new(VoiceStatsHandler::new(
-                    ctx,
+                    hc,
                     time_range,
                     *target_user,
                     stat_type,
                 )),
+                Plugin { .. } => {
+                    // Plugin navigation is handled by the plugin dispatch system,
+                    // not by the built-in router.
+                    continue;
+                }
                 Back => continue,
                 Exit => return None,
             };

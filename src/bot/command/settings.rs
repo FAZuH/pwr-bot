@@ -93,12 +93,13 @@ pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-handler! { pub struct SettingsMainHandler<'a> {} }
+handler! { pub struct SettingsMainHandler {} }
 
 #[async_trait::async_trait]
-impl CommandHandler for SettingsMainHandler<'_> {
+impl CommandHandler for SettingsMainHandler {
     async fn run(&mut self, coordinator: std::sync::Arc<Router<'_>>) -> Result<(), Error> {
         let ctx = *coordinator.context();
+        self.host_ctx.defer().await?;
         is_author_guild_admin(ctx).await?;
         let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?;
 

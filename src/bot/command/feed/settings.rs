@@ -23,13 +23,13 @@ pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-handler! { pub struct FeedSettingsHandler<'a> {} }
+handler! { pub struct FeedSettingsHandler {} }
 
 #[async_trait::async_trait]
-impl CommandHandler for FeedSettingsHandler<'_> {
+impl CommandHandler for FeedSettingsHandler {
     async fn run(&mut self, coordinator: std::sync::Arc<Router<'_>>) -> Result<(), Error> {
         let ctx = *coordinator.context();
-        ctx.defer().await?;
+        self.host_ctx.defer().await?;
         let service = ctx.data().service.feed_subscription.clone();
 
         let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?.get();

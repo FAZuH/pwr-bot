@@ -34,15 +34,15 @@ pub async fn list(
     Ok(())
 }
 
-handler! { pub struct FeedListHandler<'a> {
-    send_into: SendInto
+handler! { pub struct FeedListHandler {
+    send_into: SendInto,
 } }
 
 #[async_trait::async_trait]
-impl CommandHandler for FeedListHandler<'_> {
+impl CommandHandler for FeedListHandler {
     async fn run(&mut self, coordinator: std::sync::Arc<Router<'_>>) -> Result<(), Error> {
         let ctx = *coordinator.context();
-        ctx.defer().await?;
+        self.host_ctx.defer().await?;
 
         let subscriber = get_or_create_subscriber(ctx, &self.send_into).await?;
 

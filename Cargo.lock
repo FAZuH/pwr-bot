@@ -3646,11 +3646,13 @@ dependencies = [
  "html2md",
  "httpmock",
  "image 0.25.9",
+ "libloading",
  "log",
  "minijinja",
  "mockall",
  "plotters",
  "poise",
+ "pwr-bot-sdk",
  "resvg",
  "serde",
  "serde_json",
@@ -3663,6 +3665,16 @@ dependencies = [
  "uuid",
  "wreq",
  "wreq-util",
+]
+
+[[package]]
+name = "pwr-bot-sdk"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]

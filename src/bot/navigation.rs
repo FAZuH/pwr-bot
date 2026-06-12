@@ -55,6 +55,15 @@ pub enum Navigation {
         stat_type: GuildStatType,
     },
 
+    // -- Plugin section --
+    /// Navigate to a plugin-provided view.
+    Plugin {
+        /// Plugin name serving this navigation.
+        plugin: String,
+        /// Arbitrary state the plugin can use to reconstruct its view.
+        state: Option<serde_json::Value>,
+    },
+
     // -- Universal navigation --
     /// Go back to previous handler
     Back,
