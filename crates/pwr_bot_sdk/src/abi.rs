@@ -92,10 +92,7 @@ pub struct HostCallbacks {
     // -- Config callbacks --
     pub get_poll_interval: unsafe extern "C" fn(ctx_handle: u64) -> u64,
     pub get_data_path: unsafe extern "C" fn(ctx_handle: u64, out: *mut *mut c_char) -> bool,
-    pub is_feature_enabled: unsafe extern "C" fn(
-        ctx_handle: u64,
-        feature: *const c_char,
-    ) -> bool,
+    pub is_feature_enabled: unsafe extern "C" fn(ctx_handle: u64, feature: *const c_char) -> bool,
 }
 
 /// Stable C ABI vtable that every plugin exports.
@@ -104,9 +101,7 @@ pub struct PluginVTable {
     pub api_version: u32,
     pub metadata: unsafe extern "C" fn() -> *mut c_char,
     pub invoke: unsafe extern "C" fn(req: *const InvokeRequest, resp: *mut InvokeResponse),
-    pub init: Option<
-        unsafe extern "C" fn(req: *const InvokeRequest, resp: *mut InvokeResponse),
-    >,
+    pub init: Option<unsafe extern "C" fn(req: *const InvokeRequest, resp: *mut InvokeResponse)>,
     pub shutdown: Option<unsafe extern "C" fn() -> bool>,
     pub on_event: Option<
         unsafe extern "C" fn(
@@ -145,12 +140,18 @@ impl fmt::Debug for HostCallbacks {
             .field("get_channel_id", &(self.get_channel_id as *const ()))
             .field("query_db", &(self.query_db as *const ()))
             .field("execute_db", &(self.execute_db as *const ()))
-            .field("send_channel_message", &(self.send_channel_message as *const ()))
+            .field(
+                "send_channel_message",
+                &(self.send_channel_message as *const ()),
+            )
             .field("send_dm", &(self.send_dm as *const ()))
             .field("publish_event", &(self.publish_event as *const ()))
             .field("get_poll_interval", &(self.get_poll_interval as *const ()))
             .field("get_data_path", &(self.get_data_path as *const ()))
-            .field("is_feature_enabled", &(self.is_feature_enabled as *const ()))
+            .field(
+                "is_feature_enabled",
+                &(self.is_feature_enabled as *const ()),
+            )
             .field("free_string", &(self.free_string as *const ()))
             .finish()
     }

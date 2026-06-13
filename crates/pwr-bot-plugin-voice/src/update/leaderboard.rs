@@ -114,10 +114,7 @@ mod tests {
     #[test]
     fn set_entries_empty() {
         let mut model = VoiceLeaderboardModel::new();
-        let cmd = voice_leaderboard_update(
-            VoiceLeaderboardMsg::SetEntries(vec![]),
-            &mut model,
-        );
+        let cmd = voice_leaderboard_update(VoiceLeaderboardMsg::SetEntries(vec![]), &mut model);
         assert_eq!(cmd, VoiceLeaderboardCmd::None);
         assert!(model.entries.is_empty());
     }
@@ -148,10 +145,7 @@ mod tests {
         let mut model = VoiceLeaderboardModel::new();
         assert!(!model.partner_mode);
 
-        let cmd = voice_leaderboard_update(
-            VoiceLeaderboardMsg::ToggleMode,
-            &mut model,
-        );
+        let cmd = voice_leaderboard_update(VoiceLeaderboardMsg::ToggleMode, &mut model);
         assert_eq!(cmd, VoiceLeaderboardCmd::RefetchData);
         assert!(model.partner_mode);
     }
@@ -242,7 +236,7 @@ mod tests {
 
     #[test]
     fn target_is_author() {
-        let mut model = VoiceLeaderboardModel::new();
+        let model = VoiceLeaderboardModel::new();
         assert!(model.target_user.is_none());
     }
 
@@ -251,10 +245,7 @@ mod tests {
         let mut model = VoiceLeaderboardModel::new();
         model.target_user = Some(42);
 
-        let cmd = voice_leaderboard_update(
-            VoiceLeaderboardMsg::SetTargetUser(None),
-            &mut model,
-        );
+        let cmd = voice_leaderboard_update(VoiceLeaderboardMsg::SetTargetUser(None), &mut model);
 
         assert_eq!(cmd, VoiceLeaderboardCmd::None);
         assert!(model.target_user.is_none());
@@ -265,10 +256,8 @@ mod tests {
         let mut model = VoiceLeaderboardModel::new();
         model.partner_mode = true;
 
-        let cmd = voice_leaderboard_update(
-            VoiceLeaderboardMsg::SetTargetUser(Some(42)),
-            &mut model,
-        );
+        let cmd =
+            voice_leaderboard_update(VoiceLeaderboardMsg::SetTargetUser(Some(42)), &mut model);
 
         assert_eq!(cmd, VoiceLeaderboardCmd::RefetchData);
         assert_eq!(model.target_user, Some(42));
@@ -279,10 +268,8 @@ mod tests {
         let mut model = VoiceLeaderboardModel::new();
         model.partner_mode = false;
 
-        let cmd = voice_leaderboard_update(
-            VoiceLeaderboardMsg::SetTargetUser(Some(42)),
-            &mut model,
-        );
+        let cmd =
+            voice_leaderboard_update(VoiceLeaderboardMsg::SetTargetUser(Some(42)), &mut model);
 
         assert_eq!(cmd, VoiceLeaderboardCmd::None);
         assert_eq!(model.target_user, Some(42));

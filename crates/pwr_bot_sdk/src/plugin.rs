@@ -131,11 +131,7 @@ pub struct TaskSpec {
 }
 
 impl TaskSpec {
-    pub fn new(
-        name: impl Into<String>,
-        interval_secs: u64,
-        command: impl Into<String>,
-    ) -> Self {
+    pub fn new(name: impl Into<String>, interval_secs: u64, command: impl Into<String>) -> Self {
         Self {
             name: name.into(),
             interval_secs,

@@ -6,7 +6,10 @@ use pwr_bot_sdk::*;
 ///
 /// Queries subscribers for the feed, then sends a notification to each
 /// subscriber via their configured channel (guild) or DM.
-pub async fn handle_feed_update(host: &PluginHost, payload: serde_json::Value) -> Result<(), String> {
+pub async fn handle_feed_update(
+    host: &PluginHost,
+    payload: serde_json::Value,
+) -> Result<(), String> {
     let feed_id = match extract_feed_id(&payload) {
         Some(id) => id,
         None => return Err("FeedUpdateEvent missing feed.id".to_string()),
@@ -143,9 +146,7 @@ fn build_message(payload: &serde_json::Value) -> String {
         .and_then(|v| v.as_str())
         .unwrap_or("item");
 
-    let new_item = payload
-        .get("data")
-        .and_then(|d| d.get("new_feed_item"));
+    let new_item = payload.get("data").and_then(|d| d.get("new_feed_item"));
 
     let item_desc = new_item
         .and_then(|i| i.get("description"))
@@ -155,7 +156,7 @@ fn build_message(payload: &serde_json::Value) -> String {
     let timestamp = new_item
         .and_then(|i| i.get("published"))
         .and_then(|v| v.as_str())
-        .map(|s| format_timestamp(s))
+        .map(format_timestamp)
         .unwrap_or_default();
 
     format!(

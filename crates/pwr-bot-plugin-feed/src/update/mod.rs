@@ -26,10 +26,22 @@ impl PaginationModel {
         }
     }
 
-    pub fn first_page(&mut self) { self.current_page = 1; }
-    pub fn prev_page(&mut self) { if self.current_page > 1 { self.current_page -= 1; } }
-    pub fn next_page(&mut self) { if self.current_page < self.pages { self.current_page += 1; } }
-    pub fn last_page(&mut self) { self.current_page = self.pages; }
+    pub fn first_page(&mut self) {
+        self.current_page = 1;
+    }
+    pub fn prev_page(&mut self) {
+        if self.current_page > 1 {
+            self.current_page -= 1;
+        }
+    }
+    pub fn next_page(&mut self) {
+        if self.current_page < self.pages {
+            self.current_page += 1;
+        }
+    }
+    pub fn last_page(&mut self) {
+        self.current_page = self.pages;
+    }
     pub fn apply(&mut self, action: PaginationAction) {
         match action {
             PaginationAction::First => self.first_page(),

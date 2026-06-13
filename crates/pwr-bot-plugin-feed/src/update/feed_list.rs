@@ -47,10 +47,7 @@ impl FeedListModel {
 }
 
 /// Pure update function for the feed list.
-pub fn feed_list_update(
-    msg: FeedListMsg,
-    model: &mut FeedListModel,
-) -> FeedListCmd {
+pub fn feed_list_update(msg: FeedListMsg, model: &mut FeedListModel) -> FeedListCmd {
     use FeedListCmd::*;
     use FeedListMsg::*;
 

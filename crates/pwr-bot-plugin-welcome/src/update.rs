@@ -174,8 +174,7 @@ mod tests {
         let mut model = empty_model();
         model.settings.channel_id = Some("123".to_string());
 
-        let cmd =
-            WelcomeSettingsUpdate::update(WelcomeSettingsMsg::SetChannel(None), &mut model);
+        let cmd = WelcomeSettingsUpdate::update(WelcomeSettingsMsg::SetChannel(None), &mut model);
 
         assert_eq!(cmd, WelcomeSettingsCmd::PersistSettings);
         assert_eq!(model.settings.channel_id, None);

@@ -235,11 +235,7 @@ impl PluginHost {
     /// # Safety
     ///
     /// The registered [`HostCallbacks`] must outlive the call.
-    pub unsafe fn send_dm(
-        &self,
-        user_id: u64,
-        payload_json: &str,
-    ) -> Result<u64, String> {
+    pub unsafe fn send_dm(&self, user_id: u64, payload_json: &str) -> Result<u64, String> {
         let c_str = CString::new(payload_json).map_err(|e| e.to_string())?;
         let mut out_message_id: u64 = 0;
         let mut out_err: *mut std::ffi::c_char = std::ptr::null_mut();

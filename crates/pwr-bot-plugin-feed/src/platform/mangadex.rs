@@ -22,12 +22,12 @@ use wreq::header::HeaderMap;
 use wreq::header::HeaderValue;
 use wreq::header::USER_AGENT;
 
+use crate::error::FeedError;
 use crate::platform::traits::BasePlatform;
 use crate::platform::traits::FeedItem;
 use crate::platform::traits::FeedSource;
 use crate::platform::traits::Platform;
 use crate::platform::traits::PlatformInfo;
-use crate::error::FeedError;
 
 /// MangaDex API platform for manga tracking.
 type Json<'a> = &'a Map<String, Value>;

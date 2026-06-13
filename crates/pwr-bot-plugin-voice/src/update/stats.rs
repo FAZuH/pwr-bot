@@ -58,10 +58,7 @@ impl VoiceStatsModel {
 }
 
 /// Pure update function for voice stats.
-pub fn voice_stats_update(
-    msg: VoiceStatsMsg,
-    model: &mut VoiceStatsModel,
-) -> VoiceStatsCmd {
+pub fn voice_stats_update(msg: VoiceStatsMsg, model: &mut VoiceStatsModel) -> VoiceStatsCmd {
     use VoiceStatsCmd::*;
     use VoiceStatsMsg::*;
 
@@ -187,10 +184,7 @@ mod tests {
     #[test]
     fn set_user_changes_target_and_refetches() {
         let mut model = VoiceStatsModel::new(None);
-        let cmd = voice_stats_update(
-            VoiceStatsMsg::SetUser(Some(99)),
-            &mut model,
-        );
+        let cmd = voice_stats_update(VoiceStatsMsg::SetUser(Some(99)), &mut model);
         assert_eq!(cmd, VoiceStatsCmd::RefetchData);
         assert_eq!(model.user_id, Some(99));
         assert_eq!(model.fallback_user_id, Some(99));
@@ -199,10 +193,7 @@ mod tests {
     #[test]
     fn set_user_clear() {
         let mut model = VoiceStatsModel::new(Some(42));
-        let cmd = voice_stats_update(
-            VoiceStatsMsg::SetUser(None),
-            &mut model,
-        );
+        let cmd = voice_stats_update(VoiceStatsMsg::SetUser(None), &mut model);
         assert_eq!(cmd, VoiceStatsCmd::None);
         assert!(model.user_id.is_none());
     }
@@ -210,10 +201,7 @@ mod tests {
     #[test]
     fn set_user_none_to_none() {
         let mut model = VoiceStatsModel::new(None);
-        let cmd = voice_stats_update(
-            VoiceStatsMsg::SetUser(None),
-            &mut model,
-        );
+        let cmd = voice_stats_update(VoiceStatsMsg::SetUser(None), &mut model);
         assert_eq!(cmd, VoiceStatsCmd::None);
         assert!(model.user_id.is_none());
     }
@@ -221,10 +209,7 @@ mod tests {
     #[test]
     fn set_user_same_returns_none() {
         let mut model = VoiceStatsModel::new(Some(42));
-        let cmd = voice_stats_update(
-            VoiceStatsMsg::SetUser(Some(42)),
-            &mut model,
-        );
+        let cmd = voice_stats_update(VoiceStatsMsg::SetUser(Some(42)), &mut model);
         assert_eq!(cmd, VoiceStatsCmd::RefetchData);
         assert_eq!(model.user_id, Some(42));
     }

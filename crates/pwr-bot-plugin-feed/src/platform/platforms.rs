@@ -2,11 +2,11 @@
 
 use std::sync::Arc;
 
+use crate::error::FeedError;
 use crate::platform::AniListPlatform;
 use crate::platform::ComickPlatform;
 use crate::platform::MangaDexPlatform;
 use crate::platform::traits::Platform;
-use crate::error::FeedError;
 
 /// Registry of all feed platforms.
 pub struct Platforms {

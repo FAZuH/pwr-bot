@@ -101,16 +101,14 @@ macro_rules! export_plugin {
             let req = unsafe { &*req };
             let host = $crate::host::PluginHost::new(req.ctx_handle, unsafe { &*req.callbacks });
 
-            let result = tokio::runtime::Handle::current()
-                .block_on(async { PLUGIN.init(&host).await });
+            let result =
+                tokio::runtime::Handle::current().block_on(async { PLUGIN.init(&host).await });
 
             match result {
-                Ok(()) => {
-                    unsafe {
-                        (*resp).payload_json = std::ptr::null_mut();
-                        (*resp).error = std::ptr::null_mut();
-                    }
-                }
+                Ok(()) => unsafe {
+                    (*resp).payload_json = std::ptr::null_mut();
+                    (*resp).error = std::ptr::null_mut();
+                },
                 Err(err) => {
                     let c_str = std::ffi::CString::new(err).unwrap();
                     unsafe {
@@ -133,11 +131,7 @@ macro_rules! export_plugin {
             callbacks: *const $crate::abi::HostCallbacks,
             ctx_handle: u64,
         ) -> bool {
-            let name = unsafe {
-                std::ffi::CStr::from_ptr(event_name)
-                    .to_str()
-                    .unwrap_or("")
-            };
+            let name = unsafe { std::ffi::CStr::from_ptr(event_name).to_str().unwrap_or("") };
             let payload_str = unsafe {
                 std::ffi::CStr::from_ptr(payload_json)
                     .to_str()

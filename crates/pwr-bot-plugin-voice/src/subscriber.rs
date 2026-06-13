@@ -28,16 +28,8 @@ struct ParsedVoiceState {
 fn parse_event(payload: &serde_json::Value) -> Option<ParsedVoiceState> {
     let new = payload.get("new")?;
 
-    let user_id = new
-        .get("user_id")?
-        .as_str()?
-        .parse::<u64>()
-        .ok()?;
-    let guild_id = new
-        .get("guild_id")?
-        .as_str()?
-        .parse::<u64>()
-        .ok()?;
+    let user_id = new.get("user_id")?.as_str()?.parse::<u64>().ok()?;
+    let guild_id = new.get("guild_id")?.as_str()?.parse::<u64>().ok()?;
     let new_channel = new
         .get("channel_id")
         .and_then(|v| v.as_str())
@@ -77,8 +69,8 @@ async fn is_voice_disabled(host: &PluginHost, guild_id: u64) -> Result<bool, Str
 
     match rows.first() {
         Some(row) => match row.get("enabled") {
-            Some(val) if val == "false" => Ok(true),  // explicitly disabled
-            _ => Ok(false),  // enabled or no setting
+            Some(val) if val == "false" => Ok(true), // explicitly disabled
+            _ => Ok(false),                          // enabled or no setting
         },
         None => Ok(false), // no row = enabled by default
     }
@@ -166,7 +158,11 @@ async fn handle_join(
     channel_id: u64,
 ) -> Result<(), String> {
     // Dedup: skip if already tracking this session (gateway reconnect)
-    if active_sessions.lock().await.contains_key(&parsed.session_id) {
+    if active_sessions
+        .lock()
+        .await
+        .contains_key(&parsed.session_id)
+    {
         return Ok(());
     }
 
@@ -174,7 +170,11 @@ async fn handle_join(
     close_orphaned_sessions(host, parsed.user_id, parsed.guild_id).await?;
 
     // Re-check after await (race condition guard)
-    if active_sessions.lock().await.contains_key(&parsed.session_id) {
+    if active_sessions
+        .lock()
+        .await
+        .contains_key(&parsed.session_id)
+    {
         return Ok(());
     }
 
@@ -210,7 +210,10 @@ async fn handle_leave(
         host.query_db(
             "SELECT channel_id, join_time FROM voice_sessions \
              WHERE user_id = $1::bigint AND guild_id = $2::bigint AND is_active = true",
-            &[DbValue::I64(parsed.user_id as i64), DbValue::I64(parsed.guild_id as i64)],
+            &[
+                DbValue::I64(parsed.user_id as i64),
+                DbValue::I64(parsed.guild_id as i64),
+            ],
         )
         .map_err(|e| format!("Failed to query active sessions: {e}"))?
     };
@@ -265,7 +268,10 @@ async fn handle_move(
         host.query_db(
             "SELECT channel_id, join_time FROM voice_sessions \
              WHERE user_id = $1::bigint AND guild_id = $2::bigint AND is_active = true",
-            &[DbValue::I64(parsed.user_id as i64), DbValue::I64(parsed.guild_id as i64)],
+            &[
+                DbValue::I64(parsed.user_id as i64),
+                DbValue::I64(parsed.guild_id as i64),
+            ],
         )
         .map_err(|e| format!("Failed to query sessions on move: {e}"))?
     };
@@ -333,13 +339,9 @@ pub async fn handle_voice_state_event(
 
     match (parsed.old_channel, parsed.new_channel) {
         // User joined: old None, new Some
-        (None, Some(channel_id)) => {
-            handle_join(active_sessions, host, &parsed, channel_id).await
-        }
+        (None, Some(channel_id)) => handle_join(active_sessions, host, &parsed, channel_id).await,
         // User left: old Some, new None
-        (Some(_old_id), None) => {
-            handle_leave(active_sessions, host, &parsed).await
-        }
+        (Some(_old_id), None) => handle_leave(active_sessions, host, &parsed).await,
         // User moved: both Some, different channels
         (Some(old_id), Some(new_id)) if old_id != new_id => {
             handle_move(active_sessions, host, &parsed, new_id).await
