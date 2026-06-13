@@ -291,9 +291,10 @@ impl ViewHandler for SettingsMainView {
             NavigateToFeature => {
                 if let Some(values) = ctx.string_select_values()
                     && let Some(feature_id) = values.first()
-                        && let Some(feature) = self.features.iter().find(|f| f.id == *feature_id) {
-                            cor.navigate(feature.navigate.clone()).await;
-                        }
+                    && let Some(feature) = self.features.iter().find(|f| f.id == *feature_id)
+                {
+                    cor.navigate(feature.navigate.clone()).await;
+                }
                 Ok(ViewCmd::Exit)
             }
             ToggleFeature => {

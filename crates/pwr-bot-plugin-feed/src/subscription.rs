@@ -44,10 +44,7 @@ pub async fn subscribe(
     // Find or create the feed
     let feed = match get_feed_by_source_url(host, url).await? {
         Some(feed) => feed,
-        None => {
-            
-            create_feed(host, url).await?
-        }
+        None => create_feed(host, url).await?,
     };
 
     let feed_id = feed.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
@@ -351,9 +348,10 @@ pub async fn check_feed_update(
 
     // Check if version changed
     if let Some(ref old) = old_title
-        && new_latest.title == *old {
-            return Ok(FeedUpdateResult::NoUpdate);
-        }
+        && new_latest.title == *old
+    {
+        return Ok(FeedUpdateResult::NoUpdate);
+    }
 
     // Insert new item
     unsafe {

@@ -61,9 +61,10 @@ pub async fn dispatch(
                     free(response.error);
                 }
                 if !response.payload_json.is_null()
-                    && let Some(free) = plugin_vtable.free_string {
-                        free(response.payload_json);
-                    }
+                    && let Some(free) = plugin_vtable.free_string
+                {
+                    free(response.payload_json);
+                }
                 return Err(err.into());
             }
 
@@ -206,9 +207,7 @@ pub fn register_plugin_event_handlers(
                     Ok(())
                 }),
             );
-            log::info!(
-                "Registered event handler '{event_name}' for plugin '{plugin_name}'",
-            );
+            log::info!("Registered event handler '{event_name}' for plugin '{plugin_name}'",);
         }
     }
 }
@@ -419,9 +418,10 @@ pub async fn dispatch_tasks_ffi(ffi_plugins: &[Arc<LoadedPlugin>]) {
                             }
                         }
                         if !response.payload_json.is_null()
-                            && let Some(free) = vtable.free_string {
-                                free(response.payload_json);
-                            }
+                            && let Some(free) = vtable.free_string
+                        {
+                            free(response.payload_json);
+                        }
                     }
                 }
             });
