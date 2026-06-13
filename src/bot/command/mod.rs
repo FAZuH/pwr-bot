@@ -151,16 +151,14 @@ impl<'a> Router<'a> {
     async fn next_handler(&self) -> Option<Box<dyn CommandHandler + 'a>> {
         use Navigation::*;
 
-        loop {
-            let nav = self.pop_next().await?;
-            let hc = self.host_ctx.clone();
-            let res: Box<dyn CommandHandler> = match nav {
-                SettingsMain => Box::new(SettingsMainHandler::new(hc)),
-                SettingsPlugin { plugin_id } => Box::new(PluginSettingsHandler::new(hc, plugin_id)),
-                SettingsAbout => Box::new(AboutHandler::new(hc)),
-            };
-            return Some(res);
-        }
+        let nav = self.pop_next().await?;
+        let hc = self.host_ctx.clone();
+        let res: Box<dyn CommandHandler> = match nav {
+            SettingsMain => Box::new(SettingsMainHandler::new(hc)),
+            SettingsPlugin { plugin_id } => Box::new(PluginSettingsHandler::new(hc, plugin_id)),
+            SettingsAbout => Box::new(AboutHandler::new(hc)),
+        };
+        Some(res)
     }
 }
 

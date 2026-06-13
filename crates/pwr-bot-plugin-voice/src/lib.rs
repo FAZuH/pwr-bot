@@ -71,10 +71,6 @@ impl VoicePlugin {
         let client = pool.get().await.map_err(|e| e.to_string())?;
         client.execute(sql, params).await.map_err(|e| e.to_string())
     }
-
-    fn pool(&self) -> &Mutex<Option<Pool>> {
-        &self.pool
-    }
 }
 
 impl Default for VoicePlugin {
@@ -270,7 +266,6 @@ impl VoicePlugin {
             _ => vec![],
         };
 
-        let mut closed = 0u32;
         for row in &rows {
             let user_id = row.get("user_id").and_then(|v| v.as_i64()).unwrap_or(0);
             let channel_id = row.get("channel_id").and_then(|v| v.as_i64()).unwrap_or(0);
@@ -292,8 +287,6 @@ impl VoicePlugin {
                 ],
             )
             .await?;
-
-            closed += 1;
         }
 
         Ok(())

@@ -168,8 +168,5 @@ impl Config {
 
 /// Parse a boolean string value (not an env var — just the value).
 fn parse_bool(val: &str) -> bool {
-    match val.to_lowercase().as_str() {
-        "true" | "1" | "yes" | "on" => true,
-        _ => false,
-    }
+    matches!(val.to_lowercase().as_str(), "true" | "1" | "yes" | "on")
 }

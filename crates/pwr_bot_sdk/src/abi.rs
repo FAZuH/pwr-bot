@@ -99,10 +99,18 @@ pub struct PluginVTable {
 }
 
 impl InvokeRequest {
+    /// # Safety
+    ///
+    /// `command` must point to a valid null-terminated C string that is
+    /// guaranteed to live for the duration of the borrow.
     pub unsafe fn command_str(&self) -> &str {
         unsafe { CStr::from_ptr(self.command).to_str().unwrap_or("") }
     }
 
+    /// # Safety
+    ///
+    /// `args_json` must point to a valid null-terminated C string that is
+    /// guaranteed to live for the duration of the borrow.
     pub unsafe fn args_json_str(&self) -> &str {
         unsafe { CStr::from_ptr(self.args_json).to_str().unwrap_or("") }
     }

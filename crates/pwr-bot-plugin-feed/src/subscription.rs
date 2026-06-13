@@ -92,6 +92,7 @@ pub async fn add_subscriber(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn add_feed(
     pool: &Pool,
     _host: &PluginHost,

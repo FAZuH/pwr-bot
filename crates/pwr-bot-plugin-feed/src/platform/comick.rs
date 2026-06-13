@@ -36,6 +36,12 @@ pub struct ComickPlatform {
     limiter: RateLimiter<NotKeyed, InMemoryState, QuantaClock>,
 }
 
+impl Default for ComickPlatform {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ComickPlatform {
     /// Creates a new Comick platform with rate limiting.
     pub fn new() -> Self {

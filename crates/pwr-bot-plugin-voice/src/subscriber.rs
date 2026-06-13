@@ -7,6 +7,7 @@ use tokio_postgres::types::ToSql;
 
 /// In-memory session tracking keyed by Discord session_id.
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub struct ActiveSession {
     pub user_id: u64,
     pub guild_id: u64,

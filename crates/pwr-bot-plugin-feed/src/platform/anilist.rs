@@ -30,6 +30,12 @@ pub struct AniListPlatform {
     limiter: RateLimiter<NotKeyed, InMemoryState, QuantaClock>,
 }
 
+impl Default for AniListPlatform {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AniListPlatform {
     /// Creates a new AniList platform with rate limiting.
     pub fn new() -> Self {

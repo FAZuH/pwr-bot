@@ -39,6 +39,12 @@ pub struct MangaDexPlatform {
     limiter: RateLimiter<NotKeyed, InMemoryState, QuantaClock>,
 }
 
+impl Default for MangaDexPlatform {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MangaDexPlatform {
     /// Creates a new MangaDex platform with rate limiting.
     pub fn new() -> Self {

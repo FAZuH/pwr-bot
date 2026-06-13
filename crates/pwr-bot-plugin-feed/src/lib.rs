@@ -60,22 +60,6 @@ impl FeedPlugin {
             .collect();
         Ok(serde_json::Value::Array(json_rows))
     }
-
-    async fn db_execute(
-        &self,
-        sql: &str,
-        params: &[&(dyn tokio_postgres::types::ToSql + Sync)],
-    ) -> Result<u64, String> {
-        let pool = self
-            .pool
-            .lock()
-            .await
-            .as_ref()
-            .ok_or("Database pool not initialized")?
-            .clone();
-        let client = pool.get().await.map_err(|e| e.to_string())?;
-        client.execute(sql, params).await.map_err(|e| e.to_string())
-    }
 }
 
 impl Default for FeedPlugin {
