@@ -437,6 +437,7 @@ mod server_settings_table_tests {
                     unsubscribe_role_id: None,
                 },
                 welcome: WelcomeSettings::default(),
+                plugin_settings: std::collections::HashMap::new(),
             }),
         }
     }
