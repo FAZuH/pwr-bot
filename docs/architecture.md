@@ -5,16 +5,16 @@
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                    Presentation Layer                       │
-│          bot/ — commands (Router → CommandHandler)          │
+│     bot/ — commands (Router → CommandHandler)  +  plugins   │
 ├─────────────────────────────────────────────────────────────┤
 │                   Application Layer                         │
-│         event/  subscriber/  task/  — cross-cutting         │
+│         event/  — cross-cutting event bus                   │
 ├─────────────────────────────────────────────────────────────┤
-│                    Service Layer                            │
-│                service/ — business logic                    │
+│                   Service Layer                             │
+│               service/ — business logic                     │
 ├─────────────────────────────────────────────────────────────┤
-│                    Domain Layer                             │
-│           feed/  entity/ — models and platforms             │
+│                   Domain Layer                              │
+│               entity/ — models                               │
 ├─────────────────────────────────────────────────────────────┤
 │                 Infrastructure Layer                        │
 │                   repo/ — PostgreSQL via Diesel             │
@@ -27,28 +27,31 @@
 
 Handles all Discord I/O. Translates Discord events into domain actions, renders UI, orchestrates navigation. Contains no business logic.
 
-### Commands (`bot/commands/`)
+### Core Commands
 
-Commands are organized by domain. Each top-level module is a command group; subcommands live in a subdirectory of the same name.
+Core commands are registered statically by `Cogs`:
 
 | Module | Commands |
 |--------|----------|
-| `feed.rs` | `/feed` group — `list`, `subscribe`, `unsubscribe`, `settings` |
-| `voice.rs` | `/vc` group — `leaderboard`, `stats`, `settings` |
-| `settings.rs` | `/settings` group — `feeds`, `voice` |
+| `settings.rs` | `/settings` — guild feature toggle + navigation to plugin settings |
 | `about.rs` | `/about` |
 | `register.rs` | `/register` |
 | `register_owner.rs` | `/register_owner` |
 | `unregister.rs` | `/unregister` |
 | `dump_db.rs` | `/dump_db` |
+| `gui_test.rs` | `/gui_test` — runs all plugin-declared test steps |
+
+### Plugin Commands
+
+Commands from dynamic `.so` plugins are discovered at runtime via `PluginRegistry::all_commands()`. Each command resolves its plugin at dispatch time through `invocation::dispatch_plugin_command()`. No core code knows specific plugin names.
 
 ### Router → CommandHandler → View Flow
 
 Interactive commands follow a **Router → CommandHandler → View** flow:
 
 - **`Router`** — receives the Poise context, owns navigation state, drives handlers. Defined in `src/bot/command/mod.rs`.
-- **`CommandHandler`** — trait for handler run loops. Each domain has a concrete handler (e.g. `FeedListHandler`, `VoiceStatsHandler`).
-- **`Navigation`** — enum signalling the next navigation step (e.g. `Back`, `Exit`, `SettingsMain`). Defined in `src/bot/navigation.rs`.
+- **`CommandHandler`** — trait for handler run loops.
+- **`Navigation`** — enum signalling the next navigation step (e.g. `Back`, `Exit`, `SettingsMain`). Plugin settings panels use `SettingsPlugin { plugin_id }` — a dynamic string, not a hardcoded variant. Defined in `src/bot/navigation.rs`.
 - **`ViewEngine`** — the event loop runner that drives the view life cycle.
 
 ### View System (`src/bot/view/mod.rs`)
@@ -83,9 +86,17 @@ The view system is built on a trait-based architecture driven by the **ViewEngin
 
 Child views are integrated using `ctx.map(wrap, ParentAction::Child)`. This creates a `MappedViewSender` that wraps child actions into parent actions, allowing child views to be handled independently within a parent's `handle` method. This allows composition without the parent needing to know the child's internal state or action structure.
 
+### Test Framework (`src/bot/test_framework/`)
+
+The GUI test suite discovers test steps dynamically from loaded plugins:
+
+- Core test steps (`/about`, `/settings`) are registered statically.
+- Plugin test steps are discovered from `PluginRegistry::all_test_steps()` at runtime.
+- Each test step dispatches via `dispatch_plugin_command()` — the same path used for production commands.
+
 ---
 
-## Application Layer (`src/event/`, `src/subscriber/`, `src/task/`)
+## Application Layer (`src/event/`)
 
 Cross-cutting concerns that don't belong to any single feature. Glues layers together without containing business logic.
 
@@ -95,25 +106,9 @@ Type-safe pub/sub via `EventBus`. Publishers and subscribers are decoupled — n
 
 | Event | Published by | Consumed by |
 |-------|-------------|-------------|
-| `FeedUpdateEvent` | `SeriesFeedPublisher` | `DiscordGuildSubscriber`, `DiscordDmSubscriber` |
-| `VoiceStateEvent` | `BotEventHandler` | `VoiceStateSubscriber` |
+| `VoiceStateEvent` (named `"voice_state"`) | `BotEventHandler` | Plugins subscribed via `event_handlers()` |
 
-### Subscribers (`subscriber/`)
-
-React to application events, call services, send Discord messages.
-
-| Subscriber | Reacts to |
-|-----------|----------|
-| `DiscordGuildSubscriber` | `FeedUpdateEvent` → sends to guild channel |
-| `DiscordDmSubscriber` | `FeedUpdateEvent` → sends to DM |
-| `VoiceStateSubscriber` | `VoiceStateEvent` → tracks session lifecycle |
-
-### Background Tasks (`task/`)
-
-| Task | Responsibility |
-|------|---------------|
-| `SeriesFeedPublisher` | Polls feed platforms on a schedule, publishes `FeedUpdateEvent` |
-| `VoiceHeartbeatManager` | Crash recovery for active voice sessions |
+The event bus supports both typed events (via `Event` trait) and named string-based events. Named events are the primary mechanism for plugin communication — any plugin can subscribe to named events by declaring `EventHandlerSpec` entries.
 
 ---
 
@@ -123,40 +118,29 @@ The only layer that enforces business rules. Handlers call services; services or
 
 | Service (trait) | Responsibility |
 |---------|---------------|
-| `FeedSubscriptionProvider` | Feed subscription lifecycle — create, delete, list, validate |
-| `VoiceTracker` | Voice session lifecycle — start, stop, query stats |
-| `SettingsProvider` | Server configuration management |
-| `InternalOps` | Bot metadata and internal operations |
+| `SettingsProvider` | Server configuration management — reads/writes `server_settings` JSONB via the dynamic `plugin_settings` HashMap |
+| `InternalOps` | Bot metadata (`bot_version`), internal operations |
 
 ---
 
-## Domain Layer (`src/feed/`, `src/entity.rs`)
+## Domain Layer (`src/entity.rs`)
 
-Plain domain objects and platform abstractions. Entities have no database concerns beyond `FromRow` (an acceptable tradeoff). Platform implementations depend on domain types, not the other way around.
+Plain domain objects. Entities have no database concerns beyond Diesel model derives.
 
-### Entities (`src/entity.rs`)
+### Entities
 
 | Entity | Description |
 |--------|-------------|
-| `FeedEntity` | A content source on a platform |
-| `FeedItemEntity` | An individual update (chapter, episode) |
-| `SubscriberEntity` | A notification target (guild or DM) |
-| `FeedSubscriptionEntity` | Link between a feed and a subscriber |
-| `ServerSettingsEntity` | Per-guild configuration, includes nested `WelcomeSettings`, `FeedsSettings`, `VoiceSettings` |
-| `VoiceSessionsEntity` | Voice channel session record |
+| `ServerSettingsEntity` | Per-guild configuration — stores all plugin settings in a `#[serde(flatten)] HashMap<String, Value>` |
 | `BotMetaEntity` | Key-value bot metadata |
-| `DbVoiceSession` | Raw voice session for persistence |
-| `VoiceLeaderboardEntry` / `VoiceLeaderboardRow` | Leaderboard query results |
 
-### Platforms (`feed/`)
+### Plugin Settings Storage
 
-Implements the **Strategy pattern** — `FeedSubscriptionService` depends on the `Platform` trait, not concrete implementations.
-
-| Platform | API |
-|----------|-----|
-| `MangaDexPlatform` | MangaDex |
-| `AniListPlatform` | AniList |
-| `ComickPlatform` | Comick |
+`ServerSettings` uses `#[serde(flatten)]` so existing JSONB documents like:
+```json
+{"feeds": {"enabled": true}, "voice": {"enabled": false}}
+```
+deserialize directly into a `HashMap<String, Value>` without migration. Helper methods `is_enabled(id)` and `set_enabled(id, val)` abstract the access pattern.
 
 ---
 
@@ -164,32 +148,160 @@ Implements the **Strategy pattern** — `FeedSubscriptionService` depends on the
 
 Data access. Repositories depend on domain entities, not the other way around. Owns all Diesel query logic, the connection pool, and migrations.
 
-A factory trait `Repos` defines the repo access interface. The concrete `PgRepos` struct holds per-table `Pg*Repo` handles and implements the factory:
+A factory trait `Repos` defines the repo access interface:
 
 ```rust
 pub trait Repos: Send + Sync {
-    fn feed(&self) -> Box<dyn FeedRepository + Send + Sync>;
-    fn feed_item(&self) -> Box<dyn FeedItemRepository + Send + Sync>;
-    fn subscriber(&self) -> Box<dyn SubscriberRepository + Send + Sync>;
-    fn feed_subscription(&self) -> Box<dyn FeedSubscriptionRepository + Send + Sync>;
     fn server_settings(&self) -> Box<dyn ServerSettingsRepository + Send + Sync>;
-    fn voice_sessions(&self) -> Box<dyn VoiceSessionsRepository + Send + Sync>;
     fn bot_meta(&self) -> Box<dyn BotMetaRepository + Send + Sync>;
 }
+```
 
+The concrete `PgRepos` struct implements the factory with:
+
+```rust
 pub struct PgRepos {
-    pub feed: PgFeedRepo,
-    pub feed_item: PgFeedItemRepo,
-    pub subscriber: PgSubscriberRepo,
-    pub feed_subscription: PgFeedSubscriptionRepo,
     pub server_settings: PgServerSettingsRepo,
-    pub voice_sessions: PgVoiceSessionsRepo,
     pub bot_meta: PgBotMetaRepo,
     pool: DbPool,
 }
 ```
 
-Each table struct (`Pg*Repo`) implements a `CrudTable<T, ID>` trait alongside domain-specific repository traits.
+Plugin crates manage their own database connections via `deadpool-postgres` pools, reading `DB_URL` from the environment. They are **not** part of the core repo layer.
+
+---
+
+## Plugin System (`crates/pwr_bot_sdk/`, `src/bot/plugin/`)
+
+Plugins are loaded as dynamic shared libraries (`.so`) at startup from `PLUGIN_DIR` (default: `./plugins/`). They communicate with the host through a stable C ABI defined in the `pwr_bot_sdk` crate.
+
+### Architecture
+
+```
+Discord interaction
+  → Poise routes to command
+  → PluginRegistry::all_commands() resolves plugin
+  → invocation::dispatch_plugin_command()
+    → [FFI]   InvokeRequest → VTable::invoke() → host callbacks
+```
+
+### PluginRegistry Discovery
+
+The `PluginRegistry` provides dynamic discovery methods that iterate all loaded plugins:
+
+| Method | Returns | Used by |
+|--------|---------|---------|
+| `all_commands()` | `Vec<Command<Data, Error>>` | Poise framework registration |
+| `all_settings_panels()` | `Vec<(plugin_name, id, SettingsPanelSpec)>` | `/settings` UI |
+| `all_event_handlers()` | `Vec<(LoadedPlugin, EventHandlerSpec)>` | Event bus subscription |
+| `all_test_steps()` | `Vec<(plugin_name, step_name, TestStepSpec)>` | `/gui_test` command |
+| `all_tasks()` | `Vec<(plugin_name, TaskSpec)>` | Background task spawning |
+
+### HostCtx Abstraction
+
+The [`HostCtx`](src/bot/host_ctx.rs) trait decouples handler logic from poise internals:
+
+| Implementation | Backing | Use case |
+|----------------|---------|----------|
+| `PoiseHostCtx` | `Context<'_>` (poise) | Core commands |
+| `FfiHostCtx` | `HostCallbacks` (FFI) | Plugin commands — wraps `PoiseHostCtx` in a handle-based registry |
+
+All plugin commands (including events and tasks) go through `FfiHostCtx`. The `host_registry` maps opaque `u64` handles back to `PoiseHostCtx` instances for callback dispatch.
+
+### SDK Crate (`crates/pwr_bot_sdk/`)
+
+| Module | Contents |
+|--------|----------|
+| `abi.rs` | `PluginVTable`, `InvokeRequest`/`InvokeResponse`, `HostCallbacks` — all `#[repr(C)]` |
+| `host.rs` | `PluginHost` — safe wrapper around FFI callbacks |
+| `plugin.rs` | `BotPlugin` trait, metadata specs (`CommandSpec`, `TestStepSpec`, `SettingsPanelSpec`, `EventHandlerSpec`, `TaskSpec`) |
+| `macros.rs` | `export_plugin!` — generates `extern "C"` entry point with `OnceLock` lazy initialization |
+
+### ABI Contract
+
+```rust
+#[repr(C)]
+pub struct PluginVTable {
+    pub api_version: u32,
+    pub metadata:     unsafe extern "C" fn() -> *mut c_char,  // JSON PluginMetadata
+    pub invoke:       unsafe extern "C" fn(req, resp),
+    pub init:         Option<unsafe extern "C" fn(req, resp)>,
+    pub shutdown:     Option<unsafe extern "C" fn() -> bool>,
+    pub on_event:     Option<unsafe extern "C" fn(event_name, payload, callbacks, ctx) -> bool>,
+    pub free_string:  Option<unsafe extern "C" fn(*mut c_char)>,
+}
+```
+
+The host calls `metadata()` at load time to discover slash commands, settings panels, event handlers, tasks, and test steps — all encoded as a JSON `PluginMetadata` struct. When a user invokes a plugin command, the host serializes the arguments into `InvokeRequest`, calls `invoke()`, and processes the `InvokeResponse`.
+
+### Plugin Lifecycle
+
+1. **Load**: `loader::load_plugins("plugins/")` — `dlopen` each `.so`, lookup `pwr_bot_plugin_entry`, validate `api_version`
+2. **Register**: `registry::PluginRegistry::register()` — parse `PluginMetadata` JSON, construct poise `Command` objects, register event handlers
+3. **Init**: `invocation::dispatch_init_ffi()` — calls `vtable.init()` for each plugin (DB pool setup, etc.)
+4. **Subscribe**: `register_ffi_event_handlers()` — subscribes to named events on the event bus
+5. **Tasks**: `dispatch_tasks_ffi()` — spawns tokio intervals for each `TaskSpec`
+6. **Invoke**: `dispatch()` — serialize args, call FFI `invoke()`, deserialize `ResponsePayload`, send to Discord
+7. **Teardown**: Plugins are never unloaded — library handles are leaked intentionally so vtable pointers remain valid
+
+### Writing a Plugin
+
+```rust
+use pwr_bot_sdk::export_plugin;
+use pwr_bot_sdk::{BotPlugin, CommandSpec, ResponsePayload, PluginHost, TestStepSpec};
+
+struct MyPlugin;
+
+#[async_trait]
+impl BotPlugin for MyPlugin {
+    fn name(&self) -> &'static str { "my-plugin" }
+    fn description(&self) -> &'static str { "Example plugin" }
+    fn version(&self) -> &'static str { "0.1.0" }
+
+    fn commands(&self) -> Vec<CommandSpec> {
+        vec![CommandSpec::new("hello", "Says hello")]
+    }
+
+    fn settings_panels(&self) -> Vec<SettingsPanelSpec> {
+        vec![SettingsPanelSpec::new("my-plugin", "My Plugin")]
+    }
+
+    fn test_steps(&self) -> Vec<TestStepSpec> {
+        vec![TestStepSpec::new(
+            "hello", "Says hello", "hello", serde_json::json!({}),
+        )]
+    }
+
+    async fn invoke(&self, cmd: &str, _args: serde_json::Value, _host: &PluginHost) -> Result<ResponsePayload, String> {
+        match cmd {
+            "hello" => Ok(ResponsePayload {
+                content: Some("Hello from plugin!".into()),
+                ephemeral: false,
+                components_json: None,
+                embed_json: None,
+            }),
+            _ => Err("Unknown command".into()),
+        }
+    }
+}
+
+export_plugin!(MyPlugin, MyPlugin);
+```
+
+### Plugin Database Access
+
+Each plugin manages its own `deadpool-postgres` connection pool using `DB_URL` from the environment. The pool is created during `init()`:
+
+```rust
+async fn init(&self, _host: &PluginHost) -> Result<(), String> {
+    let mut config = deadpool_postgres::Config::new();
+    config.url = Some(std::env::var("DB_URL").map_err(|_| "DB_URL not set")?);
+    let pool = config.create_pool(Some(Runtime::Tokio1), NoTls)
+        .map_err(|e| e.to_string())?;
+    *self.pool.lock().await = Some(pool);
+    Ok(())
+}
+```
 
 ---
 
@@ -216,122 +328,32 @@ Discord interaction
       → Router routes to next CommandHandler or exits
 ```
 
-### Background Feed Update
+### Plugin Command
 
 ```
-SeriesFeedPublisher (scheduled)
-  → Platform::fetch_latest()         poll external API
-  → FeedSubscriptionService          validate, find subscribers
-  → EventBus::publish(FeedUpdateEvent)
-  → DiscordGuildSubscriber / DiscordDmSubscriber
-  → Send Discord message via Serenity HTTP
+Discord interaction
+  → Poise routes to registry command handler
+  → PluginRegistry::lookup(command_name)
+  → invocation::dispatch_plugin_command()
+    → dispatch()                         FFI path
+      → serialize args to JSON
+      → FfiHostCtx (handle + callbacks)
+      → VTable::invoke(request, response)
+      → parse ResponsePayload
+      → send reply via host callbacks
 ```
 
-### Voice State Change
+### Voice State Event
 
 ```
 Discord gateway event
   → BotEventHandler::dispatch()
-  → EventBus::publish(VoiceStateEvent)
-  → VoiceStateSubscriber
-  → VoiceTrackingService             update session state
-  → PgRepos                          persist to PostgreSQL
+  → EventBus::publish_named("voice_state", payload)
+  → All plugins subscribed to "voice_state"
+  → Each plugin's VTable::on_event()
 ```
 
 ---
-
----
-
-## Plugin System (`crates/pwr_bot_sdk/`, `src/bot/plugin/`)
-
-Plugins are loaded as dynamic shared libraries (`.so`) at startup. They communicate with the host through a stable C ABI defined in the `pwr_bot_sdk` crate.
-
-### Architecture
-
-```
-Discord interaction
-  → Poise routes to command
-  → [Built-in] Router → CommandHandler → ViewEngine
-  → [Plugin]   invocation::dispatch → FFI invoke() → host callbacks
-```
-
-### HostCtx Abstraction
-
-The [`HostCtx`](src/bot/host_ctx.rs) trait decouples handler logic from poise internals:
-
-| Implementation | Backing | Use case |
-|----------------|---------|----------|
-| `PoiseHostCtx` | `Context<'_>` (poise) | Built-in commands |
-| `FfiHostCtx` | `HostCallbacks` (FFI) | Plugin commands |
-
-Handlers use `host_ctx.defer()`, `host_ctx.data()`, etc. instead of raw poise context calls. ViewEngine creation still requires the underlying `Context<'_>` for component lifecycle management.
-
-### SDK Crate (`crates/pwr_bot_sdk/`)
-
-| Module | Contents |
-|--------|----------|
-| `abi.rs` | `PluginVTable`, `InvokeRequest`/`InvokeResponse`, `HostCallbacks` — all `#[repr(C)]` |
-| `host.rs` | `PluginHost` — safe wrapper around FFI callbacks |
-| `plugin.rs` | `BotPlugin` trait, `CommandSpec`, `ResponsePayload` |
-| `macros.rs` | `export_plugin!` — generates `extern "C"` entry point |
-
-### ABI Contract
-
-```rust
-#[repr(C)]
-pub struct PluginVTable {
-    pub api_version: u32,
-    pub commands:     unsafe extern "C" fn() -> CommandList,
-    pub invoke:       unsafe extern "C" fn(req: *const InvokeRequest, resp: *mut InvokeResponse),
-    pub free_command_list: unsafe extern "C" fn(list: CommandList),
-    pub free_response:     unsafe extern "C" fn(resp: *mut InvokeResponse),
-}
-```
-
-The host calls `commands()` at load time to discover slash commands (returned as a JSON-encoded array via `CommandList.json`). When a user invokes a plugin command, the host serializes the arguments into `InvokeRequest`, calls `invoke()`, and processes the `InvokeResponse`.
-
-### Plugin Lifecycle
-
-1. **Load**: `loader::load_plugins("plugins/")` — `dlopen` each `.so`, lookup `pwr_bot_plugin_entry`, validate `api_version`
-2. **Register**: `registry::PluginRegistry::register()` — parse `CommandList` JSON, construct poise `Command` objects
-3. **Invoke**: `invocation::dispatch()` — serialize args, call FFI `invoke()`, deserialize `ResponsePayload`, send to Discord
-4. **Teardown**: Plugins are never unloaded — library handles are leaked intentionally so vtable pointers remain valid
-
-### Writing a Plugin
-
-```rust
-use pwr_bot_sdk::{BotPlugin, CommandSpec, ArgSpec, ArgKind, ResponsePayload, PluginHost};
-
-struct MyPlugin;
-
-#[async_trait]
-impl BotPlugin for MyPlugin {
-    fn name(&self) -> &'static str { "my-plugin" }
-    fn description(&self) -> &'static str { "Example plugin" }
-    fn version(&self) -> &'static str { "0.1.0" }
-
-    fn commands(&self) -> Vec<CommandSpec> {
-        vec![CommandSpec {
-            name: "hello".to_string(),
-            description: "Says hello".to_string(),
-            args: vec![],
-        }]
-    }
-
-    async fn invoke(&self, _cmd: &str, _args: serde_json::Value, host: &PluginHost) -> Result<ResponsePayload, String> {
-        unsafe { host.send_reply(r#"{"content":"Hello from plugin!"}"#) }
-            .map_err(|e| e.to_string())?;
-        Ok(ResponsePayload {
-            content: Some("Hello from plugin!".to_string()),
-            ephemeral: false,
-            components_json: None,
-            embed_json: None,
-        })
-    }
-}
-
-export_plugin!(MyPlugin, MyPlugin);
-```
 
 ## Design Patterns Summary
 
@@ -339,8 +361,8 @@ export_plugin!(MyPlugin, MyPlugin);
 |---------|-------|---------|
 | Router → CommandHandler | Presentation | Navigation loop driving per-domain handlers |
 | ViewHandler | Presentation | Separates interaction state from view machinery |
-| Strategy | Domain | Swappable platform implementations |
 | Repository (factory) | Infrastructure | `Repos` trait with `PgRepos` concrete impl |
 | Event Bus | Application | Decoupled pub/sub communication |
-| Service | Application | Business logic via trait objects (`SettingsProvider`, `FeedSubscriptionProvider`, etc.) |
+| Service | Application | Business logic via trait objects |
 | Update (TEA) | Application | Pure state mutations separated from side effects |
+| Plugin via FFI | Cross-cutting | Dynamic `.so` loading with stable C ABI |

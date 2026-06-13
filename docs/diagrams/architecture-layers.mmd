@@ -15,13 +15,13 @@ graph TB
         Bot["Bot<br/>Serenity + Poise"]
         EventHandler["BotEventHandler<br/>Gateway events"]
 
-        subgraph Commands["Command Tree  ·  Poise Commands"]
-            Cogs["Cogs (Aggregator)"]
-            FeedCmd["Feed Command Group"]
-            VoiceCmd["Voice Command Group"]
-            SettingsCmd["Settings Command"]
-            UtilityCmds["Utility Commands<br/>about · register · unregister · ..."]
-            Cogs --> FeedCmd & VoiceCmd & SettingsCmd & UtilityCmds
+        subgraph Commands["Command Registration"]
+            Cogs["Cogs (Aggregator)<br/>Core commands"]
+            PluginRegistry["PluginRegistry<br/>all_commands()"]
+            CoreCmds["Core Commands<br/>settings · about · register · ..."]
+            PluginCmds["Plugin Commands<br/>dynamically discovered"]
+            Cogs --> CoreCmds
+            PluginRegistry --> PluginCmds
         end
 
         subgraph Nav["Router → Handler Flow"]
@@ -33,40 +33,36 @@ graph TB
 
         subgraph TestFW["Test Framework  ·  src/bot/test_framework/"]
             TestRunner["GuiTestRunner<br/>/gui_test command"]
+            PluginTestSteps["Plugin Test Steps<br/>registry.all_test_steps()"]
             SimEvents["SyntheticEvent<br/>simulate_click / simulate_select"]
             TestAsserts["assert_has_action<br/>assert_navigated_to"]
-            TestRunner --> SimEvents --> Views
+            TestRunner --> PluginTestSteps --> SimEvents --> Views
             TestRunner --> TestAsserts
         end
 
+        subgraph PluginSystem["Plugin System  ·  src/bot/plugin/"]
+            Loader["loader::load_plugins<br/>dlopen .so files"]
+            Registry["PluginRegistry<br/>register · lookup · discovery"]
+            Invocation["invocation::dispatch<br/>FFI invoke → host callbacks"]
+            FfiHost["FfiHostCtx<br/>handle-based callback registry"]
+            Loader --> Registry --> Invocation
+            Invocation --> FfiHost
+        end
+
         Bot --> EventHandler & Cogs
-        FeedCmd & VoiceCmd & SettingsCmd --> Router
+        CoreCmds & PluginCmds --> Router
     end
 
-    subgraph Application["Application Layer  ·  src/event/  src/subscriber/  src/task/"]
+    subgraph Application["Application Layer  ·  src/event/"]
         direction TB
 
         subgraph EventSystem["Event System  ·  Pub/Sub"]
             EventBus["EventBus"]
-            FeedEvent["FeedUpdateEvent"]
-            VoiceEvent["VoiceStateEvent"]
-            EventBus --> FeedEvent & VoiceEvent
+            VoiceEvent["VoiceStateEvent<br/>(named 'voice_state')"]
+            EventBus --> VoiceEvent
         end
 
-        subgraph Subscribers["Subscribers"]
-            GuildSub["DiscordGuildSubscriber"]
-            DmSub["DiscordDmSubscriber"]
-            VoiceSub["VoiceStateSubscriber"]
-        end
-
-        subgraph Tasks["Background Tasks"]
-            FeedPublisher["SeriesFeedPublisher"]
-            VoiceHeartbeat["VoiceHeartbeatManager"]
-        end
-
-        FeedEvent --> GuildSub & DmSub
-        VoiceEvent --> VoiceSub
-        Tasks --> EventBus
+        EventBus -->|plugin subscriptions| Presentation
     end
 
     subgraph BusinessLogic["Business Logic Layer  ·  src/service/  src/update/"]
@@ -74,59 +70,48 @@ graph TB
         
         subgraph UpdateSystem["TEA Update  ·  Pure Business Logic"]
             UpdateTrait["Update trait<br/>Model + Msg + Cmd"]
-            VoiceLBUpd["VoiceLeaderboardUpdate"]
-            VoiceStatsUpd["VoiceStatsUpdate"]
-            WelcomeUpd["WelcomeSettingsUpdate"]
-            FeedListUpd["FeedListUpdate"]
-            FeedSetUpd["FeedSettingsUpdate"]
-            MainSetUpd["SettingsMainUpdate"]
-            UpdateTrait -.->|implemented by| VoiceLBUpd & VoiceStatsUpd & WelcomeUpd & FeedListUpd & FeedSetUpd & MainSetUpd
+            SettingsUpd["SettingsMainUpdate"]
+            PluginUpd["Plugin Updates<br/>(in plugin crates)"]
+            UpdateTrait -.->|implemented by| SettingsUpd
+            UpdateTrait -.->|implemented by| PluginUpd
         end
         
         SettingsService["SettingsService<br/>get · update"]
-        FeedService["FeedSubscriptionService"]
-        VoiceService["VoiceTrackingService"]
         InternalService["InternalService"]
-        SettingsService --> FeedService & VoiceService
     end
 
-    subgraph Domain["Domain Layer  ·  src/entity.rs  src/feed/"]
-        subgraph Platforms["Platforms  ·  Strategy Pattern"]
-            PlatformTrait["Platform trait<br/>fetch_latest · fetch_source"]
-            MangaDex["MangaDexPlatform"]
-            AniList["AniListPlatform"]
-            Comick["ComickPlatform"]
-            PlatformTrait -.->|impl| MangaDex & AniList & Comick
-        end
-        Entities["Domain Entities<br/>FeedEntity · SubscriberEntity · VoiceSessionsEntity"]
+    subgraph Domain["Domain Layer  ·  src/entity.rs"]
+        Entities["Domain Entities<br/>ServerSettingsEntity (HashMap-based)<br/>BotMetaEntity"]
     end
 
     subgraph Infrastructure["Infrastructure Layer  ·  src/repo/"]
         subgraph Repository["Repos Factory Pattern"]
             Repo["PgRepos + Repos trait<br/>factory"]
-            FeedRepo["PgFeedRepo"]
-            FeedItemRepo["PgFeedItemRepo"]
-            SubscriberRepo["PgSubscriberRepo"]
-            VoiceRepo["PgVoiceSessionsRepo"]
             SettingsRepo["PgServerSettingsRepo"]
             BotMetaRepo["PgBotMetaRepo"]
-            Repo --> FeedRepo & FeedItemRepo & SubscriberRepo & VoiceRepo & SettingsRepo & BotMetaRepo
+            Repo --> SettingsRepo & BotMetaRepo
         end
         PostgreSQL["PostgreSQL  ·  Diesel async"]
-        FeedRepo & FeedItemRepo & SubscriberRepo & VoiceRepo & SettingsRepo --> PostgreSQL
+        SettingsRepo & BotMetaRepo --> PostgreSQL
+    end
+
+    subgraph Plugins["Plugin Crates  ·  crates/pwr-bot-plugin-*/"]
+        direction TB
+        PluginsDB["Plugin DB Pools<br/>deadpool-postgres<br/>reads DB_URL directly"]
+        PluginsTables["Plugin Tables<br/>feeds · feed_items · subscribers<br/>voice_sessions · ..."]
+        PluginsDB --> PluginsTables
     end
 
     Config["Config<br/>env vars + feature flags"]
 
     %% Cross-layer
     Handlers --> BusinessLogic
-    Subscribers --> BusinessLogic
-    Tasks --> BusinessLogic
     Views --> UpdateSystem
-    FeedService --> PlatformTrait
-    FeedService & VoiceService --> Repository
+    SettingsService --> Repository
     Bot --> BusinessLogic & EventBus
-    Config --> Bot & Tasks
+    Config --> Bot & Plugins
+    PluginsDB --> PostgreSQL
+    PluginSystem --> Plugins
 
     style Presentation fill:#1a3a1a,stroke:#4ade80,stroke-width:2px
     style Application fill:#1a2a3a,stroke:#60a5fa,stroke-width:2px
@@ -134,10 +119,14 @@ graph TB
     style Domain fill:#3a2a1a,stroke:#fbbf24,stroke-width:2px
     style Infrastructure fill:#2a1a1a,stroke:#f87171,stroke-width:2px
     style Config fill:#1a1a2a,stroke:#a78bfa,stroke-width:2px
+    style Plugins fill:#1a2a1a,stroke:#34d399,stroke-width:2px
     style UpdateSystem fill:#1a3a1a,stroke:#4ade80,stroke-width:2px
+    style PluginSystem fill:#1a2a1a,stroke:#34d399,stroke-width:2px
 
     style Bot fill:#2d2d2d,stroke:#4ade80
     style EventBus fill:#2d2d2d,stroke:#60a5fa
-    style PlatformTrait fill:#2d2d2d,stroke:#fbbf24
     style Repo fill:#2d2d2d,stroke:#f87171
+    style Registry fill:#2d2d2d,stroke:#34d399
+    style Loader fill:#2d2d2d,stroke:#34d399
+    style Invocation fill:#2d2d2d,stroke:#34d399
     style UpdateTrait fill:#2d2d2d,stroke:#4ade80

@@ -92,6 +92,7 @@ classDiagram
         Back
         Exit
         SettingsMain
+        SettingsPlugin
         ...
     }
 
@@ -200,47 +201,77 @@ classDiagram
         simulate_select(ctx, handler, action, values, coord) Result~ViewCmd~
     }
 
-    %% ── Concrete Update examples ──────────────────────────────────
-    class VoiceLeaderboardUpdate {
-        <<impl Update>>
-        Model = VoiceLeaderboardModel
-        Msg = VoiceLeaderboardMsg
-        Cmd = VoiceLeaderboardCmd
-    }
-
-    class VoiceStatsUpdate {
-        <<impl Update>>
-        Model = VoiceStatsModel
-        Msg = VoiceStatsMsg
-        Cmd = VoiceStatsCmd
-    }
-
-    class WelcomeSettingsUpdate {
-        <<impl Update>>
-        Model = WelcomeSettingsModel
-        Msg = WelcomeSettingsMsg
-        Cmd = WelcomeSettingsCmd
-    }
-
-    class FeedListUpdate {
-        <<impl Update>>
-        Model = FeedListModel
-        Msg = FeedListMsg
-        Cmd = FeedListCmd
-    }
-
-    class FeedSettingsUpdate {
-        <<impl Update>>
-        Model = FeedSettingsModel
-        Msg = FeedSettingsMsg
-        Cmd = FeedSettingsCmd
-    }
-
+    %% ── Core Update example ───────────────────────────────────────
     class SettingsMainUpdate {
         <<impl Update>>
         Model = SettingsMainModel
         Msg = SettingsMainMsg
         Cmd = SettingsMainCmd
+    }
+
+    %% ── Plugin System ─────────────────────────────────────────────
+    class PluginRegistry {
+        plugins: Vec~Arc~LoadedPlugin~~
+        command_map: HashMap~String, usize~
+        all_commands() Vec~Command~
+        all_settings_panels() Vec~SettingsPanelSpec~
+        all_event_handlers() Vec~EventHandlerSpec~
+        all_test_steps() Vec~TestStepSpec~
+        all_tasks() Vec~TaskSpec~
+    }
+
+    class LoadedPlugin {
+        name: String
+        description: String
+        version: String
+        metadata: PluginMetadata
+        vtable: PluginVTable
+    }
+
+    class PluginVTable {
+        <<repr(C)>>
+        api_version: u32
+        metadata: fn() -> *mut c_char
+        invoke: fn(req, resp)
+        init: Option~fn(req, resp)~
+        shutdown: Option~fn() -> bool~
+        on_event: Option~fn() -> bool~
+        free_string: Option~fn(*mut c_char)~
+    }
+
+    class PluginMetadata {
+        api_version: u32
+        name: String
+        commands: Vec~CommandSpec~
+        settings_panels: Vec~SettingsPanelSpec~
+        event_handlers: Vec~EventHandlerSpec~
+        test_steps: Vec~TestStepSpec~
+        tasks: Vec~TaskSpec~
+    }
+
+    class FfiHostCtx {
+        handle: u64
+        inner: Arc~PoiseHostCtx~
+        handle() u64
+    }
+
+    class PoiseHostCtx {
+        guild_id: Option~u64~
+        author_id: u64
+        channel_id: u64
+        data: Arc~Data~
+        http: Arc~Http~
+    }
+
+    class HostCallbacks {
+        <<repr(C)>>
+        send_reply: fn
+        edit_reply: fn
+        defer: fn
+        guild_id: fn -> u64
+        get_data_path: fn -> bool
+        publish_event: fn -> bool
+        ...
     }
 
     %% ── Trait relationships ───────────────────────────────────────
@@ -266,13 +297,13 @@ classDiagram
     ViewContext ..> SelectValues : uses
     ViewEvent ..> SyntheticEvent : contains
     SyntheticEvent ..> SelectValues : contains
-    VoiceLeaderboardUpdate ..> Update : implements
-    VoiceStatsUpdate ..> Update : implements
-    WelcomeSettingsUpdate ..> Update : implements
-    FeedListUpdate ..> Update : implements
-    FeedSettingsUpdate ..> Update : implements
     SettingsMainUpdate ..> Update : implements
     TestHelpers ..> ViewHandler : drives
     TestHelpers ..> ActionRegistry : inspects
     TestStep ..> GuiTestError : returns
     TestHelpers ..> GuiTestError : propagates
+    PluginRegistry --> LoadedPlugin : manages
+    LoadedPlugin --> PluginVTable : wraps
+    LoadedPlugin --> PluginMetadata : has
+    FfiHostCtx --> PoiseHostCtx : wraps
+    FfiHostCtx ..> HostCallbacks : uses

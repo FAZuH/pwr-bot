@@ -16,12 +16,7 @@ graph TB
     subgraph Commands["Command Entry Points"]
         direction TB
         SettingsCmd["/settings"]
-        FeedListCmd["/feed list"]
-        FeedSubCmd["/feed subscribe"]
-        FeedUnsubCmd["/feed unsubscribe"]
-        VoiceLBCmd["/voice leaderboard"]
-        VoiceStatsCmd["/voice stats"]
-        WelcomeCmd["/welcome"]
+        PluginCmds["/&lt;plugin-commands&gt;<br/>discovered from PluginRegistry"]
         GuiTestCmd["/gui_test  ·  owner-only"]
     end
     
@@ -31,54 +26,28 @@ graph TB
         subgraph SettingsFlow["Settings Flow"]
             direction TB
             SettingsMain["SettingsMain"]
-            SettingsFeeds["SettingsFeeds"]
-            SettingsVoice["SettingsVoice"]
-            SettingsWelcome["SettingsWelcome"]
+            SettingsPlugin["SettingsPlugin { plugin_id }<br/>dynamically dispatched<br/>to plugin command"]
             SettingsAbout["SettingsAbout"]
             
-            SettingsMain <-->|Feeds| SettingsFeeds
-            SettingsMain <-->|Voice| SettingsVoice
-            SettingsMain <-->|Welcome| SettingsWelcome
+            SettingsMain <-->|plugin settings<br/>from all_settings_panels| SettingsPlugin
             SettingsMain <-->|About| SettingsAbout
-        end
-        
-        subgraph FeedFlow["Feed Flow"]
-            direction TB
-            FeedList["FeedList"]
-            FeedSubscribe["FeedSubscribe"]
-            FeedUnsubscribe["FeedUnsubscribe"]
-            FeedBatch["FeedSubscriptionBatch"]
-            
-            FeedList <-->|Subscribe| FeedSubscribe
-            FeedList <-->|Unsubscribe| FeedUnsubscribe
-            FeedSubscribe -->|Multiple| FeedBatch
-        end
-        
-        subgraph VoiceFlow["Voice Flow"]
-            direction TB
-            VoiceLeaderboard["VoiceLeaderboard"]
-            VoiceStats["VoiceStats"]
-            
-            VoiceLeaderboard -->|Stats| VoiceStats
         end
     end
     
+    subgraph PluginDispatch["Plugin Command Dispatch"]
+        direction TB
+        RegistryLookup["PluginRegistry.lookup(parent)"]
+        FfiDispatch["invocation::dispatch()<br/>FFI invoke → ResponsePayload"]
+        DiscordReply["Discord Reply<br/>content · ephemeral"]
+        RegistryLookup --> FfiDispatch --> DiscordReply
+    end
+    
     Commands -->|settings| SettingsMain
-    Commands -->|list| FeedList
-    Commands -->|subscribe| FeedSubscribe
-    Commands -->|unsubscribe| FeedUnsubscribe
-    Commands -->|leaderboard| VoiceLeaderboard
-    Commands -->|stats| VoiceStats
-    Commands -->|welcome| SettingsWelcome
+    Commands -->|plugin command| RegistryLookup
     
     style SettingsMain fill:#2d2d2d,stroke:#ffffff,stroke-width:3px
-    style SettingsFeeds fill:#1e1e1e,stroke:#ffffff
-    style SettingsVoice fill:#1e1e1e,stroke:#ffffff
-    style SettingsWelcome fill:#1e1e1e,stroke:#ffffff
+    style SettingsPlugin fill:#1e1e1e,stroke:#ffffff
     style SettingsAbout fill:#1e1e1e,stroke:#ffffff
-    style FeedList fill:#1e1e1e,stroke:#ffffff
-    style FeedSubscribe fill:#1e1e1e,stroke:#ffffff
-    style FeedUnsubscribe fill:#1e1e1e,stroke:#ffffff
-    style FeedBatch fill:#1e1e1e,stroke:#ffffff
-    style VoiceLeaderboard fill:#2d2d2d,stroke:#ffffff,stroke-width:3px
-    style VoiceStats fill:#1e1e1e,stroke:#ffffff
+    style RegistryLookup fill:#1e1e1e,stroke:#34d399
+    style FfiDispatch fill:#1e1e1e,stroke:#34d399
+    style PluginCmds fill:#1e1e1e,stroke:#34d399
