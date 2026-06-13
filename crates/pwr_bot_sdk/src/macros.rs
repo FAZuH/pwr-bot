@@ -1,30 +1,34 @@
 /// Generate the FFI glue for a plugin.
 ///
-/// The plugin type must implement [`BotPlugin`] and be constructible as a
-/// `const` expression (e.g. a unit struct or a struct where all fields are
-/// `const`-compatible).
+/// The plugin type must implement [`BotPlugin`].
 #[macro_export]
 macro_rules! export_plugin {
     ($plugin_type:ty, $initializer:expr) => {
-        static PLUGIN: $plugin_type = $initializer;
+        use ::std::sync::OnceLock;
+
+        fn plugin_instance() -> &'static $plugin_type {
+            static PLUGIN: OnceLock<$plugin_type> = OnceLock::new();
+            PLUGIN.get_or_init(|| $initializer)
+        }
 
         fn build_metadata_json() -> *mut std::ffi::c_char {
+            let plugin = plugin_instance();
             let meta = $crate::PluginMetadata {
                 api_version: $crate::PWR_BOT_PLUGIN_API_VERSION,
-                name: PLUGIN.name().to_string(),
-                description: PLUGIN.description().to_string(),
-                version: PLUGIN.version().to_string(),
-                commands: PLUGIN.commands(),
-                event_handlers: PLUGIN.event_handlers(),
-                settings_panels: PLUGIN.settings_panels(),
-                test_steps: PLUGIN.test_steps(),
-                tasks: PLUGIN.tasks(),
+                name: plugin.name().to_string(),
+                description: plugin.description().to_string(),
+                version: plugin.version().to_string(),
+                commands: plugin.commands(),
+                event_handlers: plugin.event_handlers(),
+                settings_panels: plugin.settings_panels(),
+                test_steps: plugin.test_steps(),
+                tasks: plugin.tasks(),
             };
             let json = serde_json::to_string(&meta).unwrap_or_else(|_| "{}".to_string());
             std::ffi::CString::new(json).unwrap().into_raw()
         }
 
-        #[no_mangle]
+        #[unsafe(no_mangle)]
         pub unsafe extern "C" fn pwr_bot_plugin_entry() -> *const $crate::abi::PluginVTable {
             static VTABLE: $crate::abi::PluginVTable = $crate::abi::PluginVTable {
                 api_version: $crate::abi::PWR_BOT_PLUGIN_API_VERSION,
@@ -54,6 +58,7 @@ macro_rules! export_plugin {
             req: *const $crate::abi::InvokeRequest,
             resp: *mut $crate::abi::InvokeResponse,
         ) {
+            let plugin = plugin_instance();
             let req = unsafe { &*req };
             let command = unsafe {
                 std::ffi::CStr::from_ptr(req.command)
@@ -73,7 +78,7 @@ macro_rules! export_plugin {
                 serde_json::from_str(&args_json).unwrap_or(serde_json::Value::Null);
 
             let result = tokio::runtime::Handle::current()
-                .block_on(async { PLUGIN.invoke(&command, args, &host).await });
+                .block_on(async { plugin.invoke(&command, args, &host).await });
 
             match result {
                 Ok(payload) => {
@@ -98,11 +103,12 @@ macro_rules! export_plugin {
             req: *const $crate::abi::InvokeRequest,
             resp: *mut $crate::abi::InvokeResponse,
         ) {
+            let plugin = plugin_instance();
             let req = unsafe { &*req };
             let host = $crate::host::PluginHost::new(req.ctx_handle, unsafe { &*req.callbacks });
 
             let result =
-                tokio::runtime::Handle::current().block_on(async { PLUGIN.init(&host).await });
+                tokio::runtime::Handle::current().block_on(async { plugin.init(&host).await });
 
             match result {
                 Ok(()) => unsafe {
@@ -120,8 +126,9 @@ macro_rules! export_plugin {
         }
 
         unsafe extern "C" fn plugin_shutdown() -> bool {
+            let plugin = plugin_instance();
             tokio::runtime::Handle::current()
-                .block_on(async { PLUGIN.shutdown().await })
+                .block_on(async { plugin.shutdown().await })
                 .is_ok()
         }
 
@@ -131,6 +138,7 @@ macro_rules! export_plugin {
             callbacks: *const $crate::abi::HostCallbacks,
             ctx_handle: u64,
         ) -> bool {
+            let plugin = plugin_instance();
             let name = unsafe { std::ffi::CStr::from_ptr(event_name).to_str().unwrap_or("") };
             let payload_str = unsafe {
                 std::ffi::CStr::from_ptr(payload_json)
@@ -142,7 +150,7 @@ macro_rules! export_plugin {
             let host = $crate::host::PluginHost::new(ctx_handle, unsafe { &*callbacks });
 
             tokio::runtime::Handle::current()
-                .block_on(async { PLUGIN.on_event(name, payload, &host).await })
+                .block_on(async { plugin.on_event(name, payload, &host).await })
                 .is_ok()
         }
     };

@@ -13,7 +13,6 @@ pub use host::PluginHost;
 pub use plugin::ArgSpec;
 pub use plugin::BotPlugin;
 pub use plugin::CommandSpec;
-pub use plugin::DbValue;
 pub use plugin::EventHandlerSpec;
 pub use plugin::PluginMetadata;
 pub use plugin::ResponsePayload;

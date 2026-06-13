@@ -47,22 +47,6 @@ pub struct HostCallbacks {
     pub get_channel_id: unsafe extern "C" fn(ctx_handle: u64) -> u64,
     pub free_string: unsafe extern "C" fn(s: *mut c_char),
 
-    // -- Database callbacks --
-    pub query_db: unsafe extern "C" fn(
-        ctx_handle: u64,
-        sql: *const c_char,
-        params_json: *const c_char,
-        out_json: *mut *mut c_char,
-        out_err: *mut *mut c_char,
-    ) -> bool,
-    pub execute_db: unsafe extern "C" fn(
-        ctx_handle: u64,
-        sql: *const c_char,
-        params_json: *const c_char,
-        out_rows: *mut u64,
-        out_err: *mut *mut c_char,
-    ) -> bool,
-
     // -- Channel message callback --
     pub send_channel_message: unsafe extern "C" fn(
         ctx_handle: u64,
@@ -138,8 +122,6 @@ impl fmt::Debug for HostCallbacks {
             .field("get_guild_id", &(self.get_guild_id as *const ()))
             .field("get_author_id", &(self.get_author_id as *const ()))
             .field("get_channel_id", &(self.get_channel_id as *const ()))
-            .field("query_db", &(self.query_db as *const ()))
-            .field("execute_db", &(self.execute_db as *const ()))
             .field(
                 "send_channel_message",
                 &(self.send_channel_message as *const ()),

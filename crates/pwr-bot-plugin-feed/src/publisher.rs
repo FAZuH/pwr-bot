@@ -1,13 +1,15 @@
-//! Background feed polling task.
-
+use deadpool_postgres::Pool;
 use pwr_bot_sdk::*;
 
 use crate::platform::Platforms;
 use crate::subscription;
 
-/// Polls all feeds for updates and publishes events.
-pub async fn poll_feeds(host: &PluginHost, platforms: &Platforms) -> Result<(), String> {
-    let feeds = subscription::get_feeds_by_tag(host, "series").await?;
+pub async fn poll_feeds(
+    pool: &Pool,
+    host: &PluginHost,
+    platforms: &Platforms,
+) -> Result<(), String> {
+    let feeds = subscription::get_feeds_by_tag(pool, host, "series").await?;
     let len = feeds.len();
     if len == 0 {
         return Ok(());
@@ -15,7 +17,7 @@ pub async fn poll_feeds(host: &PluginHost, platforms: &Platforms) -> Result<(), 
 
     for feed in &feeds {
         let name = feed.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-        match subscription::check_feed_update(host, platforms, feed).await {
+        match subscription::check_feed_update(pool, host, platforms, feed).await {
             Ok(result) => {
                 subscription::publish_update(host, &result).await;
             }

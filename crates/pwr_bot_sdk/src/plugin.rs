@@ -4,59 +4,6 @@ use serde::Serialize;
 
 use crate::host::PluginHost;
 
-/// A typed database parameter for parameterized SQL queries.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum DbValue {
-    Null,
-    Bool(bool),
-    I32(i32),
-    I64(i64),
-    F64(f64),
-    Text(String),
-}
-
-impl From<()> for DbValue {
-    fn from(_: ()) -> Self {
-        DbValue::Null
-    }
-}
-
-impl From<bool> for DbValue {
-    fn from(v: bool) -> Self {
-        DbValue::Bool(v)
-    }
-}
-
-impl From<i32> for DbValue {
-    fn from(v: i32) -> Self {
-        DbValue::I32(v)
-    }
-}
-
-impl From<i64> for DbValue {
-    fn from(v: i64) -> Self {
-        DbValue::I64(v)
-    }
-}
-
-impl From<f64> for DbValue {
-    fn from(v: f64) -> Self {
-        DbValue::F64(v)
-    }
-}
-
-impl From<String> for DbValue {
-    fn from(v: String) -> Self {
-        DbValue::Text(v)
-    }
-}
-
-impl From<&str> for DbValue {
-    fn from(v: &str) -> Self {
-        DbValue::Text(v.to_string())
-    }
-}
-
 /// Describes a single command argument for slash command registration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ArgSpec {
@@ -114,11 +61,24 @@ impl SettingsPanelSpec {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TestStepSpec {
     pub name: String,
+    pub description: String,
+    pub command: String,
+    pub args: serde_json::Value,
 }
 
 impl TestStepSpec {
-    pub fn new(name: impl Into<String>) -> Self {
-        Self { name: name.into() }
+    pub fn new(
+        name: impl Into<String>,
+        description: impl Into<String>,
+        command: impl Into<String>,
+        args: serde_json::Value,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            description: description.into(),
+            command: command.into(),
+            args,
+        }
     }
 }
 

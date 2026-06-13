@@ -3,7 +3,6 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::abi::HostCallbacks;
-use crate::plugin::DbValue;
 
 /// Safe wrapper around the FFI host callbacks.
 pub struct PluginHost {
@@ -109,83 +108,6 @@ impl PluginHost {
     /// The registered [`HostCallbacks`] must outlive the call.
     pub unsafe fn channel_id(&self) -> u64 {
         unsafe { (self.callbacks.get_channel_id)(self.ctx_handle) }
-    }
-
-    // ---- Database callbacks ----
-
-    /// Executes a parameterized SQL query and returns the result rows as JSON.
-    ///
-    /// # Safety
-    ///
-    /// The registered [`HostCallbacks`] must outlive the call. `sql` must be valid
-    /// UTF-8 (it will be null-terminated).
-    pub unsafe fn query_db(
-        &self,
-        sql: &str,
-        params: &[DbValue],
-    ) -> Result<serde_json::Value, String> {
-        let sql_c = CString::new(sql).map_err(|e| e.to_string())?;
-        let params_json =
-            serde_json::to_string(params).map_err(|e| format!("param serialization: {e}"))?;
-        let params_c = CString::new(params_json).map_err(|e| e.to_string())?;
-        let mut out_json: *mut std::ffi::c_char = std::ptr::null_mut();
-        let mut out_err: *mut std::ffi::c_char = std::ptr::null_mut();
-        let ok = unsafe {
-            (self.callbacks.query_db)(
-                self.ctx_handle,
-                sql_c.as_ptr(),
-                params_c.as_ptr(),
-                &mut out_json,
-                &mut out_err,
-            )
-        };
-        if ok && !out_json.is_null() {
-            let result = unsafe { CString::from_raw(out_json) }
-                .into_string()
-                .unwrap_or_else(|_| "".to_string());
-            serde_json::from_str(&result).map_err(|e| format!("JSON parse: {e}"))
-        } else if !out_err.is_null() {
-            let err = unsafe { CString::from_raw(out_err) }
-                .into_string()
-                .unwrap_or_else(|_| "unknown error".to_string());
-            Err(err)
-        } else {
-            Err("unknown error".to_string())
-        }
-    }
-
-    /// Executes a parameterized SQL DML statement and returns the number of rows affected.
-    ///
-    /// # Safety
-    ///
-    /// The registered [`HostCallbacks`] must outlive the call. `sql` must be valid
-    /// UTF-8 (it will be null-terminated).
-    pub unsafe fn execute_db(&self, sql: &str, params: &[DbValue]) -> Result<u64, String> {
-        let sql_c = CString::new(sql).map_err(|e| e.to_string())?;
-        let params_json =
-            serde_json::to_string(params).map_err(|e| format!("param serialization: {e}"))?;
-        let params_c = CString::new(params_json).map_err(|e| e.to_string())?;
-        let mut out_rows: u64 = 0;
-        let mut out_err: *mut std::ffi::c_char = std::ptr::null_mut();
-        let ok = unsafe {
-            (self.callbacks.execute_db)(
-                self.ctx_handle,
-                sql_c.as_ptr(),
-                params_c.as_ptr(),
-                &mut out_rows,
-                &mut out_err,
-            )
-        };
-        if ok {
-            Ok(out_rows)
-        } else if !out_err.is_null() {
-            let err = unsafe { CString::from_raw(out_err) }
-                .into_string()
-                .unwrap_or_else(|_| "unknown error".to_string());
-            Err(err)
-        } else {
-            Err("unknown error".to_string())
-        }
     }
 
     // ---- Channel message callback ----

@@ -1,8 +1,48 @@
 pub mod update;
 
+use deadpool_postgres::ManagerConfig;
+use deadpool_postgres::Pool;
+use deadpool_postgres::RecyclingMethod;
 use pwr_bot_sdk::*;
+use tokio::sync::Mutex;
 
-pub struct WelcomePlugin;
+pwr_bot_sdk::export_plugin!(WelcomePlugin, WelcomePlugin::new());
+
+pub struct WelcomePlugin {
+    pool: Mutex<Option<Pool>>,
+}
+
+impl WelcomePlugin {
+    pub fn new() -> Self {
+        Self {
+            pool: Mutex::new(None),
+        }
+    }
+}
+
+impl Default for WelcomePlugin {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+fn rows_to_json(rows: &[tokio_postgres::Row]) -> serde_json::Value {
+    let json_rows: Vec<serde_json::Value> = rows
+        .iter()
+        .map(|row| {
+            let mut map = serde_json::Map::new();
+            for (i, col) in row.columns().iter().enumerate() {
+                let name = col.name();
+                let value: serde_json::Value = row
+                    .try_get::<_, serde_json::Value>(i)
+                    .unwrap_or(serde_json::Value::Null);
+                map.insert(name.to_string(), value);
+            }
+            serde_json::Value::Object(map)
+        })
+        .collect();
+    serde_json::Value::Array(json_rows)
+}
 
 #[async_trait::async_trait]
 impl BotPlugin for WelcomePlugin {
@@ -30,6 +70,30 @@ impl BotPlugin for WelcomePlugin {
         vec![SettingsPanelSpec::new("welcome", "Welcome")]
     }
 
+    fn test_steps(&self) -> Vec<TestStepSpec> {
+        vec![TestStepSpec::new(
+            "welcome settings",
+            "Welcome settings",
+            "welcome",
+            serde_json::json!({}),
+        )]
+    }
+
+    async fn init(&self, _host: &PluginHost) -> Result<(), String> {
+        let db_url =
+            std::env::var("DB_URL").map_err(|_| "DB_URL environment variable not set".to_string())?;
+        let mut config = deadpool_postgres::Config::new();
+        config.url = Some(db_url);
+        config.manager = Some(ManagerConfig {
+            recycling_method: RecyclingMethod::Fast,
+        });
+        let pool = config
+            .create_pool(Some(deadpool_postgres::Runtime::Tokio1), tokio_postgres::NoTls)
+            .map_err(|e| format!("Failed to create database pool: {e}"))?;
+        *self.pool.lock().await = Some(pool);
+        Ok(())
+    }
+
     async fn invoke(
         &self,
         command: &str,
@@ -37,7 +101,7 @@ impl BotPlugin for WelcomePlugin {
         host: &PluginHost,
     ) -> Result<ResponsePayload, String> {
         match command {
-            "welcome" => self.cmd_show(host).await,
+            "welcome" | "welcome settings" => self.cmd_show(host).await,
             _ => Err(format!("Unknown command: {command}")),
         }
     }
@@ -57,13 +121,23 @@ impl WelcomePlugin {
             });
         }
 
-        let result = unsafe {
-            host.query_db(
+        let pool = self
+            .pool
+            .lock()
+            .await
+            .as_ref()
+            .ok_or("Database pool not initialized")?
+            .clone();
+        let client = pool.get().await.map_err(|e| e.to_string())?;
+        let rows = client
+            .query(
                 "SELECT settings FROM server_settings WHERE guild_id = $1",
-                &[DbValue::I64(guild_id as i64)],
+                &[&(guild_id as i64)],
             )
-            .map_err(|e| e.to_string())?
-        };
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let result = rows_to_json(&rows);
 
         let welcome = result
             .as_array()
