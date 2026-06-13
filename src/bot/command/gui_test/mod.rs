@@ -19,31 +19,10 @@ const TEST_STEPS: &[TestStep] = &[
         steps::settings::settings_main
     ),
     crate::test_step!(
-        "/settings > feeds",
-        "Feed settings",
-        steps::settings::feed_settings
+        "/plugin-tests",
+        "All plugin commands declared via TestStepSpec",
+        steps::plugin_tests::plugin_tests
     ),
-    crate::test_step!(
-        "/settings > voice",
-        "Voice settings",
-        steps::settings::voice_settings
-    ),
-    crate::test_step!(
-        "/settings > welcome",
-        "Welcome settings",
-        steps::welcome::welcome_settings
-    ),
-    crate::test_step!(
-        "/feed list",
-        "Subscription list (empty)",
-        steps::feed::feed_list_empty
-    ),
-    crate::test_step!(
-        "/vc leaderboard",
-        "Voice leaderboard",
-        steps::voice::voice_leaderboard
-    ),
-    crate::test_step!("/vc stats", "Voice statistics", steps::voice::voice_stats),
 ];
 
 /// Step status for rendering the live summary.

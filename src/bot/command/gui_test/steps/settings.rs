@@ -2,19 +2,14 @@
 
 use std::collections::HashMap;
 
-use crate::bot::command::feed::settings::FeedSettingsModel;
-use crate::bot::command::feed::settings::SettingsFeedHandler;
 use crate::bot::command::prelude::*;
 use crate::bot::command::settings::SettingsMainAction;
 use crate::bot::command::settings::SettingsMainView;
 use crate::bot::command::settings::collect_features;
-use crate::bot::command::voice::settings::SettingsVoiceHandler;
 use crate::bot::test_framework::GuiTestError;
 use crate::bot::test_framework::assert::assert_eq_cmd;
 use crate::bot::test_framework::assert::assert_has_action;
-use crate::bot::test_framework::assert::assert_navigated_to;
 use crate::bot::test_framework::helpers::extract_actions;
-use crate::bot::test_framework::helpers::simulate_click;
 use crate::bot::test_framework::helpers::simulate_select;
 use crate::bot::view::SelectValues;
 use crate::bot::view::ViewCmd;
@@ -59,6 +54,10 @@ pub async fn settings_main(ctx: Context<'_>) -> Result<(), GuiTestError> {
             .collect::<HashMap<_, _>>(),
     );
 
+    let first_feature = features.first().cloned().ok_or_else(|| {
+        GuiTestError::setup_failed("settings_main", "no features available to toggle")
+    })?;
+
     let mut view = SettingsMainView {
         settings: entity,
         model,
@@ -71,7 +70,7 @@ pub async fn settings_main(ctx: Context<'_>) -> Result<(), GuiTestError> {
     assert_has_action(&registry, "🛈 About")
         .map_err(|e| GuiTestError::execution_failed("settings_main render about", e))?;
 
-    // Test toggle
+    // Test toggle with the first available feature
     let coordinator = Router::new(ctx);
     let toggle_action = registry
         .actions
@@ -79,122 +78,21 @@ pub async fn settings_main(ctx: Context<'_>) -> Result<(), GuiTestError> {
         .find(|a| matches!(a, SettingsMainAction::ToggleFeature))
         .cloned()
         .unwrap();
-    let initial_feeds = view.model.is_enabled("feeds");
+    let initial_enabled = view.model.is_enabled(&first_feature.id);
     let cmd = simulate_select(
         ctx,
         &mut view,
         toggle_action,
-        SelectValues::String(vec!["feeds".to_string()]),
+        SelectValues::String(vec![first_feature.id.clone()]),
         coordinator.clone(),
     )
     .await
     .map_err(|e| GuiTestError::execution_failed("settings_main toggle", e))?;
     assert_eq_cmd(cmd, ViewCmd::Render, "settings_main toggle")
         .map_err(|e| GuiTestError::execution_failed("settings_main toggle", e))?;
-    if view.model.is_enabled("feeds") == initial_feeds {
+    if view.model.is_enabled(&first_feature.id) == initial_enabled {
         return Err(GuiTestError::assertion_failed(
             "settings_main toggle",
-            !initial_feeds,
-            initial_feeds,
-        ));
-    }
-
-    Ok(())
-}
-
-pub async fn feed_settings(ctx: Context<'_>) -> Result<(), GuiTestError> {
-    let guild_id = ctx.guild_id().ok_or(GuiTestError::assertion_failed(
-        "feed_settings",
-        "guild context",
-        "none",
-    ))?;
-
-    let mut settings = ctx
-        .data()
-        .service
-        .settings
-        .get_server_settings(guild_id.into())
-        .await
-        .map_err(|e| GuiTestError::setup_failed("feed_settings", e))?;
-
-    let feeds_settings = settings.feeds.clone();
-    let mut handler = SettingsFeedHandler {
-        model: FeedSettingsModel {
-            enabled: feeds_settings.enabled,
-            channel_id: feeds_settings.channel_id,
-            subscribe_role_id: feeds_settings.subscribe_role_id,
-            unsubscribe_role_id: feeds_settings.unsubscribe_role_id,
-        },
-        settings: &mut settings,
-    };
-
-    let registry = extract_actions(&handler);
-    let toggle_action = assert_has_action(&registry, "Enabled")
-        .map_err(|e| GuiTestError::execution_failed("feed_settings render", e))?;
-    assert_has_action(&registry, "❮ Back")
-        .map_err(|e| GuiTestError::execution_failed("feed_settings render", e))?;
-
-    // Test toggle enabled
-    let initial_enabled = handler.model.is_enabled();
-    let coordinator = Router::new(ctx);
-    let cmd = simulate_click(ctx, &mut handler, toggle_action, coordinator.clone())
-        .await
-        .map_err(|e| GuiTestError::execution_failed("feed_settings toggle", e))?;
-    assert_eq_cmd(cmd, ViewCmd::Render, "feed_settings toggle")
-        .map_err(|e| GuiTestError::execution_failed("feed_settings toggle", e))?;
-    if handler.model.is_enabled() == initial_enabled {
-        return Err(GuiTestError::assertion_failed(
-            "feed_settings toggle",
-            !initial_enabled,
-            initial_enabled,
-        ));
-    }
-
-    // Test Back navigation
-    let coordinator2 = Router::new(ctx);
-    let back_action = assert_has_action(&registry, "❮ Back")
-        .map_err(|e| GuiTestError::execution_failed("feed_settings", e))?;
-    let cmd = simulate_click(ctx, &mut handler, back_action, coordinator2.clone())
-        .await
-        .map_err(|e| GuiTestError::execution_failed("feed_settings back", e))?;
-    assert_eq_cmd(cmd, ViewCmd::Exit, "feed_settings back")
-        .map_err(|e| GuiTestError::execution_failed("feed_settings back", e))?;
-    assert_navigated_to(&coordinator2, Navigation::SettingsMain)
-        .await
-        .map_err(|e| GuiTestError::execution_failed("feed_settings nav", e))?;
-
-    Ok(())
-}
-
-pub async fn voice_settings(ctx: Context<'_>) -> Result<(), GuiTestError> {
-    let guild_id = ctx.guild_id().ok_or(GuiTestError::assertion_failed(
-        "voice_settings",
-        "guild context",
-        "none",
-    ))?;
-
-    let service = ctx.data().service.settings.clone();
-    let settings = service
-        .get_server_settings(guild_id.into())
-        .await
-        .map_err(|e| GuiTestError::setup_failed("voice_settings", e))?;
-
-    let mut handler = SettingsVoiceHandler { settings };
-
-    let registry = extract_actions(&handler);
-    let toggle_action = assert_has_action(&registry, "ToggleEnabled")
-        .map_err(|e| GuiTestError::execution_failed("voice_settings render", e))?;
-
-    let initial_enabled = handler.settings.voice.enabled.unwrap_or(true);
-    let coordinator = Router::new(ctx);
-    let cmd = simulate_click(ctx, &mut handler, toggle_action, coordinator.clone())
-        .await
-        .map_err(|e| GuiTestError::execution_failed("voice_settings toggle", e))?;
-    assert_eq_cmd(cmd, ViewCmd::Render, "voice_settings toggle")
-        .map_err(|e| GuiTestError::execution_failed("voice_settings toggle", e))?;
-    if handler.settings.voice.enabled.unwrap_or(true) == initial_enabled {
-        return Err(GuiTestError::assertion_failed(
-            "voice_settings toggle",
             !initial_enabled,
             initial_enabled,
         ));

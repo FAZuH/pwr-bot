@@ -63,45 +63,45 @@ impl Update for SettingsMainUpdate {
 mod tests {
     use super::*;
 
-    fn model_with(feeds: bool, voice: bool, welcome: bool) -> SettingsMainModel {
+    fn model_with(a: bool, b: bool, c: bool) -> SettingsMainModel {
         let mut features = HashMap::new();
-        features.insert("feeds".to_string(), feeds);
-        features.insert("voice".to_string(), voice);
-        features.insert("welcome".to_string(), welcome);
+        features.insert("plugin_a".to_string(), a);
+        features.insert("plugin_b".to_string(), b);
+        features.insert("plugin_c".to_string(), c);
         SettingsMainModel::new(features)
     }
 
     #[test]
-    fn toggle_feeds() {
+    fn toggle_plugin_a() {
         let mut model = model_with(false, false, false);
-        assert!(!model.is_enabled("feeds"));
+        assert!(!model.is_enabled("plugin_a"));
 
-        let cmd = SettingsMainUpdate::update(SettingsMainMsg("feeds".into()), &mut model);
+        let cmd = SettingsMainUpdate::update(SettingsMainMsg("plugin_a".into()), &mut model);
 
         assert_eq!(cmd, SettingsMainCmd::None);
-        assert!(model.is_enabled("feeds"));
+        assert!(model.is_enabled("plugin_a"));
         assert!(model.is_modified);
     }
 
     #[test]
-    fn toggle_voice() {
+    fn toggle_plugin_b() {
         let mut model = model_with(false, true, false);
 
-        let cmd = SettingsMainUpdate::update(SettingsMainMsg("voice".into()), &mut model);
+        let cmd = SettingsMainUpdate::update(SettingsMainMsg("plugin_b".into()), &mut model);
 
         assert_eq!(cmd, SettingsMainCmd::None);
-        assert!(!model.is_enabled("voice"));
+        assert!(!model.is_enabled("plugin_b"));
         assert!(model.is_modified);
     }
 
     #[test]
-    fn toggle_welcome() {
+    fn toggle_plugin_c() {
         let mut model = model_with(false, false, true);
 
-        let cmd = SettingsMainUpdate::update(SettingsMainMsg("welcome".into()), &mut model);
+        let cmd = SettingsMainUpdate::update(SettingsMainMsg("plugin_c".into()), &mut model);
 
         assert_eq!(cmd, SettingsMainCmd::None);
-        assert!(!model.is_enabled("welcome"));
+        assert!(!model.is_enabled("plugin_c"));
         assert!(model.is_modified);
     }
 
@@ -109,12 +109,12 @@ mod tests {
     fn multiple_toggles() {
         let mut model = model_with(true, true, true);
 
-        SettingsMainUpdate::update(SettingsMainMsg("feeds".into()), &mut model);
-        SettingsMainUpdate::update(SettingsMainMsg("voice".into()), &mut model);
+        SettingsMainUpdate::update(SettingsMainMsg("plugin_a".into()), &mut model);
+        SettingsMainUpdate::update(SettingsMainMsg("plugin_b".into()), &mut model);
 
-        assert!(!model.is_enabled("feeds"));
-        assert!(!model.is_enabled("voice"));
-        assert!(model.is_enabled("welcome"));
+        assert!(!model.is_enabled("plugin_a"));
+        assert!(!model.is_enabled("plugin_b"));
+        assert!(model.is_enabled("plugin_c"));
         assert!(model.is_modified);
     }
 
@@ -123,19 +123,19 @@ mod tests {
         let mut model = model_with(false, false, false);
         assert!(!model.is_modified);
 
-        SettingsMainUpdate::update(SettingsMainMsg("feeds".into()), &mut model);
+        SettingsMainUpdate::update(SettingsMainMsg("plugin_a".into()), &mut model);
         assert!(model.is_modified);
 
-        SettingsMainUpdate::update(SettingsMainMsg("feeds".into()), &mut model);
+        SettingsMainUpdate::update(SettingsMainMsg("plugin_a".into()), &mut model);
         assert!(model.is_modified);
     }
 
     #[test]
     fn new_preserves_initial_state() {
         let model = model_with(true, false, true);
-        assert!(model.is_enabled("feeds"));
-        assert!(!model.is_enabled("voice"));
-        assert!(model.is_enabled("welcome"));
+        assert!(model.is_enabled("plugin_a"));
+        assert!(!model.is_enabled("plugin_b"));
+        assert!(model.is_enabled("plugin_c"));
         assert!(!model.is_modified);
     }
 }

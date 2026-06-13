@@ -13,6 +13,7 @@ use crate::update::settings_main::SettingsMainMsg;
 use crate::update::settings_main::SettingsMainUpdate;
 
 /// Model representing a configurable feature in the bot.
+#[derive(Clone)]
 pub struct Feature {
     pub id: String,
     pub label: String,
@@ -21,29 +22,11 @@ pub struct Feature {
 
 impl Feature {
     pub fn is_enabled(&self, settings: &ServerSettings) -> bool {
-        match self.id.as_str() {
-            "feeds" => settings.feeds.enabled.unwrap_or(false),
-            "voice" => settings.voice.enabled.unwrap_or(false),
-            "welcome" => settings.welcome.enabled.unwrap_or(false),
-            _ => settings
-                .plugin_settings
-                .get(&self.id)
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false),
-        }
+        settings.is_enabled(&self.id)
     }
 
     pub fn set_enabled(&self, settings: &mut ServerSettings, val: bool) {
-        match self.id.as_str() {
-            "feeds" => settings.feeds.enabled = Some(val),
-            "voice" => settings.voice.enabled = Some(val),
-            "welcome" => settings.welcome.enabled = Some(val),
-            _ => {
-                settings
-                    .plugin_settings
-                    .insert(self.id.clone(), serde_json::Value::Bool(val));
-            }
-        }
+        settings.set_enabled(&self.id, val);
     }
 }
 
@@ -52,18 +35,12 @@ pub async fn collect_features(registry: &PluginRegistry) -> Vec<Feature> {
     let mut features = Vec::new();
 
     for (_plugin_name, _orig_name, panel) in registry.all_settings_panels().await {
-        let navigate = match panel.id.as_str() {
-            "feeds" => Navigation::SettingsFeeds,
-            "voice" => Navigation::SettingsVoice,
-            "welcome" => Navigation::SettingsWelcome,
-            _ => Navigation::SettingsPlugin {
+        features.push(Feature {
+            navigate: Navigation::SettingsPlugin {
                 plugin_id: panel.id.clone(),
             },
-        };
-        features.push(Feature {
             id: panel.id,
             label: panel.label,
-            navigate,
         });
     }
 
@@ -176,18 +153,7 @@ impl SettingsMainView {
 
         for f in features {
             let enabled = model.is_enabled(&f.id);
-            match f.id.as_str() {
-                "feeds" => settings.settings.0.feeds.enabled = Some(enabled),
-                "voice" => settings.settings.0.voice.enabled = Some(enabled),
-                "welcome" => settings.settings.0.welcome.enabled = Some(enabled),
-                _ => {
-                    settings
-                        .settings
-                        .0
-                        .plugin_settings
-                        .insert(f.id.clone(), serde_json::Value::Bool(enabled));
-                }
-            }
+            settings.settings.0.set_enabled(&f.id, enabled);
         }
     }
 }

@@ -1,8 +1,9 @@
-//! pwr-bot - A Discord bot with feed subscriptions and voice channel tracking.
+//! pwr-bot - A modular Discord bot with hot-pluggable plugin system.
 //!
-//! This crate provides a Discord bot implementation with features including:
-//! - Feed subscriptions (MangaDex, AniList, Comick)
-//! - Voice channel activity tracking and leaderboards
+//! ## Features
+//! - Dynamic plugin loading from `PLUGIN_DIR` at startup
+//! - Plugin registry for commands, settings panels, event handlers, and tasks
+//! - Voice channel activity scanning published as `voice_state` events
 //! - Server configuration management
 
 pub mod bot;
