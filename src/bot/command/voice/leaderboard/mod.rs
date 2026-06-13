@@ -20,7 +20,7 @@ pub async fn leaderboard(
     _time_range: Option<VoiceLeaderboardTimeRange>,
 ) -> Result<(), Error> {
     let host_ctx = Arc::new(PoiseHostCtx::new(ctx));
-    let plugin = pwr_bot_plugin_voice::VoicePlugin;
+    let plugin = pwr_bot_plugin_voice::VoicePlugin::new();
     let args = serde_json::json!({"action": "leaderboard"});
     dispatch_builtin(&host_ctx, &plugin, "vc leaderboard", args).await
 }

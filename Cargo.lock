@@ -3694,9 +3694,17 @@ name = "pwr-bot-plugin-feed"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "chrono",
+ "governor",
+ "log",
  "pwr-bot-sdk",
  "serde",
  "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "uuid",
+ "wreq",
+ "wreq-util",
 ]
 
 [[package]]
@@ -3708,6 +3716,7 @@ dependencies = [
  "pwr-bot-sdk",
  "serde",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]

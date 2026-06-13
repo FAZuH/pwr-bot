@@ -106,7 +106,7 @@ impl CommandHandler for SettingsMainHandler {
         let settings = ctx
             .data()
             .service
-            .feed_subscription
+            .settings
             .get_server_settings(guild_id.into())
             .await?;
 
@@ -133,7 +133,7 @@ impl CommandHandler for SettingsMainHandler {
             let settings_data = engine.handler.settings.settings.0.clone();
             ctx.data()
                 .service
-                .feed_subscription
+                .settings
                 .update_server_settings(*guild_id, settings_data)
                 .await?;
             engine.handler.done_update_settings()?;

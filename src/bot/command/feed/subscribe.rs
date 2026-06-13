@@ -48,20 +48,22 @@ impl CommandHandler for FeedSubscribeHandler {
 }
 
 pub async fn autocomplete_supported_feeds<'a>(
-    ctx: Context<'_>,
+    _ctx: Context<'_>,
     partial: &str,
 ) -> CreateAutocompleteResponse<'a> {
     let mut choices = vec![AutocompleteChoice::new("Supported feeds are:", "foo")];
-    let feeds = ctx.data().platforms.get_all_platforms();
+    let platforms = [
+        ("AniList (anilist.co)", "anilist.co"),
+        ("MangaDex (mangadex.org)", "mangadex.org"),
+        ("Comick (comick.io)", "comick.io"),
+    ];
 
-    for feed in feeds {
-        let info = &feed.get_base().info;
-        let name = format!("{} ({})", info.name, info.api_domain);
+    for (name, domain) in &platforms {
         if partial.is_empty()
             || name.to_lowercase().contains(&partial.to_lowercase())
-            || info.api_domain.contains(&partial.to_lowercase())
+            || domain.contains(&partial.to_lowercase())
         {
-            choices.push(AutocompleteChoice::new(name, info.api_domain.clone()));
+            choices.push(AutocompleteChoice::new(*name, *domain));
         }
     }
 

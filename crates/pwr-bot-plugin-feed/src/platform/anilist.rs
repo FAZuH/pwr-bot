@@ -16,12 +16,12 @@ use log::info;
 use serde_json::Map;
 use serde_json::Value;
 
-use crate::feed::BasePlatform;
-use crate::feed::FeedItem;
-use crate::feed::FeedSource;
-use crate::feed::Platform;
-use crate::feed::PlatformInfo;
-use crate::feed::error::FeedError;
+use crate::platform::traits::BasePlatform;
+use crate::platform::traits::FeedItem;
+use crate::platform::traits::FeedSource;
+use crate::platform::traits::Platform;
+use crate::platform::traits::PlatformInfo;
+use crate::error::FeedError;
 
 /// AniList GraphQL API platform for anime tracking.
 pub struct AniListPlatform {

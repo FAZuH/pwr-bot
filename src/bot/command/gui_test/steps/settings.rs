@@ -29,7 +29,7 @@ pub async fn settings_main(ctx: Context<'_>) -> Result<(), GuiTestError> {
     let settings = ctx
         .data()
         .service
-        .feed_subscription
+        .settings
         .get_server_settings(guild_id.into())
         .await
         .map_err(|e| GuiTestError::setup_failed("settings_main", e))?;
@@ -114,7 +114,7 @@ pub async fn feed_settings(ctx: Context<'_>) -> Result<(), GuiTestError> {
     let mut settings = ctx
         .data()
         .service
-        .feed_subscription
+        .settings
         .get_server_settings(guild_id.into())
         .await
         .map_err(|e| GuiTestError::setup_failed("feed_settings", e))?;
@@ -175,7 +175,7 @@ pub async fn voice_settings(ctx: Context<'_>) -> Result<(), GuiTestError> {
         "none",
     ))?;
 
-    let service = ctx.data().service.voice_tracking.clone();
+    let service = ctx.data().service.settings.clone();
     let settings = service
         .get_server_settings(guild_id.into())
         .await

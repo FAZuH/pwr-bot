@@ -1,8 +1,34 @@
+pub mod error;
+pub mod platform;
+mod publisher;
+mod subscriber;
+pub mod subscription;
 pub mod update;
 
-use pwr_bot_sdk::*;
+use std::sync::Arc;
 
-pub struct FeedPlugin;
+use pwr_bot_sdk::*;
+use tokio::sync::Mutex;
+
+use crate::platform::Platforms;
+
+pub struct FeedPlugin {
+    platforms: Mutex<Option<Arc<Platforms>>>,
+}
+
+impl FeedPlugin {
+    pub fn new() -> Self {
+        Self {
+            platforms: Mutex::new(None),
+        }
+    }
+}
+
+impl Default for FeedPlugin {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 #[async_trait::async_trait]
 impl BotPlugin for FeedPlugin {
@@ -26,6 +52,36 @@ impl BotPlugin for FeedPlugin {
         }]
     }
 
+    fn tasks(&self) -> Vec<TaskSpec> {
+        vec![TaskSpec::new(
+            "feed-publisher",
+            60,
+            "__poll_feeds",
+        )]
+    }
+
+    fn event_handlers(&self) -> Vec<EventHandlerSpec> {
+        vec![EventHandlerSpec::new("feed_update".to_string())]
+    }
+
+    async fn init(&self, _host: &PluginHost) -> Result<(), String> {
+        let platforms = Arc::new(Platforms::new());
+        *self.platforms.lock().await = Some(platforms);
+        Ok(())
+    }
+
+    async fn on_event(
+        &self,
+        event_name: &str,
+        payload: serde_json::Value,
+        host: &PluginHost,
+    ) -> Result<(), String> {
+        match event_name {
+            "feed_update" => subscriber::handle_feed_update(host, payload).await,
+            _ => Ok(()),
+        }
+    }
+
     async fn invoke(
         &self,
         command: &str,
@@ -34,6 +90,7 @@ impl BotPlugin for FeedPlugin {
     ) -> Result<ResponsePayload, String> {
         match command {
             "feed" | "feed list" => self.cmd_list(host).await,
+            "__poll_feeds" => self.cmd_poll_feeds(host).await,
             _ => Err(format!("Unknown command: {command}")),
         }
     }
@@ -138,6 +195,18 @@ impl FeedPlugin {
 
         Ok(ResponsePayload {
             content: Some(lines.join("\n")),
+            ephemeral: false,
+            components_json: None,
+            embed_json: None,
+        })
+    }
+
+    async fn cmd_poll_feeds(&self, host: &PluginHost) -> Result<ResponsePayload, String> {
+        let platforms = self.platforms.lock().await;
+        let platforms = platforms.as_ref().ok_or("Platforms not initialized")?;
+        publisher::poll_feeds(host, platforms).await?;
+        Ok(ResponsePayload {
+            content: None,
             ephemeral: false,
             components_json: None,
             embed_json: None,

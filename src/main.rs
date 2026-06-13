@@ -11,19 +11,17 @@ use log::debug;
 use log::info;
 use pwr_bot::bot::Bot;
 use pwr_bot::config::Config;
+use pwr_bot::bot::plugin::host_registry;
+use pwr_bot::bot::host_ctx::PoiseHostCtx;
 use pwr_bot::event::FeedUpdateEvent;
-use pwr_bot::event::VoiceStateEvent;
 use pwr_bot::event::event_bus::EventBus;
-use pwr_bot::feed::Platforms;
 use pwr_bot::logging::setup_logging;
 use pwr_bot::repo::PgRepos;
 use pwr_bot::repo::traits::Repos;
 use pwr_bot::service::Services;
-use pwr_bot::subscriber::discord_dm::DiscordDmSubscriber;
-use pwr_bot::subscriber::discord_guild::DiscordGuildSubscriber;
-use pwr_bot::subscriber::voice_state::VoiceStateSubscriber;
-use pwr_bot::task::series_feed_publisher::SeriesFeedPublisher;
-use pwr_bot::task::voice_heartbeat::VoiceHeartbeatManager;
+use pwr_bot::bot::plugin::invocation;
+use pwr_bot_plugin_feed::FeedPlugin;
+use pwr_bot_plugin_voice::VoicePlugin;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -34,35 +32,54 @@ async fn main() -> Result<()> {
     let event_bus = Arc::new(EventBus::new());
 
     let repos = setup_database(&config, init_start).await?;
-    let platforms = Arc::new(Platforms::new());
-    let services = setup_services(repos.clone(), platforms.clone()).await?;
+    let services = setup_services(repos.clone()).await?;
 
-    let voice_heartbeat = setup_voice_tracking(&services, init_start).await?;
-
-    let voice_subscriber = Arc::new(VoiceStateSubscriber::new(services.clone()));
     let bot = setup_bot(
         &config,
         event_bus.clone(),
-        platforms,
         services.clone(),
-        voice_subscriber.clone(),
         init_start,
     )
     .await?;
 
-    setup_subscribers(
-        event_bus.clone(),
-        bot.clone(),
-        services.clone(),
-        voice_subscriber,
-    )
-    .await?;
-    setup_publishers(&config, &services, event_bus.clone(), init_start)?;
-
     // Initialize system context for headless plugin operations (events, tasks)
-    pwr_bot::bot::plugin::host_registry::set_system_ctx(
-        pwr_bot::bot::host_ctx::PoiseHostCtx::new_system(bot.data.clone(), bot.http.clone()),
-    );
+    host_registry::set_system_ctx(PoiseHostCtx::new_system(
+        bot.data.clone(),
+        bot.http.clone(),
+    ));
+
+    // Register builtin plugins and run their init hooks
+    let voice_plugin = Arc::new(VoicePlugin::new()) as Arc<dyn pwr_bot_sdk::BotPlugin>;
+    invocation::dispatch_init(&*voice_plugin)
+        .await
+        .map_err(|e| anyhow::anyhow!("Voice plugin init failed: {e}"))?;
+
+    let feed_plugin = Arc::new(FeedPlugin::new()) as Arc<dyn pwr_bot_sdk::BotPlugin>;
+    invocation::dispatch_init(&*feed_plugin)
+        .await
+        .map_err(|e| anyhow::anyhow!("Feed plugin init failed: {e}"))?;
+
+    let plugins: Vec<Arc<dyn pwr_bot_sdk::BotPlugin>> = vec![voice_plugin.clone(), feed_plugin.clone()];
+
+    // Bridge typed FeedUpdateEvent to named event for plugins
+    {
+        let bus = event_bus.clone();
+        event_bus.register_callback(move |event: FeedUpdateEvent| {
+            let bus = bus.clone();
+            async move {
+                if let Ok(json) = serde_json::to_value(&event) {
+                    let _ = bus.publish_named("feed_update", json);
+                }
+                Ok(())
+            }
+        });
+    }
+
+    // Register plugin event handlers on the event bus
+    invocation::register_plugin_event_handlers(&event_bus, &plugins);
+
+    // Spawn background tasks declared by plugins
+    invocation::dispatch_tasks(&plugins).await;
 
     info!(
         "pwr-bot is up in {:.2}s. Press Ctrl+C to stop.",
@@ -70,7 +87,6 @@ async fn main() -> Result<()> {
     );
     tokio::signal::ctrl_c().await?;
     info!("Ctrl+C received, shutting down.");
-    voice_heartbeat.update().await;
 
     Ok(())
 }
@@ -104,51 +120,22 @@ async fn setup_database(
 
 async fn setup_services(
     repos: Arc<dyn Repos + Send + Sync>,
-    platforms: Arc<Platforms>,
 ) -> Result<Arc<Services>> {
     debug!("Setting up Services...");
-    Ok(Arc::new(Services::new(repos, platforms).await?))
-}
-
-async fn setup_voice_tracking(
-    services: &Services,
-    init_start: Instant,
-) -> Result<Arc<VoiceHeartbeatManager>> {
-    let voice_heartbeat = Arc::new(VoiceHeartbeatManager::new(
-        services.internal.clone(),
-        services.voice_tracking.clone(),
-    ));
-
-    info!("Performing voice tracking crash recovery...");
-    let recovered = voice_heartbeat.recover_from_crash().await?;
-    if recovered > 0 {
-        info!("Recovered {recovered} orphaned voice sessions");
-    }
-
-    voice_heartbeat.clone().start().await;
-    debug!(
-        "Voice tracking setup complete ({:.2}s).",
-        init_start.elapsed().as_secs_f64()
-    );
-
-    Ok(voice_heartbeat.clone())
+    Ok(Arc::new(Services::new(repos).await?))
 }
 
 async fn setup_bot(
     config: &Arc<Config>,
     event_bus: Arc<EventBus>,
-    platforms: Arc<Platforms>,
     services: Arc<Services>,
-    voice_subscriber: Arc<VoiceStateSubscriber>,
     init_start: Instant,
 ) -> Result<Arc<Bot>> {
     info!("Starting bot...");
     let mut bot = Bot::new(
         config.clone(),
         event_bus,
-        platforms,
         services,
-        voice_subscriber,
     )
     .await?;
 
@@ -160,48 +147,4 @@ async fn setup_bot(
     );
 
     Ok(bot)
-}
-
-async fn setup_subscribers(
-    event_bus: Arc<EventBus>,
-    bot: Arc<Bot>,
-    services: Arc<Services>,
-    voice_subscriber: Arc<VoiceStateSubscriber>,
-) -> Result<()> {
-    debug!("Setting up Subscribers...");
-
-    let discord_dm_subscriber = Arc::new(DiscordDmSubscriber::new(bot.clone(), services.clone()));
-    let discord_channel_subscriber = Arc::new(DiscordGuildSubscriber::new(bot, services));
-
-    event_bus
-        .register_subcriber::<FeedUpdateEvent, _>(discord_dm_subscriber)
-        .register_subcriber::<FeedUpdateEvent, _>(discord_channel_subscriber)
-        .register_subcriber::<VoiceStateEvent, _>(voice_subscriber);
-
-    Ok(())
-}
-
-fn setup_publishers(
-    config: &Config,
-    services: &Services,
-    event_bus: Arc<EventBus>,
-    init_start: Instant,
-) -> Result<()> {
-    if !config.features.feed_publisher {
-        return Ok(());
-    }
-    debug!("Setting up Publishers...");
-
-    SeriesFeedPublisher::new(
-        services.feed_subscription.clone(),
-        event_bus,
-        config.poll_interval,
-    )
-    .start()?;
-
-    info!(
-        "Publishers setup complete ({:.2}s).",
-        init_start.elapsed().as_secs_f64()
-    );
-    Ok(())
 }

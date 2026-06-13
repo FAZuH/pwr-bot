@@ -11,7 +11,7 @@ use crate::bot::test_framework::GuiTestError;
 
 pub async fn voice_leaderboard(ctx: Context<'_>) -> Result<(), GuiTestError> {
     let host_ctx = Arc::new(PoiseHostCtx::new(ctx));
-    let plugin = pwr_bot_plugin_voice::VoicePlugin;
+    let plugin = pwr_bot_plugin_voice::VoicePlugin::new();
     let args = serde_json::json!({"action": "leaderboard"});
     dispatch_builtin(&host_ctx, &plugin, "vc leaderboard", args)
         .await
@@ -21,7 +21,7 @@ pub async fn voice_leaderboard(ctx: Context<'_>) -> Result<(), GuiTestError> {
 
 pub async fn voice_stats(ctx: Context<'_>) -> Result<(), GuiTestError> {
     let host_ctx = Arc::new(PoiseHostCtx::new(ctx));
-    let plugin = pwr_bot_plugin_voice::VoicePlugin;
+    let plugin = pwr_bot_plugin_voice::VoicePlugin::new();
     let args = serde_json::json!({"action": "stats"});
     dispatch_builtin(&host_ctx, &plugin, "vc stats", args)
         .await

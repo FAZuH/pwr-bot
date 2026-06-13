@@ -19,12 +19,12 @@ use serde_json::Value;
 use wreq::Client;
 use wreq_util::Emulation;
 
-use crate::feed::BasePlatform;
-use crate::feed::FeedItem;
-use crate::feed::FeedSource;
-use crate::feed::Platform;
-use crate::feed::PlatformInfo;
-use crate::feed::error::FeedError;
+use crate::platform::traits::BasePlatform;
+use crate::platform::traits::FeedItem;
+use crate::platform::traits::FeedSource;
+use crate::platform::traits::Platform;
+use crate::platform::traits::PlatformInfo;
+use crate::error::FeedError;
 
 /// Comick API platform for manga tracking.
 type Json = Map<String, Value>;

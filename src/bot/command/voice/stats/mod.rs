@@ -8,8 +8,6 @@ use crate::bot::command::voice::VoiceStatsTimeRange;
 use crate::bot::host_ctx::PoiseHostCtx;
 use crate::bot::plugin::invocation::dispatch_builtin;
 
-pub mod chart;
-
 /// Show voice activity statistics
 ///
 /// Display daily voice activity for a user or the entire server.
@@ -24,7 +22,7 @@ pub async fn stats(
     #[description = "Statistic to display for server view"] _statistic: Option<GuildStatType>,
 ) -> Result<(), Error> {
     let host_ctx = Arc::new(PoiseHostCtx::new(ctx));
-    let plugin = pwr_bot_plugin_voice::VoicePlugin;
+    let plugin = pwr_bot_plugin_voice::VoicePlugin::new();
     let args = serde_json::json!({"action": "stats"});
     dispatch_builtin(&host_ctx, &plugin, "vc stats", args).await
 }

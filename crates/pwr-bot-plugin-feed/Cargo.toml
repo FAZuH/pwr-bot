@@ -10,3 +10,11 @@ pwr-bot-sdk = { path = "../pwr_bot_sdk" }
 async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+chrono = { version = "0.4", features = ["serde"] }
+wreq = "5.3.0"
+wreq-util = "2.2.6"
+governor = "0.10.4"
+log = "0.4"
+thiserror = "2"
+tokio = { version = "1", features = ["sync"] }
+uuid = { version = "1", features = ["v4"] }

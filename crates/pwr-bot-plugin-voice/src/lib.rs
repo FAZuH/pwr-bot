@@ -1,8 +1,29 @@
+mod subscriber;
+
 pub mod update;
 
-use pwr_bot_sdk::*;
+use std::collections::HashMap;
 
-pub struct VoicePlugin;
+use pwr_bot_sdk::*;
+use tokio::sync::Mutex;
+
+pub struct VoicePlugin {
+    active_sessions: Mutex<HashMap<String, subscriber::ActiveSession>>,
+}
+
+impl VoicePlugin {
+    pub fn new() -> Self {
+        Self {
+            active_sessions: Mutex::new(HashMap::new()),
+        }
+    }
+}
+
+impl Default for VoicePlugin {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 #[async_trait::async_trait]
 impl BotPlugin for VoicePlugin {
@@ -26,6 +47,34 @@ impl BotPlugin for VoicePlugin {
         }]
     }
 
+    fn event_handlers(&self) -> Vec<EventHandlerSpec> {
+        vec![EventHandlerSpec::new("voice_state".to_string())]
+    }
+
+    fn tasks(&self) -> Vec<TaskSpec> {
+        vec![TaskSpec::new(
+            "voice-heartbeat",
+            10,
+            "__heartbeat",
+        )]
+    }
+
+    async fn init(&self, host: &PluginHost) -> Result<(), String> {
+        self.crash_recovery(host).await
+    }
+
+    async fn on_event(
+        &self,
+        event_name: &str,
+        payload: serde_json::Value,
+        host: &PluginHost,
+    ) -> Result<(), String> {
+        match event_name {
+            "voice_state" => subscriber::handle_voice_state_event(&self.active_sessions, host, payload).await,
+            _ => Ok(()),
+        }
+    }
+
     async fn invoke(
         &self,
         command: &str,
@@ -35,12 +84,111 @@ impl BotPlugin for VoicePlugin {
         match command {
             "vc" | "vc leaderboard" => self.cmd_leaderboard(host).await,
             "vc stats" => self.cmd_stats(host).await,
+            "__heartbeat" => self.write_heartbeat(host).await,
             _ => Err(format!("Unknown command: {command}")),
         }
     }
 }
 
+const HEARTBEAT_KEY: &str = "voice_heartbeat";
+
 impl VoicePlugin {
+    async fn crash_recovery(&self, host: &PluginHost) -> Result<(), String> {
+        let result = unsafe {
+            host.query_db(
+                "SELECT value FROM bot_meta WHERE key = $1",
+                &[DbValue::Text(HEARTBEAT_KEY.into())],
+            )
+            .map_err(|e| format!("Failed to read heartbeat: {e}"))?
+        };
+
+        let rows = match result {
+            serde_json::Value::Array(arr) => arr,
+            _ => vec![],
+        };
+
+        let last_heartbeat = match rows.first() {
+            Some(row) => row
+                .get("value")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
+            None => return Ok(()),
+        };
+
+        let last_heartbeat = match last_heartbeat {
+            Some(ts) => ts,
+            None => return Ok(()),
+        };
+
+        let sessions = unsafe {
+            host.query_db(
+                "SELECT user_id, channel_id, join_time FROM voice_sessions WHERE is_active = true",
+                &[],
+            )
+            .map_err(|e| format!("Failed to query active sessions: {e}"))?
+        };
+
+        let rows = match sessions {
+            serde_json::Value::Array(arr) => arr,
+            _ => vec![],
+        };
+
+        let mut closed = 0u32;
+        for row in &rows {
+            let user_id = row.get("user_id").and_then(|v| v.as_i64()).unwrap_or(0);
+            let channel_id = row.get("channel_id").and_then(|v| v.as_i64()).unwrap_or(0);
+            let join_time = row.get("join_time").and_then(|v| v.as_str()).unwrap_or("");
+
+            if user_id == 0 || channel_id == 0 || join_time.is_empty() {
+                continue;
+            }
+
+            unsafe {
+                host.execute_db(
+                    "UPDATE voice_sessions SET leave_time = $1::timestamptz, is_active = false \
+                     WHERE user_id = $2::bigint AND channel_id = $3::bigint \
+                     AND join_time = $4::timestamptz AND is_active = true",
+                    &[
+                        DbValue::Text(last_heartbeat.clone()),
+                        DbValue::I64(user_id),
+                        DbValue::I64(channel_id),
+                        DbValue::Text(join_time.to_string()),
+                    ],
+                )
+                .map_err(|e| format!("Failed to close session: {e}"))?;
+            }
+
+            closed += 1;
+        }
+
+        if closed > 0 {
+            // Recovery complete; host logs at info level from dispatch_init
+        }
+
+        Ok(())
+    }
+
+    async fn write_heartbeat(&self, host: &PluginHost) -> Result<ResponsePayload, String> {
+        let now = chrono::Utc::now().to_rfc3339();
+        unsafe {
+            host.execute_db(
+                "INSERT INTO bot_meta (key, value) VALUES ($1, $2) \
+                 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+                &[
+                    DbValue::Text(HEARTBEAT_KEY.into()),
+                    DbValue::Text(now),
+                ],
+            )
+            .map_err(|e| format!("Heartbeat write failed: {e}"))?;
+        }
+        Ok(ResponsePayload {
+            content: None,
+            ephemeral: false,
+            components_json: None,
+            embed_json: None,
+        })
+    }
+
     async fn cmd_leaderboard(&self, host: &PluginHost) -> Result<ResponsePayload, String> {
         unsafe { host.defer().map_err(|e| e.to_string())? };
 

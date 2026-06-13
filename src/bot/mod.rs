@@ -41,14 +41,11 @@ use crate::config::Config;
 use crate::entity::BotMetaKey;
 use crate::event::VoiceStateEvent;
 use crate::event::event_bus::EventBus;
-use crate::feed::Platforms;
 use crate::service::Services;
-use crate::subscriber::voice_state::VoiceStateSubscriber;
 
 /// Data shared across bot commands and contexts.
 pub struct Data {
     pub config: Arc<Config>,
-    pub platforms: Arc<Platforms>,
     pub service: Arc<Services>,
     pub event_bus: Arc<EventBus>,
     pub start_time: Instant,
@@ -68,9 +65,7 @@ impl Bot {
     pub async fn new(
         config: Arc<Config>,
         event_bus: Arc<EventBus>,
-        platforms: Arc<Platforms>,
         service: Arc<Services>,
-        voice_subscriber: Arc<VoiceStateSubscriber>,
     ) -> Result<Self> {
         info!("Initializing bot...");
 
@@ -83,7 +78,6 @@ impl Bot {
         let http = Arc::new(http);
         let data = Arc::new(Data {
             config: config.clone(),
-            platforms,
             service,
             event_bus: event_bus.clone(),
             start_time: Instant::now(),
@@ -92,7 +86,6 @@ impl Bot {
         let event_handler = Arc::new(BotEventHandler::new(
             event_bus,
             data.clone(),
-            voice_subscriber.clone(),
             http.clone(),
         ));
 
@@ -181,7 +174,6 @@ impl Bot {
 pub struct BotEventHandler {
     event_bus: Arc<EventBus>,
     data: Arc<Data>,
-    voice_subscriber: Arc<VoiceStateSubscriber>,
     http: Arc<poise::serenity_prelude::Http>,
 }
 
@@ -189,34 +181,23 @@ impl BotEventHandler {
     pub fn new(
         event_bus: Arc<EventBus>,
         data: Arc<Data>,
-        voice_subscriber: Arc<VoiceStateSubscriber>,
         http: Arc<poise::serenity_prelude::Http>,
     ) -> Self {
         Self {
             event_bus,
             data,
-            voice_subscriber,
             http,
         }
     }
 
     /// Scans all guilds for users currently in voice channels.
+    /// Publishes a synthetic VoiceStateEvent for each active user so that
+    /// the voice plugin can start tracking them.
     async fn scan_voice_channels(&self, ctx: &poise::serenity_prelude::Context) {
         let mut tracked = 0u32;
         let guild_ids: Vec<_> = ctx.cache.guilds().into_iter().collect();
 
         for guild_id in guild_ids {
-            let is_enabled = self
-                .data
-                .service
-                .voice_tracking
-                .is_enabled(guild_id.get())
-                .await;
-
-            if !is_enabled {
-                continue;
-            }
-
             let voice_states = {
                 let Some(guild) = ctx.cache.guild(guild_id) else {
                     continue;
@@ -224,17 +205,21 @@ impl BotEventHandler {
                 self.collect_voice_states_from_guild(&guild)
             };
 
-            for (user_id, guild_id, channel_id, session_id) in voice_states {
-                match self
-                    .voice_subscriber
-                    .track_existing_user(user_id, guild_id, channel_id, &session_id)
-                    .await
-                {
-                    Ok(_) => tracked += 1,
-                    Err(e) => {
-                        error!("Failed to track existing user {user_id} in guild {guild_id}: {e}")
-                    }
+            for (user_id, guild_id, channel_id, session_id) in &voice_states {
+                let vs = Self::make_voice_state(
+                    *user_id,
+                    Some(*guild_id),
+                    Some(*channel_id),
+                    session_id.as_str(),
+                );
+                let event = VoiceStateEvent {
+                    old: None,
+                    new: vs,
+                };
+                if let Ok(json) = serde_json::to_value(&event) {
+                    let _ = self.event_bus.publish_named("voice_state", json);
                 }
+                tracked += 1;
             }
         }
 
@@ -246,6 +231,28 @@ impl BotEventHandler {
     /// Collects voice state data from a guild reference.
     /// For large guilds the member list may be incomplete on `GuildCreate`; in that case
     /// we default to treating unknown users as non-bots (better to over-track than under-track).
+    /// Constructs a minimal VoiceState from component values.
+    fn make_voice_state(
+        user_id: u64,
+        guild_id: Option<u64>,
+        channel_id: Option<u64>,
+        session_id: &str,
+    ) -> poise::serenity_prelude::VoiceState {
+        serde_json::from_value(serde_json::json!({
+            "user_id": user_id.to_string(),
+            "guild_id": guild_id.map(|id| id.to_string()),
+            "channel_id": channel_id.map(|id| id.to_string()),
+            "session_id": session_id,
+            "deaf": false,
+            "mute": false,
+            "self_deaf": false,
+            "self_mute": false,
+            "suppress": false,
+            "self_video": false,
+        }))
+        .expect("Minimal VoiceState construction should never fail")
+    }
+
     fn collect_voice_states_from_guild(
         &self,
         guild: &Guild,
@@ -338,31 +345,24 @@ impl poise::serenity_prelude::EventHandler for BotEventHandler {
                 self.register_commands_if_needed().await;
             }
             FullEvent::GuildCreate { guild, .. } => {
-                let is_enabled = self
-                    .data
-                    .service
-                    .voice_tracking
-                    .is_enabled(guild.id.get())
-                    .await;
-
-                if !is_enabled {
-                    return;
-                }
-
                 let voice_states = self.collect_voice_states_from_guild(guild);
                 let mut tracked = 0u32;
 
-                for (user_id, guild_id, channel_id, session_id) in voice_states {
-                    match self
-                        .voice_subscriber
-                        .track_existing_user(user_id, guild_id, channel_id, &session_id)
-                        .await
-                    {
-                        Ok(_) => tracked += 1,
-                        Err(e) => error!(
-                            "Failed to track existing user {user_id} in guild {guild_id}: {e}"
-                        ),
+                for (user_id, guild_id, channel_id, session_id) in &voice_states {
+                    let vs = Self::make_voice_state(
+                        *user_id,
+                        Some(*guild_id),
+                        Some(*channel_id),
+                        session_id.as_str(),
+                    );
+                    let event = VoiceStateEvent {
+                        old: None,
+                        new: vs,
+                    };
+                    if let Ok(json) = serde_json::to_value(&event) {
+                        let _ = self.event_bus.publish_named("voice_state", json);
                     }
+                    tracked += 1;
                 }
 
                 if tracked > 0 {
@@ -374,10 +374,16 @@ impl poise::serenity_prelude::EventHandler for BotEventHandler {
                 }
             }
             FullEvent::VoiceStateUpdate { old, new, .. } => {
-                self.event_bus.publish(VoiceStateEvent {
+                let event = VoiceStateEvent {
                     old: old.clone(),
                     new: new.clone(),
-                });
+                };
+                // Keep the typed publish for any remaining core subscribers
+                self.event_bus.publish(event.clone());
+                // Also publish as named event for plugins
+                if let Ok(json) = serde_json::to_value(&event) {
+                    let _ = self.event_bus.publish_named("voice_state", json);
+                }
             }
             _ => {}
         }

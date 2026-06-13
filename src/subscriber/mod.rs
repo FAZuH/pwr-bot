@@ -1,8 +1,7 @@
 //! Event subscribers that handle published events.
-
-pub mod discord_dm;
-pub mod discord_guild;
-pub mod voice_state;
+//!
+//! Core subscribers: Discord message delivery for feed updates.
+//! Voice subscribers have been moved to the voice plugin.
 
 use anyhow::Result;
 

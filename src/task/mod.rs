@@ -1,7 +1,4 @@
-//! Background tasks for feed polling and voice tracking.
-
-pub mod series_feed_publisher;
-pub mod voice_heartbeat;
+//! Background tasks.
 
 // use std::borrow::Cow;
 // use std::sync::Arc;

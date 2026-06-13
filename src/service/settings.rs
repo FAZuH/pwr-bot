@@ -6,8 +6,75 @@ use crate::entity::Json;
 use crate::entity::ServerSettings;
 use crate::entity::ServerSettingsEntity;
 use crate::repo::traits::*;
+use crate::entity::FeedEntity;
+use crate::entity::SubscriberEntity;
 use crate::service::error::ServiceError;
+use crate::service::feed_subscription::SubscribeResult;
+use crate::service::feed_subscription::SubscriberTarget;
+use crate::service::feed_subscription::UnsubscribeResult;
+use crate::service::traits::FeedSubscriptionProvider;
 use crate::service::traits::SettingsProvider;
+
+#[async_trait::async_trait]
+impl FeedSubscriptionProvider for SettingsService {
+    async fn subscribe(
+        &self,
+        _url: &str,
+        _subscriber: &SubscriberEntity,
+    ) -> Result<SubscribeResult, ServiceError> {
+        Err(ServiceError::UnexpectedResult {
+            message: "subscribe: feed plugin not initialized".to_string(),
+        })
+    }
+
+    async fn unsubscribe(
+        &self,
+        _source_url: &str,
+        _subscriber: &SubscriberEntity,
+    ) -> Result<UnsubscribeResult, ServiceError> {
+        Err(ServiceError::UnexpectedResult {
+            message: "unsubscribe: feed plugin not initialized".to_string(),
+        })
+    }
+
+    async fn get_server_settings(&self, guild_id: u64) -> Result<ServerSettings, ServiceError> {
+        self.get_server_settings(guild_id).await
+    }
+
+    async fn update_server_settings(
+        &self,
+        guild_id: u64,
+        settings: ServerSettings,
+    ) -> Result<(), ServiceError> {
+        self.update_server_settings(guild_id, settings).await
+    }
+
+    async fn get_both_subscribers(
+        &self,
+        _target_id: String,
+        _guild_id: Option<String>,
+    ) -> (Option<SubscriberEntity>, Option<SubscriberEntity>) {
+        (None, None)
+    }
+
+    async fn search_and_combine_feeds(
+        &self,
+        _partial: &str,
+        _user_subscriber: Option<SubscriberEntity>,
+        _guild_subscriber: Option<SubscriberEntity>,
+    ) -> Vec<FeedEntity> {
+        vec![]
+    }
+
+    async fn get_or_create_subscriber(
+        &self,
+        _target: &SubscriberTarget,
+    ) -> Result<SubscriberEntity, ServiceError> {
+        Err(ServiceError::UnexpectedResult {
+            message: "get_or_create_subscriber: feed plugin not initialized".to_string(),
+        })
+    }
+}
 
 #[async_trait::async_trait]
 impl SettingsProvider for SettingsService {

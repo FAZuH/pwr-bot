@@ -18,7 +18,7 @@ pub async fn list(
     >,
 ) -> Result<(), Error> {
     let host_ctx = Arc::new(PoiseHostCtx::new(ctx));
-    let plugin = pwr_bot_plugin_feed::FeedPlugin;
+    let plugin = pwr_bot_plugin_feed::FeedPlugin::new();
     let args = serde_json::json!({"action": "list"});
     dispatch_builtin(&host_ctx, &plugin, "feed list", args).await
 }

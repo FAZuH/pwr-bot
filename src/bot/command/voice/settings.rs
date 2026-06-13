@@ -27,7 +27,7 @@ impl CommandHandler for VoiceSettingsHandler {
         self.host_ctx.defer().await?;
         let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?.get();
 
-        let service = ctx.data().service.voice_tracking.clone();
+        let service = ctx.data().service.settings.clone();
 
         let settings = service
             .get_server_settings(guild_id)
