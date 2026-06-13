@@ -3484,6 +3484,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c33a9471896f1c69cecef8d20cbe2f7accd12527ce60845ff44c153bb2a21b49"
 
 [[package]]
+name = "postgres"
+version = "0.19.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e7c48ece1c6cda0db61b058c1721378da76855140e9214339fa1317decacb176"
+dependencies = [
+ "bytes",
+ "fallible-iterator",
+ "futures-util",
+ "log",
+ "tokio",
+ "tokio-postgres",
+]
+
+[[package]]
 name = "postgres-protocol"
 version = "0.6.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3508,8 +3522,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "54b858f82211e84682fecd373f68e1ceae642d8d751a1ebd13f33de6257b3e20"
 dependencies = [
  "bytes",
+ "chrono",
  "fallible-iterator",
  "postgres-protocol",
+ "serde_core",
+ "serde_json",
 ]
 
 [[package]]
@@ -3634,6 +3651,7 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "byteorder",
+ "bytes",
  "chrono",
  "contribution-grid",
  "derive_builder",
@@ -3652,6 +3670,10 @@ dependencies = [
  "mockall",
  "plotters",
  "poise",
+ "postgres",
+ "pwr-bot-plugin-feed",
+ "pwr-bot-plugin-voice",
+ "pwr-bot-plugin-welcome",
  "pwr-bot-sdk",
  "resvg",
  "serde",
@@ -3665,6 +3687,37 @@ dependencies = [
  "uuid",
  "wreq",
  "wreq-util",
+]
+
+[[package]]
+name = "pwr-bot-plugin-feed"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "pwr-bot-sdk",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "pwr-bot-plugin-voice"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "pwr-bot-sdk",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "pwr-bot-plugin-welcome"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "pwr-bot-sdk",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

@@ -16,9 +16,14 @@ type AsyncSubscriber<E> =
     Box<dyn Fn(E) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> + Send + Sync>;
 type Subscribers = Arc<RwLock<HashMap<TypeId, Vec<Box<dyn Any + Send + Sync>>>>>;
 
+/// A named event handler receiving JSON payloads.
+type NamedHandler = Box<dyn Fn(serde_json::Value) -> Result<()> + Send + Sync>;
+
 /// Event bus for publishing events to subscribers.
 pub struct EventBus {
     subscribers: Subscribers,
+    /// Name-based subscriber dispatch (for plugins).
+    named_subscribers: Arc<RwLock<HashMap<String, Vec<NamedHandler>>>>,
 }
 
 impl EventBus {
@@ -26,6 +31,7 @@ impl EventBus {
     pub fn new() -> Self {
         Self {
             subscribers: Arc::new(RwLock::new(HashMap::new())),
+            named_subscribers: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -79,6 +85,34 @@ impl EventBus {
         }
         self
     }
+
+    // ---- Name-based API (for plugins) ----
+
+    /// Registers a named event handler that receives JSON payloads.
+    pub fn subscribe_named(
+        &self,
+        event_name: &'static str,
+        handler: NamedHandler,
+    ) -> &Self {
+        self.named_subscribers
+            .write()
+            .unwrap()
+            .entry(event_name.to_string())
+            .or_default()
+            .push(handler);
+        self
+    }
+
+    /// Publishes an event by name with a JSON payload.
+    pub fn publish_named(&self, event_name: &str, payload: serde_json::Value) -> Result<()> {
+        let subs = self.named_subscribers.read().unwrap();
+        if let Some(handlers) = subs.get(event_name) {
+            for handler in handlers {
+                let _ = handler(payload.clone());
+            }
+        }
+        Ok(())
+    }
 }
 
 impl Default for EventBus {
@@ -122,5 +156,23 @@ mod tests {
         sleep(Duration::from_millis(50)).await;
 
         assert_eq!(counter.load(Ordering::SeqCst), 10);
+    }
+
+    #[tokio::test]
+    async fn named_event_bus() {
+        let bus = EventBus::new();
+        let called = Arc::new(AtomicI32::new(0));
+        let c = called.clone();
+
+        bus.subscribe_named("test.event", Box::new(move |payload| {
+            let val = payload.get("val").and_then(|v| v.as_i64()).unwrap_or(0);
+            c.fetch_add(val as i32, Ordering::SeqCst);
+            Ok(())
+        }));
+
+        bus.publish_named("test.event", serde_json::json!({"val": 5})).unwrap();
+
+        sleep(Duration::from_millis(50)).await;
+        assert_eq!(called.load(Ordering::SeqCst), 5);
     }
 }

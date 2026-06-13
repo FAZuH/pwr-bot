@@ -50,6 +50,7 @@ pub struct Data {
     pub config: Arc<Config>,
     pub platforms: Arc<Platforms>,
     pub service: Arc<Services>,
+    pub event_bus: Arc<EventBus>,
     pub start_time: Instant,
 }
 
@@ -57,6 +58,7 @@ pub struct Data {
 pub struct Bot {
     pub cache: Arc<Cache>,
     pub http: Arc<Http>,
+    pub data: Arc<Data>,
     client_builder: Option<ClientBuilder>,
     client: Arc<Mutex<Option<Client>>>,
 }
@@ -83,6 +85,7 @@ impl Bot {
             config: config.clone(),
             platforms,
             service,
+            event_bus: event_bus.clone(),
             start_time: Instant::now(),
         });
 
@@ -96,7 +99,7 @@ impl Bot {
         let client_builder = ClientBuilder::new(token.clone(), intents)
             .event_handler(event_handler)
             .framework(framework)
-            .data(data)
+            .data(data.clone())
             .activity(ActivityData::playing(format!(
                 "v{}",
                 config.version.clone()
@@ -105,6 +108,7 @@ impl Bot {
         Ok(Self {
             cache: Arc::new(Cache::default()),
             http,
+            data,
             client_builder: Some(client_builder),
             client: Arc::new(Mutex::new(None)),
         })

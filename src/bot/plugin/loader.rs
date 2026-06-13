@@ -1,5 +1,6 @@
 //! Loads plugin `.so` files using `libloading`.
 
+use std::ffi::CStr;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -9,12 +10,19 @@ use log::info;
 use log::warn;
 use pwr_bot_sdk::PWR_BOT_PLUGIN_API_VERSION;
 use pwr_bot_sdk::PWR_BOT_PLUGIN_ENTRY;
+use pwr_bot_sdk::PluginMetadata;
 use pwr_bot_sdk::PluginVTable;
 
 /// A loaded plugin instance.
 pub struct LoadedPlugin {
-    /// Name of the plugin (from vtable).
+    /// Name of the plugin (from metadata).
     pub name: String,
+    /// Description (from metadata).
+    pub description: String,
+    /// Version (from metadata).
+    pub version: String,
+    /// Parsed metadata.
+    pub metadata: PluginMetadata,
     /// The dynamic library handle.
     _lib: Arc<Library>,
     /// The plugin's virtual table.
@@ -93,11 +101,33 @@ pub unsafe fn load_plugin(path: &Path) -> Result<LoadedPlugin, String> {
         ));
     }
 
+    // Parse metadata from the metadata function
+    let metadata_json_ptr = unsafe { (vtable.metadata)() };
+    let metadata_json = if metadata_json_ptr.is_null() {
+        return Err("metadata function returned null".to_string());
+    } else {
+        let s = unsafe { CStr::from_ptr(metadata_json_ptr) }
+            .to_str()
+            .map_err(|_| "metadata is not valid UTF-8".to_string())?
+            .to_string();
+        // Free the string
+        if let Some(free) = vtable.free_string {
+            unsafe { free(metadata_json_ptr) };
+        }
+        s
+    };
+
+    let metadata: PluginMetadata =
+        serde_json::from_str(&metadata_json).map_err(|e| format!("invalid metadata JSON: {e}"))?;
+
     let _ = Arc::into_raw(lib.clone());
 
     Ok(LoadedPlugin {
         _lib: lib,
         vtable,
-        name: String::new(),
+        name: metadata.name.clone(),
+        description: metadata.description.clone(),
+        version: metadata.version.clone(),
+        metadata,
     })
 }

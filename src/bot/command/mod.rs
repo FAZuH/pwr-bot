@@ -32,15 +32,11 @@ use poise::ReplyHandle;
 
 use crate::bot::Data;
 use crate::bot::command::about::AboutHandler;
-use crate::bot::command::feed::list::FeedListHandler;
 use crate::bot::command::feed::settings::FeedSettingsHandler;
 use crate::bot::command::feed::subscribe::FeedSubscribeHandler;
 use crate::bot::command::feed::unsubscribe::FeedUnsubscribeHandler;
 use crate::bot::command::settings::SettingsMainHandler;
-use crate::bot::command::voice::leaderboard::VoiceLeaderboardHandler;
 use crate::bot::command::voice::settings::VoiceSettingsHandler;
-use crate::bot::command::voice::stats::VoiceStatsHandler;
-use crate::bot::command::welcome::WelcomeSettingsHandler;
 use crate::bot::host_ctx::PoiseHostCtx;
 use crate::bot::navigation::Navigation;
 
@@ -171,29 +167,34 @@ impl<'a> Router<'a> {
                 SettingsMain => Box::new(SettingsMainHandler::new(hc)),
                 SettingsFeeds => Box::new(FeedSettingsHandler::new(hc)),
                 SettingsVoice => Box::new(VoiceSettingsHandler::new(hc)),
-                SettingsWelcome => Box::new(WelcomeSettingsHandler::new(hc)),
+                SettingsWelcome => {
+                    // Welcome is now a plugin-managed command.
+                    // Navigation is handled by the plugin's dispatch system.
+                    continue;
+                }
                 SettingsAbout => Box::new(AboutHandler::new(hc)),
-                FeedSubscriptions { send_into } => Box::new(FeedListHandler::new(hc, send_into?)),
+                FeedSubscriptions { .. } => {
+                    // Feed subscriptions is now plugin-managed.
+                    continue;
+                }
                 FeedSubscribe { links, send_into } => {
                     Box::new(FeedSubscribeHandler::new(hc, links, send_into))
                 }
                 FeedUnsubscribe { links, send_into } => {
                     Box::new(FeedUnsubscribeHandler::new(hc, links, send_into))
                 }
-                FeedList(send_into) => Box::new(FeedListHandler::new(hc, send_into?)),
-                VoiceLeaderboard { time_range } => {
-                    Box::new(VoiceLeaderboardHandler::new(hc, time_range))
+                FeedList(_) => {
+                    // Feed list is now a plugin-managed command.
+                    continue;
                 }
-                VoiceStats {
-                    time_range,
-                    target_user,
-                    stat_type,
-                } => Box::new(VoiceStatsHandler::new(
-                    hc,
-                    time_range,
-                    *target_user,
-                    stat_type,
-                )),
+                VoiceLeaderboard { .. } => {
+                    // Voice leaderboard is now plugin-managed.
+                    continue;
+                }
+                VoiceStats { .. } => {
+                    // Voice stats is now plugin-managed.
+                    continue;
+                }
                 Plugin { .. } => {
                     // Plugin navigation is handled by the plugin dispatch system,
                     // not by the built-in router.

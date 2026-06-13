@@ -2,7 +2,7 @@ use std::ffi::CStr;
 use std::ffi::c_char;
 use std::fmt;
 
-pub const PWR_BOT_PLUGIN_API_VERSION: u32 = 1;
+pub const PWR_BOT_PLUGIN_API_VERSION: u32 = 2;
 
 pub const PWR_BOT_PLUGIN_ENTRY: &[u8] = b"pwr_bot_plugin_entry\0";
 
@@ -29,6 +29,7 @@ pub struct CommandList {
 /// Callback table the host provides to plugins.
 #[repr(C)]
 pub struct HostCallbacks {
+    // -- Interaction callbacks --
     pub send_reply: unsafe extern "C" fn(
         ctx_handle: u64,
         reply_json: *const c_char,
@@ -44,6 +45,9 @@ pub struct HostCallbacks {
     pub get_guild_id: unsafe extern "C" fn(ctx_handle: u64) -> u64,
     pub get_author_id: unsafe extern "C" fn(ctx_handle: u64) -> u64,
     pub get_channel_id: unsafe extern "C" fn(ctx_handle: u64) -> u64,
+    pub free_string: unsafe extern "C" fn(s: *mut c_char),
+
+    // -- Database callbacks --
     pub query_db: unsafe extern "C" fn(
         ctx_handle: u64,
         sql: *const c_char,
@@ -51,36 +55,66 @@ pub struct HostCallbacks {
         out_json: *mut *mut c_char,
         out_err: *mut *mut c_char,
     ) -> bool,
-    pub free_string: unsafe extern "C" fn(s: *mut c_char),
+    pub execute_db: unsafe extern "C" fn(
+        ctx_handle: u64,
+        sql: *const c_char,
+        params_json: *const c_char,
+        out_rows: *mut u64,
+        out_err: *mut *mut c_char,
+    ) -> bool,
+
+    // -- Channel message callback --
+    pub send_channel_message: unsafe extern "C" fn(
+        ctx_handle: u64,
+        channel_id: u64,
+        payload_json: *const c_char,
+        out_message_id: *mut u64,
+        out_err: *mut *mut c_char,
+    ) -> bool,
+
+    // -- Event callback --
+    pub publish_event: unsafe extern "C" fn(
+        ctx_handle: u64,
+        event_name: *const c_char,
+        payload_json: *const c_char,
+        out_err: *mut *mut c_char,
+    ) -> bool,
+
+    // -- Config callbacks --
+    pub get_poll_interval: unsafe extern "C" fn(ctx_handle: u64) -> u64,
+    pub get_data_path: unsafe extern "C" fn(ctx_handle: u64, out: *mut *mut c_char) -> bool,
+    pub is_feature_enabled: unsafe extern "C" fn(
+        ctx_handle: u64,
+        feature: *const c_char,
+    ) -> bool,
 }
 
 /// Stable C ABI vtable that every plugin exports.
 #[repr(C)]
 pub struct PluginVTable {
     pub api_version: u32,
-    pub commands: unsafe extern "C" fn() -> CommandList,
+    pub metadata: unsafe extern "C" fn() -> *mut c_char,
     pub invoke: unsafe extern "C" fn(req: *const InvokeRequest, resp: *mut InvokeResponse),
-    pub free_command_list: unsafe extern "C" fn(list: CommandList),
-    pub free_response: unsafe extern "C" fn(resp: *mut InvokeResponse),
+    pub init: Option<
+        unsafe extern "C" fn(req: *const InvokeRequest, resp: *mut InvokeResponse),
+    >,
+    pub shutdown: Option<unsafe extern "C" fn() -> bool>,
+    pub on_event: Option<
+        unsafe extern "C" fn(
+            event_name: *const c_char,
+            payload_json: *const c_char,
+            callbacks: *const HostCallbacks,
+            ctx_handle: u64,
+        ) -> bool,
+    >,
+    pub free_string: Option<unsafe extern "C" fn(s: *mut c_char)>,
 }
 
 impl InvokeRequest {
-    /// Returns the command name string.
-    ///
-    /// # Safety
-    ///
-    /// `self.command` must be a valid, null-terminated C string pointer
-    /// that remains valid for the duration of the call.
     pub unsafe fn command_str(&self) -> &str {
         unsafe { CStr::from_ptr(self.command).to_str().unwrap_or("") }
     }
 
-    /// Returns the JSON arguments string.
-    ///
-    /// # Safety
-    ///
-    /// `self.args_json` must be a valid, null-terminated C string pointer
-    /// that remains valid for the duration of the call.
     pub unsafe fn args_json_str(&self) -> &str {
         unsafe { CStr::from_ptr(self.args_json).to_str().unwrap_or("") }
     }
@@ -101,6 +135,12 @@ impl fmt::Debug for HostCallbacks {
             .field("get_author_id", &(self.get_author_id as *const ()))
             .field("get_channel_id", &(self.get_channel_id as *const ()))
             .field("query_db", &(self.query_db as *const ()))
+            .field("execute_db", &(self.execute_db as *const ()))
+            .field("send_channel_message", &(self.send_channel_message as *const ()))
+            .field("publish_event", &(self.publish_event as *const ()))
+            .field("get_poll_interval", &(self.get_poll_interval as *const ()))
+            .field("get_data_path", &(self.get_data_path as *const ()))
+            .field("is_feature_enabled", &(self.is_feature_enabled as *const ()))
             .field("free_string", &(self.free_string as *const ()))
             .finish()
     }
@@ -110,10 +150,12 @@ impl fmt::Debug for PluginVTable {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PluginVTable")
             .field("api_version", &self.api_version)
-            .field("commands", &(self.commands as *const ()))
+            .field("metadata", &(self.metadata as *const ()))
             .field("invoke", &(self.invoke as *const ()))
-            .field("free_command_list", &(self.free_command_list as *const ()))
-            .field("free_response", &(self.free_response as *const ()))
+            .field("init", &self.init.map(|f| f as *const ()))
+            .field("shutdown", &self.shutdown.map(|f| f as *const ()))
+            .field("on_event", &self.on_event.map(|f| f as *const ()))
+            .field("free_string", &self.free_string.map(|f| f as *const ()))
             .finish()
     }
 }

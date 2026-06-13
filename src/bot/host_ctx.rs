@@ -81,6 +81,27 @@ impl PoiseHostCtx {
         })
     }
 
+    /// Creates a headless system context (no interaction — for events/tasks).
+    pub fn new_system(data: Arc<Data>, http: Arc<Http>) -> Arc<Self> {
+        Arc::new(Self {
+            guild_id: None,
+            author_id: 0,
+            channel_id: 0,
+            data,
+            http,
+            interaction: None,
+            responded: AtomicBool::new(false),
+        })
+    }
+
+    pub fn http(&self) -> &Arc<Http> {
+        &self.http
+    }
+
+    pub fn data(&self) -> Arc<Data> {
+        self.data.clone()
+    }
+
     fn cmd_interaction(&self) -> Option<&CommandInteraction> {
         self.interaction.as_ref()
     }

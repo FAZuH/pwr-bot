@@ -59,6 +59,11 @@ async fn main() -> Result<()> {
     .await?;
     setup_publishers(&config, &services, event_bus.clone(), init_start)?;
 
+    // Initialize system context for headless plugin operations (events, tasks)
+    pwr_bot::bot::plugin::host_registry::set_system_ctx(
+        pwr_bot::bot::host_ctx::PoiseHostCtx::new_system(bot.data.clone(), bot.http.clone()),
+    );
+
     info!(
         "pwr-bot is up in {:.2}s. Press Ctrl+C to stop.",
         init_start.elapsed().as_secs_f64()

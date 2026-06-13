@@ -5,6 +5,7 @@
 //! and delegates matching invocations back to the plugin via FFI.
 
 pub mod ffi_host_ctx;
+pub mod host_registry;
 pub mod invocation;
 pub mod loader;
 pub mod registry;
