@@ -149,7 +149,6 @@ async fn process_subscription_batch(
             let batch_handler = FeedSubscriptionBatchHandler {
                 states: states.clone(),
                 is_final,
-                subscriber_type: subscriber.r#type,
             };
 
             // To render without waiting for interaction, we could run the engine for 0 seconds
@@ -255,15 +254,19 @@ async fn get_or_create_subscriber(
         .await?)
 }
 
-action_enum! { FeedSubscriptionBatchAction {
-    #[label = "View Subscriptions"]
-    ViewSubscriptions,
-} }
+/// Placeholder action type for the non-interactive batch handler.
+#[derive(Debug, Clone)]
+pub enum FeedSubscriptionBatchAction {}
+
+impl Action for FeedSubscriptionBatchAction {
+    fn label(&self) -> &'static str {
+        match *self {}
+    }
+}
 
 pub struct FeedSubscriptionBatchHandler {
     pub states: Vec<String>,
     pub is_final: bool,
-    subscriber_type: SubscriberType,
 }
 
 #[async_trait::async_trait]
@@ -271,22 +274,9 @@ impl ViewHandler for FeedSubscriptionBatchHandler {
     type Action = FeedSubscriptionBatchAction;
     async fn handle(
         &mut self,
-        ctx: ViewContext<'_, FeedSubscriptionBatchAction>,
+        _ctx: ViewContext<'_, FeedSubscriptionBatchAction>,
     ) -> Result<ViewCmd, Error> {
-        use FeedSubscriptionBatchAction as Action;
-        match ctx.action() {
-            Action::ViewSubscriptions => {
-                // Convert subscriber type back to SendInto
-                let send_into = match self.subscriber_type {
-                    SubscriberType::Guild => SendInto::Server,
-                    SubscriberType::Dm => SendInto::DM,
-                };
-                ctx.coordinator
-                    .navigate(Navigation::FeedList(Some(send_into)))
-                    .await;
-                Ok(ViewCmd::Exit)
-            }
-        }
+        unreachable!()
     }
 }
 
@@ -294,30 +284,24 @@ impl ViewRender for FeedSubscriptionBatchHandler {
     type Action = FeedSubscriptionBatchAction;
     fn render(
         &self,
-        registry: &mut ActionRegistry<FeedSubscriptionBatchAction>,
+        _registry: &mut ActionRegistry<FeedSubscriptionBatchAction>,
     ) -> ResponseKind<'_> {
-        let text_components: Vec<CreateContainerComponent> = self
+        let mut text_components: Vec<CreateContainerComponent> = self
             .states
             .iter()
             .map(|s| CreateContainerComponent::TextDisplay(CreateTextDisplay::new(s.clone())))
             .collect();
 
-        let mut components = vec![CreateComponent::Container(CreateContainer::new(
-            text_components,
-        ))];
-
         if self.is_final {
-            let nav_button = registry
-                .register(FeedSubscriptionBatchAction::ViewSubscriptions)
-                .as_button()
-                .style(ButtonStyle::Secondary);
-
-            components.push(CreateComponent::ActionRow(CreateActionRow::Buttons(
-                vec![nav_button].into(),
-            )));
+            text_components.push(CreateContainerComponent::TextDisplay(
+                CreateTextDisplay::new("Use `/feed list` to view your subscriptions."),
+            ));
         }
 
-        components.into()
+        vec![CreateComponent::Container(CreateContainer::new(
+            text_components,
+        ))]
+        .into()
     }
 }
 

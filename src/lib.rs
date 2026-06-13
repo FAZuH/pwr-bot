@@ -15,6 +15,5 @@ pub mod logging;
 pub mod macros;
 pub mod repo;
 pub mod service;
-pub mod subscriber;
 pub mod task;
 pub mod update;

@@ -1,4 +1,5 @@
 use std::borrow::Borrow;
+use std::collections::HashMap;
 use std::hash::Hash;
 use std::io::Write;
 use std::ops::Deref;
@@ -244,6 +245,10 @@ pub struct ServerSettings {
     pub voice: VoiceSettings,
     #[serde(default)]
     pub welcome: WelcomeSettings,
+    /// Per-plugin settings namespace.
+    /// Plugins store their own feature toggles/config here keyed by panel ID.
+    #[serde(default)]
+    pub plugin_settings: HashMap<String, serde_json::Value>,
 }
 
 #[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]

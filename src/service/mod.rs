@@ -25,9 +25,7 @@ impl Services {
     ///
     /// Each service extracts its repo handles from the factory at construction
     /// time, not per-operation. See [`Repos`] for the factory trait.
-    pub async fn new(
-        repos: Arc<dyn Repos + Send + Sync>,
-    ) -> anyhow::Result<Self> {
+    pub async fn new(repos: Arc<dyn Repos + Send + Sync>) -> anyhow::Result<Self> {
         let settings_svc = Arc::new(SettingsService::new(Arc::from(repos.server_settings())));
         let settings = settings_svc.clone() as Arc<dyn SettingsProvider>;
         let feed_subscription = settings_svc as Arc<dyn FeedSubscriptionProvider>;

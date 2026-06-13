@@ -3,6 +3,7 @@
 use std::time::Duration;
 
 use crate::bot::command::prelude::*;
+use crate::bot::plugin::registry::PluginRegistry;
 use crate::entity::Json;
 use crate::entity::ServerSettings;
 use crate::entity::ServerSettingsEntity;
@@ -12,76 +13,70 @@ use crate::update::settings_main::SettingsMainMsg;
 use crate::update::settings_main::SettingsMainUpdate;
 
 /// Model representing a configurable feature in the bot.
-///
-/// Encapsulates feature identity, state access, and configuration logic
-/// to decouple feature management from specific handler implementations.
 pub struct Feature {
-    /// Unique identifier for the feature (e.g., "feeds", "voice", "welcome")
-    pub id: &'static str,
-    /// Display label for the feature (e.g., "Feeds", "Voice", "Welcome")
-    pub label: &'static str,
-    /// Function to get the current enabled state from ServerSettings
-    pub get_enabled: fn(&ServerSettings) -> bool,
-    /// Function to set the enabled state in ServerSettings
-    pub set_enabled: fn(&mut ServerSettings, bool),
-    /// Navigation result when configuring this feature
+    pub id: String,
+    pub label: String,
     pub navigate: Navigation,
 }
 
 impl Feature {
-    /// Get the current enabled state for this feature
     pub fn is_enabled(&self, settings: &ServerSettings) -> bool {
-        (self.get_enabled)(settings)
+        match self.id.as_str() {
+            "feeds" => settings.feeds.enabled.unwrap_or(false),
+            "voice" => settings.voice.enabled.unwrap_or(false),
+            "welcome" => settings.welcome.enabled.unwrap_or(false),
+            _ => settings
+                .plugin_settings
+                .get(&self.id)
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
+        }
     }
 
-    /// Toggle the enabled state for this feature
-    pub fn toggle_enabled(&self, settings: &mut ServerSettings) {
-        let current = (self.get_enabled)(settings);
-        (self.set_enabled)(settings, !current);
+    pub fn set_enabled(&self, settings: &mut ServerSettings, val: bool) {
+        match self.id.as_str() {
+            "feeds" => settings.feeds.enabled = Some(val),
+            "voice" => settings.voice.enabled = Some(val),
+            "welcome" => settings.welcome.enabled = Some(val),
+            _ => {
+                settings
+                    .plugin_settings
+                    .insert(self.id.clone(), serde_json::Value::Bool(val));
+            }
+        }
     }
 }
 
-/// Registry of all configurable features
-pub struct FeatureRegistry;
+/// Collects features from the plugin registry's settings panels.
+pub async fn collect_features(registry: &PluginRegistry) -> Vec<Feature> {
+    let mut features = Vec::new();
 
-impl FeatureRegistry {
-    /// Returns all available features
-    pub fn all() -> &'static [Feature] {
-        static FEATURES: &[Feature] = &[
-            Feature {
-                id: "feeds",
-                label: "Feeds",
-                get_enabled: |s| s.feeds.enabled.unwrap_or(false),
-                set_enabled: |s, v| s.feeds.enabled = Some(v),
-                navigate: Navigation::SettingsFeeds,
+    for (_plugin_name, _orig_name, panel) in registry.all_settings_panels().await {
+        let navigate = match panel.id.as_str() {
+            "feeds" => Navigation::SettingsFeeds,
+            "voice" => Navigation::SettingsVoice,
+            "welcome" => Navigation::SettingsWelcome,
+            _ => Navigation::SettingsPlugin {
+                plugin_id: panel.id.clone(),
             },
-            Feature {
-                id: "voice",
-                label: "Voice",
-                get_enabled: |s| s.voice.enabled.unwrap_or(false),
-                set_enabled: |s, v| s.voice.enabled = Some(v),
-                navigate: Navigation::SettingsVoice,
-            },
-            Feature {
-                id: "welcome",
-                label: "Welcome",
-                get_enabled: |s| s.welcome.enabled.unwrap_or(false),
-                set_enabled: |s, v| s.welcome.enabled = Some(v),
-                navigate: Navigation::SettingsWelcome,
-            },
-        ];
-        FEATURES
+        };
+        features.push(Feature {
+            id: panel.id,
+            label: panel.label,
+            navigate,
+        });
     }
 
-    /// Find a feature by its ID
-    pub fn find_by_id(id: &str) -> Option<&'static Feature> {
-        Self::all().iter().find(|f| f.id == id)
-    }
+    features
+}
 
-    /// Find a feature by its label
-    pub fn find_by_label(label: &str) -> Option<&'static Feature> {
-        Self::all().iter().find(|f| f.label == label)
+/// Builds the initial `SettingsMainModel` by reading enabled states from `ServerSettings`.
+fn build_initial_model(settings: &ServerSettings, features: &[Feature]) -> SettingsMainModel {
+    let mut map = std::collections::HashMap::new();
+    for f in features {
+        map.insert(f.id.clone(), f.is_enabled(settings));
     }
+    SettingsMainModel::new(map)
 }
 
 /// Opens main server settings
@@ -110,17 +105,20 @@ impl CommandHandler for SettingsMainHandler {
             .get_server_settings(guild_id.into())
             .await?;
 
+        let features = collect_features(&ctx.data().plugin_registry).await;
+
         let settings = ServerSettingsEntity {
             guild_id: guild_id.get().into(),
             settings: Json(settings),
         };
 
-        let model = SettingsMainModel::new(
-            settings.settings.0.feeds.enabled.unwrap_or(false),
-            settings.settings.0.voice.enabled.unwrap_or(false),
-            settings.settings.0.welcome.enabled.unwrap_or(false),
-        );
-        let view = SettingsMainView { settings, model };
+        let model = build_initial_model(&settings.settings.0, &features);
+
+        let view = SettingsMainView {
+            settings,
+            model,
+            features,
+        };
 
         let mut engine = ViewEngine::new(ctx, view, Duration::from_secs(120), coordinator.clone());
 
@@ -146,6 +144,7 @@ impl CommandHandler for SettingsMainHandler {
 pub struct SettingsMainView {
     pub settings: ServerSettingsEntity,
     pub model: SettingsMainModel,
+    pub features: Vec<Feature>,
 }
 
 impl SettingsMainView {
@@ -169,117 +168,112 @@ impl SettingsMainView {
     }
 
     fn sync_model_to_settings(&mut self) {
-        self.settings.settings.0.feeds.enabled = Some(self.model.feeds_enabled);
-        self.settings.settings.0.voice.enabled = Some(self.model.voice_enabled);
-        self.settings.settings.0.welcome.enabled = Some(self.model.welcome_enabled);
+        let Self {
+            ref features,
+            ref model,
+            ref mut settings,
+        } = *self;
+
+        for f in features {
+            let enabled = model.is_enabled(&f.id);
+            match f.id.as_str() {
+                "feeds" => settings.settings.0.feeds.enabled = Some(enabled),
+                "voice" => settings.settings.0.voice.enabled = Some(enabled),
+                "welcome" => settings.settings.0.welcome.enabled = Some(enabled),
+                _ => {
+                    settings
+                        .settings
+                        .0
+                        .plugin_settings
+                        .insert(f.id.clone(), serde_json::Value::Bool(enabled));
+                }
+            }
+        }
     }
 }
 
 impl ViewRender for SettingsMainView {
     type Action = SettingsMainAction;
     fn render(&self, registry: &mut ActionRegistry<SettingsMainAction>) -> ResponseKind<'_> {
-        let text_settings = CreateTextDisplay::new("-# **Settings**");
-        let mut components = vec![CreateContainerComponent::TextDisplay(text_settings)];
+        let mut components: Vec<CreateContainerComponent> =
+            vec![CreateContainerComponent::TextDisplay(
+                CreateTextDisplay::new("-# **Settings**"),
+            )];
 
         // Navigation section
-        let text_configure = CreateTextDisplay::new(
-            "### Configure Feature Settings
-> 🛈  Click a button to edit settings for a specific feature.",
-        );
-        components.push(CreateContainerComponent::TextDisplay(text_configure));
+        let nav_label =
+            "### Configure Feature Settings\n> 🛈  Select a feature to configure its settings.";
+        components.push(CreateContainerComponent::TextDisplay(
+            CreateTextDisplay::new(nav_label),
+        ));
 
-        // Build navigation buttons for all features
-        let navigation_buttons = CreateActionRow::Buttons(
-            FeatureRegistry::all()
+        // Navigation select menu
+        if !self.features.is_empty() {
+            let nav_options: Vec<CreateSelectMenuOption> = self
+                .features
                 .iter()
-                .map(|feature| {
-                    registry
-                        .register(match feature.label {
-                            "Feeds" => SettingsMainAction::FeedsFeature,
-                            "Voice" => SettingsMainAction::VoiceFeature,
-                            "Welcome" => SettingsMainAction::WelcomeFeature,
-                            _ => SettingsMainAction::About, // Should never happen
-                        })
-                        .as_button()
-                        .label(feature.label)
-                        .style(ButtonStyle::Secondary)
+                .map(|f| CreateSelectMenuOption::new(f.label.as_str(), f.id.as_str()))
+                .collect();
+
+            let nav_select = registry
+                .register(SettingsMainAction::NavigateToFeature)
+                .as_select(CreateSelectMenuKind::String {
+                    options: nav_options.into(),
                 })
-                .collect(),
-        );
-        components.push(CreateContainerComponent::ActionRow(navigation_buttons));
+                .placeholder("Choose a feature to configure...");
+
+            components.push(CreateContainerComponent::ActionRow(
+                CreateActionRow::SelectMenu(nav_select),
+            ));
+        }
 
         // Toggle section
-        let text_toggle = CreateTextDisplay::new(
-            "### Enable or Disable Features
-> 🛈  Turn features on or off. A checkmark means the feature is currently enabled.",
-        );
-        components.push(CreateContainerComponent::TextDisplay(text_toggle));
+        let tog_label = "### Enable or Disable Features\n> 🛈  Turn features on or off. A checkmark means the feature is currently enabled.";
+        components.push(CreateContainerComponent::TextDisplay(
+            CreateTextDisplay::new(tog_label),
+        ));
 
-        // Build select menu options with emoji indicators using FeatureRegistry
-        let select_options: Vec<_> = FeatureRegistry::all()
+        let toggle_options: Vec<CreateSelectMenuOption> = self
+            .features
             .iter()
-            .map(|feature| {
-                let is_enabled = match feature.label {
-                    "Feeds" => self.model.feeds_enabled,
-                    "Voice" => self.model.voice_enabled,
-                    "Welcome" => self.model.welcome_enabled,
-                    _ => false,
-                };
+            .map(|f| {
+                let is_enabled = self.model.is_enabled(&f.id);
                 let emoji = if is_enabled { "✅" } else { "⬜" };
-                CreateSelectMenuOption::new(format!("{} {}", emoji, feature.label), feature.label)
+                CreateSelectMenuOption::new(format!("{} {}", emoji, f.label), f.id.as_str())
             })
             .collect();
 
-        // Add select menu - show disabled placeholder if empty (should never happen)
-        let select_menu = if select_options.is_empty() {
-            CreateActionRow::SelectMenu(
-                CreateSelectMenu::new(
-                    "placeholder_no_features",
-                    CreateSelectMenuKind::String {
-                        options: vec![CreateSelectMenuOption::new(
-                            "No features available",
-                            "placeholder",
-                        )]
-                        .into(),
-                    },
-                )
-                .disabled(true),
-            )
-        } else {
-            CreateActionRow::SelectMenu(
-                registry
-                    .register(SettingsMainAction::ToggleFeature)
-                    .as_select(CreateSelectMenuKind::String {
-                        options: select_options.into(),
-                    }),
-            )
-        };
-        components.push(CreateContainerComponent::ActionRow(select_menu));
+        if !toggle_options.is_empty() {
+            let toggle_select = registry
+                .register(SettingsMainAction::ToggleFeature)
+                .as_select(CreateSelectMenuKind::String {
+                    options: toggle_options.into(),
+                });
+
+            components.push(CreateContainerComponent::ActionRow(
+                CreateActionRow::SelectMenu(toggle_select),
+            ));
+        }
 
         let container = CreateComponent::Container(CreateContainer::new(components));
 
-        let bottom_buttons = CreateComponent::ActionRow(CreateActionRow::Buttons(
-            vec![
-                registry
-                    .register(SettingsMainAction::About)
-                    .as_button()
-                    .style(ButtonStyle::Secondary),
-            ]
-            .into(),
-        ));
+        let about_button = registry
+            .register(SettingsMainAction::About)
+            .as_button()
+            .style(ButtonStyle::Secondary);
 
-        vec![container, bottom_buttons].into()
+        let bottom =
+            CreateComponent::ActionRow(CreateActionRow::Buttons(vec![about_button].into()));
+
+        vec![container, bottom].into()
     }
 }
 
 action_enum! {
     SettingsMainAction {
-        #[label = "Feeds"]
-        FeedsFeature,
-        #[label = "Voice"]
-        VoiceFeature,
-        #[label = "Welcome"]
-        WelcomeFeature,
+        /// Navigate to a selected feature's settings panel.
+        NavigateToFeature,
+        /// Toggle a selected feature on or off.
         ToggleFeature,
         #[label = "🛈 About"]
         About,
@@ -293,50 +287,19 @@ impl ViewHandler for SettingsMainView {
         use SettingsMainAction::*;
 
         let cor = ctx.coordinator.clone();
-        let action = ctx.action();
-        match action {
-            FeedsFeature => {
-                if let Some(feature) = FeatureRegistry::find_by_label("Feeds") {
-                    cor.navigate(feature.navigate.clone()).await;
-                }
-                Ok(ViewCmd::Exit)
-            }
-            VoiceFeature => {
-                if let Some(feature) = FeatureRegistry::find_by_label("Voice") {
-                    cor.navigate(feature.navigate.clone()).await;
-                }
-                Ok(ViewCmd::Exit)
-            }
-            WelcomeFeature => {
-                if let Some(feature) = FeatureRegistry::find_by_label("Welcome") {
-                    cor.navigate(feature.navigate.clone()).await;
-                }
+        match ctx.action() {
+            NavigateToFeature => {
+                if let Some(values) = ctx.string_select_values()
+                    && let Some(feature_id) = values.first()
+                        && let Some(feature) = self.features.iter().find(|f| f.id == *feature_id) {
+                            cor.navigate(feature.navigate.clone()).await;
+                        }
                 Ok(ViewCmd::Exit)
             }
             ToggleFeature => {
                 if let Some(values) = ctx.string_select_values() {
-                    for value in values {
-                        match value.as_str() {
-                            "Feeds" => {
-                                SettingsMainUpdate::update(
-                                    SettingsMainMsg::ToggleFeeds,
-                                    &mut self.model,
-                                );
-                            }
-                            "Voice" => {
-                                SettingsMainUpdate::update(
-                                    SettingsMainMsg::ToggleVoice,
-                                    &mut self.model,
-                                );
-                            }
-                            "Welcome" => {
-                                SettingsMainUpdate::update(
-                                    SettingsMainMsg::ToggleWelcome,
-                                    &mut self.model,
-                                );
-                            }
-                            _ => {}
-                        }
+                    for id in values {
+                        SettingsMainUpdate::update(SettingsMainMsg(id.clone()), &mut self.model);
                     }
                 }
                 Ok(ViewCmd::Render)

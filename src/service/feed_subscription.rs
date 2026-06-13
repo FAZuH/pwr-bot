@@ -4,7 +4,6 @@
 //! core commands still import during the transition.
 
 use crate::entity::FeedEntity;
-use crate::entity::FeedItemEntity;
 use crate::entity::SubscriberType;
 
 pub enum SubscribeResult {
@@ -22,10 +21,4 @@ pub enum UnsubscribeResult {
 pub struct SubscriberTarget {
     pub subscriber_type: SubscriberType,
     pub target_id: String,
-}
-
-#[derive(Clone, Debug)]
-pub struct Subscription {
-    pub feed: FeedEntity,
-    pub feed_latest: Option<FeedItemEntity>,
 }

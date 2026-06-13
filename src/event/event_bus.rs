@@ -10,7 +10,12 @@ use std::sync::RwLock;
 
 use anyhow::Result;
 
-use crate::subscriber::Subscriber;
+/// Trait for typed event subscribers.
+#[async_trait::async_trait]
+pub trait Subscriber<E> {
+    /// Called when an event of type E is published.
+    async fn callback(&self, event: E) -> Result<()>;
+}
 
 type AsyncSubscriber<E> =
     Box<dyn Fn(E) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> + Send + Sync>;
@@ -89,11 +94,7 @@ impl EventBus {
     // ---- Name-based API (for plugins) ----
 
     /// Registers a named event handler that receives JSON payloads.
-    pub fn subscribe_named(
-        &self,
-        event_name: &str,
-        handler: NamedHandler,
-    ) -> &Self {
+    pub fn subscribe_named(&self, event_name: &str, handler: NamedHandler) -> &Self {
         self.named_subscribers
             .write()
             .unwrap()
@@ -164,13 +165,17 @@ mod tests {
         let called = Arc::new(AtomicI32::new(0));
         let c = called.clone();
 
-        bus.subscribe_named("test.event", Box::new(move |payload| {
-            let val = payload.get("val").and_then(|v| v.as_i64()).unwrap_or(0);
-            c.fetch_add(val as i32, Ordering::SeqCst);
-            Ok(())
-        }));
+        bus.subscribe_named(
+            "test.event",
+            Box::new(move |payload| {
+                let val = payload.get("val").and_then(|v| v.as_i64()).unwrap_or(0);
+                c.fetch_add(val as i32, Ordering::SeqCst);
+                Ok(())
+            }),
+        );
 
-        bus.publish_named("test.event", serde_json::json!({"val": 5})).unwrap();
+        bus.publish_named("test.event", serde_json::json!({"val": 5}))
+            .unwrap();
 
         sleep(Duration::from_millis(50)).await;
         assert_eq!(called.load(Ordering::SeqCst), 5);

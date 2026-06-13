@@ -169,39 +169,19 @@ impl<'a> Router<'a> {
                 SettingsVoice => Box::new(VoiceSettingsHandler::new(hc)),
                 SettingsWelcome => {
                     // Welcome is now a plugin-managed command.
-                    // Navigation is handled by the plugin's dispatch system.
+                    continue;
+                }
+                SettingsPlugin { .. } => {
+                    // Plugin settings panels manage themselves.
                     continue;
                 }
                 SettingsAbout => Box::new(AboutHandler::new(hc)),
-                FeedSubscriptions { .. } => {
-                    // Feed subscriptions is now plugin-managed.
-                    continue;
-                }
                 FeedSubscribe { links, send_into } => {
                     Box::new(FeedSubscribeHandler::new(hc, links, send_into))
                 }
                 FeedUnsubscribe { links, send_into } => {
                     Box::new(FeedUnsubscribeHandler::new(hc, links, send_into))
                 }
-                FeedList(_) => {
-                    // Feed list is now a plugin-managed command.
-                    continue;
-                }
-                VoiceLeaderboard { .. } => {
-                    // Voice leaderboard is now plugin-managed.
-                    continue;
-                }
-                VoiceStats { .. } => {
-                    // Voice stats is now plugin-managed.
-                    continue;
-                }
-                Plugin { .. } => {
-                    // Plugin navigation is handled by the plugin dispatch system,
-                    // not by the built-in router.
-                    continue;
-                }
-                Back => continue,
-                Exit => return None,
             };
             return Some(res);
         }

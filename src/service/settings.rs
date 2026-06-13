@@ -2,12 +2,12 @@
 
 use std::sync::Arc;
 
+use crate::entity::FeedEntity;
 use crate::entity::Json;
 use crate::entity::ServerSettings;
 use crate::entity::ServerSettingsEntity;
-use crate::repo::traits::*;
-use crate::entity::FeedEntity;
 use crate::entity::SubscriberEntity;
+use crate::repo::traits::*;
 use crate::service::error::ServiceError;
 use crate::service::feed_subscription::SubscribeResult;
 use crate::service::feed_subscription::SubscriberTarget;

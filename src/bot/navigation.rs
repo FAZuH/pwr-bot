@@ -2,17 +2,12 @@
 //!
 //! Provides unified navigation enum for cross-domain handler navigation.
 
-use poise::serenity_prelude::User;
-
 use crate::bot::command::feed::SendInto;
-use crate::bot::command::voice::GuildStatType;
-use crate::bot::command::voice::VoiceLeaderboardTimeRange;
-use crate::bot::command::voice::VoiceStatsTimeRange;
 
 /// Result type for handler navigation.
 ///
 /// Handlers return this enum to indicate where the coordinator should
-/// navigate next. Each domain (Settings, Feed, Voice) has its own section.
+/// navigate next.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Navigation {
     // -- Settings section --
@@ -24,12 +19,15 @@ pub enum Navigation {
     SettingsVoice,
     /// Navigate to welcome settings page
     SettingsWelcome,
+    /// Navigate to a plugin-contributed settings page
+    SettingsPlugin {
+        /// ID of the plugin settings panel.
+        plugin_id: String,
+    },
     /// Navigate to about page (within settings context)
     SettingsAbout,
 
     // -- Feed commands section --
-    /// Show subscriptions list
-    FeedSubscriptions { send_into: Option<SendInto> },
     /// Start subscribe flow
     FeedSubscribe {
         links: String,
@@ -40,33 +38,4 @@ pub enum Navigation {
         links: String,
         send_into: Option<SendInto>,
     },
-    /// Start subscription list flow
-    FeedList(Option<SendInto>),
-
-    // Voice commands section
-    VoiceLeaderboard {
-        time_range: VoiceLeaderboardTimeRange,
-    },
-
-    // -- /vc stats --
-    VoiceStats {
-        time_range: VoiceStatsTimeRange,
-        target_user: Box<Option<User>>,
-        stat_type: GuildStatType,
-    },
-
-    // -- Plugin section --
-    /// Navigate to a plugin-provided view.
-    Plugin {
-        /// Plugin name serving this navigation.
-        plugin: String,
-        /// Arbitrary state the plugin can use to reconstruct its view.
-        state: Option<serde_json::Value>,
-    },
-
-    // -- Universal navigation --
-    /// Go back to previous handler
-    Back,
-    /// Exit current coordinator session
-    Exit,
 }

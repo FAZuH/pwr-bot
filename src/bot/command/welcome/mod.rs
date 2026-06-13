@@ -4,15 +4,12 @@ use std::sync::Arc;
 
 use crate::bot::command::prelude::*;
 use crate::bot::host_ctx::PoiseHostCtx;
-use crate::bot::plugin::invocation::dispatch_builtin;
-
-pub mod image_generator;
+use crate::bot::plugin::invocation::dispatch_plugin_command;
 
 /// Manage welcome message settings via the welcome plugin.
 #[poise::command(slash_command)]
 pub async fn welcome(ctx: Context<'_>) -> Result<(), Error> {
     let host_ctx = Arc::new(PoiseHostCtx::new(ctx));
-    let plugin = pwr_bot_plugin_welcome::WelcomePlugin;
     let args = serde_json::json!({});
-    dispatch_builtin(&host_ctx, &plugin, "welcome", args).await
+    dispatch_plugin_command(&ctx.data().plugin_registry, &host_ctx, "welcome", args).await
 }
