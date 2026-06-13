@@ -5,7 +5,6 @@
 
 use crate::entity::FeedEntity;
 use crate::entity::FeedItemEntity;
-use crate::entity::SubscriberEntity;
 use crate::entity::SubscriberType;
 
 pub enum SubscribeResult {

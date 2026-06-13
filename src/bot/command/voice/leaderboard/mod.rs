@@ -7,9 +7,6 @@ use crate::bot::command::voice::VoiceLeaderboardTimeRange;
 use crate::bot::host_ctx::PoiseHostCtx;
 use crate::bot::plugin::invocation::dispatch_builtin;
 
-pub mod image_builder;
-pub mod image_generator;
-
 /// Display the voice activity leaderboard
 ///
 /// Shows a ranked list of users by total time spent in voice channels.

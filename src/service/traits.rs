@@ -13,7 +13,6 @@ use crate::repo::error::DatabaseError;
 use crate::service::error::ServiceError;
 use crate::service::feed_subscription::SubscribeResult;
 use crate::service::feed_subscription::SubscriberTarget;
-use crate::service::feed_subscription::Subscription;
 use crate::service::feed_subscription::UnsubscribeResult;
 use crate::service::internal::DatabaseDump;
 
