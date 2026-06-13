@@ -116,8 +116,8 @@ pub struct PluginMetadata {
 
 /// Trait that plugin authors implement to define bot logic.
 ///
-/// The host calls [`commands`] at load time to learn what slash commands
-/// the plugin provides, then calls [`invoke`] when a user triggers one.
+/// The host calls [`Self::commands`] at load time to learn what slash commands
+/// the plugin provides, then calls [`Self::invoke`] when a user triggers one.
 #[async_trait]
 pub trait BotPlugin: Send + Sync {
     fn name(&self) -> &'static str;

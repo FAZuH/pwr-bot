@@ -133,7 +133,7 @@ impl<'a> Router<'a> {
     /// Starts the navigation loop with an initial destination.
     ///
     /// The loop continues as long as handlers return [`Navigation`]s,
-    /// stopping when [`Navigation::Exit`] is reached or the history stack is empty.
+    /// stopping when the history stack is empty.
     pub async fn run(self: Arc<Self>, initial: Navigation) -> Result<(), Error> {
         self.navigate(initial).await;
         while let Some(mut handler) = self.next_handler().await {

@@ -1,6 +1,6 @@
 /// Generate the FFI glue for a plugin.
 ///
-/// The plugin type must implement [`BotPlugin`].
+/// The plugin type must implement [`BotPlugin`](crate::plugin::BotPlugin).
 #[macro_export]
 macro_rules! export_plugin {
     ($plugin_type:ty, $initializer:expr) => {

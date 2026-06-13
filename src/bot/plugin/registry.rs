@@ -126,7 +126,7 @@ impl PluginRegistry {
     ///
     /// Each command resolves its plugin at runtime via [`dispatch_plugin_command`],
     /// so no core Poise wrappers are needed. Plugin authors add commands simply
-    /// by implementing [`BotPlugin::commands`] — no core changes required.
+    /// by implementing [`BotPlugin::commands`](pwr_bot_sdk::BotPlugin::commands) — no core changes required.
     pub fn all_commands(&self) -> Vec<Command<Data, Error>> {
         let mut cmds = Vec::new();
 

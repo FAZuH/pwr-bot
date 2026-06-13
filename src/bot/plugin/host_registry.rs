@@ -1,6 +1,6 @@
 //! Global registry mapping invocation handles to host contexts.
 //!
-//! When a plugin command is invoked, the host creates an [`FfiHostCtx`] with a
+//! When a plugin command is invoked, the host creates an [`FfiHostCtx`](super::ffi_host_ctx::FfiHostCtx) with a
 //! unique handle, registers the underlying [`PoiseHostCtx`] here, and passes
 //! the handle + callback table to the plugin. FFI callbacks use the handle to
 //! look up the context and perform operations.
