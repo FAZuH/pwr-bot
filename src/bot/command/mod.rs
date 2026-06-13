@@ -6,15 +6,12 @@
 
 pub mod about;
 pub mod dump_db;
-pub mod feed;
 pub mod gui_test;
 pub mod prelude;
 pub mod register;
 pub mod register_owner;
 pub mod settings;
 pub mod unregister;
-pub mod voice;
-pub mod welcome;
 
 /// Error type used across bot commands.
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
@@ -32,17 +29,14 @@ use poise::ReplyHandle;
 
 use crate::bot::Data;
 use crate::bot::command::about::AboutHandler;
-use crate::bot::command::feed::settings::FeedSettingsHandler;
-use crate::bot::command::feed::subscribe::FeedSubscribeHandler;
-use crate::bot::command::feed::unsubscribe::FeedUnsubscribeHandler;
 use crate::bot::command::settings::SettingsMainHandler;
-use crate::bot::command::voice::settings::VoiceSettingsHandler;
 use crate::bot::host_ctx::PoiseHostCtx;
 use crate::bot::navigation::Navigation;
+use crate::bot::plugin::invocation::dispatch_plugin_command;
 
 /// Trait for command modules (Cogs) that provide a set of Discord commands.
 ///
-/// A "Cog" is a collection of related commands (e.g., all feed-related commands).
+/// A "Cog" is a collection of related commands registered by the core.
 pub trait Cog {
     /// Returns the list of commands provided by this cog.
     fn commands(&self) -> Vec<Command<Data, Error>>;
@@ -59,14 +53,11 @@ impl Cog for Cogs {
         vec![
             about::about(),
             dump_db::dump_db(),
-            feed::feed(),
             gui_test::gui_test(),
             register::register(),
             register_owner::register_owner(),
             settings::settings(),
             unregister::unregister(),
-            voice::voice(),
-            welcome::welcome(),
         ]
     }
 }
@@ -165,23 +156,10 @@ impl<'a> Router<'a> {
             let hc = self.host_ctx.clone();
             let res: Box<dyn CommandHandler> = match nav {
                 SettingsMain => Box::new(SettingsMainHandler::new(hc)),
-                SettingsFeeds => Box::new(FeedSettingsHandler::new(hc)),
-                SettingsVoice => Box::new(VoiceSettingsHandler::new(hc)),
-                SettingsWelcome => {
-                    // Welcome is now a plugin-managed command.
-                    continue;
-                }
-                SettingsPlugin { .. } => {
-                    // Plugin settings panels manage themselves.
-                    continue;
+                SettingsPlugin { plugin_id } => {
+                    Box::new(PluginSettingsHandler::new(hc, plugin_id))
                 }
                 SettingsAbout => Box::new(AboutHandler::new(hc)),
-                FeedSubscribe { links, send_into } => {
-                    Box::new(FeedSubscribeHandler::new(hc, links, send_into))
-                }
-                FeedUnsubscribe { links, send_into } => {
-                    Box::new(FeedUnsubscribeHandler::new(hc, links, send_into))
-                }
             };
             return Some(res);
         }
@@ -194,4 +172,28 @@ pub trait CommandHandler: Send + Sync {
     ///
     /// The `coordinator` provides access to shared state and navigation.
     async fn run(&mut self, coordinator: std::sync::Arc<Router<'_>>) -> Result<(), Error>;
+}
+
+/// Handler that dispatches a plugin's settings panel via [`dispatch_plugin_command`].
+///
+/// The plugin's `invoke()` receives `"{name} settings"` as the command string.
+pub struct PluginSettingsHandler {
+    plugin_id: String,
+    host_ctx: Arc<PoiseHostCtx>,
+}
+
+impl PluginSettingsHandler {
+    pub fn new(host_ctx: Arc<PoiseHostCtx>, plugin_id: String) -> Self {
+        Self { plugin_id, host_ctx }
+    }
+}
+
+#[async_trait::async_trait]
+impl CommandHandler for PluginSettingsHandler {
+    async fn run(&mut self, coordinator: std::sync::Arc<Router<'_>>) -> Result<(), Error> {
+        let ctx = *coordinator.context();
+        let registry = &ctx.data().plugin_registry;
+        let cmd = format!("{} settings", self.plugin_id);
+        dispatch_plugin_command(registry, &self.host_ctx, &cmd, serde_json::Value::Null).await
+    }
 }

@@ -1,12 +1,10 @@
-//! Handles FFI and builtin plugin invocation dispatch.
+//! Handles FFI plugin invocation dispatch.
 
 use std::ffi::CString;
 use std::sync::Arc;
 
-use pwr_bot_sdk::BotPlugin;
 use pwr_bot_sdk::InvokeRequest;
 use pwr_bot_sdk::InvokeResponse;
-use pwr_bot_sdk::PluginHost;
 use pwr_bot_sdk::ResponsePayload;
 
 use crate::bot::command::Error;
@@ -17,10 +15,9 @@ use crate::bot::plugin::ffi_host_ctx;
 use crate::bot::plugin::ffi_host_ctx::FfiHostCtx;
 use crate::bot::plugin::host_registry;
 use crate::bot::plugin::loader::LoadedPlugin;
-use crate::bot::plugin::registry::PluginRef;
 use crate::bot::plugin::registry::PluginRegistry;
 
-/// Dispatches a plugin command invocation via FFI (for `.so` plugins).
+/// Dispatches a plugin command invocation via FFI.
 ///
 /// The FFI interaction is scoped in a block so that [`InvokeRequest`] and
 /// [`InvokeResponse`] (which contain raw pointers and are not `Send`) are
@@ -96,40 +93,7 @@ pub async fn dispatch(
     Ok(())
 }
 
-/// Dispatches a compiled-in plugin command invocation.
-///
-/// Calls the plugin's `invoke()` directly (no FFI serialization) while still
-/// providing the FFI-based `PluginHost` for callbacks.
-pub async fn dispatch_builtin(
-    host_ctx: &Arc<PoiseHostCtx>,
-    plugin: &dyn BotPlugin,
-    command: &str,
-    args: serde_json::Value,
-) -> Result<(), Error> {
-    let handle = host_registry::register(host_ctx.clone());
-
-    let host = PluginHost::new(handle, ffi_host_ctx::host_callbacks());
-
-    let result = plugin.invoke(command, args, &host).await;
-    host_registry::unregister(handle);
-
-    let payload = result.map_err(|e| format!("Plugin error: {e}"))?;
-
-    let msg_payload = MessagePayload {
-        content: payload.content,
-        embed: None,
-        ephemeral: payload.ephemeral,
-    };
-    host_ctx.send_message(&msg_payload).await?;
-
-    Ok(())
-}
-
 /// Dispatches a command to the correct plugin by looking it up from the registry.
-///
-/// Extracts the parent command name (e.g. `"vc"` from `"vc leaderboard"`),
-/// looks up the plugin in [`PluginRegistry`], and dispatches via the appropriate
-/// path (builtin or FFI).
 pub async fn dispatch_plugin_command(
     registry: &PluginRegistry,
     host_ctx: &Arc<PoiseHostCtx>,
@@ -137,123 +101,13 @@ pub async fn dispatch_plugin_command(
     args: serde_json::Value,
 ) -> Result<(), Error> {
     let parent = command.split_whitespace().next().unwrap_or(command);
-    let (_, _, plugin_ref) = registry
+    let (_, plugin) = registry
         .lookup(parent)
         .await
         .ok_or_else(|| format!("Plugin not found for command: {parent}"))?;
 
-    match plugin_ref {
-        PluginRef::Builtin(plugin) => dispatch_builtin(host_ctx, &*plugin, command, args).await,
-        PluginRef::Ffi(loaded) => {
-            let args_json = serde_json::to_string(&args).unwrap_or_else(|_| "null".to_string());
-            dispatch(host_ctx, loaded.vtable, command, &args_json).await
-        }
-    }
-}
-
-/// Calls `init` on a builtin plugin using the system context.
-pub async fn dispatch_init(plugin: &dyn BotPlugin) -> Result<(), String> {
-    let ctx =
-        host_registry::system_ctx().ok_or_else(|| "system context not initialized".to_string())?;
-    let handle = host_registry::register(ctx.clone());
-    let host = PluginHost::new(handle, ffi_host_ctx::host_callbacks());
-    let result = plugin.init(&host).await;
-    host_registry::unregister(handle);
-    result
-}
-
-/// Calls `shutdown` on a builtin plugin.
-pub async fn dispatch_shutdown(plugin: &dyn BotPlugin) -> Result<(), String> {
-    plugin.shutdown().await
-}
-
-/// Dispatches an event to a builtin plugin's `on_event` handler.
-pub async fn dispatch_on_event(
-    plugin: &dyn BotPlugin,
-    event_name: &str,
-    payload: serde_json::Value,
-) -> Result<(), String> {
-    let ctx =
-        host_registry::system_ctx().ok_or_else(|| "system context not initialized".to_string())?;
-    let handle = host_registry::register(ctx.clone());
-    let host = PluginHost::new(handle, ffi_host_ctx::host_callbacks());
-    let result = plugin.on_event(event_name, payload, &host).await;
-    host_registry::unregister(handle);
-    result
-}
-
-/// Registers plugin event handlers on the event bus.
-///
-/// For each plugin's declared [`EventHandlerSpec`], subscribes to the named
-/// event and dispatches it to the plugin's [`BotPlugin::on_event`] method.
-pub fn register_plugin_event_handlers(
-    event_bus: &crate::event::event_bus::EventBus,
-    plugins: &[Arc<dyn BotPlugin + 'static>],
-) {
-    for plugin in plugins {
-        let plugin_name = plugin.name().to_string();
-        for spec in plugin.event_handlers() {
-            let event_name = spec.event_name.clone();
-            let en = event_name.clone();
-            let p = plugin.clone();
-            event_bus.subscribe_named(
-                &event_name,
-                Box::new(move |payload| {
-                    let plugin = p.clone();
-                    let event_name = en.clone();
-                    tokio::spawn(async move {
-                        let _ = dispatch_on_event(&*plugin, &event_name, payload).await;
-                    });
-                    Ok(())
-                }),
-            );
-            log::info!("Registered event handler '{event_name}' for plugin '{plugin_name}'",);
-        }
-    }
-}
-
-/// Spawns background tasks declared by builtin plugins.
-///
-/// Each [`TaskSpec`] returned by a plugin's [`BotPlugin::tasks`] is spawned
-/// as a tokio interval that calls [`BotPlugin::invoke`] at the specified rate.
-/// The system context must be initialized before calling this.
-pub async fn dispatch_tasks(plugins: &[Arc<dyn BotPlugin + 'static>]) {
-    let system_ctx = match host_registry::system_ctx() {
-        Some(ctx) => ctx.clone(),
-        None => {
-            log::error!("Cannot dispatch tasks: system context not initialized");
-            return;
-        }
-    };
-
-    for plugin in plugins {
-        let plugin_name = plugin.name().to_string();
-        for task in plugin.tasks() {
-            let plugin = plugin.clone();
-            let ctx = system_ctx.clone();
-            let command = task.command.clone();
-            let interval_secs = task.interval_secs;
-
-            tokio::spawn(async move {
-                let mut timer =
-                    tokio::time::interval(std::time::Duration::from_secs(interval_secs));
-                loop {
-                    timer.tick().await;
-                    let handle = host_registry::register(ctx.clone());
-                    let host = PluginHost::new(handle, ffi_host_ctx::host_callbacks());
-                    let _ = plugin
-                        .invoke(&command, serde_json::Value::Null, &host)
-                        .await;
-                    host_registry::unregister(handle);
-                }
-            });
-
-            log::info!(
-                "Spawned task '{}' for plugin '{plugin_name}' (interval: {interval_secs}s)",
-                task.name,
-            );
-        }
-    }
+    let args_json = serde_json::to_string(&args).unwrap_or_else(|_| "null".to_string());
+    dispatch(host_ctx, plugin.vtable, command, &args_json).await
 }
 
 /// Calls `init` on an FFI plugin using the system context.
@@ -320,8 +174,7 @@ pub fn register_ffi_event_handlers(
                 }),
             );
             log::info!(
-                "Registered event handler '{}' for FFI plugin '{}'",
-                event_name,
+                "Registered event handler '{event_name}' for plugin '{}'",
                 plugin.name,
             );
         }

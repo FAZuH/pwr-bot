@@ -9,7 +9,6 @@ use std::sync::Arc;
 
 use log::info;
 use poise::Command;
-use pwr_bot_sdk::BotPlugin;
 use pwr_bot_sdk::CommandSpec;
 use pwr_bot_sdk::EventHandlerSpec;
 use pwr_bot_sdk::SettingsPanelSpec;
@@ -25,17 +24,15 @@ use crate::bot::plugin::loader::LoadedPlugin;
 
 /// Thread-safe registry of loaded plugins.
 pub struct PluginRegistry {
-    ffi_plugins: RwLock<Vec<Arc<LoadedPlugin>>>,
-    builtin_plugins: RwLock<Vec<Arc<dyn BotPlugin + 'static>>>,
-    /// Command name → (is_builtin, index)
-    command_map: RwLock<HashMap<String, (bool, usize)>>,
+    plugins: RwLock<Vec<Arc<LoadedPlugin>>>,
+    /// Command name → plugin index
+    command_map: RwLock<HashMap<String, usize>>,
 }
 
 impl PluginRegistry {
     pub fn new() -> Self {
         Self {
-            ffi_plugins: RwLock::new(Vec::new()),
-            builtin_plugins: RwLock::new(Vec::new()),
+            plugins: RwLock::new(Vec::new()),
             command_map: RwLock::new(HashMap::new()),
         }
     }
@@ -46,7 +43,7 @@ impl PluginRegistry {
 
         let plugin = Arc::new(plugin);
         let idx = {
-            let mut plugins = self.ffi_plugins.write().await;
+            let mut plugins = self.plugins.write().await;
             let idx = plugins.len();
             plugins.push(plugin.clone());
             idx
@@ -58,60 +55,19 @@ impl PluginRegistry {
             self.command_map
                 .write()
                 .await
-                .insert(cmd_name.clone(), (false, idx));
+                .insert(cmd_name.clone(), idx);
             cmds.push(build_plugin_command(spec));
-            info!(
-                "Registered plugin command: /{cmd_name} (from {})",
-                plugin.name
-            );
-        }
-
-        cmds
-    }
-
-    /// Register a compiled-in `BotPlugin` and return its poise `Command` list.
-    pub async fn register_builtin(
-        &self,
-        plugin: Box<dyn BotPlugin + 'static>,
-    ) -> Vec<Command<Data, Error>> {
-        let name = plugin.name().to_string();
-        let specs = plugin.commands();
-
-        let plugin = Arc::from(plugin);
-        let idx = {
-            let mut builtin = self.builtin_plugins.write().await;
-            let idx = builtin.len();
-            builtin.push(plugin);
-            idx
-        };
-
-        let mut cmds = Vec::new();
-        for spec in &specs {
-            let cmd_name = spec.name.clone();
-            self.command_map
-                .write()
-                .await
-                .insert(cmd_name.clone(), (true, idx));
-            cmds.push(build_plugin_command(spec));
-            info!("Registered builtin plugin command: /{cmd_name} (from {name})");
+            info!("Registered plugin command: /{cmd_name} (from {})", plugin.name);
         }
 
         cmds
     }
 
     /// Look up a plugin by command name.
-    ///
-    /// Returns `(is_builtin, index, Arc<...>)`.
-    pub async fn lookup(&self, command_name: &str) -> Option<(bool, usize, PluginRef)> {
-        let (is_builtin, idx) = self.command_map.read().await.get(command_name).copied()?;
-
-        if is_builtin {
-            let plugin = self.builtin_plugins.read().await[idx].clone();
-            Some((true, idx, PluginRef::Builtin(plugin)))
-        } else {
-            let plugin = self.ffi_plugins.read().await[idx].clone();
-            Some((false, idx, PluginRef::Ffi(plugin)))
-        }
+    pub async fn lookup(&self, command_name: &str) -> Option<(usize, Arc<LoadedPlugin>)> {
+        let idx = self.command_map.read().await.get(command_name).copied()?;
+        let plugin = self.plugins.read().await[idx].clone();
+        Some((idx, plugin))
     }
 
     // ---- Plugin discovery methods ----
@@ -119,14 +75,7 @@ impl PluginRegistry {
     /// Returns all loaded settings panels across all plugins.
     pub async fn all_settings_panels(&self) -> Vec<(String, String, SettingsPanelSpec)> {
         let mut panels = Vec::new();
-        for plugin in self.builtin_plugins.read().await.iter() {
-            let name = plugin.name().to_string();
-            for panel in plugin.settings_panels() {
-                panels.push((name.clone(), plugin.name().to_string(), panel));
-            }
-        }
-        // Also check FFI plugins (handled via LoadedPlugin.metadata)
-        for plugin in self.ffi_plugins.read().await.iter() {
+        for plugin in self.plugins.read().await.iter() {
             let name = plugin.name.clone();
             for panel in &plugin.metadata.settings_panels {
                 panels.push((name.clone(), name.clone(), panel.clone()));
@@ -138,11 +87,11 @@ impl PluginRegistry {
     /// Returns all registered event handlers across all plugins.
     pub async fn all_event_handlers(
         &self,
-    ) -> Vec<(Arc<dyn BotPlugin + 'static>, EventHandlerSpec)> {
+    ) -> Vec<(Arc<LoadedPlugin>, EventHandlerSpec)> {
         let mut handlers = Vec::new();
-        for plugin in self.builtin_plugins.read().await.iter() {
-            for spec in plugin.event_handlers() {
-                handlers.push((plugin.clone(), spec));
+        for plugin in self.plugins.read().await.iter() {
+            for spec in &plugin.metadata.event_handlers {
+                handlers.push((plugin.clone(), spec.clone()));
             }
         }
         handlers
@@ -151,13 +100,7 @@ impl PluginRegistry {
     /// Returns all declared test steps across all plugins.
     pub async fn all_test_steps(&self) -> Vec<(String, String, TestStepSpec)> {
         let mut steps = Vec::new();
-        for plugin in self.builtin_plugins.read().await.iter() {
-            let name = plugin.name().to_string();
-            for spec in plugin.test_steps() {
-                steps.push((name.clone(), spec.name.clone(), spec));
-            }
-        }
-        for plugin in self.ffi_plugins.read().await.iter() {
+        for plugin in self.plugins.read().await.iter() {
             for spec in &plugin.metadata.test_steps {
                 steps.push((plugin.name.clone(), spec.name.clone(), spec.clone()));
             }
@@ -168,13 +111,7 @@ impl PluginRegistry {
     /// Returns all declared tasks across all plugins.
     pub async fn all_tasks(&self) -> Vec<(String, TaskSpec)> {
         let mut tasks = Vec::new();
-        for plugin in self.builtin_plugins.read().await.iter() {
-            let name = plugin.name().to_string();
-            for spec in plugin.tasks() {
-                tasks.push((name.clone(), spec));
-            }
-        }
-        for plugin in self.ffi_plugins.read().await.iter() {
+        for plugin in self.plugins.read().await.iter() {
             for spec in &plugin.metadata.tasks {
                 tasks.push((plugin.name.clone(), spec.clone()));
             }
@@ -182,33 +119,25 @@ impl PluginRegistry {
         tasks
     }
 
-    /// Returns all builtin plugins.
-    pub fn builtin_plugins(&self) -> Vec<Arc<dyn BotPlugin + 'static>> {
-        let guard = self.builtin_plugins.blocking_read();
-        guard.clone()
-    }
-
-    /// Returns all FFI-loaded `.so` plugins.
+    /// Returns all loaded plugins.
     pub fn all_ffi_plugins(&self) -> Vec<Arc<LoadedPlugin>> {
-        self.ffi_plugins.blocking_read().clone()
+        self.plugins.blocking_read().clone()
     }
 
-    /// Returns Poise `Command`s for FFI plugins only.
+    /// Returns Poise `Command`s for all registered plugins.
     ///
-    /// Builtin plugin commands are excluded because core poise wrappers
-    /// (e.g. `voice::leaderboard`, `feed::list`) provide their own
-    /// `Command` instances through `Cogs.commands()`.  Including builtins
-    /// here would cause duplicate command registrations.
-    ///
-    /// FFI plugin commands use a single static handler function that
-    /// resolves the plugin from the registry at runtime.
+    /// Each command resolves its plugin at runtime via [`dispatch_plugin_command`],
+    /// so no core Poise wrappers are needed. Plugin authors add commands simply
+    /// by implementing [`BotPlugin::commands`] — no core changes required.
     pub fn all_commands(&self) -> Vec<Command<Data, Error>> {
         let mut cmds = Vec::new();
-        for plugin in self.ffi_plugins.blocking_read().iter() {
+
+        for plugin in self.plugins.blocking_read().iter() {
             for spec in &plugin.metadata.commands {
-                cmds.push(build_ffi_command(spec));
+                cmds.push(build_registry_command(spec));
             }
         }
+
         cmds
     }
 }
@@ -217,12 +146,6 @@ impl Default for PluginRegistry {
     fn default() -> Self {
         Self::new()
     }
-}
-
-/// Enum for a plugin reference (either FFI or builtin).
-pub enum PluginRef {
-    Builtin(Arc<dyn BotPlugin + 'static>),
-    Ffi(Arc<LoadedPlugin>),
 }
 
 /// Build a poise `Command` from a plugin `CommandSpec` (metadata-only, no handler).
@@ -234,13 +157,13 @@ fn build_plugin_command(spec: &CommandSpec) -> Command<Data, Error> {
     }
 }
 
-/// Static handler for all FFI plugin slash commands.
+/// Static handler for all registry-resolved plugin slash commands.
 ///
 /// Resolves the plugin from the command name at runtime via the registry
 /// stored in [`Data`], then dispatches through [`dispatch_plugin_command`].
 /// Errors are logged rather than propagated (Poise's `FrameworkError::Command`
 /// is `#[non_exhaustive]` and cannot be constructed externally).
-async fn ffi_command_handler<'a>(
+async fn registry_command_handler<'a>(
     ctx: poise::ApplicationContext<'a, Data, Error>,
 ) -> Result<(), poise::FrameworkError<'a, Data, Error>> {
     let poise_ctx: poise::Context<'a, Data, Error> = ctx.into();
@@ -251,20 +174,20 @@ async fn ffi_command_handler<'a>(
     if let Err(e) =
         dispatch_plugin_command(registry, &host_ctx, cmd_name, serde_json::Value::Null).await
     {
-        log::error!("FFI plugin command '{cmd_name}' failed: {e}");
+        log::error!("Plugin command '{cmd_name}' failed: {e}");
     }
     Ok(())
 }
 
-/// Build a poise `Command` for an FFI plugin from its `CommandSpec`.
+/// Build a poise `Command` from a plugin `CommandSpec` for registry-based dispatch.
 ///
-/// The command uses a static function pointer handler that resolves
-/// the plugin from the registry at dispatch time.
-fn build_ffi_command(spec: &CommandSpec) -> Command<Data, Error> {
+/// The command uses a static handler that resolves the plugin from the
+/// registry at dispatch time.
+fn build_registry_command(spec: &CommandSpec) -> Command<Data, Error> {
     Command::<Data, Error> {
         name: Cow::Owned(spec.name.clone()),
         description: Some(Cow::Owned(spec.description.clone())),
-        slash_action: Some(|ctx| Box::pin(ffi_command_handler(ctx))),
+        slash_action: Some(|ctx| Box::pin(registry_command_handler(ctx))),
         ..Default::default()
     }
 }

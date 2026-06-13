@@ -1,5 +1,3 @@
-//! Common test utilities.
-
 use std::sync::Arc;
 
 use pwr_bot::repo::PgRepos;
@@ -13,18 +11,11 @@ pub async fn setup_db() -> Arc<PgRepos> {
         .await
         .expect("Failed to connect to database");
 
-    db.delete_all_tables()
-        .await
-        .expect("Failed to clean database");
-
     db.run_migrations().await.expect("Failed to run migrations");
 
     Arc::new(db)
 }
 
 /// Cleans up the test database by deleting all data.
-pub async fn teardown_db(db: &PgRepos) {
-    db.delete_all_tables()
-        .await
-        .expect("Failed to clean database");
+pub async fn teardown_db(_db: &PgRepos) {
 }

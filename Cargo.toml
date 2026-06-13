@@ -53,13 +53,9 @@ diesel = { version = "2.3", features = ["chrono", "postgres", "serde_json", "uui
 diesel-async = { version = "0.8", features = ["deadpool", "postgres"] }
 diesel_migrations = { version = "2.3", features = ["postgres"] }
 byteorder = "1.5.0"
-bytes = "1"
 libloading = "0.8"
-postgres = { version = "0.19", features = ["with-serde_json-1", "with-chrono-0_4"] }
 pwr-bot-sdk = { path = "crates/pwr_bot_sdk" }
-pwr-bot-plugin-welcome = { path = "crates/pwr-bot-plugin-welcome" }
-pwr-bot-plugin-feed = { path = "crates/pwr-bot-plugin-feed" }
-pwr-bot-plugin-voice = { path = "crates/pwr-bot-plugin-voice" }
+
 
 [dev-dependencies]
 httpmock = "0.7.0"

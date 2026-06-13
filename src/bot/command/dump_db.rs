@@ -1,35 +1,15 @@
-//! Owner dump_db command.
+//! Owner-only database inspection command (stub).
+//! Plugin data is managed by each plugin independently.
 
 use crate::bot::command::prelude::*;
 
 #[poise::command(prefix_command, owners_only, hide_in_help)]
 pub async fn dump_db(ctx: Context<'_>) -> Result<(), Error> {
-    command(ctx).await
-}
-
-pub async fn command(ctx: Context<'_>) -> Result<(), Error> {
-    ctx.defer().await?;
-    let dump = ctx.data().service.internal.dump_database().await?;
-
-    let reply = CreateReply::default()
-        .content("Database dump:")
-        .attachment(CreateAttachment::bytes(
-            serde_json::to_string_pretty(&dump.feeds)?,
-            "feeds.json",
-        ))
-        .attachment(CreateAttachment::bytes(
-            serde_json::to_string_pretty(&dump.feed_items)?,
-            "feed_versions.json",
-        ))
-        .attachment(CreateAttachment::bytes(
-            serde_json::to_string_pretty(&dump.subscribers)?,
-            "subscribers.json",
-        ))
-        .attachment(CreateAttachment::bytes(
-            serde_json::to_string_pretty(&dump.subscriptions)?,
-            "subscriptions.json",
-        ));
-
-    ctx.send(reply).await?;
+    ctx.send(
+        CreateReply::default()
+            .content("Database inspection is handled by individual plugins. Use plugin-specific commands to inspect their data.")
+            .ephemeral(true),
+    )
+    .await?;
     Ok(())
 }

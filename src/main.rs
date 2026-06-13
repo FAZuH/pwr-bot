@@ -21,9 +21,6 @@ use pwr_bot::logging::setup_logging;
 use pwr_bot::repo::PgRepos;
 use pwr_bot::repo::traits::Repos;
 use pwr_bot::service::Services;
-use pwr_bot_plugin_feed::FeedPlugin;
-use pwr_bot_plugin_voice::VoicePlugin;
-use pwr_bot_plugin_welcome::WelcomePlugin;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -36,13 +33,8 @@ async fn main() -> Result<()> {
     let repos = setup_database(&config, init_start).await?;
     let services = setup_services(repos.clone()).await?;
 
-    // Create plugin registry and register all builtin plugins
+    // Create plugin registry and register all plugins
     let registry = Arc::new(PluginRegistry::new());
-    registry
-        .register_builtin(Box::new(VoicePlugin::new()))
-        .await;
-    registry.register_builtin(Box::new(FeedPlugin::new())).await;
-    registry.register_builtin(Box::new(WelcomePlugin)).await;
 
     // Load FFI (.so) plugins from plugin directory
     let ffi_plugins = loader::load_plugins(&config.plugin_dir);
@@ -62,33 +54,19 @@ async fn main() -> Result<()> {
     // Initialize system context for headless plugin operations (events, tasks)
     host_registry::set_system_ctx(PoiseHostCtx::new_system(bot.data.clone(), bot.http.clone()));
 
-    // Initialize all builtin plugins
-    let plugins = registry.builtin_plugins();
+    // Initialize all plugins
+    let plugins = registry.all_ffi_plugins();
     for plugin in &plugins {
-        invocation::dispatch_init(&**plugin)
-            .await
-            .map_err(|e| anyhow::anyhow!("{} plugin init failed: {e}", plugin.name()))?;
-    }
-
-    // Initialize all FFI plugins
-    let ffi = registry.all_ffi_plugins();
-    for plugin in &ffi {
         invocation::dispatch_init_ffi(plugin)
             .await
             .map_err(|e| anyhow::anyhow!("{} plugin init failed: {e}", plugin.name))?;
     }
 
-    // Register builtin plugin event handlers on the event bus
-    invocation::register_plugin_event_handlers(&event_bus, &plugins);
+    // Register plugin event handlers on the event bus
+    invocation::register_ffi_event_handlers(&event_bus, &plugins);
 
-    // Register FFI plugin event handlers
-    invocation::register_ffi_event_handlers(&event_bus, &ffi);
-
-    // Spawn background tasks declared by builtin plugins
-    invocation::dispatch_tasks(&plugins).await;
-
-    // Spawn background tasks declared by FFI plugins
-    invocation::dispatch_tasks_ffi(&ffi).await;
+    // Spawn background tasks declared by plugins
+    invocation::dispatch_tasks_ffi(&plugins).await;
 
     info!(
         "pwr-bot is up in {:.2}s. Press Ctrl+C to stop.",

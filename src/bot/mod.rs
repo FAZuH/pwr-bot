@@ -288,7 +288,7 @@ impl BotEventHandler {
 
     /// Registers commands globally if the bot version has changed.
     async fn register_commands_if_needed(&self) {
-        if !self.data.config.features.autoregister_cmds {
+        if !self.data.config.features.is_enabled("autoregister_cmds") {
             info!(
                 "Autoregister command feature is disabled. Commands will not be registered globally."
             );

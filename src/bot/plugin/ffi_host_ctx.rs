@@ -9,34 +9,7 @@ use std::ffi::CString;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use bytes::BytesMut;
 use poise::serenity_prelude::*;
-use postgres::types::IsNull;
-use postgres::types::ToSql;
-use postgres::types::Type;
-
-/// A sentinel type representing a NULL database parameter.
-#[derive(Debug)]
-struct PgNull;
-impl ToSql for PgNull {
-    fn to_sql(
-        &self,
-        _ty: &Type,
-        _out: &mut BytesMut,
-    ) -> Result<IsNull, Box<dyn std::error::Error + Sync + Send>> {
-        Ok(IsNull::Yes)
-    }
-    fn accepts(_ty: &Type) -> bool {
-        true
-    }
-    fn to_sql_checked(
-        &self,
-        ty: &Type,
-        out: &mut BytesMut,
-    ) -> Result<IsNull, Box<dyn std::error::Error + Sync + Send>> {
-        self.to_sql(ty, out)
-    }
-}
 
 use crate::bot::Data;
 use crate::bot::command::Error;
@@ -58,8 +31,6 @@ pub fn host_callbacks() -> &'static pwr_bot_sdk::HostCallbacks {
         get_author_id: cb_author_id,
         get_channel_id: cb_channel_id,
         free_string: cb_free_string,
-        query_db: cb_query_db,
-        execute_db: cb_execute_db,
         send_channel_message: cb_send_channel_message,
         send_dm: cb_send_dm,
         publish_event: cb_publish_event,
@@ -225,124 +196,6 @@ unsafe extern "C" fn cb_free_string(s: *mut std::ffi::c_char) {
     if !s.is_null() {
         unsafe {
             let _ = CString::from_raw(s);
-        }
-    }
-}
-
-// ---- Database callbacks ----
-
-fn deserialize_db_params(params_json: *const std::ffi::c_char) -> Vec<pwr_bot_sdk::DbValue> {
-    if params_json.is_null() {
-        return vec![];
-    }
-    match unsafe { CStr::from_ptr(params_json) }.to_str() {
-        Ok(s) => serde_json::from_str(s).unwrap_or_default(),
-        Err(_) => vec![],
-    }
-}
-
-fn postgres_params_from_dbvalue(
-    values: &[pwr_bot_sdk::DbValue],
-) -> Vec<Box<dyn postgres::types::ToSql + Sync + '_>> {
-    use postgres::types::ToSql;
-    values
-        .iter()
-        .map(|v| -> Box<dyn ToSql + Sync + '_> {
-            match v {
-                pwr_bot_sdk::DbValue::Null => Box::new(PgNull),
-                pwr_bot_sdk::DbValue::Bool(b) => Box::new(*b),
-                pwr_bot_sdk::DbValue::I32(n) => Box::new(*n),
-                pwr_bot_sdk::DbValue::I64(n) => Box::new(*n),
-                pwr_bot_sdk::DbValue::F64(n) => Box::new(*n),
-                pwr_bot_sdk::DbValue::Text(s) => Box::new(s.as_str()),
-            }
-        })
-        .collect()
-}
-
-fn with_db<F, T>(ctx_handle: u64, f: F) -> Result<T, (String, bool)>
-where
-    F: FnOnce(&mut postgres::Client) -> Result<T, postgres::Error>,
-{
-    let data = ctx_data(ctx_handle).ok_or(("no context".to_string(), false))?;
-    let db_url = &data.config.db_url;
-    let mut client =
-        postgres::Client::connect(db_url, postgres::NoTls).map_err(|e| (e.to_string(), true))?;
-    f(&mut client).map_err(|e| (e.to_string(), false))
-}
-
-unsafe extern "C" fn cb_query_db(
-    ctx_handle: u64,
-    sql: *const std::ffi::c_char,
-    params_json: *const std::ffi::c_char,
-    out_json: *mut *mut std::ffi::c_char,
-    out_err: *mut *mut std::ffi::c_char,
-) -> bool {
-    let sql_str = match unsafe { CStr::from_ptr(sql) }.to_str() {
-        Ok(s) => s,
-        Err(_) => return false,
-    };
-
-    let params = deserialize_db_params(params_json);
-    let pg_params = postgres_params_from_dbvalue(&params);
-    let param_refs: Vec<&(dyn postgres::types::ToSql + Sync)> =
-        pg_params.iter().map(|p| p.as_ref()).collect();
-
-    match with_db(ctx_handle, |client| client.query(sql_str, &param_refs)) {
-        Ok(rows) => {
-            let json_rows: Vec<serde_json::Value> = rows
-                .iter()
-                .map(|row| {
-                    let mut map = serde_json::Map::new();
-                    for (i, col) in row.columns().iter().enumerate() {
-                        let name = col.name();
-                        let value: serde_json::Value = row
-                            .try_get::<_, serde_json::Value>(i)
-                            .unwrap_or(serde_json::Value::Null);
-                        map.insert(name.to_string(), value);
-                    }
-                    serde_json::Value::Object(map)
-                })
-                .collect();
-
-            let json = serde_json::to_string(&json_rows).unwrap_or_else(|_| "[]".to_string());
-            unsafe { *out_json = CString::new(json).unwrap().into_raw() }
-            true
-        }
-        Err((e, _)) => {
-            let err = CString::new(e).unwrap();
-            unsafe { *out_err = err.into_raw() }
-            false
-        }
-    }
-}
-
-unsafe extern "C" fn cb_execute_db(
-    ctx_handle: u64,
-    sql: *const std::ffi::c_char,
-    params_json: *const std::ffi::c_char,
-    out_rows: *mut u64,
-    out_err: *mut *mut std::ffi::c_char,
-) -> bool {
-    let sql_str = match unsafe { CStr::from_ptr(sql) }.to_str() {
-        Ok(s) => s,
-        Err(_) => return false,
-    };
-
-    let params = deserialize_db_params(params_json);
-    let pg_params = postgres_params_from_dbvalue(&params);
-    let param_refs: Vec<&(dyn postgres::types::ToSql + Sync)> =
-        pg_params.iter().map(|p| p.as_ref()).collect();
-
-    match with_db(ctx_handle, |client| client.execute(sql_str, &param_refs)) {
-        Ok(rows) => {
-            unsafe { *out_rows = rows };
-            true
-        }
-        Err((e, _)) => {
-            let err = CString::new(e).unwrap();
-            unsafe { *out_err = err.into_raw() }
-            false
         }
     }
 }
@@ -540,12 +393,7 @@ unsafe extern "C" fn cb_is_feature_enabled(
         None => return false,
     };
 
-    match feature_name {
-        "voice_tracking" => data.config.features.voice_tracking,
-        "feed_publisher" => data.config.features.feed_publisher,
-        "autoregister_cmds" => data.config.features.autoregister_cmds,
-        _ => false,
-    }
+    data.config.features.is_enabled(feature_name)
 }
 
 // ---------------------------------------------------------------------------
