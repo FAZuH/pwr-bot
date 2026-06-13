@@ -1,21 +1,8 @@
+pub mod update;
+
 use pwr_bot_sdk::*;
-use serde::Deserialize;
 
 pub struct WelcomePlugin;
-
-#[derive(Default, Deserialize)]
-struct PluginWelcomeSettings {
-    #[serde(default)]
-    pub enabled: Option<bool>,
-    #[serde(default)]
-    pub channel_id: Option<String>,
-    #[serde(default)]
-    pub primary_color: Option<String>,
-    #[serde(default)]
-    pub template_id: Option<String>,
-    #[serde(default)]
-    pub messages: Option<Vec<String>>,
-}
 
 #[async_trait::async_trait]
 impl BotPlugin for WelcomePlugin {
@@ -74,30 +61,32 @@ impl WelcomePlugin {
             .map_err(|e| e.to_string())?
         };
 
-        let rows: Vec<serde_json::Value> = match result {
-            serde_json::Value::Array(arr) => arr,
-            _ => vec![],
-        };
-
-        let welcome_settings = rows
-            .first()
+        let welcome = result
+            .as_array()
+            .and_then(|arr| arr.first())
             .and_then(|r| r.get("settings"))
-            .and_then(|s| s.get("welcome"))
-            .and_then(|w| serde_json::from_value::<PluginWelcomeSettings>(w.clone()).ok())
-            .unwrap_or_default();
+            .and_then(|s| s.get("welcome"));
 
-        let enabled = welcome_settings.enabled.unwrap_or(false);
-        let channel = welcome_settings
-            .channel_id
-            .unwrap_or_else(|| "Not set".into());
-        let template = welcome_settings.template_id.unwrap_or_else(|| "1".into());
-        let color = welcome_settings
-            .primary_color
-            .unwrap_or_else(|| "#5865F2".into());
-        let msg_count = welcome_settings
-            .messages
-            .as_ref()
-            .map(|m| m.len())
+        let enabled = welcome
+            .and_then(|w| w.get("enabled"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let channel = welcome
+            .and_then(|w| w.get("channel_id"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("Not set");
+        let template = welcome
+            .and_then(|w| w.get("template_id"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("1");
+        let color = welcome
+            .and_then(|w| w.get("primary_color"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("#5865F2");
+        let msg_count = welcome
+            .and_then(|w| w.get("messages"))
+            .and_then(|v| v.as_array())
+            .map(|a| a.len())
             .unwrap_or(0);
 
         let content = format!(

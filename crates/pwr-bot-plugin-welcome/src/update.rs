@@ -1,11 +1,14 @@
-//! Pure update logic for welcome settings.
-//!
-//! Manages welcome-card configuration state and message-removal bookkeeping.
-
 use std::collections::HashSet;
 
-use crate::entity::WelcomeSettings;
-use crate::update::Update;
+/// Settings for the welcome feature (local domain type, matches DB schema).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WelcomeSettings {
+    pub enabled: Option<bool>,
+    pub channel_id: Option<String>,
+    pub primary_color: Option<String>,
+    pub template_id: Option<String>,
+    pub messages: Option<Vec<String>>,
+}
 
 /// Messages that can mutate the welcome-settings model.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -63,14 +66,8 @@ impl WelcomeSettingsUpdate {
     pub fn new() -> Self {
         Self
     }
-}
 
-impl Update for WelcomeSettingsUpdate {
-    type Model = WelcomeSettingsModel;
-    type Msg = WelcomeSettingsMsg;
-    type Cmd = WelcomeSettingsCmd;
-
-    fn update(msg: Self::Msg, model: &mut Self::Model) -> Self::Cmd {
+    pub fn update(msg: WelcomeSettingsMsg, model: &mut WelcomeSettingsModel) -> WelcomeSettingsCmd {
         use WelcomeSettingsCmd::*;
         use WelcomeSettingsMsg::*;
 
@@ -137,8 +134,6 @@ mod tests {
         WelcomeSettingsModel::new(WelcomeSettings::default())
     }
 
-    // ── ToggleEnabled ───────────────────────────────────────────────────────
-
     #[test]
     fn toggle_enabled_from_false() {
         let mut model = empty_model();
@@ -161,8 +156,6 @@ mod tests {
         assert!(!model.is_enabled());
     }
 
-    // ── SetChannel ──────────────────────────────────────────────────────────
-
     #[test]
     fn set_channel() {
         let mut model = empty_model();
@@ -181,13 +174,12 @@ mod tests {
         let mut model = empty_model();
         model.settings.channel_id = Some("123".to_string());
 
-        let cmd = WelcomeSettingsUpdate::update(WelcomeSettingsMsg::SetChannel(None), &mut model);
+        let cmd =
+            WelcomeSettingsUpdate::update(WelcomeSettingsMsg::SetChannel(None), &mut model);
 
         assert_eq!(cmd, WelcomeSettingsCmd::PersistSettings);
         assert_eq!(model.settings.channel_id, None);
     }
-
-    // ── SetTemplate ─────────────────────────────────────────────────────────
 
     #[test]
     fn set_template() {
@@ -201,8 +193,6 @@ mod tests {
         assert_eq!(cmd, WelcomeSettingsCmd::PersistSettings);
         assert_eq!(model.settings.template_id, Some("5".to_string()));
     }
-
-    // ── MarkRemoval ─────────────────────────────────────────────────────────
 
     #[test]
     fn mark_removal() {
@@ -219,8 +209,6 @@ mod tests {
         assert_eq!(cmd, WelcomeSettingsCmd::None);
         assert_eq!(model.marked_removal, indices);
     }
-
-    // ── AddMessage ──────────────────────────────────────────────────────────
 
     #[test]
     fn add_message() {
@@ -263,8 +251,6 @@ mod tests {
         assert_eq!(model.message_count(), 25);
     }
 
-    // ── SetColor ────────────────────────────────────────────────────────────
-
     #[test]
     fn set_color_valid() {
         let mut model = empty_model();
@@ -290,8 +276,6 @@ mod tests {
         assert_eq!(cmd, WelcomeSettingsCmd::PersistSettings);
         assert_eq!(model.settings.primary_color, None);
     }
-
-    // ── SaveRemoval ─────────────────────────────────────────────────────────
 
     #[test]
     fn save_removal() {
@@ -327,8 +311,6 @@ mod tests {
         assert_eq!(model.settings.messages, Some(vec![]));
     }
 
-    // ── CancelRemoval ───────────────────────────────────────────────────────
-
     #[test]
     fn cancel_removal() {
         let mut model = empty_model();
@@ -340,8 +322,6 @@ mod tests {
         assert_eq!(cmd, WelcomeSettingsCmd::None);
         assert!(model.marked_removal.is_empty());
     }
-
-    // ── Model helpers ───────────────────────────────────────────────────────
 
     #[test]
     fn message_count() {

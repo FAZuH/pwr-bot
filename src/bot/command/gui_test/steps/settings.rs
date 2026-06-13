@@ -12,11 +12,11 @@ use crate::bot::test_framework::assert::assert_navigated_to;
 use crate::bot::test_framework::helpers::extract_actions;
 use crate::bot::test_framework::helpers::simulate_click;
 use crate::bot::test_framework::helpers::simulate_select;
+use crate::bot::command::feed::settings::FeedSettingsModel;
 use crate::bot::view::SelectValues;
 use crate::bot::view::ViewCmd;
 use crate::entity::Json;
 use crate::entity::ServerSettingsEntity;
-use crate::update::feed_settings::FeedSettingsModel;
 use crate::update::settings_main::SettingsMainModel;
 
 pub async fn settings_main(ctx: Context<'_>) -> Result<(), GuiTestError> {

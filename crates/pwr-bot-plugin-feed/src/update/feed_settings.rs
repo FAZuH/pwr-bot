@@ -1,9 +1,3 @@
-//! Pure update logic for feed settings.
-//!
-//! Manages notification channel and role-permission toggles.
-
-use crate::update::Update;
-
 /// Messages that can mutate the feed-settings model.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FeedSettingsMsg {
@@ -34,55 +28,41 @@ impl FeedSettingsModel {
     }
 }
 
-/// The update implementation for feed settings.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct FeedSettingsUpdate;
+/// Pure update function for feed settings.
+pub fn feed_settings_update(
+    msg: FeedSettingsMsg,
+    model: &mut FeedSettingsModel,
+) -> FeedSettingsCmd {
+    use FeedSettingsMsg::*;
 
-impl FeedSettingsUpdate {
-    pub fn new() -> Self {
-        Self
-    }
-}
-
-impl Update for FeedSettingsUpdate {
-    type Model = FeedSettingsModel;
-    type Msg = FeedSettingsMsg;
-    type Cmd = FeedSettingsCmd;
-
-    fn update(msg: Self::Msg, model: &mut Self::Model) -> Self::Cmd {
-        use FeedSettingsMsg::*;
-
-        match msg {
-            ToggleEnabled => {
-                let current = model.enabled.unwrap_or(true);
-                model.enabled = Some(!current);
-            }
-            SetChannel(id) => {
-                model.channel_id = id;
-            }
-            SetSubRole(id) => {
-                model.subscribe_role_id = id;
-            }
-            SetUnsubRole(id) => {
-                model.unsubscribe_role_id = id;
-            }
+    match msg {
+        ToggleEnabled => {
+            let current = model.enabled.unwrap_or(true);
+            model.enabled = Some(!current);
         }
-        FeedSettingsCmd::None
+        SetChannel(id) => {
+            model.channel_id = id;
+        }
+        SetSubRole(id) => {
+            model.subscribe_role_id = id;
+        }
+        SetUnsubRole(id) => {
+            model.unsubscribe_role_id = id;
+        }
     }
+    FeedSettingsCmd::None
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    // ── ToggleEnabled ───────────────────────────────────────────────────────
-
     #[test]
     fn toggle_enabled_from_true() {
         let mut model = FeedSettingsModel::default();
         assert!(model.is_enabled());
 
-        let cmd = FeedSettingsUpdate::update(FeedSettingsMsg::ToggleEnabled, &mut model);
+        let cmd = feed_settings_update(FeedSettingsMsg::ToggleEnabled, &mut model);
 
         assert_eq!(cmd, FeedSettingsCmd::None);
         assert!(!model.is_enabled());
@@ -95,19 +75,17 @@ mod tests {
             ..Default::default()
         };
 
-        let cmd = FeedSettingsUpdate::update(FeedSettingsMsg::ToggleEnabled, &mut model);
+        let cmd = feed_settings_update(FeedSettingsMsg::ToggleEnabled, &mut model);
 
         assert_eq!(cmd, FeedSettingsCmd::None);
         assert!(model.is_enabled());
     }
 
-    // ── SetChannel ──────────────────────────────────────────────────────────
-
     #[test]
     fn set_channel() {
         let mut model = FeedSettingsModel::default();
 
-        let cmd = FeedSettingsUpdate::update(
+        let cmd = feed_settings_update(
             FeedSettingsMsg::SetChannel(Some("123".to_string())),
             &mut model,
         );
@@ -123,19 +101,17 @@ mod tests {
             ..Default::default()
         };
 
-        let cmd = FeedSettingsUpdate::update(FeedSettingsMsg::SetChannel(None), &mut model);
+        let cmd = feed_settings_update(FeedSettingsMsg::SetChannel(None), &mut model);
 
         assert_eq!(cmd, FeedSettingsCmd::None);
         assert_eq!(model.channel_id, None);
     }
 
-    // ── SetSubRole ──────────────────────────────────────────────────────────
-
     #[test]
     fn set_sub_role() {
         let mut model = FeedSettingsModel::default();
 
-        let cmd = FeedSettingsUpdate::update(
+        let cmd = feed_settings_update(
             FeedSettingsMsg::SetSubRole(Some("role1".to_string())),
             &mut model,
         );
@@ -144,13 +120,11 @@ mod tests {
         assert_eq!(model.subscribe_role_id, Some("role1".to_string()));
     }
 
-    // ── SetUnsubRole ────────────────────────────────────────────────────────
-
     #[test]
     fn set_unsub_role() {
         let mut model = FeedSettingsModel::default();
 
-        let cmd = FeedSettingsUpdate::update(
+        let cmd = feed_settings_update(
             FeedSettingsMsg::SetUnsubRole(Some("role2".to_string())),
             &mut model,
         );
@@ -158,8 +132,6 @@ mod tests {
         assert_eq!(cmd, FeedSettingsCmd::None);
         assert_eq!(model.unsubscribe_role_id, Some("role2".to_string()));
     }
-
-    // ── Model helpers ───────────────────────────────────────────────────────
 
     #[test]
     fn is_enabled_defaults_to_true() {

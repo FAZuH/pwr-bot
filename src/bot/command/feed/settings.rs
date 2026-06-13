@@ -5,10 +5,43 @@ use std::time::Duration;
 
 use crate::bot::command::prelude::*;
 use crate::entity::ServerSettings;
-use crate::update::Update;
-use crate::update::feed_settings::FeedSettingsModel;
-use crate::update::feed_settings::FeedSettingsMsg;
-use crate::update::feed_settings::FeedSettingsUpdate;
+
+/// The feed-settings model (inlined, was in crate::update::feed_settings).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct FeedSettingsModel {
+    pub enabled: Option<bool>,
+    pub channel_id: Option<String>,
+    pub subscribe_role_id: Option<String>,
+    pub unsubscribe_role_id: Option<String>,
+}
+
+impl FeedSettingsModel {
+    pub fn is_enabled(&self) -> bool {
+        self.enabled.unwrap_or(true)
+    }
+}
+
+/// Messages for the feed-settings model.
+#[allow(dead_code)]
+enum FeedSettingsMsg {
+    ToggleEnabled,
+    SetChannel(Option<String>),
+    SetSubRole(Option<String>),
+    SetUnsubRole(Option<String>),
+}
+
+/// Pure update function for feed settings.
+fn feed_settings_update(msg: FeedSettingsMsg, model: &mut FeedSettingsModel) {
+    match msg {
+        FeedSettingsMsg::ToggleEnabled => {
+            let current = model.enabled.unwrap_or(true);
+            model.enabled = Some(!current);
+        }
+        FeedSettingsMsg::SetChannel(id) => model.channel_id = id,
+        FeedSettingsMsg::SetSubRole(id) => model.subscribe_role_id = id,
+        FeedSettingsMsg::SetUnsubRole(id) => model.unsubscribe_role_id = id,
+    }
+}
 
 /// Configure feed settings for this server
 ///
@@ -83,7 +116,7 @@ impl<'a> ViewHandler for SettingsFeedHandler<'a> {
     async fn handle(&mut self, ctx: ViewContext<'_, SettingsFeedAction>) -> Result<ViewCmd, Error> {
         match ctx.action() {
             SettingsFeedAction::Enabled => {
-                FeedSettingsUpdate::update(FeedSettingsMsg::ToggleEnabled, &mut self.model);
+                feed_settings_update(FeedSettingsMsg::ToggleEnabled, &mut self.model);
                 self.settings.feeds.enabled = self.model.enabled;
                 Ok(ViewCmd::Render)
             }
@@ -91,10 +124,7 @@ impl<'a> ViewHandler for SettingsFeedHandler<'a> {
                 let channel_id = ctx
                     .channel_select_values()
                     .and_then(|v| v.first().map(|id| id.to_string()));
-                FeedSettingsUpdate::update(
-                    FeedSettingsMsg::SetChannel(channel_id),
-                    &mut self.model,
-                );
+                feed_settings_update(FeedSettingsMsg::SetChannel(channel_id), &mut self.model);
                 self.settings.feeds.channel_id = self.model.channel_id.clone();
                 Ok(ViewCmd::Render)
             }
@@ -102,7 +132,7 @@ impl<'a> ViewHandler for SettingsFeedHandler<'a> {
                 let role_id = ctx
                     .role_select_values()
                     .and_then(|v| v.first().map(|id| id.to_string()));
-                FeedSettingsUpdate::update(FeedSettingsMsg::SetSubRole(role_id), &mut self.model);
+                feed_settings_update(FeedSettingsMsg::SetSubRole(role_id), &mut self.model);
                 self.settings.feeds.subscribe_role_id = self.model.subscribe_role_id.clone();
                 Ok(ViewCmd::Render)
             }
@@ -110,7 +140,7 @@ impl<'a> ViewHandler for SettingsFeedHandler<'a> {
                 let role_id = ctx
                     .role_select_values()
                     .and_then(|v| v.first().map(|id| id.to_string()));
-                FeedSettingsUpdate::update(FeedSettingsMsg::SetUnsubRole(role_id), &mut self.model);
+                feed_settings_update(FeedSettingsMsg::SetUnsubRole(role_id), &mut self.model);
                 self.settings.feeds.unsubscribe_role_id = self.model.unsubscribe_role_id.clone();
                 Ok(ViewCmd::Render)
             }

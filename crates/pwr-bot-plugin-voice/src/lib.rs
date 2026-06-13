@@ -1,3 +1,5 @@
+pub mod update;
+
 use pwr_bot_sdk::*;
 
 pub struct VoicePlugin;
