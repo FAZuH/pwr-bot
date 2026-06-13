@@ -37,6 +37,7 @@ type Error = Box<dyn std::error::Error + Send + Sync>;
 use crate::bot::command::Cog;
 use crate::bot::command::Cogs;
 use crate::bot::error_handler::ErrorHandler;
+use crate::bot::plugin::registry::PluginRegistry;
 use crate::config::Config;
 use crate::entity::BotMetaKey;
 use crate::event::VoiceStateEvent;
@@ -48,6 +49,7 @@ pub struct Data {
     pub config: Arc<Config>,
     pub service: Arc<Services>,
     pub event_bus: Arc<EventBus>,
+    pub plugin_registry: Arc<PluginRegistry>,
     pub start_time: Instant,
 }
 
@@ -66,11 +68,12 @@ impl Bot {
         config: Arc<Config>,
         event_bus: Arc<EventBus>,
         service: Arc<Services>,
+        plugin_registry: Arc<PluginRegistry>,
     ) -> Result<Self> {
         info!("Initializing bot...");
 
         let (token, intents) = Self::create_client_config(&config)?;
-        let framework = Self::create_framework(&config)?;
+        let framework = Self::create_framework(&config, &plugin_registry)?;
         let http = Http::new(token.clone());
         if let Some(application_id) = config.discord_application_id {
             http.set_application_id(ApplicationId::new(application_id));
@@ -80,14 +83,11 @@ impl Bot {
             config: config.clone(),
             service,
             event_bus: event_bus.clone(),
+            plugin_registry,
             start_time: Instant::now(),
         });
 
-        let event_handler = Arc::new(BotEventHandler::new(
-            event_bus,
-            data.clone(),
-            http.clone(),
-        ));
+        let event_handler = Arc::new(BotEventHandler::new(event_bus, data.clone(), http.clone()));
 
         let client_builder = ClientBuilder::new(token.clone(), intents)
             .event_handler(event_handler)
@@ -137,9 +137,14 @@ impl Bot {
     }
 
     /// Creates the Poise framework with commands and configuration.
-    fn create_framework(config: &Config) -> Result<Box<Framework<Data, Error>>> {
+    fn create_framework(
+        config: &Config,
+        registry: &PluginRegistry,
+    ) -> Result<Box<Framework<Data, Error>>> {
+        let mut core_commands = Cogs.commands();
+        core_commands.extend(registry.all_commands());
         let options = FrameworkOptions::<Data, Error> {
-            commands: Cogs.commands(),
+            commands: core_commands,
             on_error: |error| Box::pin(Self::on_error(error)),
             prefix_options: poise::PrefixFrameworkOptions {
                 prefix: Some("!".into()),
@@ -212,10 +217,7 @@ impl BotEventHandler {
                     Some(*channel_id),
                     session_id.as_str(),
                 );
-                let event = VoiceStateEvent {
-                    old: None,
-                    new: vs,
-                };
+                let event = VoiceStateEvent { old: None, new: vs };
                 if let Ok(json) = serde_json::to_value(&event) {
                     let _ = self.event_bus.publish_named("voice_state", json);
                 }
@@ -311,7 +313,8 @@ impl BotEventHandler {
                     stored_version.ok().flatten()
                 );
 
-                let commands = Cogs.commands();
+                let mut commands = Cogs.commands();
+                commands.extend(self.data.plugin_registry.all_commands());
                 match poise::builtins::register_globally(&self.http, &commands).await {
                     Ok(_) => {
                         info!("Commands registered globally successfully");
@@ -355,10 +358,7 @@ impl poise::serenity_prelude::EventHandler for BotEventHandler {
                         Some(*channel_id),
                         session_id.as_str(),
                     );
-                    let event = VoiceStateEvent {
-                        old: None,
-                        new: vs,
-                    };
+                    let event = VoiceStateEvent { old: None, new: vs };
                     if let Ok(json) = serde_json::to_value(&event) {
                         let _ = self.event_bus.publish_named("voice_state", json);
                     }

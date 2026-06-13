@@ -47,16 +47,16 @@ impl BotPlugin for VoicePlugin {
         }]
     }
 
+    fn settings_panels(&self) -> Vec<SettingsPanelSpec> {
+        vec![SettingsPanelSpec::new("voice", "Voice")]
+    }
+
     fn event_handlers(&self) -> Vec<EventHandlerSpec> {
         vec![EventHandlerSpec::new("voice_state".to_string())]
     }
 
     fn tasks(&self) -> Vec<TaskSpec> {
-        vec![TaskSpec::new(
-            "voice-heartbeat",
-            10,
-            "__heartbeat",
-        )]
+        vec![TaskSpec::new("voice-heartbeat", 10, "__heartbeat")]
     }
 
     async fn init(&self, host: &PluginHost) -> Result<(), String> {
@@ -70,7 +70,9 @@ impl BotPlugin for VoicePlugin {
         host: &PluginHost,
     ) -> Result<(), String> {
         match event_name {
-            "voice_state" => subscriber::handle_voice_state_event(&self.active_sessions, host, payload).await,
+            "voice_state" => {
+                subscriber::handle_voice_state_event(&self.active_sessions, host, payload).await
+            }
             _ => Ok(()),
         }
     }
@@ -174,10 +176,7 @@ impl VoicePlugin {
             host.execute_db(
                 "INSERT INTO bot_meta (key, value) VALUES ($1, $2) \
                  ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
-                &[
-                    DbValue::Text(HEARTBEAT_KEY.into()),
-                    DbValue::Text(now),
-                ],
+                &[DbValue::Text(HEARTBEAT_KEY.into()), DbValue::Text(now)],
             )
             .map_err(|e| format!("Heartbeat write failed: {e}"))?;
         }

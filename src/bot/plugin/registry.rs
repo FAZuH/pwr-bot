@@ -19,6 +19,8 @@ use tokio::sync::RwLock;
 
 use crate::bot::Data;
 use crate::bot::command::Error;
+use crate::bot::host_ctx::PoiseHostCtx;
+use crate::bot::plugin::invocation::dispatch_plugin_command;
 use crate::bot::plugin::loader::LoadedPlugin;
 
 /// Thread-safe registry of loaded plugins.
@@ -134,7 +136,9 @@ impl PluginRegistry {
     }
 
     /// Returns all registered event handlers across all plugins.
-    pub async fn all_event_handlers(&self) -> Vec<(Arc<dyn BotPlugin + 'static>, EventHandlerSpec)> {
+    pub async fn all_event_handlers(
+        &self,
+    ) -> Vec<(Arc<dyn BotPlugin + 'static>, EventHandlerSpec)> {
         let mut handlers = Vec::new();
         for plugin in self.builtin_plugins.read().await.iter() {
             for spec in plugin.event_handlers() {
@@ -183,6 +187,30 @@ impl PluginRegistry {
         let guard = self.builtin_plugins.blocking_read();
         guard.clone()
     }
+
+    /// Returns all FFI-loaded `.so` plugins.
+    pub fn all_ffi_plugins(&self) -> Vec<Arc<LoadedPlugin>> {
+        self.ffi_plugins.blocking_read().clone()
+    }
+
+    /// Returns Poise `Command`s for FFI plugins only.
+    ///
+    /// Builtin plugin commands are excluded because core poise wrappers
+    /// (e.g. `voice::leaderboard`, `feed::list`) provide their own
+    /// `Command` instances through `Cogs.commands()`.  Including builtins
+    /// here would cause duplicate command registrations.
+    ///
+    /// FFI plugin commands use a single static handler function that
+    /// resolves the plugin from the registry at runtime.
+    pub fn all_commands(&self) -> Vec<Command<Data, Error>> {
+        let mut cmds = Vec::new();
+        for plugin in self.ffi_plugins.blocking_read().iter() {
+            for spec in &plugin.metadata.commands {
+                cmds.push(build_ffi_command(spec));
+            }
+        }
+        cmds
+    }
 }
 
 impl Default for PluginRegistry {
@@ -197,11 +225,46 @@ pub enum PluginRef {
     Ffi(Arc<LoadedPlugin>),
 }
 
-/// Build a poise `Command` from a plugin `CommandSpec`.
+/// Build a poise `Command` from a plugin `CommandSpec` (metadata-only, no handler).
 fn build_plugin_command(spec: &CommandSpec) -> Command<Data, Error> {
     Command::<Data, Error> {
         name: Cow::Owned(spec.name.clone()),
         description: Some(Cow::Owned(spec.description.clone())),
+        ..Default::default()
+    }
+}
+
+/// Static handler for all FFI plugin slash commands.
+///
+/// Resolves the plugin from the command name at runtime via the registry
+/// stored in [`Data`], then dispatches through [`dispatch_plugin_command`].
+/// Errors are logged rather than propagated (Poise's `FrameworkError::Command`
+/// is `#[non_exhaustive]` and cannot be constructed externally).
+async fn ffi_command_handler<'a>(
+    ctx: poise::ApplicationContext<'a, Data, Error>,
+) -> Result<(), poise::FrameworkError<'a, Data, Error>> {
+    let poise_ctx: poise::Context<'a, Data, Error> = ctx.into();
+    let cmd_name = poise_ctx.invoked_command_name();
+    let registry = &poise_ctx.data().plugin_registry;
+    let host_ctx = Arc::new(PoiseHostCtx::new(poise_ctx));
+
+    if let Err(e) =
+        dispatch_plugin_command(registry, &host_ctx, cmd_name, serde_json::Value::Null).await
+    {
+        log::error!("FFI plugin command '{cmd_name}' failed: {e}");
+    }
+    Ok(())
+}
+
+/// Build a poise `Command` for an FFI plugin from its `CommandSpec`.
+///
+/// The command uses a static function pointer handler that resolves
+/// the plugin from the registry at dispatch time.
+fn build_ffi_command(spec: &CommandSpec) -> Command<Data, Error> {
+    Command::<Data, Error> {
+        name: Cow::Owned(spec.name.clone()),
+        description: Some(Cow::Owned(spec.description.clone())),
+        slash_action: Some(|ctx| Box::pin(ffi_command_handler(ctx))),
         ..Default::default()
     }
 }

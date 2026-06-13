@@ -10,18 +10,21 @@ use dotenv::dotenv;
 use log::debug;
 use log::info;
 use pwr_bot::bot::Bot;
-use pwr_bot::config::Config;
-use pwr_bot::bot::plugin::host_registry;
 use pwr_bot::bot::host_ctx::PoiseHostCtx;
+use pwr_bot::bot::plugin::host_registry;
+use pwr_bot::bot::plugin::invocation;
+use pwr_bot::bot::plugin::loader;
+use pwr_bot::bot::plugin::registry::PluginRegistry;
+use pwr_bot::config::Config;
 use pwr_bot::event::FeedUpdateEvent;
 use pwr_bot::event::event_bus::EventBus;
 use pwr_bot::logging::setup_logging;
 use pwr_bot::repo::PgRepos;
 use pwr_bot::repo::traits::Repos;
 use pwr_bot::service::Services;
-use pwr_bot::bot::plugin::invocation;
 use pwr_bot_plugin_feed::FeedPlugin;
 use pwr_bot_plugin_voice::VoicePlugin;
+use pwr_bot_plugin_welcome::WelcomePlugin;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -34,32 +37,47 @@ async fn main() -> Result<()> {
     let repos = setup_database(&config, init_start).await?;
     let services = setup_services(repos.clone()).await?;
 
+    // Create plugin registry and register all builtin plugins
+    let registry = Arc::new(PluginRegistry::new());
+    registry
+        .register_builtin(Box::new(VoicePlugin::new()))
+        .await;
+    registry.register_builtin(Box::new(FeedPlugin::new())).await;
+    registry.register_builtin(Box::new(WelcomePlugin)).await;
+
+    // Load FFI (.so) plugins from plugin directory
+    let ffi_plugins = loader::load_plugins(&config.plugin_dir);
+    for ffi_plugin in ffi_plugins {
+        registry.register(ffi_plugin).await;
+    }
+
     let bot = setup_bot(
         &config,
         event_bus.clone(),
         services.clone(),
+        registry.clone(),
         init_start,
     )
     .await?;
 
     // Initialize system context for headless plugin operations (events, tasks)
-    host_registry::set_system_ctx(PoiseHostCtx::new_system(
-        bot.data.clone(),
-        bot.http.clone(),
-    ));
+    host_registry::set_system_ctx(PoiseHostCtx::new_system(bot.data.clone(), bot.http.clone()));
 
-    // Register builtin plugins and run their init hooks
-    let voice_plugin = Arc::new(VoicePlugin::new()) as Arc<dyn pwr_bot_sdk::BotPlugin>;
-    invocation::dispatch_init(&*voice_plugin)
-        .await
-        .map_err(|e| anyhow::anyhow!("Voice plugin init failed: {e}"))?;
+    // Initialize all builtin plugins
+    let plugins = registry.builtin_plugins();
+    for plugin in &plugins {
+        invocation::dispatch_init(&**plugin)
+            .await
+            .map_err(|e| anyhow::anyhow!("{} plugin init failed: {e}", plugin.name()))?;
+    }
 
-    let feed_plugin = Arc::new(FeedPlugin::new()) as Arc<dyn pwr_bot_sdk::BotPlugin>;
-    invocation::dispatch_init(&*feed_plugin)
-        .await
-        .map_err(|e| anyhow::anyhow!("Feed plugin init failed: {e}"))?;
-
-    let plugins: Vec<Arc<dyn pwr_bot_sdk::BotPlugin>> = vec![voice_plugin.clone(), feed_plugin.clone()];
+    // Initialize all FFI plugins
+    let ffi = registry.all_ffi_plugins();
+    for plugin in &ffi {
+        invocation::dispatch_init_ffi(plugin)
+            .await
+            .map_err(|e| anyhow::anyhow!("{} plugin init failed: {e}", plugin.name))?;
+    }
 
     // Bridge typed FeedUpdateEvent to named event for plugins
     {
@@ -75,11 +93,17 @@ async fn main() -> Result<()> {
         });
     }
 
-    // Register plugin event handlers on the event bus
+    // Register builtin plugin event handlers on the event bus
     invocation::register_plugin_event_handlers(&event_bus, &plugins);
 
-    // Spawn background tasks declared by plugins
+    // Register FFI plugin event handlers
+    invocation::register_ffi_event_handlers(&event_bus, &ffi);
+
+    // Spawn background tasks declared by builtin plugins
     invocation::dispatch_tasks(&plugins).await;
+
+    // Spawn background tasks declared by FFI plugins
+    invocation::dispatch_tasks_ffi(&ffi).await;
 
     info!(
         "pwr-bot is up in {:.2}s. Press Ctrl+C to stop.",
@@ -118,9 +142,7 @@ async fn setup_database(
     Ok(Arc::new(repos))
 }
 
-async fn setup_services(
-    repos: Arc<dyn Repos + Send + Sync>,
-) -> Result<Arc<Services>> {
+async fn setup_services(repos: Arc<dyn Repos + Send + Sync>) -> Result<Arc<Services>> {
     debug!("Setting up Services...");
     Ok(Arc::new(Services::new(repos).await?))
 }
@@ -129,15 +151,11 @@ async fn setup_bot(
     config: &Arc<Config>,
     event_bus: Arc<EventBus>,
     services: Arc<Services>,
+    plugin_registry: Arc<PluginRegistry>,
     init_start: Instant,
 ) -> Result<Arc<Bot>> {
     info!("Starting bot...");
-    let mut bot = Bot::new(
-        config.clone(),
-        event_bus,
-        services,
-    )
-    .await?;
+    let mut bot = Bot::new(config.clone(), event_bus, services, plugin_registry).await?;
 
     bot.start();
     let bot = Arc::new(bot);

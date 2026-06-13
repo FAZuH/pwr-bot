@@ -10,6 +10,11 @@ use crate::bot::command::prelude::*;
 ///
 /// Remove feeds from your subscriptions. Use autocomplete to find
 /// feeds you are currently subscribed to.
+// TODO: route unsubscribe DB operations through feed plugin
+//   Currently `service.feed_subscription.unsubscribe()` returns a stub error
+//   because the actual logic was moved to pwr-bot-plugin-feed.
+//   Fix: dispatch via `plugin.invoke("feed.unsubscribe", args)` or extend PluginHost
+//   with a `call_procedure` path for synchronous DB operations from the batch UI.
 #[poise::command(slash_command)]
 pub async fn unsubscribe(
     ctx: Context<'_>,

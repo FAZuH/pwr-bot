@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::bot::command::feed::SendInto;
 use crate::bot::command::prelude::*;
 use crate::bot::host_ctx::PoiseHostCtx;
-use crate::bot::plugin::invocation::dispatch_builtin;
+use crate::bot::plugin::invocation::dispatch_plugin_command;
 
 /// List your current feed subscriptions
 ///
@@ -18,7 +18,6 @@ pub async fn list(
     >,
 ) -> Result<(), Error> {
     let host_ctx = Arc::new(PoiseHostCtx::new(ctx));
-    let plugin = pwr_bot_plugin_feed::FeedPlugin::new();
     let args = serde_json::json!({"action": "list"});
-    dispatch_builtin(&host_ctx, &plugin, "feed list", args).await
+    dispatch_plugin_command(&ctx.data().plugin_registry, &host_ctx, "feed list", args).await
 }

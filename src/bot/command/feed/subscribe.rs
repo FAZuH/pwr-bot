@@ -10,6 +10,11 @@ use crate::bot::command::prelude::*;
 ///
 /// Add feeds to receive notifications. You can subscribe in your DM or
 /// in the server (if server feed settings are configured).
+// TODO: route subscribe DB operations through feed plugin
+//   Currently `service.feed_subscription.subscribe()` returns a stub error
+//   because the actual logic was moved to pwr-bot-plugin-feed.
+//   Fix: dispatch via `plugin.invoke("feed.subscribe", args)` or extend PluginHost
+//   with a `call_procedure` path for synchronous DB operations from the batch UI.
 #[poise::command(slash_command)]
 pub async fn subscribe(
     ctx: Context<'_>,

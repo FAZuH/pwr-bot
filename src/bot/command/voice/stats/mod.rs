@@ -6,7 +6,7 @@ use crate::bot::command::prelude::*;
 use crate::bot::command::voice::GuildStatType;
 use crate::bot::command::voice::VoiceStatsTimeRange;
 use crate::bot::host_ctx::PoiseHostCtx;
-use crate::bot::plugin::invocation::dispatch_builtin;
+use crate::bot::plugin::invocation::dispatch_plugin_command;
 
 /// Show voice activity statistics
 ///
@@ -22,7 +22,6 @@ pub async fn stats(
     #[description = "Statistic to display for server view"] _statistic: Option<GuildStatType>,
 ) -> Result<(), Error> {
     let host_ctx = Arc::new(PoiseHostCtx::new(ctx));
-    let plugin = pwr_bot_plugin_voice::VoicePlugin::new();
     let args = serde_json::json!({"action": "stats"});
-    dispatch_builtin(&host_ctx, &plugin, "vc stats", args).await
+    dispatch_plugin_command(&ctx.data().plugin_registry, &host_ctx, "vc stats", args).await
 }

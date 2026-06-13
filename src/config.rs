@@ -19,6 +19,7 @@ pub struct Config {
     pub admin_id: String,
     pub data_path: PathBuf,
     pub logs_path: PathBuf,
+    pub plugin_dir: PathBuf,
     pub features: Features,
     pub version: String,
 }
@@ -66,6 +67,7 @@ impl Config {
 
         self.data_path = self.get_dirpath_mustexist("DATA_PATH", "./data")?;
         self.logs_path = self.get_dirpath_mustexist("LOGS_PATH", "./logs")?;
+        self.plugin_dir = self.get_dirpath_mustexist("PLUGIN_DIR", "./plugins")?;
 
         self.features = Features {
             voice_tracking: parse_bool_env("ENABLE_VOICE_TRACKING", true),

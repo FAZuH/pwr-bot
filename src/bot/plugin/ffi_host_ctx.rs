@@ -9,9 +9,8 @@ use std::ffi::CString;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use poise::serenity_prelude::*;
-
 use bytes::BytesMut;
+use poise::serenity_prelude::*;
 use postgres::types::IsNull;
 use postgres::types::ToSql;
 use postgres::types::Type;
@@ -20,13 +19,21 @@ use postgres::types::Type;
 #[derive(Debug)]
 struct PgNull;
 impl ToSql for PgNull {
-    fn to_sql(&self, _ty: &Type, _out: &mut BytesMut) -> Result<IsNull, Box<dyn std::error::Error + Sync + Send>> {
+    fn to_sql(
+        &self,
+        _ty: &Type,
+        _out: &mut BytesMut,
+    ) -> Result<IsNull, Box<dyn std::error::Error + Sync + Send>> {
         Ok(IsNull::Yes)
     }
     fn accepts(_ty: &Type) -> bool {
         true
     }
-    fn to_sql_checked(&self, ty: &Type, out: &mut BytesMut) -> Result<IsNull, Box<dyn std::error::Error + Sync + Send>> {
+    fn to_sql_checked(
+        &self,
+        ty: &Type,
+        out: &mut BytesMut,
+    ) -> Result<IsNull, Box<dyn std::error::Error + Sync + Send>> {
         self.to_sql(ty, out)
     }
 }
@@ -39,8 +46,7 @@ use crate::bot::host_ctx::PoiseHostCtx;
 use crate::bot::plugin::host_registry;
 
 /// Global callback table shared by all FFI invocations.
-static HOST_CALLBACKS: std::sync::OnceLock<pwr_bot_sdk::HostCallbacks> =
-    std::sync::OnceLock::new();
+static HOST_CALLBACKS: std::sync::OnceLock<pwr_bot_sdk::HostCallbacks> = std::sync::OnceLock::new();
 
 /// Returns the global callback table.
 pub fn host_callbacks() -> &'static pwr_bot_sdk::HostCallbacks {
@@ -438,7 +444,7 @@ unsafe extern "C" fn cb_send_dm(
         if let Some(content) = &payload.content {
             builder = builder.content(content);
         }
-        user.id.dm(&http, builder).await
+        user.id.dm(http, builder).await
     };
 
     match handle.block_on(dm_fut) {
@@ -508,10 +514,7 @@ unsafe extern "C" fn cb_get_poll_interval(ctx_handle: u64) -> u64 {
         .unwrap_or(60)
 }
 
-unsafe extern "C" fn cb_get_data_path(
-    ctx_handle: u64,
-    out: *mut *mut std::ffi::c_char,
-) -> bool {
+unsafe extern "C" fn cb_get_data_path(ctx_handle: u64, out: *mut *mut std::ffi::c_char) -> bool {
     match ctx_data(ctx_handle) {
         Some(data) => {
             let path = data.config.data_path.to_string_lossy().to_string();

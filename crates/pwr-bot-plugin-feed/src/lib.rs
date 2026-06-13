@@ -52,12 +52,12 @@ impl BotPlugin for FeedPlugin {
         }]
     }
 
+    fn settings_panels(&self) -> Vec<SettingsPanelSpec> {
+        vec![SettingsPanelSpec::new("feeds", "Feeds")]
+    }
+
     fn tasks(&self) -> Vec<TaskSpec> {
-        vec![TaskSpec::new(
-            "feed-publisher",
-            60,
-            "__poll_feeds",
-        )]
+        vec![TaskSpec::new("feed-publisher", 60, "__poll_feeds")]
     }
 
     fn event_handlers(&self) -> Vec<EventHandlerSpec> {

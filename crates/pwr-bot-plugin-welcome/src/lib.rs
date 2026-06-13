@@ -26,6 +26,10 @@ impl BotPlugin for WelcomePlugin {
         }]
     }
 
+    fn settings_panels(&self) -> Vec<SettingsPanelSpec> {
+        vec![SettingsPanelSpec::new("welcome", "Welcome")]
+    }
+
     async fn invoke(
         &self,
         command: &str,
