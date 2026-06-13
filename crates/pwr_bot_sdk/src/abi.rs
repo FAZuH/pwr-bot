@@ -2,7 +2,7 @@ use std::ffi::CStr;
 use std::ffi::c_char;
 use std::fmt;
 
-pub const PWR_BOT_PLUGIN_API_VERSION: u32 = 2;
+pub const PWR_BOT_PLUGIN_API_VERSION: u32 = 3;
 
 pub const PWR_BOT_PLUGIN_ENTRY: &[u8] = b"pwr_bot_plugin_entry\0";
 
@@ -80,6 +80,15 @@ pub struct HostCallbacks {
         out_err: *mut *mut c_char,
     ) -> bool,
 
+    // -- DM callback --
+    pub send_dm: unsafe extern "C" fn(
+        ctx_handle: u64,
+        user_id: u64,
+        payload_json: *const c_char,
+        out_message_id: *mut u64,
+        out_err: *mut *mut c_char,
+    ) -> bool,
+
     // -- Config callbacks --
     pub get_poll_interval: unsafe extern "C" fn(ctx_handle: u64) -> u64,
     pub get_data_path: unsafe extern "C" fn(ctx_handle: u64, out: *mut *mut c_char) -> bool,
@@ -137,6 +146,7 @@ impl fmt::Debug for HostCallbacks {
             .field("query_db", &(self.query_db as *const ()))
             .field("execute_db", &(self.execute_db as *const ()))
             .field("send_channel_message", &(self.send_channel_message as *const ()))
+            .field("send_dm", &(self.send_dm as *const ()))
             .field("publish_event", &(self.publish_event as *const ()))
             .field("get_poll_interval", &(self.get_poll_interval as *const ()))
             .field("get_data_path", &(self.get_data_path as *const ()))

@@ -55,6 +55,7 @@ pub fn host_callbacks() -> &'static pwr_bot_sdk::HostCallbacks {
         query_db: cb_query_db,
         execute_db: cb_execute_db,
         send_channel_message: cb_send_channel_message,
+        send_dm: cb_send_dm,
         publish_event: cb_publish_event,
         get_poll_interval: cb_get_poll_interval,
         get_data_path: cb_get_data_path,
@@ -385,6 +386,62 @@ unsafe extern "C" fn cb_send_channel_message(
     };
     let handle = tokio::runtime::Handle::current();
     match handle.block_on(msg_fut) {
+        Ok(msg) => {
+            unsafe { *out_message_id = msg.id.get() };
+            true
+        }
+        Err(e) => {
+            let err = CString::new(e.to_string()).unwrap();
+            if !out_err.is_null() {
+                unsafe { *out_err = err.into_raw() };
+            }
+            false
+        }
+    }
+}
+
+// ---- DM callback ----
+
+unsafe extern "C" fn cb_send_dm(
+    ctx_handle: u64,
+    user_id: u64,
+    payload_json: *const std::ffi::c_char,
+    out_message_id: *mut u64,
+    out_err: *mut *mut std::ffi::c_char,
+) -> bool {
+    let ctx = match host_registry::get(ctx_handle) {
+        Some(ctx) => ctx,
+        None => return false,
+    };
+
+    let json_str = match unsafe { CStr::from_ptr(payload_json) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+
+    let payload: pwr_bot_sdk::ResponsePayload = match serde_json::from_str(json_str) {
+        Ok(p) => p,
+        Err(e) => {
+            let err = CString::new(format!("invalid DM payload JSON: {e}")).unwrap();
+            if !out_err.is_null() {
+                unsafe { *out_err = err.into_raw() };
+            }
+            return false;
+        }
+    };
+
+    let http = ctx.http();
+    let handle = tokio::runtime::Handle::current();
+    let dm_fut = async {
+        let user = http.get_user(UserId::new(user_id)).await?;
+        let mut builder = CreateMessage::new();
+        if let Some(content) = &payload.content {
+            builder = builder.content(content);
+        }
+        user.id.dm(&http, builder).await
+    };
+
+    match handle.block_on(dm_fut) {
         Ok(msg) => {
             unsafe { *out_message_id = msg.id.get() };
             true

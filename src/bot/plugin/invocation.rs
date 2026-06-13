@@ -142,3 +142,77 @@ pub async fn dispatch_on_event(
     host_registry::unregister(handle);
     result
 }
+
+/// Registers plugin event handlers on the event bus.
+///
+/// For each plugin's declared [`EventHandlerSpec`], subscribes to the named
+/// event and dispatches it to the plugin's [`BotPlugin::on_event`] method.
+pub fn register_plugin_event_handlers(
+    event_bus: &crate::event::event_bus::EventBus,
+    plugins: &[Arc<dyn BotPlugin + 'static>],
+) {
+    for plugin in plugins {
+        let plugin_name = plugin.name().to_string();
+        for spec in plugin.event_handlers() {
+            let event_name = spec.event_name.clone();
+            let en = event_name.clone();
+            let p = plugin.clone();
+            event_bus.subscribe_named(
+                &event_name,
+                Box::new(move |payload| {
+                    let plugin = p.clone();
+                    let event_name = en.clone();
+                    tokio::spawn(async move {
+                        let _ = dispatch_on_event(&*plugin, &event_name, payload).await;
+                    });
+                    Ok(())
+                }),
+            );
+            log::info!(
+                "Registered event handler '{}' for plugin '{plugin_name}'",
+                event_name,
+            );
+        }
+    }
+}
+
+/// Spawns background tasks declared by builtin plugins.
+///
+/// Each [`TaskSpec`] returned by a plugin's [`BotPlugin::tasks`] is spawned
+/// as a tokio interval that calls [`BotPlugin::invoke`] at the specified rate.
+/// The system context must be initialized before calling this.
+pub async fn dispatch_tasks(plugins: &[Arc<dyn BotPlugin + 'static>]) {
+    let system_ctx = match host_registry::system_ctx() {
+        Some(ctx) => ctx.clone(),
+        None => {
+            log::error!("Cannot dispatch tasks: system context not initialized");
+            return;
+        }
+    };
+
+    for plugin in plugins {
+        let plugin_name = plugin.name().to_string();
+        for task in plugin.tasks() {
+            let plugin = plugin.clone();
+            let ctx = system_ctx.clone();
+            let command = task.command.clone();
+            let interval_secs = task.interval_secs;
+
+            tokio::spawn(async move {
+                let mut timer = tokio::time::interval(std::time::Duration::from_secs(interval_secs));
+                loop {
+                    timer.tick().await;
+                    let handle = host_registry::register(ctx.clone());
+                    let host = PluginHost::new(handle, ffi_host_ctx::host_callbacks());
+                    let _ = plugin.invoke(&command, serde_json::Value::Null, &host).await;
+                    host_registry::unregister(handle);
+                }
+            });
+
+            log::info!(
+                "Spawned task '{}' for plugin '{plugin_name}' (interval: {interval_secs}s)",
+                task.name,
+            );
+        }
+    }
+}

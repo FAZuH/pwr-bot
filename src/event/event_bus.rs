@@ -91,7 +91,7 @@ impl EventBus {
     /// Registers a named event handler that receives JSON payloads.
     pub fn subscribe_named(
         &self,
-        event_name: &'static str,
+        event_name: &str,
         handler: NamedHandler,
     ) -> &Self {
         self.named_subscribers

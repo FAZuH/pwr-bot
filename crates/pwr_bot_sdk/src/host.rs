@@ -226,6 +226,44 @@ impl PluginHost {
         }
     }
 
+    // ---- DM callback ----
+
+    /// Sends a direct message to a user.
+    ///
+    /// Returns the message ID on success.
+    ///
+    /// # Safety
+    ///
+    /// The registered [`HostCallbacks`] must outlive the call.
+    pub unsafe fn send_dm(
+        &self,
+        user_id: u64,
+        payload_json: &str,
+    ) -> Result<u64, String> {
+        let c_str = CString::new(payload_json).map_err(|e| e.to_string())?;
+        let mut out_message_id: u64 = 0;
+        let mut out_err: *mut std::ffi::c_char = std::ptr::null_mut();
+        let ok = unsafe {
+            (self.callbacks.send_dm)(
+                self.ctx_handle,
+                user_id,
+                c_str.as_ptr(),
+                &mut out_message_id,
+                &mut out_err,
+            )
+        };
+        if ok {
+            Ok(out_message_id)
+        } else if !out_err.is_null() {
+            let err = unsafe { CString::from_raw(out_err) }
+                .into_string()
+                .unwrap_or_else(|_| "unknown error".to_string());
+            Err(err)
+        } else {
+            Err("unknown error".to_string())
+        }
+    }
+
     // ---- Event callback ----
 
     /// Publishes an event to the event bus by name.
