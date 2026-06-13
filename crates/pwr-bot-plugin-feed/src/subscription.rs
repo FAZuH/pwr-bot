@@ -52,11 +52,7 @@ async fn query_json(
     Ok(serde_json::Value::Array(json_rows))
 }
 
-async fn db_execute(
-    pool: &Pool,
-    sql: &str,
-    params: &[&(dyn ToSql + Sync)],
-) -> Result<u64, String> {
+async fn db_execute(pool: &Pool, sql: &str, params: &[&(dyn ToSql + Sync)]) -> Result<u64, String> {
     let client = pool.get().await.map_err(|e| e.to_string())?;
     client.execute(sql, params).await.map_err(|e| e.to_string())
 }
@@ -82,19 +78,17 @@ pub async fn add_subscriber(
 
     match rows.first() {
         Some(row) => Ok(row.clone()),
-        None => {
-            query_json(
-                pool,
-                "SELECT id, type_, target_id FROM subscribers WHERE type_ = $1 AND target_id = $2",
-                &[&sub_type, &target_id],
-            )
-            .await
-            .and_then(|r| {
-                r.as_array()
-                    .and_then(|arr| arr.first().cloned())
-                    .ok_or_else(|| "Failed to find subscriber after insert".to_string())
-            })
-        }
+        None => query_json(
+            pool,
+            "SELECT id, type_, target_id FROM subscribers WHERE type_ = $1 AND target_id = $2",
+            &[&sub_type, &target_id],
+        )
+        .await
+        .and_then(|r| {
+            r.as_array()
+                .and_then(|arr| arr.first().cloned())
+                .ok_or_else(|| "Failed to find subscriber after insert".to_string())
+        }),
     }
 }
 
@@ -168,15 +162,9 @@ pub async fn subscribe(
     let inserted = result.as_array().map(|a| !a.is_empty()).unwrap_or(false);
 
     if inserted {
-        Ok(SubscribeResult::Success {
-            feed_id,
-            feed_name,
-        })
+        Ok(SubscribeResult::Success { feed_id, feed_name })
     } else {
-        Ok(SubscribeResult::AlreadySubscribed {
-            feed_id,
-            feed_name,
-        })
+        Ok(SubscribeResult::AlreadySubscribed { feed_id, feed_name })
     }
 }
 
@@ -214,15 +202,9 @@ pub async fn unsubscribe(
     .await?;
 
     if deleted > 0 {
-        Ok(UnsubscribeResult::Success {
-            feed_id,
-            feed_name,
-        })
+        Ok(UnsubscribeResult::Success { feed_id, feed_name })
     } else {
-        Ok(UnsubscribeResult::AlreadyUnsubscribed {
-            feed_id,
-            feed_name,
-        })
+        Ok(UnsubscribeResult::AlreadyUnsubscribed { feed_id, feed_name })
     }
 }
 
@@ -260,7 +242,7 @@ pub async fn get_feed_by_source_id(
 
 pub async fn check_feed_update(
     pool: &Pool,
-    host: &PluginHost,
+    _host: &PluginHost,
     platforms: &Platforms,
     feed: &serde_json::Value,
 ) -> Result<FeedUpdateResult, String> {
@@ -280,7 +262,7 @@ pub async fn check_feed_update(
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
-    let items_id = feed
+    let _items_id = feed
         .get("items_id")
         .and_then(|v| v.as_str())
         .unwrap_or("")

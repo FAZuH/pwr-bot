@@ -135,15 +135,18 @@ impl BotPlugin for VoicePlugin {
     }
 
     async fn init(&self, _host: &PluginHost) -> Result<(), String> {
-        let db_url =
-            std::env::var("DB_URL").map_err(|_| "DB_URL environment variable not set".to_string())?;
+        let db_url = std::env::var("DB_URL")
+            .map_err(|_| "DB_URL environment variable not set".to_string())?;
         let mut config = deadpool_postgres::Config::new();
         config.url = Some(db_url);
         config.manager = Some(ManagerConfig {
             recycling_method: RecyclingMethod::Fast,
         });
         let pool = config
-            .create_pool(Some(deadpool_postgres::Runtime::Tokio1), tokio_postgres::NoTls)
+            .create_pool(
+                Some(deadpool_postgres::Runtime::Tokio1),
+                tokio_postgres::NoTls,
+            )
             .map_err(|e| format!("Failed to create database pool: {e}"))?;
         *self.pool.lock().await = Some(pool);
 
@@ -158,12 +161,8 @@ impl BotPlugin for VoicePlugin {
     ) -> Result<(), String> {
         match event_name {
             "voice_state" => {
-                subscriber::handle_voice_state_event(
-                    &self.active_sessions,
-                    &self.pool,
-                    payload,
-                )
-                .await
+                subscriber::handle_voice_state_event(&self.active_sessions, &self.pool, payload)
+                    .await
             }
             _ => Ok(()),
         }
@@ -296,8 +295,6 @@ impl VoicePlugin {
 
             closed += 1;
         }
-
-        if closed > 0 {}
 
         Ok(())
     }

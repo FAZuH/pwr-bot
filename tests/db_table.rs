@@ -25,18 +25,9 @@ mod server_settings_table_tests {
 
     fn make_settings(guild_id: u64) -> ServerSettingsEntity {
         let mut plugin_settings = HashMap::new();
-        plugin_settings.insert(
-            "feeds".to_string(),
-            serde_json::json!({"enabled": true}),
-        );
-        plugin_settings.insert(
-            "voice".to_string(),
-            serde_json::json!({"enabled": false}),
-        );
-        plugin_settings.insert(
-            "welcome".to_string(),
-            serde_json::json!({"enabled": true}),
-        );
+        plugin_settings.insert("feeds".to_string(), serde_json::json!({"enabled": true}));
+        plugin_settings.insert("voice".to_string(), serde_json::json!({"enabled": false}));
+        plugin_settings.insert("welcome".to_string(), serde_json::json!({"enabled": true}));
 
         ServerSettingsEntity {
             guild_id: DbU64(guild_id),
@@ -62,7 +53,7 @@ mod server_settings_table_tests {
 
         let mut updated = make_settings(200);
         updated.settings.0.set_enabled("feeds", false);
-        let _ = db.server_settings.update(&updated).await.unwrap();
+        db.server_settings.update(&updated).await.unwrap();
 
         let fetched = db.server_settings.select(&200).await.unwrap().unwrap();
         assert!(!fetched.settings.0.is_enabled("feeds"));

@@ -17,5 +17,4 @@ pub async fn setup_db() -> Arc<PgRepos> {
 }
 
 /// Cleans up the test database by deleting all data.
-pub async fn teardown_db(_db: &PgRepos) {
-}
+pub async fn teardown_db(_db: &PgRepos) {}

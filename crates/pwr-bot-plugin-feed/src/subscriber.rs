@@ -34,12 +34,35 @@ fn extract_feed_id(payload: &serde_json::Value) -> Option<i64> {
 }
 
 fn build_message(payload: &serde_json::Value) -> String {
-    let feed = payload.get("feed").and_then(|f| f.get("name")).and_then(|v| v.as_str()).unwrap_or("Unknown feed");
-    let latest = payload.get("latest").and_then(|l| l.get("title")).and_then(|v| v.as_str()).unwrap_or("");
-    let item_name = payload.get("item_name").and_then(|v| v.as_str()).unwrap_or("item");
-    let platform = payload.get("feed").and_then(|f| f.get("platform")).and_then(|v| v.as_str()).unwrap_or("");
-    let url = payload.get("latest").and_then(|l| l.get("url")).and_then(|v| v.as_str()).unwrap_or("");
-    let logo_url = payload.get("feed").and_then(|f| f.get("logo_url")).and_then(|v| v.as_str()).unwrap_or("");
+    let feed = payload
+        .get("feed")
+        .and_then(|f| f.get("name"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("Unknown feed");
+    let latest = payload
+        .get("latest")
+        .and_then(|l| l.get("title"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let item_name = payload
+        .get("item_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("item");
+    let platform = payload
+        .get("feed")
+        .and_then(|f| f.get("platform"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let url = payload
+        .get("latest")
+        .and_then(|l| l.get("url"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let logo_url = payload
+        .get("feed")
+        .and_then(|f| f.get("logo_url"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
 
     let mut msg = format!(
         "## **{}**\nNew **{}** on *{}*\n> {}",
@@ -54,11 +77,7 @@ fn build_message(payload: &serde_json::Value) -> String {
     msg
 }
 
-async fn query_subscribers(
-    pool: &Pool,
-    feed_id: i64,
-    sub_type: &str,
-) -> Vec<serde_json::Value> {
+async fn query_subscribers(pool: &Pool, feed_id: i64, sub_type: &str) -> Vec<serde_json::Value> {
     let result = query_json(
         pool,
         "SELECT s.id, s.target_id, s.type_ \

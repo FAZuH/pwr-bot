@@ -20,8 +20,19 @@ use crate::repo::schema::server_settings;
 
 /// Newtype for `u64` values stored as `BIGINT`/`Int8`.
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, AsExpression, FromSqlRow, Default,
-    Serialize, Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    AsExpression,
+    FromSqlRow,
+    Default,
+    Serialize,
+    Deserialize,
 )]
 #[diesel(sql_type = BigInt)]
 pub struct DbU64(pub u64);
@@ -130,9 +141,7 @@ impl ServerSettings {
             .get(plugin_id)
             .and_then(|v| match v {
                 serde_json::Value::Bool(b) => Some(*b),
-                serde_json::Value::Object(obj) => {
-                    obj.get("enabled").and_then(|v| v.as_bool())
-                }
+                serde_json::Value::Object(obj) => obj.get("enabled").and_then(|v| v.as_bool()),
                 _ => None,
             })
             .unwrap_or(false)
@@ -144,10 +153,7 @@ impl ServerSettings {
             .entry(plugin_id.to_string())
             .or_insert_with(|| serde_json::json!({}));
         if let Some(obj) = entry.as_object_mut() {
-            obj.insert(
-                "enabled".to_string(),
-                serde_json::Value::Bool(enabled),
-            );
+            obj.insert("enabled".to_string(), serde_json::Value::Bool(enabled));
         }
     }
 }

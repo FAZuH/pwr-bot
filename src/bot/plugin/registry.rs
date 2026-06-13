@@ -52,12 +52,12 @@ impl PluginRegistry {
         let mut cmds = Vec::new();
         for spec in &specs {
             let cmd_name = spec.name.clone();
-            self.command_map
-                .write()
-                .await
-                .insert(cmd_name.clone(), idx);
+            self.command_map.write().await.insert(cmd_name.clone(), idx);
             cmds.push(build_plugin_command(spec));
-            info!("Registered plugin command: /{cmd_name} (from {})", plugin.name);
+            info!(
+                "Registered plugin command: /{cmd_name} (from {})",
+                plugin.name
+            );
         }
 
         cmds
@@ -85,9 +85,7 @@ impl PluginRegistry {
     }
 
     /// Returns all registered event handlers across all plugins.
-    pub async fn all_event_handlers(
-        &self,
-    ) -> Vec<(Arc<LoadedPlugin>, EventHandlerSpec)> {
+    pub async fn all_event_handlers(&self) -> Vec<(Arc<LoadedPlugin>, EventHandlerSpec)> {
         let mut handlers = Vec::new();
         for plugin in self.plugins.read().await.iter() {
             for spec in &plugin.metadata.event_handlers {

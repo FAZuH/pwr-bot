@@ -128,15 +128,18 @@ impl BotPlugin for FeedPlugin {
     }
 
     async fn init(&self, _host: &PluginHost) -> Result<(), String> {
-        let db_url =
-            std::env::var("DB_URL").map_err(|_| "DB_URL environment variable not set".to_string())?;
+        let db_url = std::env::var("DB_URL")
+            .map_err(|_| "DB_URL environment variable not set".to_string())?;
         let mut config = deadpool_postgres::Config::new();
         config.url = Some(db_url);
         config.manager = Some(ManagerConfig {
             recycling_method: RecyclingMethod::Fast,
         });
         let pool = config
-            .create_pool(Some(deadpool_postgres::Runtime::Tokio1), tokio_postgres::NoTls)
+            .create_pool(
+                Some(deadpool_postgres::Runtime::Tokio1),
+                tokio_postgres::NoTls,
+            )
             .map_err(|e| format!("Failed to create database pool: {e}"))?;
         *self.pool.lock().await = Some(pool);
 
@@ -231,8 +234,14 @@ impl FeedPlugin {
              - **Unsubscribe Role:** {}",
             if enabled { "✅ Yes" } else { "❌ No" },
             channel,
-            sub_role.map(|r| format!("<@&{r}>")).as_deref().unwrap_or("None"),
-            unsub_role.map(|r| format!("<@&{r}>")).as_deref().unwrap_or("None"),
+            sub_role
+                .map(|r| format!("<@&{r}>"))
+                .as_deref()
+                .unwrap_or("None"),
+            unsub_role
+                .map(|r| format!("<@&{r}>"))
+                .as_deref()
+                .unwrap_or("None"),
         );
 
         Ok(ResponsePayload {

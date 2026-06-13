@@ -51,11 +51,7 @@ async fn query_json(
     Ok(rows_to_json(&rows))
 }
 
-async fn db_execute(
-    pool: &Pool,
-    sql: &str,
-    params: &[&(dyn ToSql + Sync)],
-) -> Result<u64, String> {
+async fn db_execute(pool: &Pool, sql: &str, params: &[&(dyn ToSql + Sync)]) -> Result<u64, String> {
     let client = pool.get().await.map_err(|e| e.to_string())?;
     client.execute(sql, params).await.map_err(|e| e.to_string())
 }
@@ -109,11 +105,7 @@ async fn is_voice_disabled(pool: &Pool, guild_id: u64) -> Result<bool, String> {
     }
 }
 
-async fn close_orphaned_sessions(
-    pool: &Pool,
-    user_id: u64,
-    guild_id: u64,
-) -> Result<(), String> {
+async fn close_orphaned_sessions(pool: &Pool, user_id: u64, guild_id: u64) -> Result<(), String> {
     let sessions = query_json(
         pool,
         "SELECT channel_id, join_time FROM voice_sessions \
@@ -333,7 +325,12 @@ pub async fn handle_voice_state_event(
         None => return Err("Failed to parse voice state event".to_string()),
     };
 
-    let pool = pool.lock().await.as_ref().ok_or("DB not initialized")?.clone();
+    let pool = pool
+        .lock()
+        .await
+        .as_ref()
+        .ok_or("DB not initialized")?
+        .clone();
 
     if is_voice_disabled(&pool, parsed.guild_id).await? {
         return Ok(());

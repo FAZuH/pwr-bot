@@ -156,9 +156,7 @@ impl<'a> Router<'a> {
             let hc = self.host_ctx.clone();
             let res: Box<dyn CommandHandler> = match nav {
                 SettingsMain => Box::new(SettingsMainHandler::new(hc)),
-                SettingsPlugin { plugin_id } => {
-                    Box::new(PluginSettingsHandler::new(hc, plugin_id))
-                }
+                SettingsPlugin { plugin_id } => Box::new(PluginSettingsHandler::new(hc, plugin_id)),
                 SettingsAbout => Box::new(AboutHandler::new(hc)),
             };
             return Some(res);
@@ -184,7 +182,10 @@ pub struct PluginSettingsHandler {
 
 impl PluginSettingsHandler {
     pub fn new(host_ctx: Arc<PoiseHostCtx>, plugin_id: String) -> Self {
-        Self { plugin_id, host_ctx }
+        Self {
+            plugin_id,
+            host_ctx,
+        }
     }
 }
 

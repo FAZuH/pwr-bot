@@ -12,7 +12,4 @@ diesel::table! {
     }
 }
 
-diesel::allow_tables_to_appear_in_same_query!(
-    bot_meta,
-    server_settings,
-);
+diesel::allow_tables_to_appear_in_same_query!(bot_meta, server_settings,);
