@@ -16,7 +16,6 @@ use pwr_bot::bot::plugin::invocation;
 use pwr_bot::bot::plugin::loader;
 use pwr_bot::bot::plugin::registry::PluginRegistry;
 use pwr_bot::config::Config;
-use pwr_bot::event::FeedUpdateEvent;
 use pwr_bot::event::event_bus::EventBus;
 use pwr_bot::logging::setup_logging;
 use pwr_bot::repo::PgRepos;
@@ -77,20 +76,6 @@ async fn main() -> Result<()> {
         invocation::dispatch_init_ffi(plugin)
             .await
             .map_err(|e| anyhow::anyhow!("{} plugin init failed: {e}", plugin.name))?;
-    }
-
-    // Bridge typed FeedUpdateEvent to named event for plugins
-    {
-        let bus = event_bus.clone();
-        event_bus.register_callback(move |event: FeedUpdateEvent| {
-            let bus = bus.clone();
-            async move {
-                if let Ok(json) = serde_json::to_value(&event) {
-                    let _ = bus.publish_named("feed_update", json);
-                }
-                Ok(())
-            }
-        });
     }
 
     // Register builtin plugin event handlers on the event bus

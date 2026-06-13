@@ -10,7 +10,6 @@ pub mod config;
 pub mod entity;
 pub mod error;
 pub mod event;
-pub mod feed;
 pub mod logging;
 pub mod macros;
 pub mod repo;

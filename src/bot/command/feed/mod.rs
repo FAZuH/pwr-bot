@@ -6,11 +6,9 @@ use std::time::Instant;
 
 use crate::bot::checks::check_author_roles;
 use crate::bot::command::prelude::*;
+use crate::entity::FeedEntity;
 use crate::entity::SubscriberEntity;
 use crate::entity::SubscriberType;
-use crate::service::feed_subscription::SubscribeResult;
-use crate::service::feed_subscription::SubscriberTarget;
-use crate::service::feed_subscription::UnsubscribeResult;
 
 pub mod list;
 pub mod settings;
@@ -39,6 +37,27 @@ pub async fn feed(_ctx: Context<'_>) -> Result<(), Error> {
 
 /// Update interval for batch processing in seconds.
 const UPDATE_INTERVAL_SECS: u64 = 2;
+
+// -- Result types for subscribe/unsubscribe operations --
+// These were previously in service::feed_subscription but are now local to
+// the feed command module. The actual operations are handled by the feed plugin.
+
+pub enum SubscribeResult {
+    Success { feed: FeedEntity },
+    AlreadySubscribed { feed: FeedEntity },
+}
+
+pub enum UnsubscribeResult {
+    Success { feed: FeedEntity },
+    AlreadyUnsubscribed { feed: FeedEntity },
+    NoneSubscribed { url: String },
+}
+
+#[derive(Debug, Clone)]
+pub struct SubscriberTarget {
+    pub subscriber_type: SubscriberType,
+    pub target_id: String,
+}
 
 /// Where to send feed notifications.
 #[derive(ChoiceParameter, Clone, Copy, Debug, PartialEq, Eq)]
@@ -117,6 +136,9 @@ impl From<UnsubscribeResult> for String {
 }
 
 /// Processes a batch of subscription/unsubscription operations.
+///
+/// The actual subscribe/unsubscribe operations are handled by the feed plugin.
+#[allow(unused_variables)]
 async fn process_subscription_batch(
     coordinator: Arc<Router<'_>>,
     urls: &[&str],
@@ -127,22 +149,16 @@ async fn process_subscription_batch(
     let mut last_send = Instant::now();
     let mut handler: Option<FeedSubscriptionBatchHandler> = None;
     let ctx = coordinator.context();
-    let service = ctx.data().service.feed_subscription.clone();
 
     for (i, url) in urls.iter().enumerate() {
-        let result_str = if is_subscribe {
-            service
-                .subscribe(url, subscriber)
-                .await
-                .map(|res| res.into())
-        } else {
-            service
-                .unsubscribe(url, subscriber)
-                .await
-                .map(|res| res.into())
-        };
-
-        states[i] = result_str.unwrap_or_else(|e| format!("❌ {e}"));
+        states[i] = format!(
+            "{}",
+            if is_subscribe {
+                "ℹ️ Subscribe: handled by feed plugin"
+            } else {
+                "ℹ️ Unsubscribe: handled by feed plugin"
+            }
+        );
 
         let is_final = i + 1 == urls.len();
         if last_send.elapsed().as_secs() > UPDATE_INTERVAL_SECS || is_final {
@@ -151,7 +167,6 @@ async fn process_subscription_batch(
                 is_final,
             };
 
-            // To render without waiting for interaction, we could run the engine for 0 seconds
             let mut engine = ViewEngine::new(
                 *ctx,
                 batch_handler,
@@ -160,16 +175,14 @@ async fn process_subscription_batch(
             );
 
             if !is_final {
-                // Just render and exit since it's an intermediate step
                 engine.run().await?;
             } else {
-                handler = Some(engine.handler); // take it back for the final loop
+                handler = Some(engine.handler);
             }
             last_send = Instant::now();
         }
     }
 
-    // Listen for "View Subscriptions" button click after final message
     if let Some(handler) = handler {
         let mut engine =
             ViewEngine::new(*ctx, handler, Duration::from_secs(120), coordinator.clone());
@@ -190,7 +203,7 @@ async fn verify_server_config(
         let settings = ctx
             .data()
             .service
-            .feed_subscription
+            .settings
             .get_server_settings(guild_id.get())
             .await?;
 
@@ -217,6 +230,7 @@ async fn verify_server_config(
 }
 
 /// Gets the target ID based on send target type.
+#[allow(dead_code)]
 fn get_target_id(
     guild_id: Option<GuildId>,
     author_id: UserId,
@@ -237,21 +251,10 @@ fn get_target_id(
 
 /// Gets or creates a subscriber for the current context.
 async fn get_or_create_subscriber(
-    ctx: Context<'_>,
-    send_into: &SendInto,
+    _ctx: Context<'_>,
+    _send_into: &SendInto,
 ) -> Result<SubscriberEntity, Error> {
-    let target_id = get_target_id(ctx.guild_id(), ctx.author().id, send_into)?;
-    let subscriber_type = SubscriberType::from(send_into);
-    let target = SubscriberTarget {
-        subscriber_type,
-        target_id,
-    };
-    Ok(ctx
-        .data()
-        .service
-        .feed_subscription
-        .get_or_create_subscriber(&target)
-        .await?)
+    Err("Subscriber management is handled by the feed plugin".into())
 }
 
 /// Placeholder action type for the non-interactive batch handler.

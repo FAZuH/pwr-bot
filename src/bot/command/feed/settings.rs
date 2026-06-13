@@ -63,11 +63,9 @@ impl CommandHandler for FeedSettingsHandler {
     async fn run(&mut self, coordinator: std::sync::Arc<Router<'_>>) -> Result<(), Error> {
         let ctx = *coordinator.context();
         self.host_ctx.defer().await?;
-        let service = ctx.data().service.feed_subscription.clone();
-
         let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?.get();
 
-        let mut settings = service.get_server_settings(guild_id).await?;
+        let mut settings = ctx.data().service.settings.get_server_settings(guild_id).await?;
 
         let feeds_settings = settings.feeds.clone();
         let view = SettingsFeedHandler {
@@ -85,7 +83,9 @@ impl CommandHandler for FeedSettingsHandler {
         engine.run().await?;
 
         // Save settings after the view loop completes
-        service
+        ctx.data()
+            .service
+            .settings
             .update_server_settings(guild_id, settings.clone())
             .await
             .ok();

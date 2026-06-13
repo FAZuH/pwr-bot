@@ -5,7 +5,6 @@ use std::fmt::Debug;
 use log::error;
 use uuid::Uuid;
 
-use crate::feed::error::FeedError;
 use crate::repo::error::DatabaseError;
 use crate::service::error::ServiceError;
 
@@ -45,6 +44,5 @@ impl AppError {
 pub enum AppErrorKind {
     AppError(AppError),
     DatabaseError(DatabaseError),
-    FeedError(FeedError),
     ServiceError(ServiceError),
 }

@@ -53,44 +53,12 @@ impl CommandHandler for FeedUnsubscribeHandler {
 }
 
 /// Autocompletes subscriptions for the current user.
+///
+/// Subscription data comes from the feed plugin. The plugin handles
+/// its own autocomplete logic through its command handler.
 pub async fn autocomplete_subscriptions<'a>(
-    ctx: Context<'_>,
-    partial: &str,
+    _ctx: Context<'_>,
+    _partial: &str,
 ) -> CreateAutocompleteResponse<'a> {
-    if partial.trim().is_empty() {
-        return CreateAutocompleteResponse::new().set_choices(vec![AutocompleteChoice::from(
-            "Start typing to see suggestions",
-        )]);
-    }
-
-    let service = ctx.data().service.feed_subscription.clone();
-
-    let (user_sub, guild_sub) = service
-        .get_both_subscribers(
-            ctx.author().id.to_string(),
-            ctx.guild_id().map(|v| v.to_string()),
-        )
-        .await;
-
-    if user_sub.is_none() && guild_sub.is_none() {
-        return CreateAutocompleteResponse::new();
-    }
-
-    let feeds = service
-        .search_and_combine_feeds(partial, user_sub, guild_sub)
-        .await;
-
-    if ctx.guild_id().is_none() && feeds.is_empty() {
-        return CreateAutocompleteResponse::new().set_choices(vec![AutocompleteChoice::from(
-            "You have no subscriptions yet. Subscribe first with `/subscribe` command",
-        )]);
-    }
-
-    let mut choices: Vec<AutocompleteChoice> = feeds
-        .into_iter()
-        .map(|feed| AutocompleteChoice::new(feed.name, feed.source_url))
-        .collect();
-
-    choices.truncate(25);
-    CreateAutocompleteResponse::new().set_choices(choices)
+    CreateAutocompleteResponse::new()
 }

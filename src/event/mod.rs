@@ -1,10 +1,7 @@
 //! Event system for pub/sub communication between components.
 
 pub mod event_bus;
-pub mod feed_update;
 
-pub use feed_update::FeedUpdateData;
-pub use feed_update::FeedUpdateEvent;
 use poise::serenity_prelude::VoiceState;
 
 /// Marker trait for events that can be dispatched through the event bus.
