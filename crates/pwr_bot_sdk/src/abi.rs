@@ -2,10 +2,25 @@ use std::ffi::CStr;
 use std::ffi::c_char;
 use std::fmt;
 
+/// Current version of the plugin ABI.
+///
+/// Plugins must match this version at load time. Bumped when the FFI types
+/// ( [`InvokeRequest`], [`InvokeResponse`], [`PluginVTable`], [`HostCallbacks`])
+/// change in a breaking way.
 pub const PWR_BOT_PLUGIN_API_VERSION: u32 = 3;
 
+/// Name of the entry point symbol plugins must export.
+///
+/// The host `dlopen`s the `.so` and looks up this symbol to get the
+/// [`PluginVTable`]. The [`export_plugin!`](crate::export_plugin) macro
+/// generates a function with this exact name.
 pub const PWR_BOT_PLUGIN_ENTRY: &[u8] = b"pwr_bot_plugin_entry\0";
 
+/// FFI input to a plugin invocation.
+///
+/// Passed from the host to [`PluginVTable::invoke`] and
+/// [`PluginVTable::init`]. Contains the command name, JSON arguments,
+/// host callbacks, and an opaque context handle.
 #[repr(C)]
 pub struct InvokeRequest {
     pub command: *const c_char,
@@ -14,16 +29,15 @@ pub struct InvokeRequest {
     pub ctx_handle: u64,
 }
 
+/// FFI output from a plugin invocation.
+///
+/// The plugin writes the result (either a JSON payload or an error string)
+/// into this struct. The host is responsible for calling
+/// [`PluginVTable::free_string`] on non-null pointers.
 #[repr(C)]
 pub struct InvokeResponse {
     pub payload_json: *mut c_char,
     pub error: *mut c_char,
-}
-
-/// JSON-encoded array of command descriptors.
-#[repr(C)]
-pub struct CommandList {
-    pub json: *const c_char,
 }
 
 /// Callback table the host provides to plugins.

@@ -1,3 +1,11 @@
+//! SDK for building pwr-bot plugins.
+//!
+//! This crate provides the types and macros needed to write a dynamic plugin
+//! that can be loaded at runtime by the pwr-bot host. See [`BotPlugin`] for
+//! the main entry point.
+//!
+//! [`BotPlugin`]: plugin::BotPlugin
+
 pub mod abi;
 pub mod host;
 pub mod macros;

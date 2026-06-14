@@ -30,6 +30,7 @@ pub struct PluginRegistry {
 }
 
 impl PluginRegistry {
+    /// Creates an empty plugin registry.
     pub fn new() -> Self {
         Self {
             plugins: RwLock::new(Vec::new()),

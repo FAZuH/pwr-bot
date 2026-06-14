@@ -1,6 +1,24 @@
 /// Generate the FFI glue for a plugin.
 ///
+/// This macro generates the `extern "C"` functions required by the plugin ABI,
+/// including the entry point ([`PWR_BOT_PLUGIN_ENTRY`](crate::PWR_BOT_PLUGIN_ENTRY)),
+/// metadata, invoke, init, shutdown, and event dispatch.
+///
 /// The plugin type must implement [`BotPlugin`](crate::plugin::BotPlugin).
+///
+/// # Usage
+///
+/// ```ignore
+/// use pwr_bot_sdk::export_plugin;
+///
+/// struct MyPlugin;
+/// // ... implement BotPlugin for MyPlugin ...
+///
+/// export_plugin!(MyPlugin, MyPlugin);
+/// ```
+///
+/// The second argument is an expression that constructs the plugin instance.
+/// It is called once and cached in a `OnceLock`.
 #[macro_export]
 macro_rules! export_plugin {
     ($plugin_type:ty, $initializer:expr) => {

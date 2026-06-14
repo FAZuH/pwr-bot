@@ -136,6 +136,7 @@ pub struct ServerSettings {
 }
 
 impl ServerSettings {
+    /// Returns `true` if a plugin is enabled for this server.
     pub fn is_enabled(&self, plugin_id: &str) -> bool {
         self.plugin_settings
             .get(plugin_id)
@@ -147,6 +148,7 @@ impl ServerSettings {
             .unwrap_or(false)
     }
 
+    /// Enables or disables a plugin for this server.
     pub fn set_enabled(&mut self, plugin_id: &str, enabled: bool) {
         let entry = self
             .plugin_settings
@@ -169,7 +171,9 @@ pub struct BotMetaEntity {
     pub value: String,
 }
 
+/// Enumeration of well-known metadata keys in the `bot_meta` table.
 pub enum BotMetaKey {
+    /// The currently deployed bot version string, used for auto-registration.
     BotVersion,
 }
 

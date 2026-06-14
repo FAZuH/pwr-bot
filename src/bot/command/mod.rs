@@ -122,10 +122,14 @@ impl<'a> Router<'a> {
         self.nav_queue.lock().await.back().cloned()
     }
 
+    /// Stores the reply handle for the current message.
+    ///
+    /// Used by handlers to get access to the sent message for later edits.
     pub async fn set_reply_handle(&self, new_reply: ReplyHandle<'a>) {
         *self.reply_handle.lock().await = Some(new_reply)
     }
 
+    /// Returns a lock guard to the current reply handle.
     pub async fn reply_handle(&self) -> tokio::sync::MutexGuard<'_, Option<ReplyHandle<'a>>> {
         self.reply_handle.lock().await
     }
@@ -179,6 +183,7 @@ pub struct PluginSettingsHandler {
 }
 
 impl PluginSettingsHandler {
+    /// Creates a new handler for the given plugin's settings panel.
     pub fn new(host_ctx: Arc<PoiseHostCtx>, plugin_id: String) -> Self {
         Self {
             plugin_id,

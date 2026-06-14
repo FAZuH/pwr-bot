@@ -11,6 +11,11 @@ pub struct PluginHost {
 }
 
 impl PluginHost {
+    /// Creates a new host handle for a plugin invocation.
+    ///
+    /// `ctx_handle` is an opaque identifier tied to the Discord interaction.
+    /// `callbacks` must remain valid for the lifetime of this handle (guaranteed
+    /// by the host for the duration of the FFI call).
     pub fn new(ctx_handle: u64, callbacks: &'static HostCallbacks) -> Self {
         Self {
             ctx_handle,
@@ -18,6 +23,7 @@ impl PluginHost {
         }
     }
 
+    /// Returns the opaque context handle for this invocation.
     pub fn ctx_handle(&self) -> u64 {
         self.ctx_handle
     }

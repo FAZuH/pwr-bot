@@ -152,7 +152,10 @@ pub async fn dispatch_init_ffi(loaded: &LoadedPlugin) -> Result<(), String> {
     Ok(())
 }
 
-/// Registers FFI plugin event handlers on the event bus.
+/// Registers all FFI plugin event handlers on the event bus.
+///
+/// For each plugin's declared [`EventHandlerSpec`](pwr_bot_sdk::EventHandlerSpec)s,
+/// subscribes a named handler that dispatches to the plugin's `on_event` via FFI.
 pub fn register_ffi_event_handlers(
     event_bus: &crate::event::event_bus::EventBus,
     ffi_plugins: &[Arc<LoadedPlugin>],

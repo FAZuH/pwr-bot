@@ -10,6 +10,9 @@ use crate::bot::command::Context as BotContext;
 use crate::bot::command::Error;
 
 /// Owned message payload for sending across trait boundaries.
+///
+/// Constructed by handlers and consumed by [`HostCtx::send_message`] or
+/// [`HostCtx::edit_message`].
 pub struct MessagePayload {
     pub content: Option<String>,
     pub embed: Option<CreateEmbed<'static>>,
@@ -17,6 +20,7 @@ pub struct MessagePayload {
 }
 
 impl MessagePayload {
+    /// Creates a plain text message payload (non-ephemeral, no embed).
     pub fn text(content: impl Into<String>) -> Self {
         Self {
             content: Some(content.into()),
@@ -32,18 +36,26 @@ impl MessagePayload {
 /// Plugin commands use `FfiHostCtx` (calling back into the host via FFI).
 #[async_trait]
 pub trait HostCtx: Send + Sync {
+    /// Returns the guild ID for this interaction, if any.
     fn guild_id(&self) -> Option<u64>;
+    /// Returns the Discord user ID of the interaction author.
     fn author_id(&self) -> u64;
+    /// Returns the Discord channel ID where the interaction occurred.
     fn channel_id(&self) -> u64;
+    /// Returns a clone of the shared application [`Data`].
     fn data(&self) -> Arc<Data>;
 
+    /// Defers the interaction, showing a loading state to the user.
     async fn defer(&self) -> Result<(), Error>;
+    /// Sends a (possibly ephemeral) message in response to the interaction.
     async fn send_message(&self, payload: &MessagePayload) -> Result<MessageId, Error>;
+    /// Edits a previously sent message.
     async fn edit_message(
         &self,
         message_id: MessageId,
         payload: &MessagePayload,
     ) -> Result<(), Error>;
+    /// Acknowledges a component interaction without sending a message.
     async fn acknowledge(&self, interaction: &ComponentInteraction) -> Result<(), Error>;
 }
 
@@ -62,6 +74,10 @@ pub struct PoiseHostCtx {
 }
 
 impl PoiseHostCtx {
+    /// Creates a new `PoiseHostCtx` from a poise command context.
+    ///
+    /// Extracts all owned state (guild ID, author ID, channel ID, HTTP client)
+    /// at construction so the type is lifetime-free and can be sent across tasks.
     pub fn new(ctx: BotContext<'_>) -> Arc<Self> {
         let interaction = match ctx {
             BotContext::Application(app_ctx) => Some(app_ctx.interaction.clone()),
@@ -94,10 +110,12 @@ impl PoiseHostCtx {
         })
     }
 
+    /// Returns a reference to the Discord HTTP client.
     pub fn http(&self) -> &Arc<Http> {
         &self.http
     }
 
+    /// Returns a clone of the shared application [`Data`].
     pub fn data(&self) -> Arc<Data> {
         self.data.clone()
     }
