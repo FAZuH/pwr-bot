@@ -49,6 +49,7 @@ impl StepStatus {
 fn build_test_reply<'a>(
     steps: &'a [(StepStatus, &'static str, &'static str)],
     failed_at: Option<usize>,
+    error: Option<&'a str>,
 ) -> CreateReply<'a> {
     let total = steps.len();
     let passed = steps
@@ -78,13 +79,17 @@ fn build_test_reply<'a>(
         }
     }
 
-    let status_text = if let Some(idx) = failed_at {
+    let mut status_text = if let Some(idx) = failed_at {
         format!("\n❌ **Failed at:** {}\n", steps[idx].1)
     } else if passed == total {
         format!("\n✅ **All {total} steps passed.**\n")
     } else {
         format!("\n⏳ **Progress:** {passed}/{total}\n")
     };
+
+    if let Some(err) = error {
+        status_text.push_str(&format!("```\n{err}\n```"));
+    }
 
     let text = format!("{}\n{}\n{}", title, body_lines.join("\n"), status_text);
 
@@ -116,7 +121,7 @@ pub async fn gui_test(ctx: Context<'_>) -> Result<(), Error> {
         .zip(step_info.iter())
         .map(|(s, (name, desc))| (*s, *name, *desc))
         .collect();
-    let msg = ctx.send(build_test_reply(&steps_with_status, None)).await?;
+    let msg = ctx.send(build_test_reply(&steps_with_status, None, None)).await?;
 
     for (i, step) in TEST_STEPS.iter().enumerate() {
         statuses[i] = StepStatus::Running;
@@ -126,7 +131,7 @@ pub async fn gui_test(ctx: Context<'_>) -> Result<(), Error> {
             .zip(step_info.iter())
             .map(|(s, (name, desc))| (*s, *name, *desc))
             .collect();
-        msg.edit(ctx, build_test_reply(&steps_with_status, None))
+        msg.edit(ctx, build_test_reply(&steps_with_status, None, None))
             .await?;
 
         match (step.run)(ctx).await {
@@ -141,9 +146,10 @@ pub async fn gui_test(ctx: Context<'_>) -> Result<(), Error> {
                     .zip(step_info.iter())
                     .map(|(s, (name, desc))| (*s, *name, *desc))
                     .collect();
+                let err_str = e.to_string();
                 msg.edit(
                     ctx,
-                    build_test_reply(&steps_with_status, Some(i)).content(format!("```\n{e}\n```")),
+                    build_test_reply(&steps_with_status, Some(i), Some(&err_str)),
                 )
                 .await?;
                 return Ok(());
@@ -159,7 +165,7 @@ pub async fn gui_test(ctx: Context<'_>) -> Result<(), Error> {
         .zip(step_info.iter())
         .map(|(s, (name, desc))| (*s, *name, *desc))
         .collect();
-    msg.edit(ctx, build_test_reply(&steps_with_status, None))
+    msg.edit(ctx, build_test_reply(&steps_with_status, None, None))
         .await?;
 
     Ok(())
