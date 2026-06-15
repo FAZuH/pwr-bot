@@ -1,6 +1,3 @@
-[workspace]
-members = ["crates/pwr_bot_sdk", "crates/pwr-bot-plugin-welcome", "crates/pwr-bot-plugin-feed", "crates/pwr-bot-plugin-voice", "tests/fixtures/pwr-bot-test-plugin"]
-
 [package]
 name = "pwr-bot"
 default-run = "pwr-bot"
@@ -67,3 +64,6 @@ required-features = ["db-tests"]
 
 [dev-dependencies]
 serial_test = "3.3.1"
+
+[workspace]
+members = ["crates/pwr_bot_sdk", "crates/pwr-bot-plugin-welcome", "crates/pwr-bot-plugin-feed", "crates/pwr-bot-plugin-voice", "tests/fixtures/pwr-bot-test-plugin"]

@@ -214,6 +214,42 @@ impl ComickPlatform {
             })
     }
 
+    pub(crate) fn parse_latest_response(
+        &self,
+        resp: Json,
+        hid: &str,
+    ) -> Result<FeedItem, FeedError> {
+        let chapter = self.get_latest_chapter(&resp, hid)?;
+        let title = self.get_chapter(chapter)?;
+        let published = self.get_publish_at(chapter)?;
+        Ok(FeedItem {
+            id: hid.to_string(),
+            title,
+            published,
+        })
+    }
+
+    pub(crate) fn parse_source_response(
+        &self,
+        resp: Json,
+        slug: &str,
+    ) -> Result<FeedSource, FeedError> {
+        let comic = self.get_comic_from_resp(&resp)?;
+        let items_id = self.get_hid(comic)?;
+        let name = self.get_title(comic)?;
+        let description = self.get_description(comic)?;
+        let source_url = self.get_source_url_from_id(slug);
+        let image_url = Some(self.get_cover_url(comic)?);
+        Ok(FeedSource {
+            id: slug.to_string(),
+            items_id,
+            name,
+            source_url,
+            image_url,
+            description,
+        })
+    }
+
     async fn send(&self, request: wreq::RequestBuilder) -> Result<wreq::Response, wreq::Error> {
         if self.limiter.check().is_err() {
             info!("Source {} is ratelimited. Waiting...", self.base.info.name);
@@ -248,23 +284,8 @@ impl Platform for ComickPlatform {
             .get(format!("{}/comic/{slug}", self.base.info.api_url));
 
         let resp = self.send_get_json(request).await?;
-        let comic = self.get_comic_from_resp(&resp)?;
 
-        let items_id = self.get_hid(comic)?;
-        let name = self.get_title(comic)?;
-        let description = self.get_description(comic)?;
-        let source_url = self.get_source_url_from_id(slug);
-        // We will assume image_url always exist for this platform until proven otherwise
-        let image_url = Some(self.get_cover_url(comic)?);
-
-        Ok(FeedSource {
-            id: slug.to_string(),
-            items_id,
-            name,
-            source_url,
-            image_url,
-            description,
-        })
+        self.parse_source_response(resp, slug)
     }
 
     async fn fetch_latest(&self, hid: &str) -> Result<FeedItem, FeedError> {
@@ -280,15 +301,7 @@ impl Platform for ComickPlatform {
 
         let resp = self.send_get_json(request).await?;
 
-        let chapter = self.get_latest_chapter(&resp, hid)?;
-        let title = self.get_chapter(chapter)?;
-        let published = self.get_publish_at(chapter)?;
-
-        Ok(FeedItem {
-            id: hid.to_string(),
-            title,
-            published,
-        })
+        self.parse_latest_response(resp, hid)
     }
 
     fn get_id_from_source_url<'a>(&self, slug: &'a str) -> Result<&'a str, FeedError> {
@@ -315,5 +328,78 @@ impl Eq for ComickPlatform {}
 impl Hash for ComickPlatform {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.base.info.api_url.hash(state);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    macro_rules! load_fixture {
+        ($file:expr) => {
+            serde_json::from_str::<Map<String, Value>>(include_str!(concat!(
+                "../../tests/fixtures/",
+                $file
+            )))
+            .unwrap()
+        };
+    }
+
+    fn platform() -> ComickPlatform {
+        ComickPlatform::new()
+    }
+
+    #[test]
+    fn parse_latest_returns_feed_item() {
+        let json = load_fixture!("comick_fetch_latest_exist.json");
+        let item = platform().parse_latest_response(json, "DqrXZDbr").unwrap();
+        assert_eq!(item.id, "DqrXZDbr");
+        assert_eq!(item.title, "333");
+        assert_eq!(
+            item.published,
+            "2025-12-27T14:44:40.000Z".parse::<DateTime<Utc>>().unwrap()
+        );
+    }
+
+    #[test]
+    fn parse_latest_with_no_chapters_returns_item_not_found() {
+        let resp: Map<String, Value> =
+            serde_json::from_str(r#"{"chapters":[]}"#).unwrap();
+        let result = platform().parse_latest_response(resp, "DqrXZDbr");
+        assert!(matches!(result, Err(FeedError::ItemNotFound { .. })));
+    }
+
+    #[test]
+    fn parse_source_returns_feed_source() {
+        let json = load_fixture!("comick_fetch_source_exist.json");
+        let slug = "02-tonikaku-kawaii";
+        let result = platform().parse_source_response(json, slug).unwrap();
+        assert_eq!(result.id, slug);
+        assert_eq!(result.items_id, "DqrXZDbr");
+        assert_eq!(result.name, "Tonikaku Kawaii");
+        assert!(result.description.starts_with("Described as a story"));
+        assert_eq!(
+            result.source_url,
+            "https://comick.dev/comic/02-tonikaku-kawaii"
+        );
+        assert_eq!(
+            result.image_url.as_deref(),
+            Some("https://meo.comick.pictures/O8kwQg.jpg")
+        );
+    }
+
+    #[test]
+    fn check_resp_errors_detects_status_code() {
+        let resp: Map<String, Value> =
+            serde_json::from_str(r#"{"statusCode":404,"message":"Not Found"}"#).unwrap();
+        let result = platform().check_resp_errors(&resp);
+        assert!(matches!(result, Err(FeedError::ApiError { .. })));
+    }
+
+    #[test]
+    fn check_resp_errors_ok_on_valid() {
+        let json = load_fixture!("comick_fetch_latest_exist.json");
+        let result = platform().check_resp_errors(&json);
+        assert!(result.is_ok());
     }
 }

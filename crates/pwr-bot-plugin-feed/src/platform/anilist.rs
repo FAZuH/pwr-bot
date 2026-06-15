@@ -208,6 +208,39 @@ impl AniListPlatform {
             })?;
         Ok(source_id_num)
     }
+
+    pub(crate) fn parse_latest_response(
+        &self,
+        resp: Value,
+        source_id: &str,
+    ) -> Result<FeedItem, FeedError> {
+        let schedule = self.get_airing_schedule(&resp, source_id)?;
+        let timestamp = self.get_timestamp(schedule)?;
+        let title = self.get_episode(schedule)?;
+        let id = self.get_id(schedule)?;
+        let published = DateTime::from_timestamp(timestamp, 0)
+            .ok_or_else(|| FeedError::InvalidTimestamp { timestamp })?;
+        Ok(FeedItem { id, title, published })
+    }
+
+    pub(crate) fn parse_source_response(
+        &self,
+        resp: Value,
+        source_id: &str,
+    ) -> Result<FeedSource, FeedError> {
+        let media = self.get_media(&resp, source_id)?;
+        let name = self.get_title_romaji(media)?;
+        let description = self.get_description(media)?;
+        let image_url = Some(self.get_cover_image(media)?);
+        Ok(FeedSource {
+            id: source_id.to_string(),
+            items_id: source_id.to_string(),
+            name,
+            description,
+            source_url: self.get_source_url_from_id(source_id),
+            image_url,
+        })
+    }
 }
 
 #[async_trait]
@@ -230,19 +263,7 @@ impl Platform for AniListPlatform {
         "#;
         let response_json = self.request(&source_id, query).await?;
 
-        let airing_schedule = self.get_airing_schedule(&response_json, &source_id)?;
-        let timestamp = self.get_timestamp(airing_schedule)?;
-        let title = self.get_episode(airing_schedule)?;
-        let id = self.get_id(airing_schedule)?;
-
-        let published = DateTime::from_timestamp(timestamp, 0)
-            .ok_or_else(|| FeedError::InvalidTimestamp { timestamp })?;
-
-        Ok(FeedItem {
-            id,
-            title,
-            published,
-        })
+        self.parse_latest_response(response_json, &source_id)
     }
 
     async fn fetch_source(&self, id: &str) -> Result<FeedSource, FeedError> {
@@ -265,19 +286,7 @@ impl Platform for AniListPlatform {
         "#;
         let response_json = self.request(&source_id, query).await?;
 
-        let media = self.get_media(&response_json, &source_id)?;
-        let name = self.get_title_romaji(media)?;
-        let description = self.get_description(media)?;
-        let image_url = Some(self.get_cover_image(media)?);
-
-        Ok(FeedSource {
-            id: source_id.clone(),
-            items_id: source_id.clone(),
-            name,
-            description,
-            source_url: self.get_source_url_from_id(id),
-            image_url,
-        })
+        self.parse_source_response(response_json, &source_id)
     }
 
     fn get_id_from_source_url<'a>(&self, url: &'a str) -> Result<&'a str, FeedError> {
@@ -304,5 +313,88 @@ impl Eq for AniListPlatform {}
 impl Hash for AniListPlatform {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.base.info.api_url.hash(state);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    macro_rules! load_fixture {
+        ($file:expr) => {
+            serde_json::from_str(include_str!(concat!("../../tests/fixtures/", $file))).unwrap()
+        };
+    }
+
+    fn platform() -> AniListPlatform {
+        AniListPlatform::new()
+    }
+
+    #[test]
+    fn parse_latest_returns_feed_item() {
+        let json = load_fixture!("anilist_fetch_latest_exist.json");
+        let item = platform().parse_latest_response(json, "173692").unwrap();
+        assert_eq!(item.title, "12");
+        assert_eq!(item.id, "401043");
+        assert_eq!(item.published, DateTime::from_timestamp(1766327400, 0).unwrap());
+    }
+
+    #[test]
+    fn parse_latest_with_null_schedule_returns_item_not_found() {
+        let json = json!({"data": {"AiringSchedule": null}});
+        let result = platform().parse_latest_response(json, "173692");
+        assert!(matches!(result, Err(FeedError::ItemNotFound { .. })));
+    }
+
+    #[test]
+    fn parse_source_returns_feed_source() {
+        let json = load_fixture!("anilist_fetch_source_exist.json");
+        let result = platform().parse_source_response(json, "173692").unwrap();
+        assert_eq!(result.id, "173692");
+        assert_eq!(result.items_id, "173692");
+        assert_eq!(
+            result.name,
+            "Chichi wa Eiyuu, Haha wa Seirei, Musume no Watashi wa Tenseisha."
+        );
+        assert!(result.description.starts_with("Ellen, an 8-year-old girl"));
+        assert_eq!(
+            result.image_url.as_deref(),
+            Some("https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx173692-shp7PGRQyCQl.jpg")
+        );
+        assert_eq!(result.source_url, "https://anilist.co/anime/173692");
+    }
+
+    #[test]
+    fn parse_source_with_null_media_returns_source_not_found() {
+        let json = json!({"data": null});
+        let result = platform().parse_source_response(json, "999999");
+        assert!(matches!(result, Err(FeedError::SourceNotFound { .. })));
+    }
+
+    #[test]
+    fn check_api_errors_detects_errors() {
+        let json = load_fixture!("anilist_fetch_latest_not_exist.json");
+        let result = AniListPlatform::new().check_api_errors(&json);
+        assert!(matches!(result, Err(FeedError::ApiError { .. })));
+    }
+
+    #[test]
+    fn check_api_errors_ok_on_valid() {
+        let json = load_fixture!("anilist_fetch_latest_exist.json");
+        let result = AniListPlatform::new().check_api_errors(&json);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn validate_id_rejects_non_numeric() {
+        let result = AniListPlatform::validate_id("abc");
+        assert!(matches!(result, Err(FeedError::InvalidSourceId { .. })));
+    }
+
+    #[test]
+    fn validate_id_accepts_numeric() {
+        let result = AniListPlatform::validate_id("12345");
+        assert_eq!(result.unwrap(), 12345);
     }
 }

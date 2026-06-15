@@ -262,6 +262,45 @@ impl MangaDexPlatform {
         Ok(())
     }
 
+    pub(crate) fn parse_latest_response(
+        &self,
+        resp: Value,
+        source_id: &str,
+    ) -> Result<FeedItem, FeedError> {
+        let data = self.get_data_from_resp(&resp)?;
+        let chapters = self.get_chapters_from_data(data)?;
+        let chapter = self.get_first_chapter(chapters, source_id)?;
+        let attributes = self.get_chapter_attributes(chapter)?;
+        let id = self.get_chapter_id(chapter)?;
+        let title = self.get_chapter_title(attributes)?;
+        let published = self.get_chapter_publish_at(attributes)?;
+        Ok(FeedItem { id, title, published })
+    }
+
+    pub(crate) fn parse_source_response(
+        &self,
+        resp: Value,
+        source_id: &str,
+    ) -> Result<FeedSource, FeedError> {
+        let data = self.get_data_from_resp(&resp)?;
+        let attr = self.get_attr_from_data(data)?;
+        let name = self.get_title_from_attr(attr)?;
+        let description = self.get_description_from_attr(attr);
+        let cover_filename = self.get_cover_filename(data)?;
+        let image_url = Some(format!(
+            "https://uploads.mangadex.org/covers/{source_id}/{cover_filename}"
+        ));
+        let source_url = self.get_source_url_from_id(source_id);
+        Ok(FeedSource {
+            items_id: source_id.to_string(),
+            name,
+            source_url,
+            image_url,
+            id: source_id.to_string(),
+            description,
+        })
+    }
+
     async fn send(&self, request: wreq::RequestBuilder) -> Result<wreq::Response, wreq::Error> {
         if self.limiter.check().is_err() {
             info!("Source {} is ratelimited. Waiting...", self.base.info.name);
@@ -302,25 +341,8 @@ impl Platform for MangaDexPlatform {
         ));
 
         let resp = self.send_get_json(request).await?;
-        let data = self.get_data_from_resp(&resp)?;
-        let attr = self.get_attr_from_data(data)?;
-        let name = self.get_title_from_attr(attr)?;
-        let description = self.get_description_from_attr(attr);
 
-        let cover_filename = self.get_cover_filename(data)?;
-        let image_url = Some(format!(
-            "https://uploads.mangadex.org/covers/{source_id}/{cover_filename}"
-        ));
-        let source_url = self.get_source_url_from_id(&source_id);
-
-        Ok(FeedSource {
-            items_id: source_id.clone(),
-            name,
-            source_url,
-            image_url,
-            id: source_id,
-            description,
-        })
+        self.parse_source_response(resp, &source_id)
     }
 
     async fn fetch_latest(&self, items_id: &str) -> Result<FeedItem, FeedError> {
@@ -342,21 +364,7 @@ impl Platform for MangaDexPlatform {
 
         let resp = self.send_get_json(request).await?;
 
-        // Extract fields
-        let data = self.get_data_from_resp(&resp)?;
-        let chapters = self.get_chapters_from_data(data)?;
-        let chapter = self.get_first_chapter(chapters, &source_id)?;
-        let attributes = self.get_chapter_attributes(chapter)?;
-
-        let id = self.get_chapter_id(chapter)?;
-        let title = self.get_chapter_title(attributes)?;
-        let published = self.get_chapter_publish_at(attributes)?;
-
-        Ok(FeedItem {
-            id,
-            title,
-            published,
-        })
+        self.parse_latest_response(resp, &source_id)
     }
 
     fn get_id_from_source_url<'a>(&self, url: &'a str) -> Result<&'a str, FeedError> {
@@ -383,5 +391,119 @@ impl Eq for MangaDexPlatform {}
 impl Hash for MangaDexPlatform {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.base.info.api_url.hash(state);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    macro_rules! load_fixture {
+        ($file:expr) => {
+            serde_json::from_str(include_str!(concat!("../../tests/fixtures/", $file))).unwrap()
+        };
+    }
+
+    fn platform() -> MangaDexPlatform {
+        MangaDexPlatform::new()
+    }
+
+    #[test]
+    fn parse_latest_returns_feed_item() {
+        let json = load_fixture!("mangadex_fetch_latest_exist.json");
+        let item = platform().parse_latest_response(json, "0e017a08-835a-4cbe-ba63-576d5010a5a0").unwrap();
+        assert_eq!(item.id, "eb39609e-2e48-4434-af76-aff0b7be91c2");
+        assert_eq!(item.title, "105");
+        assert_eq!(
+            item.published,
+            "2025-12-23T03:19:29+00:00".parse::<DateTime<Utc>>().unwrap()
+        );
+    }
+
+    #[test]
+    fn parse_latest_with_no_chapters_returns_empty_source() {
+        let json = serde_json::json!({"data": [], "result": "ok"});
+        let result = platform().parse_latest_response(json, "0e017a08-835a-4cbe-ba63-576d5010a5a0");
+        assert!(matches!(result, Err(FeedError::EmptySource { .. })));
+    }
+
+    #[test]
+    fn parse_source_returns_feed_source() {
+        let json = load_fixture!("mangadex_fetch_source_exist.json");
+        let source_id = "0e017a08-835a-4cbe-ba63-576d5010a5a0";
+        let result = platform().parse_source_response(json, source_id).unwrap();
+        assert_eq!(result.id, source_id);
+        assert_eq!(result.items_id, source_id);
+        assert_eq!(result.name, "Kuma Kuma Kuma Bear");
+        assert!(result.description.starts_with("Yuna, a 15-year-old girl"));
+        assert_eq!(
+            result.image_url.as_deref(),
+            Some("https://uploads.mangadex.org/covers/0e017a08-835a-4cbe-ba63-576d5010a5a0/7c198c70-6ab4-4e45-838b-f3efd9f5f1c1.jpg")
+        );
+        assert_eq!(
+            result.source_url,
+            "https://mangadex.org/title/0e017a08-835a-4cbe-ba63-576d5010a5a0"
+        );
+    }
+
+    #[test]
+    fn check_resp_errors_detects_errors() {
+        let json = load_fixture!("mangadex_fetch_latest_not_exist.json");
+        let result = platform().check_resp_errors(&json);
+        assert!(matches!(result, Err(FeedError::ApiError { .. })));
+    }
+
+    #[test]
+    fn check_resp_errors_ok_on_valid() {
+        let json = load_fixture!("mangadex_fetch_latest_exist.json");
+        let result = platform().check_resp_errors(&json);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn validate_uuid_rejects_invalid() {
+        let result = platform().validate_uuid(&"not-a-uuid".to_string());
+        assert!(matches!(result, Err(FeedError::InvalidSourceId { .. })));
+    }
+
+    #[test]
+    fn validate_uuid_accepts_valid() {
+        let result = platform().validate_uuid(
+            &"0e017a08-835a-4cbe-ba63-576d5010a5a0".to_string(),
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn get_title_from_attr_returns_en_title() {
+        let attr: Map<String, Value> = serde_json::from_value(serde_json::json!({
+            "title": {"en": "English Title"},
+            "altTitles": [{"ja-ro": "Romaji Alt Title"}]
+        }))
+        .unwrap();
+        let result = platform().get_title_from_attr(&attr).unwrap();
+        assert_eq!(result, "English Title");
+    }
+
+    #[test]
+    fn get_title_from_attr_falls_back_to_alt_titles() {
+        let attr: Map<String, Value> = serde_json::from_value(serde_json::json!({
+            "title": {"ja": "Japanese Title"},
+            "altTitles": [{"en": "English Alt Title"}]
+        }))
+        .unwrap();
+        let result = platform().get_title_from_attr(&attr).unwrap();
+        assert_eq!(result, "English Alt Title");
+    }
+
+    #[test]
+    fn get_title_from_attr_falls_back_to_ja_ro() {
+        let attr: Map<String, Value> = serde_json::from_value(serde_json::json!({
+            "title": {"ja": "Japanese Title"},
+            "altTitles": [{"ja-ro": "Romaji Alt Title"}]
+        }))
+        .unwrap();
+        let result = platform().get_title_from_attr(&attr).unwrap();
+        assert_eq!(result, "Romaji Alt Title");
     }
 }
