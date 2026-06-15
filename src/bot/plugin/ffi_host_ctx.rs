@@ -71,6 +71,31 @@ impl Drop for FfiHostCtx {
 // FFI callbacks
 // ---------------------------------------------------------------------------
 
+/// Shared runtime for host callbacks called from within a plugin's
+/// `Runtime::block_on`. We cannot nest `Handle::block_on` on the host's
+/// runtime (the thread is already inside it), so we run each future on a
+/// dedicated thread with its own tokio runtime.
+static HOST_BLOCK_RT: std::sync::OnceLock<tokio::runtime::Runtime> = std::sync::OnceLock::new();
+
+fn host_block_on<F, T>(f: F) -> T
+where
+    F: std::future::Future<Output = T> + Send + 'static,
+    T: Send + 'static,
+{
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let rt = HOST_BLOCK_RT.get_or_init(|| {
+            tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(1)
+                .enable_all()
+                .build()
+                .expect("Failed to create host block_on runtime")
+        });
+        let _ = tx.send(rt.block_on(f));
+    });
+    rx.recv().expect("host runtime task failed")
+}
+
 fn ctx_data(ctx_handle: u64) -> Option<Arc<Data>> {
     host_registry::get(ctx_handle).map(|ctx| ctx.data())
 }
@@ -106,8 +131,16 @@ unsafe extern "C" fn cb_send_reply(
             }
         };
 
-    let handle = tokio::runtime::Handle::current();
-    match handle.block_on(async { ctx.send_message(&payload).await }) {
+    let content = payload.content;
+    let ephemeral = payload.ephemeral;
+    match host_block_on(async move {
+        let msg = MessagePayload {
+            content,
+            embed: None,
+            ephemeral,
+        };
+        ctx.send_message(&msg).await
+    }) {
         Ok(_) => true,
         Err(e) => {
             let err = CString::new(e.to_string()).unwrap();
@@ -151,8 +184,17 @@ unsafe extern "C" fn cb_edit_reply(
             }
         };
 
-    let handle = tokio::runtime::Handle::current();
-    match handle.block_on(async { ctx.edit_message(MessageId::new(message_id), &payload).await }) {
+    let msg_id = message_id;
+    let content = payload.content;
+    let ephemeral = payload.ephemeral;
+    match host_block_on(async move {
+        let msg = MessagePayload {
+            content,
+            embed: None,
+            ephemeral,
+        };
+        ctx.edit_message(MessageId::new(msg_id), &msg).await
+    }) {
         Ok(_) => true,
         Err(e) => {
             let err = CString::new(e.to_string()).unwrap();
@@ -170,8 +212,7 @@ unsafe extern "C" fn cb_defer(ctx_handle: u64) -> bool {
         None => return false,
     };
 
-    let handle = tokio::runtime::Handle::current();
-    handle.block_on(async { ctx.defer().await }).is_ok()
+    host_block_on(async move { ctx.defer().await }).is_ok()
 }
 
 unsafe extern "C" fn cb_guild_id(ctx_handle: u64) -> u64 {
@@ -230,21 +271,21 @@ unsafe extern "C" fn cb_send_channel_message(
         }
     };
 
-    let http = ctx.http();
-    let msg_fut = async {
+    let http = ctx.http().clone();
+    let content = payload.content;
+    let channel_id_val = channel_id;
+    match host_block_on(async move {
         let mut builder = poise::serenity_prelude::CreateMessage::new();
-        if let Some(content) = &payload.content {
-            builder = builder.content(content);
+        if let Some(ref c) = content {
+            builder = builder.content(c);
         }
         http.send_message(
-            poise::serenity_prelude::ChannelId::new(channel_id).into(),
+            poise::serenity_prelude::ChannelId::new(channel_id_val).into(),
             vec![],
             &builder,
         )
         .await
-    };
-    let handle = tokio::runtime::Handle::current();
-    match handle.block_on(msg_fut) {
+    }) {
         Ok(msg) => {
             unsafe { *out_message_id = msg.id.get() };
             true
@@ -289,18 +330,17 @@ unsafe extern "C" fn cb_send_dm(
         }
     };
 
-    let http = ctx.http();
-    let handle = tokio::runtime::Handle::current();
-    let dm_fut = async {
-        let user = http.get_user(UserId::new(user_id)).await?;
+    let http = ctx.http().clone();
+    let user_id_val = user_id;
+    let content = payload.content;
+    match host_block_on(async move {
+        let user = http.get_user(UserId::new(user_id_val)).await?;
         let mut builder = CreateMessage::new();
-        if let Some(content) = &payload.content {
-            builder = builder.content(content);
+        if let Some(ref c) = content {
+            builder = builder.content(c);
         }
-        user.id.dm(http, builder).await
-    };
-
-    match handle.block_on(dm_fut) {
+        user.id.dm(&http, builder).await
+    }) {
         Ok(msg) => {
             unsafe { *out_message_id = msg.id.get() };
             true
