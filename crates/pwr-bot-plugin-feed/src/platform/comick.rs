@@ -363,8 +363,7 @@ mod tests {
 
     #[test]
     fn parse_latest_with_no_chapters_returns_item_not_found() {
-        let resp: Map<String, Value> =
-            serde_json::from_str(r#"{"chapters":[]}"#).unwrap();
+        let resp: Map<String, Value> = serde_json::from_str(r#"{"chapters":[]}"#).unwrap();
         let result = platform().parse_latest_response(resp, "DqrXZDbr");
         assert!(matches!(result, Err(FeedError::ItemNotFound { .. })));
     }

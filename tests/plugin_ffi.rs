@@ -6,15 +6,15 @@ use std::ffi::CStr;
 use std::ffi::CString;
 use std::sync::Arc;
 
+use pwr_bot::bot::host_ctx::PoiseHostCtx;
+use pwr_bot::bot::plugin::ffi_host_ctx::FfiHostCtx;
+use pwr_bot::bot::plugin::ffi_host_ctx::{self};
+use pwr_bot::bot::plugin::loader::LoadedPlugin;
+use pwr_bot::bot::plugin::registry::PluginRegistry;
 use pwr_bot_sdk::InvokeRequest;
 use pwr_bot_sdk::InvokeResponse;
 use pwr_bot_sdk::PluginVTable;
 use pwr_bot_sdk::ResponsePayload;
-
-use pwr_bot::bot::host_ctx::PoiseHostCtx;
-use pwr_bot::bot::plugin::ffi_host_ctx::{self, FfiHostCtx};
-use pwr_bot::bot::plugin::loader::LoadedPlugin;
-use pwr_bot::bot::plugin::registry::PluginRegistry;
 
 mod common;
 
@@ -135,10 +135,7 @@ fn parses_event_and_settings_declarations() {
     let plugin = load_plugin();
 
     assert_eq!(plugin.metadata.event_handlers.len(), 1);
-    assert_eq!(
-        plugin.metadata.event_handlers[0].event_name,
-        "test.event"
-    );
+    assert_eq!(plugin.metadata.event_handlers[0].event_name, "test.event");
 
     assert_eq!(plugin.metadata.settings_panels.len(), 1);
     assert_eq!(plugin.metadata.settings_panels[0].id, "test_plugin");
@@ -161,10 +158,7 @@ fn load_plugin_rejects_missing_symbol() {
     let result = unsafe { pwr_bot::bot::plugin::loader::load_plugin(&bad_path) };
     match result {
         Err(err) => {
-            assert!(
-                err.contains("dlopen failed"),
-                "unexpected error: {err}"
-            );
+            assert!(err.contains("dlopen failed"), "unexpected error: {err}");
         }
         Ok(_) => panic!("expected load error for nonexistent .so"),
     }
@@ -267,15 +261,16 @@ fn ffi_invoke_config_check_returns_config_values() {
     let json = unsafe { ffi_invoke(plugin.vtable, "config_check", r#"{}"#, &host_ctx) };
 
     let payload: ResponsePayload = serde_json::from_str(&json).unwrap();
-    let content: serde_json::Value =
-        serde_json::from_str(&payload.content.unwrap()).unwrap();
+    let content: serde_json::Value = serde_json::from_str(&payload.content.unwrap()).unwrap();
 
     assert_eq!(content["poll_interval_secs"], 42);
     assert!(content["feature_enabled"].as_bool().unwrap());
-    assert!(content["data_path"]
-        .as_str()
-        .unwrap()
-        .contains("pwr-bot-test-data"));
+    assert!(
+        content["data_path"]
+            .as_str()
+            .unwrap()
+            .contains("pwr-bot-test-data")
+    );
 }
 
 #[test]
@@ -370,7 +365,8 @@ fn ffi_shutdown_succeeds() {
 
 #[test]
 fn publish_event_callback_reaches_event_bus() {
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::Ordering;
 
     reset_globals();
     let received = Arc::new(AtomicBool::new(false));
@@ -389,7 +385,17 @@ fn publish_event_callback_reaches_event_bus() {
     let host_ctx = common::test_helpers::setup_system_ctx(data);
     let plugin = load_plugin();
 
-    let _ = unsafe { ffi_invoke(plugin.vtable, "publish", r#"{"event":"plugin.test"}"#, &host_ctx) };
+    let _ = unsafe {
+        ffi_invoke(
+            plugin.vtable,
+            "publish",
+            r#"{"event":"plugin.test"}"#,
+            &host_ctx,
+        )
+    };
 
-    assert!(received.load(Ordering::SeqCst), "event callback was not invoked");
+    assert!(
+        received.load(Ordering::SeqCst),
+        "event callback was not invoked"
+    );
 }

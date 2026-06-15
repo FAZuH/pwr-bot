@@ -7,18 +7,19 @@ use std::time::Instant;
 
 use poise::serenity_prelude::Http;
 use poise::serenity_prelude::Token;
-
 use pwr_bot::bot::Data;
 use pwr_bot::bot::host_ctx::PoiseHostCtx;
 use pwr_bot::bot::plugin::host_registry;
 use pwr_bot::bot::plugin::loader;
 use pwr_bot::bot::plugin::loader::LoadedPlugin;
 use pwr_bot::bot::plugin::registry::PluginRegistry;
-use pwr_bot::config::{Config, Features};
+use pwr_bot::config::Config;
+use pwr_bot::config::Features;
 use pwr_bot::event::event_bus::EventBus;
 use pwr_bot::service::Services;
 
-use super::noop_services::{NoopInternalOps, NoopSettingsProvider};
+use super::noop_services::NoopInternalOps;
+use super::noop_services::NoopSettingsProvider;
 
 static BUILD_PLUGIN: OnceLock<()> = OnceLock::new();
 

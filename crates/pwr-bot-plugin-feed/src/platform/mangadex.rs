@@ -274,7 +274,11 @@ impl MangaDexPlatform {
         let id = self.get_chapter_id(chapter)?;
         let title = self.get_chapter_title(attributes)?;
         let published = self.get_chapter_publish_at(attributes)?;
-        Ok(FeedItem { id, title, published })
+        Ok(FeedItem {
+            id,
+            title,
+            published,
+        })
     }
 
     pub(crate) fn parse_source_response(
@@ -411,12 +415,16 @@ mod tests {
     #[test]
     fn parse_latest_returns_feed_item() {
         let json = load_fixture!("mangadex_fetch_latest_exist.json");
-        let item = platform().parse_latest_response(json, "0e017a08-835a-4cbe-ba63-576d5010a5a0").unwrap();
+        let item = platform()
+            .parse_latest_response(json, "0e017a08-835a-4cbe-ba63-576d5010a5a0")
+            .unwrap();
         assert_eq!(item.id, "eb39609e-2e48-4434-af76-aff0b7be91c2");
         assert_eq!(item.title, "105");
         assert_eq!(
             item.published,
-            "2025-12-23T03:19:29+00:00".parse::<DateTime<Utc>>().unwrap()
+            "2025-12-23T03:19:29+00:00"
+                .parse::<DateTime<Utc>>()
+                .unwrap()
         );
     }
 
@@ -438,7 +446,9 @@ mod tests {
         assert!(result.description.starts_with("Yuna, a 15-year-old girl"));
         assert_eq!(
             result.image_url.as_deref(),
-            Some("https://uploads.mangadex.org/covers/0e017a08-835a-4cbe-ba63-576d5010a5a0/7c198c70-6ab4-4e45-838b-f3efd9f5f1c1.jpg")
+            Some(
+                "https://uploads.mangadex.org/covers/0e017a08-835a-4cbe-ba63-576d5010a5a0/7c198c70-6ab4-4e45-838b-f3efd9f5f1c1.jpg"
+            )
         );
         assert_eq!(
             result.source_url,
@@ -468,9 +478,7 @@ mod tests {
 
     #[test]
     fn validate_uuid_accepts_valid() {
-        let result = platform().validate_uuid(
-            &"0e017a08-835a-4cbe-ba63-576d5010a5a0".to_string(),
-        );
+        let result = platform().validate_uuid(&"0e017a08-835a-4cbe-ba63-576d5010a5a0".to_string());
         assert!(result.is_ok());
     }
 

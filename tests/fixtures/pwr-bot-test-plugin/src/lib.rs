@@ -3,11 +3,10 @@ use std::ffi::CString;
 
 use pwr_bot_sdk::InvokeRequest;
 use pwr_bot_sdk::InvokeResponse;
+use pwr_bot_sdk::PWR_BOT_PLUGIN_API_VERSION;
 use pwr_bot_sdk::PluginHost;
 use pwr_bot_sdk::PluginMetadata;
 use pwr_bot_sdk::PluginVTable;
-use pwr_bot_sdk::PWR_BOT_PLUGIN_API_VERSION;
-
 use pwr_bot_sdk::ResponsePayload;
 
 // Plugin instance stored as a global singleton.
@@ -138,10 +137,7 @@ unsafe extern "C" fn plugin_free_string(s: *mut std::ffi::c_char) {
     }
 }
 
-unsafe extern "C" fn plugin_invoke(
-    req: *const InvokeRequest,
-    resp: *mut InvokeResponse,
-) {
+unsafe extern "C" fn plugin_invoke(req: *const InvokeRequest, resp: *mut InvokeResponse) {
     let req = unsafe { &*req };
     let command = unsafe { CStr::from_ptr(req.command) }
         .to_str()
@@ -172,10 +168,7 @@ unsafe extern "C" fn plugin_invoke(
     }
 }
 
-unsafe extern "C" fn plugin_init(
-    _req: *const InvokeRequest,
-    resp: *mut InvokeResponse,
-) {
+unsafe extern "C" fn plugin_init(_req: *const InvokeRequest, resp: *mut InvokeResponse) {
     unsafe {
         (*resp).payload_json = std::ptr::null_mut();
         (*resp).error = std::ptr::null_mut();

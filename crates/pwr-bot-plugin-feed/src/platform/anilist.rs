@@ -220,7 +220,11 @@ impl AniListPlatform {
         let id = self.get_id(schedule)?;
         let published = DateTime::from_timestamp(timestamp, 0)
             .ok_or_else(|| FeedError::InvalidTimestamp { timestamp })?;
-        Ok(FeedItem { id, title, published })
+        Ok(FeedItem {
+            id,
+            title,
+            published,
+        })
     }
 
     pub(crate) fn parse_source_response(
@@ -318,8 +322,9 @@ impl Hash for AniListPlatform {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use serde_json::json;
+
+    use super::*;
 
     macro_rules! load_fixture {
         ($file:expr) => {
@@ -337,7 +342,10 @@ mod tests {
         let item = platform().parse_latest_response(json, "173692").unwrap();
         assert_eq!(item.title, "12");
         assert_eq!(item.id, "401043");
-        assert_eq!(item.published, DateTime::from_timestamp(1766327400, 0).unwrap());
+        assert_eq!(
+            item.published,
+            DateTime::from_timestamp(1766327400, 0).unwrap()
+        );
     }
 
     #[test]
@@ -360,7 +368,9 @@ mod tests {
         assert!(result.description.starts_with("Ellen, an 8-year-old girl"));
         assert_eq!(
             result.image_url.as_deref(),
-            Some("https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx173692-shp7PGRQyCQl.jpg")
+            Some(
+                "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx173692-shp7PGRQyCQl.jpg"
+            )
         );
         assert_eq!(result.source_url, "https://anilist.co/anime/173692");
     }

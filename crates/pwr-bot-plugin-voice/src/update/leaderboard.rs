@@ -267,5 +267,4 @@ mod tests {
         assert_eq!(cmd, VoiceLeaderboardCmd::None);
         assert_eq!(model.target_user, Some(42));
     }
-
 }
