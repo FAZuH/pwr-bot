@@ -207,7 +207,7 @@ mod tests {
     }
 
     #[test]
-    fn set_user_same_returns_none() {
+    fn set_user_same_returns_refetch() {
         let mut model = VoiceStatsModel::new(Some(42));
         let cmd = voice_stats_update(VoiceStatsMsg::SetUser(Some(42)), &mut model);
         assert_eq!(cmd, VoiceStatsCmd::RefetchData);

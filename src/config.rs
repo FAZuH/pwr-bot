@@ -37,6 +37,11 @@ pub struct Features {
 }
 
 impl Features {
+    /// Creates features from a map of flag name → enabled status.
+    pub fn new(flags: HashMap<String, bool>) -> Self {
+        Self { flags }
+    }
+
     /// Returns `true` if the named feature is enabled.
     pub fn is_enabled(&self, name: &str) -> bool {
         self.flags.get(name).copied().unwrap_or(false)

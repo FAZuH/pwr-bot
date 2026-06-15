@@ -104,13 +104,6 @@ pub fn voice_leaderboard_update(
 mod tests {
     use super::*;
 
-    fn make_entry(user_id: u64, secs: i64) -> VoiceLeaderboardEntry {
-        VoiceLeaderboardEntry {
-            user_id,
-            total_duration: secs,
-        }
-    }
-
     #[test]
     fn set_entries_empty() {
         let mut model = VoiceLeaderboardModel::new();
@@ -275,18 +268,4 @@ mod tests {
         assert_eq!(model.target_user, Some(42));
     }
 
-    #[test]
-    fn current_page_rank_offset() {
-        let mut model = VoiceLeaderboardModel::new();
-        model.entries = vec![
-            make_entry(1, 100),
-            make_entry(2, 90),
-            make_entry(3, 80),
-            make_entry(4, 70),
-            make_entry(5, 60),
-        ];
-        model.pagination = PaginationModel::new(1, 1);
-
-        assert_eq!(model.entries.len(), 5);
-    }
 }

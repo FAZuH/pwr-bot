@@ -288,6 +288,27 @@ impl BotPlugin for MyPlugin {
 export_plugin!(MyPlugin, MyPlugin);
 ```
 
+### Integration Tests (`tests/`)
+
+The test suite in `tests/` covers the plugin FFI boundary and database CRUD paths:
+
+| Test file | Scope | Dependencies |
+|-----------|-------|-------------|
+| `tests/plugin_ffi.rs` | Real `.so` loading, metadata parsing, FFI invoke/init/on_event/shutdown, registry aggregation, event bus callbacks | Test plugin `.so` built from `tests/fixtures/pwr-bot-test-plugin/` |
+| `tests/db_table.rs` | `server_settings` CRUD via `PgServerSettingsRepo` | PostgreSQL (`db-tests` feature) |
+
+**Test plugin fixture** (`tests/fixtures/pwr-bot-test-plugin/`):
+- A minimal `cdylib` implementing `BotPlugin` using raw FFI (no `export_plugin!` macro, synchronous `extern "C"` functions).
+- Declares 4 commands (`echo`, `config_check`, `return_error`, `publish`), one event handler, one settings panel, one test step, and one task.
+- Does not call any HTTP-bound host callbacks — all tests use `Http::new("a.b.c")` (fake token) and only exercise config readers and `publish_event`.
+- Stored at `tests/fixtures/` as a workspace member.
+
+**Shared helpers** (`tests/common/`):
+- `test_helpers.rs` — `build_test_plugin()`, `test_plugin_path()`, `load_test_plugin()`, `test_config()`, `test_data()`, `setup_system_ctx()`, `reset_host_registry()`.
+- `noop_services.rs` — `NoopSettingsProvider` and `NoopInternalOps` stubs for constructing `Data` without a database connection.
+
+**Isolation**: Plugin tests run serially (`--test-threads=1`) due to the process-wide `host_registry` global state. The `reset_for_test()` helper clears handles, system context, and the handle counter between tests.
+
 ### Plugin Database Access
 
 Each plugin manages its own `deadpool-postgres` connection pool using `DB_URL` from the environment. The pool is created during `init()`:

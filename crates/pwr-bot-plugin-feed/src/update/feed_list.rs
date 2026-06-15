@@ -25,7 +25,6 @@ pub enum FeedListMsg {
 pub enum FeedListCmd {
     None,
     SaveUnsubscribes(HashSet<String>),
-    RefetchSubscriptions,
 }
 
 /// The feed list model.
@@ -131,7 +130,7 @@ mod tests {
     }
 
     #[test]
-    fn save_empty_returns_refetch() {
+    fn     save_empty_returns_none() {
         let mut m = default_model();
         let cmd = feed_list_update(FeedListMsg::Save, &mut m);
         assert_eq!(cmd, FeedListCmd::None);

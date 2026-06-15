@@ -15,7 +15,10 @@ Guidelines for AI agents working on the pwr-bot Rust codebase.
 cargo check
 
 # Run tests (locally needs a .env file; CI copies .env-example → .env automatically)
-cargo test --all-features
+cargo test --workspace --all-features
+
+# Without a local Postgres instance, skip DB tests:
+# cargo test --workspace
 
 # When finishing up — format + lint modifies files, so run last
 ./dev.sh format lint   # format uses +nightly; lint uses clippy --fix --allow-dirty
@@ -23,9 +26,40 @@ cargo test --all-features
 
 - Do **not** run `./dev.sh format lint` after every edit — it mutates source files and may require re-reading
 - Do **not** use `./dev.sh build` for quick feedback — it builds a Docker image
-- Tests need `DB_URL` in `.env` locally; CI copies `.env-example` → `.env` automatically
 - CI order: `fmt --check` → `build --all-targets` → `clippy -D warnings` → `test`
 - Diagrams: always use `./dev.sh docs`, never invoke `mmdc` directly
+
+## Testing
+
+```bash
+# Full suite (needs PostgreSQL)
+cargo test --workspace --all-features -- --test-threads=1
+
+# Without Postgres — skips DB integration tests
+cargo test --workspace
+
+# Run only plugin FFI integration tests
+cargo test --workspace --test plugin_ffi
+```
+
+### Test structure
+
+| Path | Purpose |
+|------|---------|
+| `tests/plugin_ffi.rs` | Plugin system integration tests — loads real `.so`, calls real FFI |
+| `tests/db_table.rs` | Database CRUD integration tests (gated by `db-tests` feature) |
+| `tests/common/test_helpers.rs` | Shared helpers: config builders, test plugin loader, host registry reset |
+| `tests/common/noop_services.rs` | Stub `SettingsProvider`/`InternalOps` for plugin tests |
+| `tests/fixtures/pwr-bot-test-plugin/` | Minimal plugin `.so` used by `plugin_ffi.rs` — implements `BotPlugin` as raw FFI (no `export_plugin!`) |
+| `src/bot/command/gui_test/` | Runtime GUI test steps (manual, not automated in CI) |
+| `src/**/*.rs` (`#[cfg(test)]`) | Pure unit tests for TEA update logic, utils, event bus |
+
+### Key details
+
+- Plugin FFI tests avoid `dispatch()` (which sends Discord HTTP) — they call `vtable.invoke()` directly and read the response from `InvokeResponse`.
+- Test plugin is safe: does not call any HTTP-bound host callbacks (`send_reply`, `send_channel_message`, `send_dm`, etc.).
+- `host_registry` has process-wide globals — plugin tests must run serially (`--test-threads=1`).
+- `db-tests` feature gates all PostgreSQL integration tests in `tests/db_table.rs`.
 
 ## Code Style
 

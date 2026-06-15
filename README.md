@@ -169,6 +169,37 @@ After the bot is running and invited to your server, you need to register the sl
 - **Logs:** Application logs are stored in the configured `LOGS_PATH` (default: `logs/` directory).
 - **Docker Volumes:** If you are using Docker, make sure `data/` and `logs/` are mounted to persist data and logs between restarts.
 
+## Development
+
+### Prerequisites
+
+- [Rust](https://rustup.rs/) (stable + nightly for formatting)
+- [PostgreSQL](https://www.postgresql.org/) 17+
+- `libpq-dev`, `pkg-config`, `libfontconfig1-dev` (Linux)
+
+### Setup
+
+```sh
+cp .env-example .env
+# Edit .env with your Discord token and DB URL
+```
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `cargo check` | Quick compilation check |
+| `cargo test --workspace` | Run all tests without Postgres |
+| `cargo test --workspace --all-features` | Run all tests including DB integration |
+| `cargo test --workspace --test plugin_ffi` | Run plugin system integration tests only |
+| `./dev.sh format` | Format with nightly rustfmt |
+| `./dev.sh lint` | Lint with clippy (fixes auto-fixable issues) |
+| `./dev.sh test` | Format + lint + test |
+
+### Plugin SDK
+
+The [`pwr_bot_sdk`](crates/pwr_bot_sdk/) crate provides the public API for writing dynamic plugins loaded as `.so` files at runtime. See [`docs/architecture.md`](docs/architecture.md#plugin-system) for details on the plugin ABI and lifecycle.
+
 ## Bug Reports and Feature Requests
 
 You can report bugs or request for features on the [issue tracker](https://github.com/FAZuH/pwr-bot/issues).

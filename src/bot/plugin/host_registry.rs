@@ -15,7 +15,7 @@ use std::sync::atomic::Ordering;
 use crate::bot::host_ctx::PoiseHostCtx;
 
 static REGISTRY: OnceLock<Mutex<HashMap<u64, Arc<PoiseHostCtx>>>> = OnceLock::new();
-static SYSTEM_CTX: OnceLock<Arc<PoiseHostCtx>> = OnceLock::new();
+static SYSTEM_CTX: Mutex<Option<Arc<PoiseHostCtx>>> = Mutex::new(None);
 static NEXT_HANDLE: AtomicU64 = AtomicU64::new(1);
 
 fn registry() -> &'static Mutex<HashMap<u64, Arc<PoiseHostCtx>>> {
@@ -41,10 +41,21 @@ pub fn unregister(handle: u64) {
 
 /// Sets the system-wide headless context for event/task dispatch.
 pub fn set_system_ctx(ctx: Arc<PoiseHostCtx>) {
-    let _ = SYSTEM_CTX.set(ctx);
+    *SYSTEM_CTX.lock().unwrap() = Some(ctx);
 }
 
 /// Returns the system-wide headless context.
-pub fn system_ctx() -> Option<&'static Arc<PoiseHostCtx>> {
-    SYSTEM_CTX.get()
+pub fn system_ctx() -> Option<Arc<PoiseHostCtx>> {
+    SYSTEM_CTX.lock().unwrap().clone()
+}
+
+/// Resets all global state for test isolation.
+///
+/// Clears the handle registry, system context, and handle counter.
+/// Only intended for use in integration tests.
+#[doc(hidden)]
+pub fn reset_for_test() {
+    registry().lock().unwrap().clear();
+    *SYSTEM_CTX.lock().unwrap() = None;
+    NEXT_HANDLE.store(1, Ordering::SeqCst);
 }

@@ -1,3 +1,6 @@
+pub mod noop_services;
+pub mod test_helpers;
+
 use std::sync::Arc;
 
 use pwr_bot::repo::PgRepos;

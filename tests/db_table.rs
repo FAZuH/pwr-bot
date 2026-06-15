@@ -1,3 +1,7 @@
+// Shared test modules (common/) are compiled independently per integration test
+// binary — each binary sees different subsets as "unused".
+#![allow(dead_code)]
+
 use std::collections::HashMap;
 
 use pwr_bot::entity::DbU64;

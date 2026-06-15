@@ -1,0 +1,12 @@
+[package]
+name = "pwr-bot-test-plugin"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "pwr_bot_test_plugin"
+crate-type = ["cdylib"]
+
+[dependencies]
+pwr-bot-sdk = { path = "../../../crates/pwr_bot_sdk" }
+serde_json = "1"
