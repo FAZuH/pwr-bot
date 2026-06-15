@@ -119,8 +119,8 @@ impl PluginRegistry {
     }
 
     /// Returns all loaded plugins.
-    pub fn all_ffi_plugins(&self) -> Vec<Arc<LoadedPlugin>> {
-        self.plugins.blocking_read().clone()
+    pub async fn all_ffi_plugins(&self) -> Vec<Arc<LoadedPlugin>> {
+        self.plugins.read().await.clone()
     }
 
     /// Returns Poise `Command`s for all registered plugins.
@@ -128,10 +128,10 @@ impl PluginRegistry {
     /// Each command resolves its plugin at runtime via [`dispatch_plugin_command`],
     /// so no core Poise wrappers are needed. Plugin authors add commands simply
     /// by implementing [`BotPlugin::commands`](pwr_bot_sdk::BotPlugin::commands) — no core changes required.
-    pub fn all_commands(&self) -> Vec<Command<Data, Error>> {
+    pub async fn all_commands(&self) -> Vec<Command<Data, Error>> {
         let mut cmds = Vec::new();
 
-        for plugin in self.plugins.blocking_read().iter() {
+        for plugin in self.plugins.read().await.iter() {
             for spec in &plugin.metadata.commands {
                 cmds.push(build_registry_command(spec));
             }

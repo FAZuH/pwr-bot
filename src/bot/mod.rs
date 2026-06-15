@@ -77,7 +77,7 @@ impl Bot {
         info!("Initializing bot...");
 
         let (token, intents) = Self::create_client_config(&config)?;
-        let framework = Self::create_framework(&config, &plugin_registry)?;
+        let framework = Self::create_framework(&config, &plugin_registry).await?;
         let http = Http::new(token.clone());
         if let Some(application_id) = config.discord_application_id {
             http.set_application_id(ApplicationId::new(application_id));
@@ -141,12 +141,12 @@ impl Bot {
     }
 
     /// Creates the Poise framework with commands and configuration.
-    fn create_framework(
+    async fn create_framework(
         config: &Config,
         registry: &PluginRegistry,
     ) -> Result<Box<Framework<Data, Error>>> {
         let mut core_commands = Cogs.commands();
-        core_commands.extend(registry.all_commands());
+        core_commands.extend(registry.all_commands().await);
         let options = FrameworkOptions::<Data, Error> {
             commands: core_commands,
             on_error: |error| Box::pin(Self::on_error(error)),
@@ -318,7 +318,7 @@ impl BotEventHandler {
                 );
 
                 let mut commands = Cogs.commands();
-                commands.extend(self.data.plugin_registry.all_commands());
+                commands.extend(self.data.plugin_registry.all_commands().await);
                 match poise::builtins::register_globally(&self.http, &commands).await {
                     Ok(_) => {
                         info!("Commands registered globally successfully");

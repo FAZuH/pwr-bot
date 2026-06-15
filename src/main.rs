@@ -55,7 +55,7 @@ async fn main() -> Result<()> {
     host_registry::set_system_ctx(PoiseHostCtx::new_system(bot.data.clone(), bot.http.clone()));
 
     // Initialize all plugins
-    let plugins = registry.all_ffi_plugins();
+    let plugins = registry.all_ffi_plugins().await;
     for plugin in &plugins {
         invocation::dispatch_init_ffi(plugin)
             .await
