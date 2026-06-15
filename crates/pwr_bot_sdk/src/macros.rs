@@ -24,6 +24,17 @@ macro_rules! export_plugin {
     ($plugin_type:ty, $initializer:expr) => {
         use ::std::sync::OnceLock;
 
+        static PLUGIN_RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
+
+        fn plugin_runtime() -> &'static tokio::runtime::Runtime {
+            PLUGIN_RUNTIME.get_or_init(|| {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("Failed to create plugin tokio runtime")
+            })
+        }
+
         fn plugin_instance() -> &'static $plugin_type {
             static PLUGIN: OnceLock<$plugin_type> = OnceLock::new();
             PLUGIN.get_or_init(|| $initializer)
@@ -95,8 +106,7 @@ macro_rules! export_plugin {
             let args: serde_json::Value =
                 serde_json::from_str(&args_json).unwrap_or(serde_json::Value::Null);
 
-            let result = tokio::runtime::Handle::current()
-                .block_on(async { plugin.invoke(&command, args, &host).await });
+            let result = plugin_runtime().block_on(async { plugin.invoke(&command, args, &host).await });
 
             match result {
                 Ok(payload) => {
@@ -125,8 +135,7 @@ macro_rules! export_plugin {
             let req = unsafe { &*req };
             let host = $crate::host::PluginHost::new(req.ctx_handle, unsafe { &*req.callbacks });
 
-            let result =
-                tokio::runtime::Handle::current().block_on(async { plugin.init(&host).await });
+            let result = plugin_runtime().block_on(async { plugin.init(&host).await });
 
             match result {
                 Ok(()) => unsafe {
@@ -145,9 +154,7 @@ macro_rules! export_plugin {
 
         unsafe extern "C" fn plugin_shutdown() -> bool {
             let plugin = plugin_instance();
-            tokio::runtime::Handle::current()
-                .block_on(async { plugin.shutdown().await })
-                .is_ok()
+            plugin_runtime().block_on(async { plugin.shutdown().await }).is_ok()
         }
 
         unsafe extern "C" fn plugin_on_event(
@@ -167,9 +174,7 @@ macro_rules! export_plugin {
                 serde_json::from_str(payload_str).unwrap_or(serde_json::Value::Null);
             let host = $crate::host::PluginHost::new(ctx_handle, unsafe { &*callbacks });
 
-            tokio::runtime::Handle::current()
-                .block_on(async { plugin.on_event(name, payload, &host).await })
-                .is_ok()
+            plugin_runtime().block_on(async { plugin.on_event(name, payload, &host).await }).is_ok()
         }
     };
 }
