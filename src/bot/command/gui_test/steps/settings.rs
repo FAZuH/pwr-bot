@@ -65,7 +65,7 @@ pub async fn settings_main(ctx: Context<'_>) -> Result<(), GuiTestError> {
     };
 
     let registry = extract_actions(&view);
-    assert_has_action(&registry, "Choose a feature to configure...")
+    assert_has_action(&registry, "NavigateToFeature")
         .map_err(|e| GuiTestError::execution_failed("settings_main render nav", e))?;
     assert_has_action(&registry, "🛈 About")
         .map_err(|e| GuiTestError::execution_failed("settings_main render about", e))?;
