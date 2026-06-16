@@ -173,7 +173,7 @@ async fn registry_command_handler<'a>(
     if let Err(e) =
         dispatch_plugin_command(registry, &host_ctx, cmd_name, serde_json::Value::Null).await
     {
-        log::error!("Plugin command '{cmd_name}' failed: {e}");
+        log::error!("Plugin command '{cmd_name}' failed: {e:#}");
     }
     Ok(())
 }
