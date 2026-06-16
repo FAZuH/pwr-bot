@@ -54,6 +54,7 @@ pub async fn dispatch(
                     .to_str()
                     .unwrap_or("unknown error")
                     .to_string();
+                log::debug!("FFI command '{command}' returned error: {err}");
                 if let Some(free) = plugin_vtable.free_string {
                     free(response.error);
                 }

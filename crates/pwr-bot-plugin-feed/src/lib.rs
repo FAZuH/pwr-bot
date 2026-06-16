@@ -40,10 +40,21 @@ impl FeedPlugin {
             .lock()
             .await
             .as_ref()
-            .ok_or("Database pool not initialized")?
+            .ok_or_else(|| {
+                eprintln!("[FEED_PLUGIN_DEBUG] pool is None");
+                "Database pool not initialized".to_string()
+            })?
             .clone();
-        let client = pool.get().await.map_err(|e| e.to_string())?;
-        let rows = client.query(sql, params).await.map_err(|e| e.to_string())?;
+        let client = pool.get().await.map_err(|e| {
+            let msg = e.to_string();
+            eprintln!("[FEED_PLUGIN_DEBUG] pool.get() error: {msg}");
+            msg
+        })?;
+        let rows = client.query(sql, params).await.map_err(|e| {
+            let msg = e.to_string();
+            eprintln!("[FEED_PLUGIN_DEBUG] query error: {msg}");
+            msg
+        })?;
         let json_rows: Vec<serde_json::Value> = rows
             .iter()
             .map(|row| {

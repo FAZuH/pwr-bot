@@ -106,7 +106,8 @@ macro_rules! export_plugin {
             let args: serde_json::Value =
                 serde_json::from_str(&args_json).unwrap_or(serde_json::Value::Null);
 
-            let result = plugin_runtime().block_on(async { plugin.invoke(&command, args, &host).await });
+            let result =
+                plugin_runtime().block_on(async { plugin.invoke(&command, args, &host).await });
 
             match result {
                 Ok(payload) => {
@@ -154,7 +155,9 @@ macro_rules! export_plugin {
 
         unsafe extern "C" fn plugin_shutdown() -> bool {
             let plugin = plugin_instance();
-            plugin_runtime().block_on(async { plugin.shutdown().await }).is_ok()
+            plugin_runtime()
+                .block_on(async { plugin.shutdown().await })
+                .is_ok()
         }
 
         unsafe extern "C" fn plugin_on_event(
@@ -174,7 +177,9 @@ macro_rules! export_plugin {
                 serde_json::from_str(payload_str).unwrap_or(serde_json::Value::Null);
             let host = $crate::host::PluginHost::new(ctx_handle, unsafe { &*callbacks });
 
-            plugin_runtime().block_on(async { plugin.on_event(name, payload, &host).await }).is_ok()
+            plugin_runtime()
+                .block_on(async { plugin.on_event(name, payload, &host).await })
+                .is_ok()
         }
     };
 }

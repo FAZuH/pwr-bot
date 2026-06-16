@@ -121,7 +121,9 @@ pub async fn gui_test(ctx: Context<'_>) -> Result<(), Error> {
         .zip(step_info.iter())
         .map(|(s, (name, desc))| (*s, *name, *desc))
         .collect();
-    let msg = ctx.send(build_test_reply(&steps_with_status, None, None)).await?;
+    let msg = ctx
+        .send(build_test_reply(&steps_with_status, None, None))
+        .await?;
 
     for (i, step) in TEST_STEPS.iter().enumerate() {
         statuses[i] = StepStatus::Running;
