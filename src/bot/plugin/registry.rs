@@ -7,7 +7,6 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use tracing::info;
 use poise::Command;
 use pwr_bot_sdk::CommandSpec;
 use pwr_bot_sdk::EventHandlerSpec;
@@ -15,13 +14,14 @@ use pwr_bot_sdk::SettingsPanelSpec;
 use pwr_bot_sdk::TaskSpec;
 use pwr_bot_sdk::TestStepSpec;
 use tokio::sync::RwLock;
+use tracing::info;
+use tracing::instrument;
 
 use crate::bot::Data;
 use crate::bot::command::Error;
 use crate::bot::host_ctx::PoiseHostCtx;
 use crate::bot::plugin::invocation::dispatch_plugin_command;
 use crate::bot::plugin::loader::LoadedPlugin;
-use tracing::instrument;
 
 /// Thread-safe registry of loaded plugins.
 pub struct PluginRegistry {
@@ -216,7 +216,7 @@ async fn registry_command_handler<'a>(
     let cmd_name = poise_ctx.invoked_command_name();
     let guild_id = poise_ctx.guild_id().map(|g| g.get());
     let author_id = poise_ctx.author().id.get();
-    tracing::Span::current().record("command.name", &cmd_name);
+    tracing::Span::current().record("command.name", cmd_name);
     if let Some(gid) = guild_id {
         tracing::Span::current().record("guild.id", gid);
     }

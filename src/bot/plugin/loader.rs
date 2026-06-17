@@ -5,13 +5,13 @@ use std::path::Path;
 use std::sync::Arc;
 
 use libloading::Library;
-use tracing::error;
-use tracing::info;
-use tracing::warn;
 use pwr_bot_sdk::PWR_BOT_PLUGIN_API_VERSION;
 use pwr_bot_sdk::PWR_BOT_PLUGIN_ENTRY;
 use pwr_bot_sdk::PluginMetadata;
 use pwr_bot_sdk::PluginVTable;
+use tracing::error;
+use tracing::info;
+use tracing::warn;
 
 /// A loaded plugin instance.
 pub struct LoadedPlugin {

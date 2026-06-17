@@ -11,24 +11,10 @@ use crate::bot::command::Error;
 
 /// Owned message payload for sending across trait boundaries.
 ///
-/// Constructed by handlers and consumed by [`HostCtx::send_message`] or
-/// [`HostCtx::edit_message`].
-pub struct MessagePayload {
-    pub content: Option<String>,
-    pub embed: Option<CreateEmbed<'static>>,
-    pub ephemeral: bool,
-}
-
-impl MessagePayload {
-    /// Creates a plain text message payload (non-ephemeral, no embed).
-    pub fn text(content: impl Into<String>) -> Self {
-        Self {
-            content: Some(content.into()),
-            embed: None,
-            ephemeral: false,
-        }
-    }
-}
+/// Wraps raw JSON that the host forwards to Discord's API.
+/// For interaction responses the host wraps `data` in `{"type": 4, "data": …}`;
+/// for edits / channel messages / DMs the value is sent as-is.
+pub struct MessagePayload(pub serde_json::Value);
 
 /// Abstract interface for Discord interaction operations.
 ///
@@ -144,23 +130,6 @@ impl PoiseHostCtx {
     fn cmd_interaction(&self) -> Option<&CommandInteraction> {
         self.interaction.as_ref()
     }
-
-    fn build_response_message<'a>(
-        &self,
-        payload: &'a MessagePayload,
-    ) -> CreateInteractionResponseMessage<'a> {
-        let mut msg = CreateInteractionResponseMessage::new();
-        if let Some(ref content) = payload.content {
-            msg = msg.content(content);
-        }
-        if let Some(ref embed) = payload.embed {
-            msg = msg.embed(embed.clone());
-        }
-        if payload.ephemeral {
-            msg = msg.ephemeral(true);
-        }
-        msg
-    }
 }
 
 #[async_trait]
@@ -201,76 +170,48 @@ impl HostCtx for PoiseHostCtx {
                     {
                         tracing::debug!("send_message: CAS failed, falling through to followup");
                     } else {
-                        let builder = self.build_response_message(payload);
+                        let envelope = serde_json::json!({
+                            "type": 4,
+                            "data": payload.0,
+                        });
                         tracing::debug!(
                             interaction.id = %cmd.id,
-                            interaction.token = %cmd.token,
-                            "send_message: calling cmd.create_response",
+                            "send_message: sending initial response via HTTP",
                         );
-                        match cmd.create_response(
-                            &self.http,
-                            CreateInteractionResponse::Message(builder),
-                        )
-                        .await
-                        {
-                            Ok(()) => tracing::debug!("send_message: create_response succeeded"),
-                            Err(e) => {
-                                tracing::error!(error = %e, "send_message: create_response failed");
-                                return Err(e.into());
-                            }
-                        }
-                        match cmd.get_response(&self.http).await {
-                            Ok(msg) => {
-                                tracing::debug!(message.id = %msg.id, "send_message: got response id");
-                                return Ok(msg.id);
-                            }
-                            Err(e) => {
-                                tracing::error!(error = %e, "send_message: get_response failed");
-                                return Err(e.into());
-                            }
-                        }
+                        self.http
+                            .create_interaction_response(cmd.id, &cmd.token, &envelope, vec![])
+                            .await?;
+                        let msg = self
+                            .http
+                            .get_original_interaction_response(&cmd.token)
+                            .await?;
+                        return Ok(msg.id);
                     }
                 }
                 DEFERRED => {
-                    // Was deferred — edit the original response to replace
-                    // the "thinking…" indicator with actual content.
-                    let mut builder = poise::serenity_prelude::EditInteractionResponse::new();
-                    if let Some(ref content) = payload.content {
-                        builder = builder.content(content);
-                    }
-                    if let Some(ref embed) = payload.embed {
-                        builder = builder.embeds(vec![embed.clone()]);
-                    }
-                    cmd.edit_response(&self.http, builder).await?;
-                    return Ok(cmd.get_response(&self.http).await?.id);
+                    self.http
+                        .edit_original_interaction_response(&cmd.token, &payload.0, vec![])
+                        .await?;
+                    let msg = self
+                        .http
+                        .get_original_interaction_response(&cmd.token)
+                        .await?;
+                    return Ok(msg.id);
                 }
                 _ => {}
             }
 
-            // Already responded (full message) — send as a followup.
-            let mut followup = CreateInteractionResponseFollowup::new();
-            if let Some(ref content) = payload.content {
-                followup = followup.content(content);
-            }
-            if let Some(ref embed) = payload.embed {
-                followup = followup.embeds(vec![embed.clone()]);
-            }
-            if payload.ephemeral {
-                followup = followup.ephemeral(true);
-            }
-            Ok(cmd.create_followup(&self.http, followup).await?.id)
+            // Already responded — send as a followup.
+            let msg = self
+                .http
+                .create_followup_message(&cmd.token, &payload.0, vec![])
+                .await?;
+            Ok(msg.id)
         } else {
             // Prefix context — send a channel message
-            let mut msg = CreateMessage::new();
-            if let Some(ref content) = payload.content {
-                msg = msg.content(content);
-            }
-            if let Some(ref embed) = payload.embed {
-                msg = msg.embed(embed.clone());
-            }
             Ok(self
                 .http
-                .send_message(GenericChannelId::new(self.channel_id), vec![], &msg)
+                .send_message(GenericChannelId::new(self.channel_id), vec![], &payload.0)
                 .await?
                 .id)
         }
@@ -282,27 +223,15 @@ impl HostCtx for PoiseHostCtx {
         payload: &MessagePayload,
     ) -> Result<(), Error> {
         if let Some(cmd) = self.cmd_interaction() {
-            let mut builder = EditInteractionResponse::new();
-            if let Some(ref content) = payload.content {
-                builder = builder.content(content);
-            }
-            if let Some(ref embed) = payload.embed {
-                builder = builder.embeds(vec![embed.clone()]);
-            }
-            cmd.edit_response(&self.http, builder).await?;
+            self.http
+                .edit_original_interaction_response(&cmd.token, &payload.0, vec![])
+                .await?;
         } else {
-            let mut builder = EditMessage::new();
-            if let Some(ref content) = payload.content {
-                builder = builder.content(content);
-            }
-            if let Some(ref embed) = payload.embed {
-                builder = builder.embed(embed.clone());
-            }
             self.http
                 .edit_message(
                     GenericChannelId::new(self.channel_id),
                     message_id,
-                    &builder,
+                    &payload.0,
                     vec![],
                 )
                 .await?;

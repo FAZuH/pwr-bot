@@ -35,12 +35,49 @@ impl CommandSpec {
 }
 
 /// Payload returned by a plugin after handling a command invocation.
+///
+/// Wraps raw JSON that the host forwards to Discord's API. The plugin can
+/// construct it from any poise/serenity type that implements [`Serialize`]
+/// (e.g. `CreateReply`, `CreateEmbed`, `CreateComponent`, `CreateButton`,
+/// `CreateActionRow`, `CreateSelectMenu`, `EditMessage`, etc.):
+///
+/// ```ignore
+/// use pwr_bot_sdk::ResponsePayload;
+///
+/// let reply = serde_json::json!({"content": "Hello!", "flags": 64});
+/// let payload = ResponsePayload::from_serializable(&reply).unwrap();
+/// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResponsePayload {
-    pub content: Option<String>,
-    pub ephemeral: bool,
-    pub components_json: Option<serde_json::Value>,
-    pub embed_json: Option<serde_json::Value>,
+    /// Raw JSON data portion of the Discord interaction response.
+    ///
+    /// For interaction replies this becomes `data` in `{"type": 4, "data": …}`.
+    /// For channel messages / DMs / edits the value is sent as-is.
+    pub data: serde_json::Value,
+}
+
+impl ResponsePayload {
+    /// Creates a response from any `Serialize`-able value (poise reply builders,
+    /// serenity embeds/components, or raw `serde_json::Value`).
+    pub fn from_serializable(data: &impl Serialize) -> Result<Self, serde_json::Error> {
+        Ok(Self {
+            data: serde_json::to_value(data)?,
+        })
+    }
+
+    /// Plain text response (non-ephemeral).
+    pub fn text(content: impl Into<String>) -> Self {
+        Self {
+            data: serde_json::json!({"content": content.into()}),
+        }
+    }
+
+    /// Plain text response, ephemeral.
+    pub fn text_ephemeral(content: impl Into<String>) -> Self {
+        Self {
+            data: serde_json::json!({"content": content.into(), "flags": 64}),
+        }
+    }
 }
 
 /// Specifies an event the plugin wants to handle.
@@ -160,7 +197,7 @@ pub struct PluginMetadata {
 ///
 ///     async fn invoke(&self, command: &str, _args: serde_json::Value, host: &PluginHost) -> Result<ResponsePayload, String> {
 ///         host.send_reply("Hello from my plugin!").await;
-///         Ok(ResponsePayload { content: None, ephemeral: false, components_json: None, embed_json: None })
+///         Ok(ResponsePayload::text("done"))
 ///     }
 /// }
 ///

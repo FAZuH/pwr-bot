@@ -73,12 +73,7 @@ impl TestPlugin {
         match command {
             "echo" => {
                 let content = format!("echoed: {command} with args {args}");
-                Ok(ResponsePayload {
-                    content: Some(content),
-                    ephemeral: false,
-                    components_json: None,
-                    embed_json: None,
-                })
+                Ok(ResponsePayload::text(content))
             }
             "config_check" => {
                 let poll_interval = host.poll_interval().as_secs();
@@ -94,12 +89,7 @@ impl TestPlugin {
                     "feature_enabled": feature_enabled,
                 })
                 .to_string();
-                Ok(ResponsePayload {
-                    content: Some(content),
-                    ephemeral: false,
-                    components_json: None,
-                    embed_json: None,
-                })
+                Ok(ResponsePayload::text(content))
             }
             "return_error" => Err("intentional error for testing".into()),
             "publish" => {
@@ -111,12 +101,7 @@ impl TestPlugin {
                     host.publish_event(event_name, r#"{"from":"plugin"}"#)
                         .map_err(|e| format!("publish_event failed: {e}"))?;
                 }
-                Ok(ResponsePayload {
-                    content: None,
-                    ephemeral: false,
-                    components_json: None,
-                    embed_json: None,
-                })
+                Ok(ResponsePayload::text(""))
             }
             _ => Err(format!("unknown command: {command}")),
         }

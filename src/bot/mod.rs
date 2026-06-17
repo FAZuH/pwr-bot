@@ -29,12 +29,12 @@ use anyhow;
 use anyhow::Result;
 use async_trait::async_trait;
 use futures::lock::Mutex;
-use tracing::debug;
-use tracing::error;
-use tracing::info;
 use poise::Framework;
 use poise::FrameworkOptions;
 use poise::serenity_prelude::*;
+use tracing::debug;
+use tracing::error;
+use tracing::info;
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
 

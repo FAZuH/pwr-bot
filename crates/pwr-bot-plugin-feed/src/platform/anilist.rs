@@ -11,10 +11,10 @@ use governor::RateLimiter;
 use governor::clock::QuantaClock;
 use governor::state::InMemoryState;
 use governor::state::direct::NotKeyed;
-use tracing::debug;
-use tracing::info;
 use serde_json::Map;
 use serde_json::Value;
+use tracing::debug;
+use tracing::info;
 
 use crate::error::FeedError;
 use crate::platform::traits::BasePlatform;

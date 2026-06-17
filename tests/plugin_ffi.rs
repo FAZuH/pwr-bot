@@ -248,7 +248,10 @@ fn ffi_invoke_echo_returns_payload() {
     let json = unsafe { ffi_invoke(plugin.vtable, "echo", r#"{}"#, &host_ctx) };
 
     let payload: ResponsePayload = serde_json::from_str(&json).unwrap();
-    assert_eq!(payload.content.unwrap(), "echoed: echo with args {}");
+    assert_eq!(
+        payload.data["content"].as_str().unwrap(),
+        "echoed: echo with args {}"
+    );
 }
 
 #[test]
@@ -261,7 +264,8 @@ fn ffi_invoke_config_check_returns_config_values() {
     let json = unsafe { ffi_invoke(plugin.vtable, "config_check", r#"{}"#, &host_ctx) };
 
     let payload: ResponsePayload = serde_json::from_str(&json).unwrap();
-    let content: serde_json::Value = serde_json::from_str(&payload.content.unwrap()).unwrap();
+    let content: serde_json::Value =
+        serde_json::from_str(payload.data["content"].as_str().unwrap()).unwrap();
 
     assert_eq!(content["poll_interval_secs"], 42);
     assert!(content["feature_enabled"].as_bool().unwrap());

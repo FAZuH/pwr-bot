@@ -115,32 +115,18 @@ unsafe extern "C" fn cb_send_reply(
         Err(_) => return false,
     };
 
-    let payload: MessagePayload =
-        match serde_json::from_str::<pwr_bot_sdk::ResponsePayload>(json_str) {
-            Ok(resp) => MessagePayload {
-                content: resp.content,
-                embed: None,
-                ephemeral: resp.ephemeral,
-            },
-            Err(e) => {
-                let err = CString::new(format!("invalid reply JSON: {e}")).unwrap();
-                if !out_err.is_null() {
-                    unsafe { *out_err = err.into_raw() };
-                }
-                return false;
+    let payload: pwr_bot_sdk::ResponsePayload = match serde_json::from_str(json_str) {
+        Ok(p) => p,
+        Err(e) => {
+            let err = CString::new(format!("invalid reply JSON: {e}")).unwrap();
+            if !out_err.is_null() {
+                unsafe { *out_err = err.into_raw() };
             }
-        };
+            return false;
+        }
+    };
 
-    let content = payload.content;
-    let ephemeral = payload.ephemeral;
-    match host_block_on(async move {
-        let msg = MessagePayload {
-            content,
-            embed: None,
-            ephemeral,
-        };
-        ctx.send_message(&msg).await
-    }) {
+    match host_block_on(async move { ctx.send_message(&MessagePayload(payload.data)).await }) {
         Ok(_) => true,
         Err(e) => {
             let err = CString::new(e.to_string()).unwrap();
@@ -168,32 +154,21 @@ unsafe extern "C" fn cb_edit_reply(
         Err(_) => return false,
     };
 
-    let payload: MessagePayload =
-        match serde_json::from_str::<pwr_bot_sdk::ResponsePayload>(json_str) {
-            Ok(resp) => MessagePayload {
-                content: resp.content,
-                embed: None,
-                ephemeral: resp.ephemeral,
-            },
-            Err(e) => {
-                let err = CString::new(format!("invalid reply JSON: {e}")).unwrap();
-                if !out_err.is_null() {
-                    unsafe { *out_err = err.into_raw() };
-                }
-                return false;
+    let payload: pwr_bot_sdk::ResponsePayload = match serde_json::from_str(json_str) {
+        Ok(p) => p,
+        Err(e) => {
+            let err = CString::new(format!("invalid reply JSON: {e}")).unwrap();
+            if !out_err.is_null() {
+                unsafe { *out_err = err.into_raw() };
             }
-        };
+            return false;
+        }
+    };
 
-    let msg_id = message_id;
-    let content = payload.content;
-    let ephemeral = payload.ephemeral;
+    let mid = message_id;
     match host_block_on(async move {
-        let msg = MessagePayload {
-            content,
-            embed: None,
-            ephemeral,
-        };
-        ctx.edit_message(MessageId::new(msg_id), &msg).await
+        ctx.edit_message(MessageId::new(mid), &MessagePayload(payload.data))
+            .await
     }) {
         Ok(_) => true,
         Err(e) => {
@@ -278,17 +253,12 @@ unsafe extern "C" fn cb_send_channel_message(
     };
 
     let http = ctx.http().clone();
-    let content = payload.content;
     let channel_id_val = channel_id;
     match host_block_on(async move {
-        let mut builder = poise::serenity_prelude::CreateMessage::new();
-        if let Some(ref c) = content {
-            builder = builder.content(c);
-        }
         http.send_message(
             poise::serenity_prelude::ChannelId::new(channel_id_val).into(),
             vec![],
-            &builder,
+            &payload.data,
         )
         .await
     }) {
@@ -338,14 +308,10 @@ unsafe extern "C" fn cb_send_dm(
 
     let http = ctx.http().clone();
     let user_id_val = user_id;
-    let content = payload.content;
     match host_block_on(async move {
-        let user = http.get_user(UserId::new(user_id_val)).await?;
-        let mut builder = CreateMessage::new();
-        if let Some(ref c) = content {
-            builder = builder.content(c);
-        }
-        user.id.dm(&http, builder).await
+        let dm_channel = UserId::new(user_id_val).create_dm_channel(&http).await?;
+        http.send_message(dm_channel.id.into(), vec![], &payload.data)
+            .await
     }) {
         Ok(msg) => {
             unsafe { *out_message_id = msg.id.get() };

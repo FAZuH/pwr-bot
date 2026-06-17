@@ -189,12 +189,9 @@ impl VoicePlugin {
 
         let guild_id = unsafe { host.guild_id() };
         if guild_id == 0 {
-            return Ok(ResponsePayload {
-                content: Some("This command can only be used in a server.".into()),
-                ephemeral: true,
-                components_json: None,
-                embed_json: None,
-            });
+            return Ok(ResponsePayload::text_ephemeral(
+                "This command can only be used in a server.",
+            ));
         }
 
         let result = self
@@ -221,12 +218,7 @@ impl VoicePlugin {
             if enabled { "✅ Yes" } else { "❌ No" },
         );
 
-        Ok(ResponsePayload {
-            content: Some(content),
-            ephemeral: false,
-            components_json: None,
-            embed_json: None,
-        })
+        Ok(ResponsePayload::text(content))
     }
 
     async fn crash_recovery(&self) -> Result<(), String> {
@@ -301,12 +293,7 @@ impl VoicePlugin {
             &[&HEARTBEAT_KEY, &now],
         )
         .await?;
-        Ok(ResponsePayload {
-            content: None,
-            ephemeral: false,
-            components_json: None,
-            embed_json: None,
-        })
+        Ok(ResponsePayload::text(""))
     }
 
     async fn cmd_leaderboard(&self, host: &PluginHost) -> Result<ResponsePayload, String> {
@@ -314,12 +301,9 @@ impl VoicePlugin {
 
         let guild_id = unsafe { host.guild_id() };
         if guild_id == 0 {
-            return Ok(ResponsePayload {
-                content: Some("This command can only be used in a server.".into()),
-                ephemeral: true,
-                components_json: None,
-                embed_json: None,
-            });
+            return Ok(ResponsePayload::text_ephemeral(
+                "This command can only be used in a server.",
+            ));
         }
 
         let since = chrono::Utc::now() - chrono::Duration::days(30);
@@ -346,12 +330,9 @@ impl VoicePlugin {
         };
 
         if rows.is_empty() {
-            return Ok(ResponsePayload {
-                content: Some("No voice activity data available for the last 30 days.".into()),
-                ephemeral: false,
-                components_json: None,
-                embed_json: None,
-            });
+            return Ok(ResponsePayload::text(
+                "No voice activity data available for the last 30 days.",
+            ));
         }
 
         let mut lines: Vec<String> = vec!["## Voice Leaderboard (Last 30 Days)".to_string()];
@@ -377,12 +358,7 @@ impl VoicePlugin {
             ));
         }
 
-        Ok(ResponsePayload {
-            content: Some(lines.join("\n")),
-            ephemeral: false,
-            components_json: None,
-            embed_json: None,
-        })
+        Ok(ResponsePayload::text(lines.join("\n")))
     }
 
     async fn cmd_stats(&self, host: &PluginHost) -> Result<ResponsePayload, String> {
@@ -390,12 +366,9 @@ impl VoicePlugin {
 
         let guild_id = unsafe { host.guild_id() };
         if guild_id == 0 {
-            return Ok(ResponsePayload {
-                content: Some("This command can only be used in a server.".into()),
-                ephemeral: true,
-                components_json: None,
-                embed_json: None,
-            });
+            return Ok(ResponsePayload::text_ephemeral(
+                "This command can only be used in a server.",
+            ));
         }
 
         let since = chrono::Utc::now() - chrono::Duration::days(7);
@@ -446,11 +419,6 @@ impl VoicePlugin {
              - **Average per User:** {avg_hours}h {avg_mins}m"
         );
 
-        Ok(ResponsePayload {
-            content: Some(content),
-            ephemeral: false,
-            components_json: None,
-            embed_json: None,
-        })
+        Ok(ResponsePayload::text(content))
     }
 }

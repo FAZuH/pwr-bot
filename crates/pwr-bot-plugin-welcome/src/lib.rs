@@ -115,12 +115,9 @@ impl WelcomePlugin {
 
         let guild_id = unsafe { host.guild_id() };
         if guild_id == 0 {
-            return Ok(ResponsePayload {
-                content: Some("This command can only be used in a server.".into()),
-                ephemeral: true,
-                components_json: None,
-                embed_json: None,
-            });
+            return Ok(ResponsePayload::text_ephemeral(
+                "This command can only be used in a server.",
+            ));
         }
 
         let pool = self
@@ -183,11 +180,6 @@ impl WelcomePlugin {
             msg_count,
         );
 
-        Ok(ResponsePayload {
-            content: Some(content),
-            ephemeral: false,
-            components_json: None,
-            embed_json: None,
-        })
+        Ok(ResponsePayload::text(content))
     }
 }

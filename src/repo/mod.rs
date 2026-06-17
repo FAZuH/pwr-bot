@@ -11,8 +11,8 @@ use diesel_async::pooled_connection::deadpool::Pool;
 use diesel_migrations::EmbeddedMigrations;
 use diesel_migrations::MigrationHarness;
 use diesel_migrations::embed_migrations;
-use tracing::info;
 use tokio::task;
+use tracing::info;
 
 use crate::repo::postgres::*;
 use crate::repo::traits::*;

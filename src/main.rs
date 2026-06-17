@@ -7,8 +7,6 @@ use std::time::Instant;
 
 use anyhow::Result;
 use dotenv::dotenv;
-use tracing::debug;
-use tracing::info;
 use pwr_bot::bot::Bot;
 use pwr_bot::bot::host_ctx::PoiseHostCtx;
 use pwr_bot::bot::plugin::host_registry;
@@ -21,6 +19,8 @@ use pwr_bot::logging::setup_logging;
 use pwr_bot::repo::PgRepos;
 use pwr_bot::repo::traits::Repos;
 use pwr_bot::service::Services;
+use tracing::debug;
+use tracing::info;
 
 #[tokio::main]
 async fn main() -> Result<()> {

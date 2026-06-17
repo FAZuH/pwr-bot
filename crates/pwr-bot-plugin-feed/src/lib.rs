@@ -185,12 +185,9 @@ impl FeedPlugin {
 
         let guild_id = unsafe { host.guild_id() };
         if guild_id == 0 {
-            return Ok(ResponsePayload {
-                content: Some("This command can only be used in a server.".into()),
-                ephemeral: true,
-                components_json: None,
-                embed_json: None,
-            });
+            return Ok(ResponsePayload::text_ephemeral(
+                "This command can only be used in a server.",
+            ));
         }
 
         let result = self
@@ -239,12 +236,7 @@ impl FeedPlugin {
                 .unwrap_or("None"),
         );
 
-        Ok(ResponsePayload {
-            content: Some(content),
-            ephemeral: false,
-            components_json: None,
-            embed_json: None,
-        })
+        Ok(ResponsePayload::text(content))
     }
 
     async fn cmd_list(&self, host: &PluginHost) -> Result<ResponsePayload, String> {
@@ -269,14 +261,9 @@ impl FeedPlugin {
         };
 
         if rows.is_empty() {
-            return Ok(ResponsePayload {
-                content: Some(
-                    "You have no subscriptions. Use `/feed subscribe` to add some!".into(),
-                ),
-                ephemeral: false,
-                components_json: None,
-                embed_json: None,
-            });
+            return Ok(ResponsePayload::text(
+                "You have no subscriptions. Use `/feed subscribe` to add some!",
+            ));
         }
 
         let subscriber_id = rows[0].get("id").and_then(|v| v.as_i64()).unwrap_or(0);
@@ -340,12 +327,7 @@ impl FeedPlugin {
             }
         }
 
-        Ok(ResponsePayload {
-            content: Some(lines.join("\n")),
-            ephemeral: false,
-            components_json: None,
-            embed_json: None,
-        })
+        Ok(ResponsePayload::text(lines.join("\n")))
     }
 
     async fn cmd_poll_feeds(&self, host: &PluginHost) -> Result<ResponsePayload, String> {
@@ -359,11 +341,6 @@ impl FeedPlugin {
         let platforms = self.platforms.lock().await;
         let platforms = platforms.as_ref().ok_or("Platforms not initialized")?;
         publisher::poll_feeds(&pool, host, platforms).await?;
-        Ok(ResponsePayload {
-            content: None,
-            ephemeral: false,
-            components_json: None,
-            embed_json: None,
-        })
+        Ok(ResponsePayload::text(""))
     }
 }

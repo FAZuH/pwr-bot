@@ -6,6 +6,7 @@ use std::sync::Arc;
 use pwr_bot_sdk::InvokeRequest;
 use pwr_bot_sdk::InvokeResponse;
 use pwr_bot_sdk::ResponsePayload;
+use tracing::instrument;
 
 use crate::bot::command::Error;
 use crate::bot::host_ctx::HostCtx;
@@ -16,7 +17,6 @@ use crate::bot::plugin::ffi_host_ctx::FfiHostCtx;
 use crate::bot::plugin::host_registry;
 use crate::bot::plugin::loader::LoadedPlugin;
 use crate::bot::plugin::registry::PluginRegistry;
-use tracing::instrument;
 
 /// Dispatches a plugin command invocation via FFI.
 ///
@@ -96,11 +96,7 @@ pub async fn dispatch(
                         e
                     })
                     .ok();
-                payload.map(|p| MessagePayload {
-                    content: p.content,
-                    embed: None,
-                    ephemeral: p.ephemeral,
-                })
+                payload.map(|p| MessagePayload(p.data))
             } else {
                 None
             }
@@ -108,7 +104,7 @@ pub async fn dispatch(
     };
 
     if let Some(msg) = msg_payload {
-        tracing::debug!(ffi.command = %command, content = ?msg.content, "dispatch: sending response");
+        tracing::debug!(ffi.command = %command, "dispatch: sending response");
         host_ctx.send_message(&msg).await?;
         tracing::debug!(ffi.command = %command, "dispatch: response sent");
     } else {

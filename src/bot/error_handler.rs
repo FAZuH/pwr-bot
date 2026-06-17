@@ -1,9 +1,9 @@
 //! Error handling for Discord bot commands.
 
-use tracing::error;
 use poise::CreateReply;
 use poise::FrameworkError;
 use poise::serenity_prelude::*;
+use tracing::error;
 
 use crate::bot::Data;
 use crate::bot::Error;
