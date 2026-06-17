@@ -13,6 +13,7 @@ use pwr_bot::bot::plugin::host_registry;
 use pwr_bot::bot::plugin::loader;
 use pwr_bot::bot::plugin::loader::LoadedPlugin;
 use pwr_bot::bot::plugin::registry::PluginRegistry;
+use pwr_bot::bot::plugin::view_registry::PluginViewRegistry;
 use pwr_bot::config::Config;
 use pwr_bot::config::Features;
 use pwr_bot::event::event_bus::EventBus;
@@ -89,7 +90,9 @@ pub fn test_data() -> Arc<Data> {
         internal: Arc::new(NoopInternalOps),
     });
 
+    let http = fake_http();
     Arc::new(Data {
+        view_registry: Arc::new(PluginViewRegistry::new(http, plugin_registry.clone())),
         config,
         service: services,
         event_bus,

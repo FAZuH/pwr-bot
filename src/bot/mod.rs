@@ -42,6 +42,7 @@ use crate::bot::command::Cog;
 use crate::bot::command::Cogs;
 use crate::bot::error_handler::ErrorHandler;
 use crate::bot::plugin::registry::PluginRegistry;
+use crate::bot::plugin::view_registry::PluginViewRegistry;
 use crate::config::Config;
 use crate::entity::BotMetaKey;
 use crate::event::VoiceStateEvent;
@@ -54,6 +55,7 @@ pub struct Data {
     pub service: Arc<Services>,
     pub event_bus: Arc<EventBus>,
     pub plugin_registry: Arc<PluginRegistry>,
+    pub view_registry: Arc<PluginViewRegistry>,
     pub start_time: Instant,
 }
 
@@ -87,7 +89,8 @@ impl Bot {
             config: config.clone(),
             service,
             event_bus: event_bus.clone(),
-            plugin_registry,
+            plugin_registry: plugin_registry.clone(),
+            view_registry: Arc::new(PluginViewRegistry::new(http.clone(), plugin_registry)),
             start_time: Instant::now(),
         });
 
@@ -259,6 +262,27 @@ impl BotEventHandler {
         .expect("Minimal VoiceState construction should never fail")
     }
 
+    /// Handles component interactions for plugin views.
+    ///
+    /// If the interaction is a component interaction on a message tracked by
+    /// [`PluginViewRegistry`], routes it to the plugin via
+    /// [`view_registry::PluginViewRegistry::handle_interaction`].
+    async fn handle_plugin_view_interaction(
+        &self,
+        _ctx: &poise::serenity_prelude::Context,
+        interaction: &poise::serenity_prelude::Interaction,
+    ) {
+        let Interaction::Component(component) = interaction else {
+            return;
+        };
+
+        let msg_id = component.message.id;
+        self.data
+            .view_registry
+            .handle_interaction(msg_id, component.clone())
+            .await;
+    }
+
     fn collect_voice_states_from_guild(
         &self,
         guild: &Guild,
@@ -386,6 +410,9 @@ impl poise::serenity_prelude::EventHandler for BotEventHandler {
                 if let Ok(json) = serde_json::to_value(&event) {
                     let _ = self.event_bus.publish_named("voice_state", json);
                 }
+            }
+            FullEvent::InteractionCreate { interaction, .. } => {
+                self.handle_plugin_view_interaction(ctx, interaction).await;
             }
             _ => {}
         }

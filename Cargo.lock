@@ -906,6 +906,7 @@ checksum = "b95864e58597509106f1fddfe0600de7e589e1fddddd87f54eee0a49fd111bbc"
 dependencies = [
  "deadpool 0.13.0",
  "diesel",
+ "diesel_migrations",
  "futures-core",
  "futures-util",
  "pin-project-lite",
@@ -3095,6 +3096,7 @@ dependencies = [
  "libloading",
  "log",
  "minijinja",
+ "percent-encoding",
  "plotters",
  "poise",
  "pwr-bot-sdk",
@@ -3108,6 +3110,7 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
+ "url",
  "uuid",
  "wreq",
  "wreq-util",

@@ -14,7 +14,7 @@ mod common;
 
 macro_rules! db_test {
     ($name:ident, |$db:ident| $body:block) => {
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread")]
         #[serial_test::serial]
         async fn $name() {
             let $db = common::setup_db().await;

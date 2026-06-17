@@ -3,6 +3,7 @@
 use std::ffi::CString;
 use std::sync::Arc;
 
+use poise::serenity_prelude::UserId;
 use pwr_bot_sdk::InvokeRequest;
 use pwr_bot_sdk::InvokeResponse;
 use pwr_bot_sdk::ResponsePayload;
@@ -40,7 +41,7 @@ pub async fn dispatch(
 
     let ffi_ctx = Arc::new(FfiHostCtx::new(host_ctx.clone()));
 
-    let msg_payload = {
+    let (msg_payload, has_components) = {
         let cmd_c = CString::new(command).map_err(|e| e.to_string())?;
         let args_c = CString::new(args_json).map_err(|e| e.to_string())?;
 
@@ -96,17 +97,41 @@ pub async fn dispatch(
                         e
                     })
                     .ok();
-                payload.map(|p| MessagePayload(p.data))
+                let has_components = payload
+                    .as_ref()
+                    .and_then(|p| p.data.get("components"))
+                    .and_then(|c| c.as_array())
+                    .is_some_and(|a| !a.is_empty());
+                (payload.map(|p| MessagePayload(p.data)), has_components)
             } else {
-                None
+                (None, false)
             }
         }
     };
 
     if let Some(msg) = msg_payload {
         tracing::debug!(ffi.command = %command, "dispatch: sending response");
-        host_ctx.send_message(&msg).await?;
-        tracing::debug!(ffi.command = %command, "dispatch: response sent");
+        let msg_id = host_ctx.send_message(&msg).await?;
+        tracing::debug!(
+            ffi.command = %command,
+            message.id = %msg_id,
+            "dispatch: response sent",
+        );
+
+        // Register as interactive view if the response contained components
+        if has_components {
+            let data = host_ctx.data();
+            let plugin_name = command.split_whitespace().next().unwrap_or(command);
+            data.view_registry
+                .register(plugin_name, msg_id, UserId::new(host_ctx.author_id()))
+                .await;
+            tracing::debug!(
+                ffi.command = %command,
+                plugin.name = %plugin_name,
+                message.id = %msg_id,
+                "plugin view registered",
+            );
+        }
     } else {
         tracing::debug!(ffi.command = %command, "dispatch: no response payload");
     }
@@ -207,7 +232,7 @@ pub fn register_ffi_event_handlers(
 }
 
 /// Dispatches an event to an FFI plugin's `on_event` handler.
-async fn dispatch_on_event_ffi(
+pub async fn dispatch_on_event_ffi(
     loaded: &LoadedPlugin,
     event_name: &str,
     payload: serde_json::Value,

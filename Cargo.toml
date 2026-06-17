@@ -48,8 +48,11 @@ base64 = "0.22.1"
 resvg = "0.47.0"
 plotters = "0.3.7"
 diesel = { version = "2.3", features = ["chrono", "postgres", "serde_json", "uuid"] }
-diesel-async = { version = "0.8", features = ["deadpool", "postgres"] }
+
+diesel-async = { version = "0.8", features = ["deadpool", "postgres", "migrations"] }
 diesel_migrations = { version = "2.3", features = ["postgres"] }
+url = "2"
+percent-encoding = "2"
 byteorder = "1.5.0"
 libloading = "0.8"
 pwr-bot-sdk = { path = "crates/pwr_bot_sdk" }

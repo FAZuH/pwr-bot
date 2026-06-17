@@ -9,3 +9,4 @@ pub mod host_registry;
 pub mod invocation;
 pub mod loader;
 pub mod registry;
+pub mod view_registry;
