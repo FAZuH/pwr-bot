@@ -33,6 +33,7 @@ log = "0.4.29"
 thiserror = "2.0.18"
 uuid = { version = "1.21.0", features = ["v4"] }
 governor = "0.10.4"
+tracing = "0.1"
 tracing-appender = "0.2.4"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 wreq = "5.3.0"

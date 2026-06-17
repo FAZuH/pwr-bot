@@ -7,8 +7,8 @@ use std::time::Instant;
 
 use anyhow::Result;
 use dotenv::dotenv;
-use log::debug;
-use log::info;
+use tracing::debug;
+use tracing::info;
 use pwr_bot::bot::Bot;
 use pwr_bot::bot::host_ctx::PoiseHostCtx;
 use pwr_bot::bot::plugin::host_registry;
@@ -69,22 +69,22 @@ async fn main() -> Result<()> {
     invocation::dispatch_tasks_ffi(&plugins).await;
 
     info!(
-        "pwr-bot is up in {:.2}s. Press Ctrl+C to stop.",
-        init_start.elapsed().as_secs_f64()
+        duration = init_start.elapsed().as_secs_f64(),
+        "pwr-bot is up",
     );
     tokio::signal::ctrl_c().await?;
-    info!("Ctrl+C received, shutting down.");
+    info!("shutting down");
 
     Ok(())
 }
 
 async fn load_config() -> Result<Arc<Config>> {
-    debug!("Loading configuration...");
+    debug!("loading configuration");
     let mut config = Config::new();
     config.load()?;
     let config = Arc::new(config);
     setup_logging(&config)?;
-    info!("Starting pwr-bot...");
+    info!("starting pwr-bot");
     Ok(config)
 }
 
@@ -92,21 +92,21 @@ async fn setup_database(
     config: &Config,
     init_start: Instant,
 ) -> Result<Arc<dyn Repos + Send + Sync>> {
-    debug!("Setting up Database...");
+    debug!("setting up database");
     let repos = PgRepos::new(&config.db_url).await?;
 
-    info!("Running database migrations...");
+    info!("running database migrations");
     repos.run_migrations().await?;
     info!(
-        "Database setup complete ({:.2}s).",
-        init_start.elapsed().as_secs_f64()
+        duration = init_start.elapsed().as_secs_f64(),
+        "database setup complete",
     );
 
     Ok(Arc::new(repos))
 }
 
 async fn setup_services(repos: Arc<dyn Repos + Send + Sync>) -> Result<Arc<Services>> {
-    debug!("Setting up Services...");
+    debug!("setting up services");
     Ok(Arc::new(Services::new(repos).await?))
 }
 
@@ -117,14 +117,14 @@ async fn setup_bot(
     plugin_registry: Arc<PluginRegistry>,
     init_start: Instant,
 ) -> Result<Arc<Bot>> {
-    info!("Starting bot...");
+    info!("starting bot");
     let mut bot = Bot::new(config.clone(), event_bus, services, plugin_registry).await?;
 
     bot.start();
     let bot = Arc::new(bot);
     info!(
-        "Bot setup complete ({:.2}s).",
-        init_start.elapsed().as_secs_f64()
+        duration = init_start.elapsed().as_secs_f64(),
+        "bot setup complete",
     );
 
     Ok(bot)

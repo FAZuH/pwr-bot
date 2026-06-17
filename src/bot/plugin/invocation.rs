@@ -16,18 +16,28 @@ use crate::bot::plugin::ffi_host_ctx::FfiHostCtx;
 use crate::bot::plugin::host_registry;
 use crate::bot::plugin::loader::LoadedPlugin;
 use crate::bot::plugin::registry::PluginRegistry;
+use tracing::instrument;
 
 /// Dispatches a plugin command invocation via FFI.
+///
+/// Defers the interaction on the main runtime first (reliable serenity HTTP path),
+/// then marks the context as responded so the plugin's FFI `host.defer()` becomes
+/// a no-op instead of going through `host_block_on` (which can deadlock reqwest).
 ///
 /// The FFI interaction is scoped in a block so that [`InvokeRequest`] and
 /// [`InvokeResponse`] (which contain raw pointers and are not `Send`) are
 /// dropped before any `.await` point.
+#[instrument(skip_all, fields(ffi.command = %command))]
 pub async fn dispatch(
     host_ctx: &Arc<PoiseHostCtx>,
     plugin_vtable: &pwr_bot_sdk::PluginVTable,
     command: &str,
     args_json: &str,
 ) -> Result<(), Error> {
+    tracing::debug!(ffi.command = %command, "dispatch: before defer");
+    host_ctx.defer().await?;
+    tracing::debug!(ffi.command = %command, "dispatch: after defer");
+
     let ffi_ctx = Arc::new(FfiHostCtx::new(host_ctx.clone()));
 
     let msg_payload = {
@@ -54,7 +64,7 @@ pub async fn dispatch(
                     .to_str()
                     .unwrap_or("unknown error")
                     .to_string();
-                log::debug!("FFI command '{command}' returned error: {err}");
+                tracing::debug!(ffi.command = %command, ffi.error = %err, "FFI command returned error");
                 if let Some(free) = plugin_vtable.free_string {
                     free(response.error);
                 }
@@ -69,18 +79,28 @@ pub async fn dispatch(
             if !response.payload_json.is_null() {
                 let json_str = std::ffi::CStr::from_ptr(response.payload_json)
                     .to_str()
-                    .unwrap_or("{}");
+                    .unwrap_or("{}")
+                    .to_string();
                 if let Some(free) = plugin_vtable.free_string {
                     free(response.payload_json);
                 }
 
-                serde_json::from_str::<ResponsePayload>(json_str)
-                    .ok()
-                    .map(|p| MessagePayload {
-                        content: p.content,
-                        embed: None,
-                        ephemeral: p.ephemeral,
+                let payload: Option<ResponsePayload> = serde_json::from_str(&json_str)
+                    .map_err(|e| {
+                        tracing::error!(
+                            ffi.command = %command,
+                            response_json = %json_str,
+                            error = %e,
+                            "failed to deserialize plugin response",
+                        );
+                        e
                     })
+                    .ok();
+                payload.map(|p| MessagePayload {
+                    content: p.content,
+                    embed: None,
+                    ephemeral: p.ephemeral,
+                })
             } else {
                 None
             }
@@ -88,7 +108,11 @@ pub async fn dispatch(
     };
 
     if let Some(msg) = msg_payload {
+        tracing::debug!(ffi.command = %command, content = ?msg.content, "dispatch: sending response");
         host_ctx.send_message(&msg).await?;
+        tracing::debug!(ffi.command = %command, "dispatch: response sent");
+    } else {
+        tracing::debug!(ffi.command = %command, "dispatch: no response payload");
     }
 
     Ok(())
@@ -177,9 +201,10 @@ pub fn register_ffi_event_handlers(
                     Ok(())
                 }),
             );
-            log::info!(
-                "Registered event handler '{event_name}' for plugin '{}'",
-                plugin.name,
+            tracing::info!(
+                event.name = %event_name,
+                plugin.name = %plugin.name,
+                "event handler registered",
             );
         }
     }
@@ -224,7 +249,7 @@ pub async fn dispatch_tasks_ffi(ffi_plugins: &[Arc<LoadedPlugin>]) {
     let system_ctx = match host_registry::system_ctx() {
         Some(ctx) => ctx.clone(),
         None => {
-            log::error!("Cannot dispatch FFI tasks: system context not initialized");
+            tracing::error!("cannot dispatch FFI tasks: system context not initialized");
             return;
         }
     };
@@ -267,8 +292,11 @@ pub async fn dispatch_tasks_ffi(ffi_plugins: &[Arc<LoadedPlugin>]) {
                             let err = std::ffi::CStr::from_ptr(response.error)
                                 .to_str()
                                 .unwrap_or("unknown error");
-                            log::error!(
-                                "FFI task '{task_name}' for plugin '{plugin_name}' failed: {err}",
+                            tracing::error!(
+                                task.name = %task_name,
+                                plugin.name = %plugin_name,
+                                ffi.error = %err,
+                                "FFI task failed",
                             );
                             if let Some(free) = vtable.free_string {
                                 free(response.error);
@@ -283,7 +311,11 @@ pub async fn dispatch_tasks_ffi(ffi_plugins: &[Arc<LoadedPlugin>]) {
                 }
             });
 
-            log::info!("Spawned FFI task '{name_for_log}' (interval: {interval_secs}s)",);
+            tracing::info!(
+                task.name = %name_for_log,
+                task.interval = interval_secs,
+                "FFI task spawned",
+            );
         }
     }
 }

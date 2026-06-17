@@ -212,6 +212,12 @@ unsafe extern "C" fn cb_defer(ctx_handle: u64) -> bool {
         None => return false,
     };
 
+    // Fast path: if already responded (e.g. by dispatch() on the main runtime),
+    // return immediately without spawning a thread / runtime for a no-op.
+    if ctx.was_responded() {
+        return true;
+    }
+
     host_block_on(async move { ctx.defer().await }).is_ok()
 }
 

@@ -41,18 +41,18 @@ impl FeedPlugin {
             .await
             .as_ref()
             .ok_or_else(|| {
-                eprintln!("[FEED_PLUGIN_DEBUG] pool is None");
+                tracing::error!("database pool not initialized");
                 "Database pool not initialized".to_string()
             })?
             .clone();
         let client = pool.get().await.map_err(|e| {
             let msg = e.to_string();
-            eprintln!("[FEED_PLUGIN_DEBUG] pool.get() error: {msg}");
+            tracing::error!(error = %msg, "failed to get connection from pool");
             msg
         })?;
         let rows = client.query(sql, params).await.map_err(|e| {
             let msg = e.to_string();
-            eprintln!("[FEED_PLUGIN_DEBUG] query error: {msg}");
+            tracing::error!(db.query = %sql, error = %msg, "database query failed");
             msg
         })?;
         let json_rows: Vec<serde_json::Value> = rows
@@ -94,11 +94,11 @@ impl BotPlugin for FeedPlugin {
     }
 
     fn commands(&self) -> Vec<CommandSpec> {
-        vec![CommandSpec {
-            name: "feed".into(),
-            description: "Manage feed subscriptions".into(),
-            args: vec![],
-        }]
+        vec![
+            CommandSpec::new("feed", "Manage feed subscriptions"),
+            CommandSpec::new("feed list", "List your subscriptions"),
+            CommandSpec::new("feed settings", "Configure feed settings"),
+        ]
     }
 
     fn settings_panels(&self) -> Vec<SettingsPanelSpec> {
@@ -252,13 +252,14 @@ impl FeedPlugin {
 
         let _guild_id = unsafe { host.guild_id() };
         let author_id = unsafe { host.author_id() };
+        let target_id = author_id.to_string();
 
         let result = self
             .query_json(
-                "SELECT s.id, s.type_, s.target_id \
+                "SELECT s.id, s.type, s.target_id \
                  FROM subscribers s \
-                 WHERE s.target_id = $1 AND s.type_ = 'dm'",
-                &[&(author_id as i64)],
+                 WHERE s.target_id = $1 AND s.type = 'dm'",
+                &[&target_id],
             )
             .await?;
 

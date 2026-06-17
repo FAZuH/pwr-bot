@@ -80,10 +80,10 @@ fn build_message(payload: &serde_json::Value) -> String {
 async fn query_subscribers(pool: &Pool, feed_id: i64, sub_type: &str) -> Vec<serde_json::Value> {
     let result = query_json(
         pool,
-        "SELECT s.id, s.target_id, s.type_ \
+        "SELECT s.id, s.target_id, s.type \
          FROM subscribers s \
          JOIN feed_subscriptions fs ON fs.subscriber_id = s.id \
-         WHERE fs.feed_id = $1 AND s.type_ = $2",
+         WHERE fs.feed_id = $1 AND s.type = $2",
         &[&feed_id, &sub_type],
     )
     .await

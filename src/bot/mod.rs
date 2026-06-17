@@ -29,9 +29,9 @@ use anyhow;
 use anyhow::Result;
 use async_trait::async_trait;
 use futures::lock::Mutex;
-use log::debug;
-use log::error;
-use log::info;
+use tracing::debug;
+use tracing::error;
+use tracing::info;
 use poise::Framework;
 use poise::FrameworkOptions;
 use poise::serenity_prelude::*;
@@ -74,7 +74,7 @@ impl Bot {
         service: Arc<Services>,
         plugin_registry: Arc<PluginRegistry>,
     ) -> Result<Self> {
-        info!("Initializing bot...");
+        info!("initializing bot");
 
         let (token, intents) = Self::create_client_config(&config)?;
         let framework = Self::create_framework(&config, &plugin_registry).await?;
@@ -113,19 +113,19 @@ impl Bot {
 
     /// Starts the bot client in a background task.
     pub fn start(&mut self) {
-        info!("Starting bot client...");
+        info!("starting bot client");
         let client_builder = self.client_builder.take().expect("start() called twice");
         let client = self.client.clone();
 
         tokio::spawn(async move {
-            info!("Connecting bot to Discord...");
+            info!("connecting to Discord");
 
             let built_client = client_builder
                 .await
                 .expect("Failed to build Discord client");
 
             *client.lock().await = Some(built_client);
-            info!("Bot connected to Discord.");
+            info!("connected to Discord");
 
             client
                 .lock()
@@ -137,7 +137,7 @@ impl Bot {
                 .expect("Bot client crashed");
         });
 
-        info!("Bot client start initiated.");
+        info!("bot client start initiated");
     }
 
     /// Creates the Poise framework with commands and configuration.
@@ -230,7 +230,7 @@ impl BotEventHandler {
         }
 
         if tracked > 0 {
-            info!("Voice channel scan complete: {tracked} users now being tracked");
+            info!(users.tracked = tracked, "voice channel scan complete");
         }
     }
 
@@ -293,9 +293,7 @@ impl BotEventHandler {
     /// Registers commands globally if the bot version has changed.
     async fn register_commands_if_needed(&self) {
         if !self.data.config.features.is_enabled("autoregister_cmds") {
-            info!(
-                "Autoregister command feature is disabled. Commands will not be registered globally."
-            );
+            info!("autoregister commands disabled");
             return;
         }
 
@@ -307,32 +305,32 @@ impl BotEventHandler {
 
         match stored_version {
             Ok(Some(version)) if version == current_version => {
-                debug!("Bot version unchanged ({current_version})");
+                debug!(version = %current_version, "bot version unchanged");
             }
             _ => {
                 // Version mismatch or not found - register commands globally
                 info!(
-                    "Bot version changed or not found. Registering commands globally (current: {}, stored: {:?})",
-                    current_version,
-                    stored_version.ok().flatten()
+                    version.current = %current_version,
+                    version.stored = ?stored_version.ok().flatten(),
+                    "registering commands globally",
                 );
 
                 let mut commands = Cogs.commands();
                 commands.extend(self.data.plugin_registry.all_commands().await);
                 match poise::builtins::register_globally(&self.http, &commands).await {
                     Ok(_) => {
-                        info!("Commands registered globally successfully");
+                        info!("commands registered globally");
 
                         // Update stored version
                         if let Err(e) = service
                             .set_meta(BotMetaKey::BotVersion, current_version)
                             .await
                         {
-                            error!("Failed to update bot version in database: {e}");
+                            error!(error = %e, "failed to update bot version in database");
                         }
                     }
                     Err(e) => {
-                        error!("Failed to register commands globally: {e}");
+                        error!(error = %e, "failed to register commands globally");
                     }
                 }
             }
@@ -345,7 +343,7 @@ impl poise::serenity_prelude::EventHandler for BotEventHandler {
     async fn dispatch(&self, ctx: &poise::serenity_prelude::Context, event: &FullEvent) {
         match event {
             FullEvent::Ready { .. } => {
-                info!("Bot is ready, scanning voice channels...");
+                info!("bot ready, scanning voice channels");
                 self.scan_voice_channels(ctx).await;
 
                 // Check if commands need to be re-registered
@@ -371,9 +369,9 @@ impl poise::serenity_prelude::EventHandler for BotEventHandler {
 
                 if tracked > 0 {
                     info!(
-                        "Guild {} scan complete: {} users now being tracked",
-                        guild.id.get(),
-                        tracked
+                        guild.id = %guild.id.get(),
+                        users.tracked = tracked,
+                        "guild scan complete",
                     );
                 }
             }

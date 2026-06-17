@@ -12,8 +12,8 @@ use governor::RateLimiter;
 use governor::clock::QuantaClock;
 use governor::state::InMemoryState;
 use governor::state::direct::NotKeyed;
-use log::debug;
-use log::info;
+use tracing::debug;
+use tracing::info;
 use serde_json::Map;
 use serde_json::Value;
 use wreq::Client;
@@ -252,12 +252,12 @@ impl ComickPlatform {
 
     async fn send(&self, request: wreq::RequestBuilder) -> Result<wreq::Response, wreq::Error> {
         if self.limiter.check().is_err() {
-            info!("Source {} is ratelimited. Waiting...", self.base.info.name);
+            info!(source = %self.base.info.name, "source ratelimited, waiting");
         }
         self.limiter.until_ready().await;
 
         let req = request.build()?;
-        debug!("Making request to: {}", req.url());
+        debug!(url = %req.url(), "making request");
         self.client.execute(req).await
     }
 
@@ -275,8 +275,9 @@ impl ComickPlatform {
 impl Platform for ComickPlatform {
     async fn fetch_source(&self, slug: &str) -> Result<FeedSource, FeedError> {
         debug!(
-            "Fetching info from {} for source_id: {slug}",
-            self.base.info.name
+            source = %self.base.info.name,
+            source_id = %slug,
+            "fetching source info",
         );
 
         let request = self
@@ -290,8 +291,9 @@ impl Platform for ComickPlatform {
 
     async fn fetch_latest(&self, hid: &str) -> Result<FeedItem, FeedError> {
         debug!(
-            "Fetching latest from {} for source_id: {hid}",
-            self.base.info.name
+            source = %self.base.info.name,
+            source_id = %hid,
+            "fetching latest",
         );
 
         let request = self.client.get(format!(

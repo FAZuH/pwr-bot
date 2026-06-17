@@ -12,9 +12,9 @@ use governor::RateLimiter;
 use governor::clock::QuantaClock;
 use governor::state::InMemoryState;
 use governor::state::direct::NotKeyed;
-use log::debug;
-use log::info;
-use log::warn;
+use tracing::debug;
+use tracing::info;
+use tracing::warn;
 use serde_json::Map;
 use serde_json::Value;
 use wreq::Client;
@@ -196,7 +196,7 @@ impl MangaDexPlatform {
         source_id: &str,
     ) -> Result<&'a Value, FeedError> {
         chapters.first().ok_or_else(|| {
-            warn!("No chapters found in data for source_id: {source_id}");
+            warn!(source_id = %source_id, "no chapters found");
             FeedError::EmptySource {
                 source_id: source_id.to_string(),
             }
@@ -307,12 +307,12 @@ impl MangaDexPlatform {
 
     async fn send(&self, request: wreq::RequestBuilder) -> Result<wreq::Response, wreq::Error> {
         if self.limiter.check().is_err() {
-            info!("Source {} is ratelimited. Waiting...", self.base.info.name);
+            info!(source = %self.base.info.name, "source ratelimited, waiting");
         }
         self.limiter.until_ready().await;
 
         let req = request.build()?;
-        debug!("Making request to: {}", req.url());
+        debug!(url = %req.url(), "making request");
         self.client.execute(req).await
     }
 
@@ -333,8 +333,9 @@ impl MangaDexPlatform {
 impl Platform for MangaDexPlatform {
     async fn fetch_source(&self, source_id: &str) -> Result<FeedSource, FeedError> {
         debug!(
-            "Fetching info from {} for source_id: {source_id}",
-            self.base.info.name
+            source = %self.base.info.name,
+            source_id = %source_id,
+            "fetching source info",
         );
         let source_id = source_id.to_string();
         self.validate_uuid(&source_id.clone())?;
@@ -351,8 +352,9 @@ impl Platform for MangaDexPlatform {
 
     async fn fetch_latest(&self, items_id: &str) -> Result<FeedItem, FeedError> {
         debug!(
-            "Fetching latest from {} for source_id: {items_id}",
-            self.base.info.name
+            source = %self.base.info.name,
+            source_id = %items_id,
+            "fetching latest",
         );
         let source_id = items_id.to_string();
 

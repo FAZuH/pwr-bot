@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicU8;
 use std::sync::atomic::Ordering;
 
 use async_trait::async_trait;
@@ -59,6 +59,13 @@ pub trait HostCtx: Send + Sync {
     async fn acknowledge(&self, interaction: &ComponentInteraction) -> Result<(), Error>;
 }
 
+/// Interaction not yet responded to.
+const PENDING: u8 = 0b00;
+/// A full message response was sent as the initial interaction response.
+const RESPONDED: u8 = 0b01;
+/// A defer (type 5) was sent; the actual response must edit the original.
+const DEFERRED: u8 = 0b11;
+
 /// HostCtx backed by a live poise `Context`.
 ///
 /// Extracts all owned state at construction so the type is lifetime-free.
@@ -69,8 +76,8 @@ pub struct PoiseHostCtx {
     data: Arc<Data>,
     http: Arc<Http>,
     interaction: Option<CommandInteraction>,
-    /// Tracks whether we have sent an initial interaction response.
-    responded: AtomicBool,
+    /// Interaction response state: PENDING (0b00), RESPONDED (0b01), DEFERRED (0b11).
+    state: AtomicU8,
 }
 
 impl PoiseHostCtx {
@@ -93,7 +100,7 @@ impl PoiseHostCtx {
             data: ctx.data(),
             http,
             interaction,
-            responded: AtomicBool::new(false),
+            state: AtomicU8::new(PENDING),
         })
     }
 
@@ -106,8 +113,22 @@ impl PoiseHostCtx {
             data,
             http,
             interaction: None,
-            responded: AtomicBool::new(false),
+            state: AtomicU8::new(PENDING),
         })
+    }
+
+    /// Marks as responded (full message, not defer).
+    ///
+    /// Used by [`gui_test`](crate::bot::command::gui_test) to prevent plugin
+    /// dispatch from trying to defer an already-responded interaction.
+    pub fn mark_responded(&self) {
+        self.state.store(RESPONDED, Ordering::SeqCst);
+    }
+
+    /// Returns `true` if the interaction has already received any response
+    /// (either a full message or a defer).
+    pub fn was_responded(&self) -> bool {
+        self.state.load(Ordering::SeqCst) != PENDING
     }
 
     /// Returns a reference to the Discord HTTP client.
@@ -161,35 +182,83 @@ impl HostCtx for PoiseHostCtx {
     }
 
     async fn defer(&self) -> Result<(), Error> {
-        if let Some(cmd) = self.cmd_interaction()
-            && !self.responded.swap(true, Ordering::SeqCst)
-        {
-            cmd.defer(&self.http).await?;
-        }
+        // No-op. Plugins run fast enough (<1s from logs) that we skip the
+        // Discord defer entirely. send_message will send the response
+        // directly as the initial interaction response (type 4).
         Ok(())
     }
 
     async fn send_message(&self, payload: &MessagePayload) -> Result<MessageId, Error> {
-        let builder = self.build_response_message(payload);
-
         if let Some(cmd) = self.cmd_interaction() {
-            if !self.responded.swap(true, Ordering::SeqCst) {
-                cmd.create_response(&self.http, CreateInteractionResponse::Message(builder))
-                    .await?;
-                Ok(cmd.get_response(&self.http).await?.id)
-            } else {
-                let mut followup = CreateInteractionResponseFollowup::new();
-                if let Some(ref content) = payload.content {
-                    followup = followup.content(content);
+            let prev = self.state.load(Ordering::SeqCst);
+            match prev {
+                PENDING => {
+                    tracing::debug!("send_message: state=PENDING, attempting initial response");
+                    if self
+                        .state
+                        .compare_exchange(PENDING, RESPONDED, Ordering::SeqCst, Ordering::SeqCst)
+                        .is_err()
+                    {
+                        tracing::debug!("send_message: CAS failed, falling through to followup");
+                    } else {
+                        let builder = self.build_response_message(payload);
+                        tracing::debug!(
+                            interaction.id = %cmd.id,
+                            interaction.token = %cmd.token,
+                            "send_message: calling cmd.create_response",
+                        );
+                        match cmd.create_response(
+                            &self.http,
+                            CreateInteractionResponse::Message(builder),
+                        )
+                        .await
+                        {
+                            Ok(()) => tracing::debug!("send_message: create_response succeeded"),
+                            Err(e) => {
+                                tracing::error!(error = %e, "send_message: create_response failed");
+                                return Err(e.into());
+                            }
+                        }
+                        match cmd.get_response(&self.http).await {
+                            Ok(msg) => {
+                                tracing::debug!(message.id = %msg.id, "send_message: got response id");
+                                return Ok(msg.id);
+                            }
+                            Err(e) => {
+                                tracing::error!(error = %e, "send_message: get_response failed");
+                                return Err(e.into());
+                            }
+                        }
+                    }
                 }
-                if let Some(ref embed) = payload.embed {
-                    followup = followup.embeds(vec![embed.clone()]);
+                DEFERRED => {
+                    // Was deferred — edit the original response to replace
+                    // the "thinking…" indicator with actual content.
+                    let mut builder = poise::serenity_prelude::EditInteractionResponse::new();
+                    if let Some(ref content) = payload.content {
+                        builder = builder.content(content);
+                    }
+                    if let Some(ref embed) = payload.embed {
+                        builder = builder.embeds(vec![embed.clone()]);
+                    }
+                    cmd.edit_response(&self.http, builder).await?;
+                    return Ok(cmd.get_response(&self.http).await?.id);
                 }
-                if payload.ephemeral {
-                    followup = followup.ephemeral(true);
-                }
-                Ok(cmd.create_followup(&self.http, followup).await?.id)
+                _ => {}
             }
+
+            // Already responded (full message) — send as a followup.
+            let mut followup = CreateInteractionResponseFollowup::new();
+            if let Some(ref content) = payload.content {
+                followup = followup.content(content);
+            }
+            if let Some(ref embed) = payload.embed {
+                followup = followup.embeds(vec![embed.clone()]);
+            }
+            if payload.ephemeral {
+                followup = followup.ephemeral(true);
+            }
+            Ok(cmd.create_followup(&self.http, followup).await?.id)
         } else {
             // Prefix context — send a channel message
             let mut msg = CreateMessage::new();

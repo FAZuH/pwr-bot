@@ -65,8 +65,8 @@ pub async fn add_subscriber(
 ) -> Result<serde_json::Value, String> {
     let result = query_json(
         pool,
-        "INSERT INTO subscribers (type_, target_id) VALUES ($1, $2) \
-         ON CONFLICT (type_, target_id) DO NOTHING RETURNING id, type_, target_id",
+        "INSERT INTO subscribers (type, target_id) VALUES ($1, $2) \
+         ON CONFLICT (type, target_id) DO NOTHING RETURNING id, type, target_id",
         &[&sub_type, &target_id],
     )
     .await?;
@@ -80,7 +80,7 @@ pub async fn add_subscriber(
         Some(row) => Ok(row.clone()),
         None => query_json(
             pool,
-            "SELECT id, type_, target_id FROM subscribers WHERE type_ = $1 AND target_id = $2",
+            "SELECT id, type, target_id FROM subscribers WHERE type = $1 AND target_id = $2",
             &[&sub_type, &target_id],
         )
         .await

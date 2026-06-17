@@ -7,7 +7,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use log::info;
+use tracing::info;
 use poise::Command;
 use pwr_bot_sdk::CommandSpec;
 use pwr_bot_sdk::EventHandlerSpec;
@@ -21,6 +21,7 @@ use crate::bot::command::Error;
 use crate::bot::host_ctx::PoiseHostCtx;
 use crate::bot::plugin::invocation::dispatch_plugin_command;
 use crate::bot::plugin::loader::LoadedPlugin;
+use tracing::instrument;
 
 /// Thread-safe registry of loaded plugins.
 pub struct PluginRegistry {
@@ -56,8 +57,9 @@ impl PluginRegistry {
             self.command_map.write().await.insert(cmd_name.clone(), idx);
             cmds.push(build_plugin_command(spec));
             info!(
-                "Registered plugin command: /{cmd_name} (from {})",
-                plugin.name
+                command.name = %cmd_name,
+                plugin.name = %plugin.name,
+                "plugin command registered",
             );
         }
 
@@ -125,16 +127,59 @@ impl PluginRegistry {
 
     /// Returns Poise `Command`s for all registered plugins.
     ///
-    /// Each command resolves its plugin at runtime via [`dispatch_plugin_command`],
-    /// so no core Poise wrappers are needed. Plugin authors add commands simply
-    /// by implementing [`BotPlugin::commands`](pwr_bot_sdk::BotPlugin::commands) — no core changes required.
+    /// Commands with space-separated names (e.g. `"feed list"`) are nested as
+    /// subcommands of their parent (`"feed"`), producing a proper Discord
+    /// command tree that shows subcommands in the autocomplete UI.
     pub async fn all_commands(&self) -> Vec<Command<Data, Error>> {
-        let mut cmds = Vec::new();
+        // Collect all specs, grouping by parent name (the token before the first space).
+        struct Group {
+            root: Option<CommandSpec>,
+            sub: Vec<CommandSpec>,
+        }
+        let mut groups: HashMap<String, Group> = HashMap::new();
 
         for plugin in self.plugins.read().await.iter() {
             for spec in &plugin.metadata.commands {
-                cmds.push(build_registry_command(spec));
+                if let Some((parent, _sub)) = spec.name.split_once(' ') {
+                    let g = groups.entry(parent.to_string()).or_insert(Group {
+                        root: None,
+                        sub: Vec::new(),
+                    });
+                    g.sub.push(spec.clone());
+                } else {
+                    let g = groups.entry(spec.name.clone()).or_insert(Group {
+                        root: None,
+                        sub: Vec::new(),
+                    });
+                    g.root = Some(spec.clone());
+                }
             }
+        }
+
+        let mut cmds = Vec::new();
+        for (_name, group) in groups {
+            let root = group.root.unwrap_or_else(|| CommandSpec {
+                name: _name.clone(),
+                description: String::new(),
+                args: vec![],
+            });
+
+            let mut cmd = build_registry_command(&root);
+            if !group.sub.is_empty() {
+                cmd.subcommands = group
+                    .sub
+                    .iter()
+                    .map(|spec| {
+                        let mut sub_cmd = build_registry_command(spec);
+                        // Strip parent prefix for Discord-compatible subcommand name
+                        if let Some((_, sub_name)) = spec.name.split_once(' ') {
+                            sub_cmd.name = Cow::Owned(sub_name.to_string());
+                        }
+                        sub_cmd
+                    })
+                    .collect();
+            }
+            cmds.push(cmd);
         }
 
         cmds
@@ -162,18 +207,43 @@ fn build_plugin_command(spec: &CommandSpec) -> Command<Data, Error> {
 /// stored in [`Data`], then dispatches through [`dispatch_plugin_command`].
 /// Errors are logged rather than propagated (Poise's `FrameworkError::Command`
 /// is `#[non_exhaustive]` and cannot be constructed externally).
+#[instrument(skip_all, fields(command.name = tracing::field::Empty, guild.id = tracing::field::Empty))]
 async fn registry_command_handler<'a>(
     ctx: poise::ApplicationContext<'a, Data, Error>,
 ) -> Result<(), poise::FrameworkError<'a, Data, Error>> {
     let poise_ctx: poise::Context<'a, Data, Error> = ctx.into();
+
     let cmd_name = poise_ctx.invoked_command_name();
+    let guild_id = poise_ctx.guild_id().map(|g| g.get());
+    let author_id = poise_ctx.author().id.get();
+    tracing::Span::current().record("command.name", &cmd_name);
+    if let Some(gid) = guild_id {
+        tracing::Span::current().record("guild.id", gid);
+    }
+
+    tracing::info!(
+        command.name = %cmd_name,
+        guild.id = guild_id,
+        user.id = author_id,
+        "command invoked",
+    );
+    tracing::debug!(
+        command.name = %cmd_name,
+        guild.id = guild_id,
+        user.id = author_id,
+        channel.id = poise_ctx.channel_id().get(),
+        "command dispatch started",
+    );
+
     let registry = &poise_ctx.data().plugin_registry;
     let host_ctx = Arc::new(PoiseHostCtx::new(poise_ctx));
 
     if let Err(e) =
         dispatch_plugin_command(registry, &host_ctx, cmd_name, serde_json::Value::Null).await
     {
-        log::error!("Plugin command '{cmd_name}' failed: {e:#}");
+        tracing::error!(command.name = %cmd_name, error = %e, "plugin command failed");
+    } else {
+        tracing::debug!(command.name = %cmd_name, "command dispatch completed");
     }
     Ok(())
 }

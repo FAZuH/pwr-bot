@@ -19,7 +19,9 @@ pub async fn plugin_tests(ctx: Context<'_>) -> Result<(), GuiTestError> {
     }
 
     for (_plugin_name, _step_name, spec) in &steps {
-        let host_ctx = Arc::new(PoiseHostCtx::new(ctx));
+        let host_ctx = PoiseHostCtx::new(ctx);
+        host_ctx.mark_responded();
+        let host_ctx = Arc::new(host_ctx);
         dispatch_plugin_command(registry, &host_ctx, &spec.command, spec.args.clone())
             .await
             .map_err(|e| GuiTestError::execution_failed(&spec.name, e.to_string()))?;

@@ -18,6 +18,7 @@ wreq = "5.3.0"
 wreq-util = "2.2.6"
 governor = "0.10.4"
 log = "0.4"
+tracing = "0.1"
 thiserror = "2"
 tokio = { version = "1", features = ["sync"] }
 tokio-postgres = { version = "0.7", features = ["with-serde_json-1", "with-chrono-0_4"] }

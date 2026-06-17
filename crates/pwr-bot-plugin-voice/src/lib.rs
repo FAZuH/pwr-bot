@@ -94,11 +94,12 @@ impl BotPlugin for VoicePlugin {
     }
 
     fn commands(&self) -> Vec<CommandSpec> {
-        vec![CommandSpec {
-            name: "vc".into(),
-            description: "Voice channel tracking and leaderboard".into(),
-            args: vec![],
-        }]
+        vec![
+            CommandSpec::new("vc", "Voice channel tracking and leaderboard"),
+            CommandSpec::new("vc leaderboard", "Show voice leaderboard"),
+            CommandSpec::new("vc stats", "Show your voice statistics"),
+            CommandSpec::new("vc settings", "Configure voice tracking settings"),
+        ]
     }
 
     fn settings_panels(&self) -> Vec<SettingsPanelSpec> {

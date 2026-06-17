@@ -1,6 +1,6 @@
 //! Error handling for Discord bot commands.
 
-use log::error;
+use tracing::error;
 use poise::CreateReply;
 use poise::FrameworkError;
 use poise::serenity_prelude::*;
@@ -39,7 +39,7 @@ impl ErrorHandler {
             }
             error => {
                 if let Err(e) = poise::builtins::on_error(error).await {
-                    error!("Error while handling error: {e}");
+                    error!(error = %e, "error while handling error");
                 }
             }
         }
@@ -48,7 +48,7 @@ impl ErrorHandler {
     /// Classifies an error and returns user-friendly title and description.
     fn classify_error(
         error: &Error,
-        ctx: &poise::Context<'_, Data, Error>,
+        _ctx: &poise::Context<'_, Data, Error>,
     ) -> (&'static str, String) {
         if let Some(bot_error) = error.downcast_ref::<BotError>() {
             ("❌ Action Failed", bot_error.to_string())
@@ -56,11 +56,6 @@ impl ErrorHandler {
             ("❌ Service Error", service_error.to_string())
         } else {
             let ref_id = AppError::log_with_ref(error);
-            error!(
-                "Unexpected error in command `{}`: {:?}",
-                ctx.command().name,
-                error
-            );
             (
                 "❌ Internal Error",
                 format!(

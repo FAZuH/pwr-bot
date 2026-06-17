@@ -2,7 +2,7 @@
 
 use std::fmt::Debug;
 
-use log::error;
+use tracing::error;
 use uuid::Uuid;
 
 use crate::repo::error::DatabaseError;
@@ -29,13 +29,13 @@ impl AppError {
     /// Log details internally, return generic error to user
     pub fn internal_with_ref(msg: impl Debug) -> Self {
         let ref_id = Uuid::new_v4();
-        error!("Internal error ({ref_id}): {msg:?}");
+        error!(ref_id = %ref_id, error = ?msg, "internal error");
         Self::InternalWithRef { ref_id }
     }
 
     pub fn log_with_ref(msg: impl Debug) -> Uuid {
         let ref_id = Uuid::new_v4();
-        error!("Internal error ({ref_id}): {msg:?}");
+        error!(ref_id = %ref_id, error = ?msg, "internal error");
         ref_id
     }
 }

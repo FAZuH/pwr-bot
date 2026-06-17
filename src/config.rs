@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use log::info;
+use tracing::info;
 
 use crate::error::AppError;
 
@@ -159,7 +159,7 @@ impl Config {
         let path_str = path.to_string_lossy();
 
         if !path.exists() {
-            info!("Directory {path_str} does not exist. Creating...");
+            info!(dir = %path_str, "directory does not exist, creating");
             std::fs::create_dir_all(&path).ok();
         } else if !path.is_dir() {
             return Err(AppError::ConfigurationError {

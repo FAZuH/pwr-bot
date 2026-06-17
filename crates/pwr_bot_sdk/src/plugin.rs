@@ -13,11 +13,25 @@ pub struct ArgSpec {
 }
 
 /// Describes a slash command provided by the plugin.
+///
+/// A command with a space-separated name (e.g. `"feed list"`) is registered
+/// as a subcommand of the parent (`"feed"` → `/feed list`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommandSpec {
     pub name: String,
     pub description: String,
     pub args: Vec<ArgSpec>,
+}
+
+impl CommandSpec {
+    /// Creates a new command spec with the given name and description.
+    pub fn new(name: impl Into<String>, description: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            description: description.into(),
+            args: vec![],
+        }
+    }
 }
 
 /// Payload returned by a plugin after handling a command invocation.

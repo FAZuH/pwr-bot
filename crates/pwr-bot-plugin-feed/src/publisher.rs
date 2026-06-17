@@ -23,7 +23,7 @@ pub async fn poll_feeds(
             }
             Err(e) => {
                 let id = feed.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
-                log::error!("Error checking feed id `{id}` ({name}): {e}");
+                tracing::error!(feed.id = id, feed.name = %name, error = %e, "error checking feed");
             }
         }
     }

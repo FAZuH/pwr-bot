@@ -59,11 +59,10 @@ impl BotPlugin for WelcomePlugin {
     }
 
     fn commands(&self) -> Vec<CommandSpec> {
-        vec![CommandSpec {
-            name: "welcome".into(),
-            description: "Manage welcome message settings".into(),
-            args: vec![],
-        }]
+        vec![
+            CommandSpec::new("welcome", "Manage welcome message settings"),
+            CommandSpec::new("welcome settings", "Configure welcome settings"),
+        ]
     }
 
     fn settings_panels(&self) -> Vec<SettingsPanelSpec> {

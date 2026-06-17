@@ -31,8 +31,14 @@ pub fn setup_logging(config: &Config) -> Result<(), AppError> {
     // Leak the guard to prevent it from being dropped
     std::mem::forget(_guard);
 
-    let env_filter =
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("pwr_bot=info"));
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        EnvFilter::new(
+            "pwr_bot=info,\
+             pwr_bot_plugin_feed=info,\
+             pwr_bot_plugin_voice=info,\
+             pwr_bot_plugin_welcome=info",
+        )
+    });
 
     tracing_subscriber::registry()
         .with(env_filter)

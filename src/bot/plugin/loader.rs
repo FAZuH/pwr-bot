@@ -5,9 +5,9 @@ use std::path::Path;
 use std::sync::Arc;
 
 use libloading::Library;
-use log::error;
-use log::info;
-use log::warn;
+use tracing::error;
+use tracing::info;
+use tracing::warn;
 use pwr_bot_sdk::PWR_BOT_PLUGIN_API_VERSION;
 use pwr_bot_sdk::PWR_BOT_PLUGIN_ENTRY;
 use pwr_bot_sdk::PluginMetadata;
@@ -32,7 +32,7 @@ pub struct LoadedPlugin {
 /// Loads all plugins from a directory.
 pub fn load_plugins(dir: &Path) -> Vec<LoadedPlugin> {
     if !dir.exists() {
-        info!("Plugin directory does not exist: {dir:?}");
+        info!(dir = ?dir, "plugin directory does not exist");
         return vec![];
     }
 
@@ -41,7 +41,7 @@ pub fn load_plugins(dir: &Path) -> Vec<LoadedPlugin> {
     let entries = match std::fs::read_dir(dir) {
         Ok(e) => e,
         Err(e) => {
-            error!("Failed to read plugin directory {dir:?}: {e}");
+            error!(dir = ?dir, error = %e, "failed to read plugin directory");
             return vec![];
         }
     };
@@ -58,11 +58,15 @@ pub fn load_plugins(dir: &Path) -> Vec<LoadedPlugin> {
 
         match unsafe { load_plugin(&path) } {
             Ok(plugin) => {
-                info!("Loaded plugin: {} (v{:?})", plugin.name, path);
+                info!(
+                    plugin.name = %plugin.name,
+                    plugin.version = %plugin.version,
+                    "plugin loaded",
+                );
                 plugins.push(plugin);
             }
             Err(e) => {
-                warn!("Failed to load plugin {path:?}: {e}");
+                warn!(path = ?path, error = %e, "failed to load plugin");
             }
         }
     }

@@ -11,7 +11,7 @@ use diesel_async::pooled_connection::deadpool::Pool;
 use diesel_migrations::EmbeddedMigrations;
 use diesel_migrations::MigrationHarness;
 use diesel_migrations::embed_migrations;
-use log::info;
+use tracing::info;
 use tokio::task;
 
 use crate::repo::postgres::*;
@@ -32,10 +32,10 @@ pub struct PgRepos {
 impl PgRepos {
     pub async fn new(db_url: impl Into<String>) -> anyhow::Result<Self> {
         let db_url = db_url.into();
-        info!("connecting to db");
+        info!("connecting to database");
         let conf = AsyncDieselConnectionManager::new(db_url.clone());
         let pool: DbPool = Pool::builder(conf).max_size(5).build()?;
-        info!("connected to db");
+        info!("connected to database");
 
         Ok(Self {
             server_settings: PgServerSettingsRepo::new(pool.clone()),
