@@ -3,8 +3,8 @@ pub mod postgres;
 pub mod schema;
 pub mod traits;
 
-use diesel_async::AsyncPgConnection;
 use diesel_async::AsyncMigrationHarness;
+use diesel_async::AsyncPgConnection;
 use diesel_async::pooled_connection::AsyncDieselConnectionManager;
 use diesel_async::pooled_connection::deadpool::Object;
 use diesel_async::pooled_connection::deadpool::Pool;

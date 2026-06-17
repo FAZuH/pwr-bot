@@ -6,8 +6,14 @@ use std::sync::Arc;
 use pwr_bot::repo::PgRepos;
 use pwr_bot::repo::traits::*;
 
+/// Loads .env if present (silently ignores missing file).
+fn load_dotenv() {
+    let _ = dotenv::dotenv();
+}
+
 /// Sets up a test database connection to PostgreSQL.
 pub async fn setup_db() -> Arc<PgRepos> {
+    load_dotenv();
     let db_url = std::env::var("DB_URL")
         .unwrap_or("postgres://pwr_bot:pwr_bot@localhost:5432/pwr_bot".to_string());
 
