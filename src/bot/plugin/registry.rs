@@ -211,6 +211,12 @@ fn build_plugin_command(spec: &CommandSpec) -> Command<Data, Error> {
 async fn registry_command_handler<'a>(
     ctx: poise::ApplicationContext<'a, Data, Error>,
 ) -> Result<(), poise::FrameworkError<'a, Data, Error>> {
+    // Serialize the full CommandData before consuming ctx — the plugin
+    // extracts the options it needs. Any type that implements Serialize
+    // works (CommandData derives Serialize via serenity).
+    let args_json = serde_json::to_value(&ctx.interaction.data)
+        .unwrap_or(serde_json::Value::Null);
+
     let poise_ctx: poise::Context<'a, Data, Error> = ctx.into();
 
     let cmd_name = poise_ctx.invoked_command_name();
@@ -239,7 +245,7 @@ async fn registry_command_handler<'a>(
     let host_ctx = Arc::new(PoiseHostCtx::new(poise_ctx));
 
     if let Err(e) =
-        dispatch_plugin_command(registry, &host_ctx, cmd_name, serde_json::Value::Null).await
+        dispatch_plugin_command(registry, &host_ctx, cmd_name, args_json).await
     {
         tracing::error!(command.name = %cmd_name, error = %e, "plugin command failed");
     } else {

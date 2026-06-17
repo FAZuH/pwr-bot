@@ -98,6 +98,38 @@ impl BotPlugin for FeedPlugin {
             CommandSpec::new("feed", "Manage feed subscriptions"),
             CommandSpec::new("feed list", "List your subscriptions"),
             CommandSpec::new("feed settings", "Configure feed settings"),
+            CommandSpec {
+                name: "feed subscribe".into(),
+                description: "Subscribe to one or more feeds".into(),
+                args: vec![
+                    ArgSpec {
+                        name: "links".into(),
+                        description: "Link(s) of the feeds. Separate with commas".into(),
+                        kind: "String".into(),
+                    },
+                    ArgSpec {
+                        name: "send_into".into(),
+                        description: "Where to send notifications (dm or server)".into(),
+                        kind: "String".into(),
+                    },
+                ],
+            },
+            CommandSpec {
+                name: "feed unsubscribe".into(),
+                description: "Unsubscribe from one or more feeds".into(),
+                args: vec![
+                    ArgSpec {
+                        name: "links".into(),
+                        description: "Link(s) of the feeds to remove".into(),
+                        kind: "String".into(),
+                    },
+                    ArgSpec {
+                        name: "send_into".into(),
+                        description: "Where to send notifications (dm or server)".into(),
+                        kind: "String".into(),
+                    },
+                ],
+            },
         ]
     }
 
@@ -167,12 +199,14 @@ impl BotPlugin for FeedPlugin {
     async fn invoke(
         &self,
         command: &str,
-        _args: serde_json::Value,
+        args: serde_json::Value,
         host: &PluginHost,
     ) -> Result<ResponsePayload, String> {
         match command {
             "feed" | "feed list" => self.cmd_list(host).await,
             "feed settings" => self.cmd_settings(host).await,
+            "feed subscribe" => self.cmd_subscribe(host, &args).await,
+            "feed unsubscribe" => self.cmd_unsubscribe(host, &args).await,
             "__poll_feeds" => self.cmd_poll_feeds(host).await,
             _ => Err(format!("Unknown command: {command}")),
         }
@@ -343,4 +377,207 @@ impl FeedPlugin {
         publisher::poll_feeds(&pool, host, platforms).await?;
         Ok(ResponsePayload::text(""))
     }
+
+    async fn cmd_subscribe(
+        &self,
+        host: &PluginHost,
+        args: &serde_json::Value,
+    ) -> Result<ResponsePayload, String> {
+        unsafe { host.defer().map_err(|e| e.to_string())? };
+
+        let links = extract_arg(args, "links").unwrap_or_default();
+        let urls: Vec<&str> = links.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+        if urls.is_empty() {
+            return Ok(ResponsePayload::text_ephemeral(
+                "Please provide at least one feed URL.",
+            ));
+        }
+
+        let _guild_id = unsafe { host.guild_id() };
+        let author_id = unsafe { host.author_id() };
+        let _send_into = extract_arg(args, "send_into").unwrap_or("dm");
+
+        let pool = self.pool();
+
+        // Get or create the subscriber
+        let subscriber = subscription::add_subscriber(&pool, host, _send_into, &author_id.to_string()).await?;
+        let subscriber_id = subscriber
+            .get("id")
+            .and_then(|v| v.as_i64())
+            .ok_or("Failed to get subscriber ID")? as i32;
+
+        let platforms = self.platforms.lock().await;
+
+        let mut results: Vec<String> = Vec::new();
+        for url in &urls {
+            // Resolve platform from URL
+            let source_id = match resolve_source_id(platforms.as_deref(), url) {
+                Ok(id) => id,
+                Err(e) => {
+                    results.push(format!("❌ `{url}`: {e}"));
+                    continue;
+                }
+            };
+
+            // Check if feed exists in DB
+            let existing = subscription::get_feed_by_source_id(&pool, host, source_id).await?;
+            let feed = match existing {
+                Some(f) => f,
+                None => {
+                    results.push(format!("❌ `{url}`: Feed not found. Add it first."));
+                    continue;
+                }
+            };
+
+            let feed_id = feed
+                .get("id")
+                .and_then(|v| v.as_i64())
+                .ok_or("Invalid feed data")? as i32;
+            let feed_name = feed
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("Unknown")
+                .to_string();
+
+            match subscription::subscribe(&pool, host, feed_id, subscriber_id).await? {
+                subscription::SubscribeResult::Success { .. } => {
+                    results.push(format!("✅ Subscribed to **{feed_name}**"));
+                }
+                subscription::SubscribeResult::AlreadySubscribed { .. } => {
+                    results.push(format!("ℹ️ Already subscribed to **{feed_name}**"));
+                }
+            }
+        }
+
+        if results.is_empty() {
+            return Ok(ResponsePayload::text_ephemeral("No feeds were processed."));
+        }
+
+        let content = format!(
+            "## Subscribe Results\n{}",
+            results.join("\n")
+        );
+        Ok(ResponsePayload::text(content))
+    }
+
+    async fn cmd_unsubscribe(
+        &self,
+        host: &PluginHost,
+        args: &serde_json::Value,
+    ) -> Result<ResponsePayload, String> {
+        unsafe { host.defer().map_err(|e| e.to_string())? };
+
+        let links = extract_arg(args, "links").unwrap_or_default();
+        let urls: Vec<&str> = links.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+        if urls.is_empty() {
+            return Ok(ResponsePayload::text_ephemeral(
+                "Please provide at least one feed URL.",
+            ));
+        }
+
+        let author_id = unsafe { host.author_id() };
+        let _send_into = extract_arg(args, "send_into").unwrap_or("dm");
+
+        let pool = self.pool();
+
+        // Find the subscriber
+        let subscriber = subscription::add_subscriber(&pool, host, _send_into, &author_id.to_string()).await?;
+        let subscriber_id = subscriber
+            .get("id")
+            .and_then(|v| v.as_i64())
+            .ok_or("Failed to get subscriber ID")? as i32;
+
+        let platforms_lock = self.platforms.lock().await;
+        let platforms = platforms_lock.as_deref();
+        let mut results: Vec<String> = Vec::new();
+        for url in &urls {
+            let source_id = match resolve_source_id(platforms, url) {
+                Ok(id) => id,
+                Err(e) => {
+                    results.push(format!("❌ `{url}`: {e}"));
+                    continue;
+                }
+            };
+
+            let existing = subscription::get_feed_by_source_id(&pool, host, source_id).await?;
+            let feed = match existing {
+                Some(f) => f,
+                None => {
+                    results.push(format!("❌ `{url}`: Feed not found."));
+                    continue;
+                }
+            };
+
+            let feed_id = feed
+                .get("id")
+                .and_then(|v| v.as_i64())
+                .ok_or("Invalid feed data")? as i32;
+            let feed_name = feed
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("Unknown")
+                .to_string();
+
+            match subscription::unsubscribe(&pool, host, feed_id, subscriber_id).await? {
+                subscription::UnsubscribeResult::Success { .. } => {
+                    results.push(format!("✅ Unsubscribed from **{feed_name}**"));
+                }
+                subscription::UnsubscribeResult::AlreadyUnsubscribed { .. } => {
+                    results.push(format!("ℹ️ Was not subscribed to **{feed_name}**"));
+                }
+                subscription::UnsubscribeResult::NoneSubscribed { .. } => {
+                    results.push(format!("ℹ️ Not subscribed to **{feed_name}**"));
+                }
+            }
+        }
+
+        if results.is_empty() {
+            return Ok(ResponsePayload::text_ephemeral("No feeds were processed."));
+        }
+
+        let content = format!(
+            "## Unsubscribe Results\n{}",
+            results.join("\n")
+        );
+        Ok(ResponsePayload::text(content))
+    }
+
+    fn pool(&self) -> deadpool_postgres::Pool {
+        self.pool
+            .try_lock()
+            .ok()
+            .and_then(|g| g.clone())
+            .expect("pool not initialized")
+    }
 }
+
+/// Extracts a named argument from the serialized CommandData JSON.
+///
+/// For subcommands, walks `options[0].options` to find the matching arg.
+fn extract_arg<'a>(args: &'a serde_json::Value, name: &str) -> Option<&'a str> {
+    let opts = args
+        .get("options")?
+        .as_array()?
+        .first()?
+        .get("options")?
+        .as_array()?;
+    for opt in opts {
+        if opt.get("name").and_then(|n| n.as_str()) == Some(name) {
+            return opt.get("value").and_then(|v| v.as_str());
+        }
+    }
+    None
+}
+
+/// Resolves a source_id from a platform URL.
+fn resolve_source_id<'a>(platforms: Option<&'a crate::platform::Platforms>, url: &'a str) -> Result<&'a str, String> {
+    let platforms = platforms.ok_or("Platforms not initialized")?;
+    let platform = platforms
+        .get_platform_by_source_url(url)
+        .ok_or_else(|| format!("Unsupported URL: {url}"))?;
+    platform
+        .get_id_from_source_url(url)
+        .map_err(|e| format!("Failed to parse URL: {e}"))
+}
+
+
