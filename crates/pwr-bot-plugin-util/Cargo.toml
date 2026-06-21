@@ -1,0 +1,11 @@
+[package]
+name = "pwr-bot-plugin-util"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Shared database utilities for pwr-bot plugins"
+
+[dependencies]
+deadpool-postgres = "0.14"
+tokio-postgres = { version = "0.7", features = ["with-serde_json-1"] }
+serde_json = "1"

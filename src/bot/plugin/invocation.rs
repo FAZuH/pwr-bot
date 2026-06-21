@@ -123,7 +123,12 @@ pub async fn dispatch(
             let data = host_ctx.data();
             let plugin_name = command.split_whitespace().next().unwrap_or(command);
             data.view_registry
-                .register(plugin_name, msg_id, UserId::new(host_ctx.author_id()))
+                .register(
+                    plugin_name,
+                    msg_id,
+                    UserId::new(host_ctx.author_id()),
+                    host_ctx.guild_id(),
+                )
                 .await;
             tracing::debug!(
                 ffi.command = %command,

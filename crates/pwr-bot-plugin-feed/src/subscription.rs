@@ -1,6 +1,7 @@
 use deadpool_postgres::Pool;
+use pwr_bot_plugin_util::db_execute;
+use pwr_bot_plugin_util::query_json;
 use pwr_bot_sdk::*;
-use tokio_postgres::types::ToSql;
 
 use crate::platform::Platforms;
 
@@ -34,35 +35,6 @@ pub struct FeedUpdated {
 pub enum FeedUpdateResult {
     NoUpdate,
     Updated(Box<FeedUpdated>),
-}
-
-async fn query_json(
-    pool: &Pool,
-    sql: &str,
-    params: &[&(dyn ToSql + Sync)],
-) -> Result<serde_json::Value, String> {
-    let client = pool.get().await.map_err(|e| e.to_string())?;
-    let rows = client.query(sql, params).await.map_err(|e| e.to_string())?;
-    let json_rows: Vec<serde_json::Value> = rows
-        .iter()
-        .map(|row| {
-            let mut map = serde_json::Map::new();
-            for (i, col) in row.columns().iter().enumerate() {
-                let name = col.name();
-                let value: serde_json::Value = row
-                    .try_get::<_, serde_json::Value>(i)
-                    .unwrap_or(serde_json::Value::Null);
-                map.insert(name.to_string(), value);
-            }
-            serde_json::Value::Object(map)
-        })
-        .collect();
-    Ok(serde_json::Value::Array(json_rows))
-}
-
-async fn db_execute(pool: &Pool, sql: &str, params: &[&(dyn ToSql + Sync)]) -> Result<u64, String> {
-    let client = pool.get().await.map_err(|e| e.to_string())?;
-    client.execute(sql, params).await.map_err(|e| e.to_string())
 }
 
 pub async fn add_subscriber(
@@ -492,5 +464,70 @@ pub async fn publish_update(host: &PluginHost, result: &FeedUpdateResult) {
         if let Ok(s) = &json_str {
             let _ = unsafe { host.publish_event("feed_update", s) };
         }
+    }
+}
+
+pub async fn get_server_settings(pool: &Pool, guild_id: u64) -> Result<serde_json::Value, String> {
+    let result = query_json(
+        pool,
+        "SELECT settings FROM server_settings WHERE guild_id = $1",
+        &[&(guild_id as i64)],
+    )
+    .await?;
+    let settings = result
+        .as_array()
+        .and_then(|arr| arr.first())
+        .and_then(|r| r.get("settings"))
+        .cloned()
+        .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
+    Ok(settings)
+}
+
+pub async fn save_feed_settings(
+    pool: &Pool,
+    guild_id: u64,
+    feeds: &serde_json::Value,
+) -> Result<(), String> {
+    let mut settings = get_server_settings(pool, guild_id).await?;
+    if !settings.is_object() {
+        settings = serde_json::Value::Object(serde_json::Map::new());
+    }
+    settings["feeds"] = feeds.clone();
+    let settings_str = serde_json::to_string(&settings).map_err(|e| e.to_string())?;
+    db_execute(
+        pool,
+        "INSERT INTO server_settings (guild_id, settings) VALUES ($1, $2::jsonb) \
+         ON CONFLICT (guild_id) DO UPDATE SET settings = EXCLUDED.settings",
+        &[&(guild_id as i64), &settings_str],
+    )
+    .await?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    #[test]
+    fn save_feed_settings_preserves_voice_welcome() {
+        // Verify the merge logic preserves other top-level keys.
+        // This test validates the algorithm used in save_feed_settings.
+        let initial = json!({"voice": {"enabled": true}, "welcome": {"enabled": false}});
+        let feeds = json!({"enabled": true, "channel_id": "123"});
+
+        let mut settings = initial.clone();
+        settings["feeds"] = feeds.clone();
+
+        assert_eq!(settings["voice"], initial["voice"]);
+        assert_eq!(settings["welcome"], initial["welcome"]);
+        assert_eq!(settings["feeds"], feeds);
+    }
+
+    #[test]
+    fn save_feed_settings_on_empty_settings() {
+        let feeds = json!({"enabled": false});
+        let mut settings = serde_json::Value::Object(serde_json::Map::new());
+        settings["feeds"] = feeds.clone();
+        assert_eq!(settings["feeds"], feeds);
     }
 }

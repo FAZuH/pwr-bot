@@ -1,6 +1,7 @@
 pub mod error;
 pub mod platform;
 mod publisher;
+mod settings_view;
 mod subscriber;
 pub mod subscription;
 pub mod update;
@@ -16,6 +17,9 @@ use pwr_bot_sdk::*;
 use tokio::sync::Mutex;
 
 use crate::platform::Platforms;
+use crate::update::feed_settings::FeedSettingsModel;
+use crate::update::feed_settings::FeedSettingsMsg;
+use crate::update::feed_settings::feed_settings_update;
 
 pwr_bot_sdk::export_plugin!(FeedPlugin, FeedPlugin::new());
 
@@ -23,6 +27,7 @@ pub struct FeedPlugin {
     platforms: Mutex<Option<Arc<Platforms>>>,
     pool: Mutex<Option<Pool>>,
     feed_list_states: Mutex<HashMap<u64, view::FeedListState>>,
+    feed_settings_states: Mutex<HashMap<u64, settings_view::FeedSettingsState>>,
 }
 
 impl FeedPlugin {
@@ -31,49 +36,8 @@ impl FeedPlugin {
             platforms: Mutex::new(None),
             pool: Mutex::new(None),
             feed_list_states: Mutex::new(HashMap::new()),
+            feed_settings_states: Mutex::new(HashMap::new()),
         }
-    }
-
-    async fn query_json(
-        &self,
-        sql: &str,
-        params: &[&(dyn tokio_postgres::types::ToSql + Sync)],
-    ) -> Result<serde_json::Value, String> {
-        let pool = self
-            .pool
-            .lock()
-            .await
-            .as_ref()
-            .ok_or_else(|| {
-                tracing::error!("database pool not initialized");
-                "Database pool not initialized".to_string()
-            })?
-            .clone();
-        let client = pool.get().await.map_err(|e| {
-            let msg = e.to_string();
-            tracing::error!(error = %msg, "failed to get connection from pool");
-            msg
-        })?;
-        let rows = client.query(sql, params).await.map_err(|e| {
-            let msg = e.to_string();
-            tracing::error!(db.query = %sql, error = %msg, "database query failed");
-            msg
-        })?;
-        let json_rows: Vec<serde_json::Value> = rows
-            .iter()
-            .map(|row| {
-                let mut map = serde_json::Map::new();
-                for (i, col) in row.columns().iter().enumerate() {
-                    let name = col.name();
-                    let value: serde_json::Value = row
-                        .try_get::<_, serde_json::Value>(i)
-                        .unwrap_or(serde_json::Value::Null);
-                    map.insert(name.to_string(), value);
-                }
-                serde_json::Value::Object(map)
-            })
-            .collect();
-        Ok(serde_json::Value::Array(json_rows))
     }
 }
 
@@ -146,12 +110,20 @@ impl BotPlugin for FeedPlugin {
     }
 
     fn test_steps(&self) -> Vec<TestStepSpec> {
-        vec![TestStepSpec::new(
-            "feed list",
-            "Subscription list (empty)",
-            "feed list",
-            serde_json::json!({"action": "list"}),
-        )]
+        vec![
+            TestStepSpec::new(
+                "feed list",
+                "Subscription list (empty)",
+                "feed list",
+                serde_json::json!({"action": "list"}),
+            ),
+            TestStepSpec::new(
+                "feed settings",
+                "Feed settings panel render",
+                "feed settings",
+                serde_json::json!({"action": "settings"}),
+            ),
+        ]
     }
 
     fn event_handlers(&self) -> Vec<EventHandlerSpec> {
@@ -209,6 +181,10 @@ impl BotPlugin for FeedPlugin {
                 if msg_id > 0 {
                     self.feed_list_states.lock().await.remove(&msg_id);
                 }
+                // Also clean settings state by guild_id from the payload
+                if let Some(gid) = payload.get("guild_id").and_then(|v| v.as_u64()) {
+                    self.feed_settings_states.lock().await.remove(&gid);
+                }
                 Ok(())
             }
             _ => Ok(()),
@@ -243,53 +219,33 @@ impl FeedPlugin {
             ));
         }
 
-        let result = self
-            .query_json(
-                "SELECT settings FROM server_settings WHERE guild_id = $1",
-                &[&(guild_id as i64)],
-            )
-            .await?;
+        let settings = subscription::get_server_settings(&self.pool(), guild_id).await?;
 
-        let feed = result
-            .as_array()
-            .and_then(|arr| arr.first())
-            .and_then(|r| r.get("settings"))
-            .and_then(|s| s.get("feeds"));
+        let feeds = settings.get("feeds");
 
-        let enabled = feed
-            .and_then(|f| f.get("enabled"))
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        let channel = feed
-            .and_then(|f| f.get("channel_id"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("Not set");
-        let sub_role = feed
-            .and_then(|f| f.get("subscribe_role_id"))
-            .and_then(|v| v.as_str());
-        let unsub_role = feed
-            .and_then(|f| f.get("unsubscribe_role_id"))
-            .and_then(|v| v.as_str());
+        let model = FeedSettingsModel {
+            enabled: feeds.and_then(|f| f.get("enabled").and_then(|v| v.as_bool())),
+            channel_id: feeds
+                .and_then(|f| f.get("channel_id"))
+                .and_then(|v| v.as_str())
+                .map(String::from),
+            subscribe_role_id: feeds
+                .and_then(|f| f.get("subscribe_role_id"))
+                .and_then(|v| v.as_str())
+                .map(String::from),
+            unsubscribe_role_id: feeds
+                .and_then(|f| f.get("unsubscribe_role_id"))
+                .and_then(|v| v.as_str())
+                .map(String::from),
+        };
 
-        let content = format!(
-            "## Feed Settings\n\
-             - **Enabled:** {}\n\
-             - **Notification Channel:** {}\n\
-             - **Subscribe Role:** {}\n\
-             - **Unsubscribe Role:** {}",
-            if enabled { "✅ Yes" } else { "❌ No" },
-            channel,
-            sub_role
-                .map(|r| format!("<@&{r}>"))
-                .as_deref()
-                .unwrap_or("None"),
-            unsub_role
-                .map(|r| format!("<@&{r}>"))
-                .as_deref()
-                .unwrap_or("None"),
-        );
-
-        Ok(ResponsePayload::text(content))
+        let state = settings_view::FeedSettingsState::new(model, guild_id);
+        let response = settings_view::render_feed_settings(&state);
+        self.feed_settings_states
+            .lock()
+            .await
+            .insert(guild_id, state);
+        Ok(response)
     }
 
     async fn cmd_list(&self, host: &PluginHost) -> Result<ResponsePayload, String> {
@@ -550,12 +506,32 @@ impl FeedPlugin {
             .unwrap_or(0);
         let user_id = payload.get("user_id").and_then(|v| v.as_u64()).unwrap_or(0);
 
+        if custom_id.starts_with(settings_view::SETTINGS_CUSTOM_ID_PREFIX) {
+            return self.handle_settings_interaction(payload, host).await;
+        }
         if !custom_id.starts_with(view::CUSTOM_ID_PREFIX) {
             return Ok(());
         }
 
         let action = &custom_id[view::CUSTOM_ID_PREFIX.len()..];
         let pool = self.pool();
+
+        // On first interaction, re-key state from author_id to message_id
+        // so that view_timeout can find and remove it.
+        let mut states = self.feed_list_states.lock().await;
+        let state = match states.get_mut(&message_id) {
+            Some(s) => s,
+            None => {
+                let moved = states.remove(&user_id).map(|s| {
+                    states.insert(message_id, s);
+                    states.get_mut(&message_id).unwrap()
+                });
+                match moved {
+                    Some(s) => s,
+                    None => return Ok(()),
+                }
+            }
+        };
 
         // Select menu interaction — just store the selected values, no re-render
         if action == "select" {
@@ -568,20 +544,9 @@ impl FeedPlugin {
                         .collect()
                 })
                 .unwrap_or_default();
-
-            let mut states = self.feed_list_states.lock().await;
-            if let Some(state) = states.get_mut(&user_id) {
-                state.selected_unsub = values;
-            }
+            state.selected_unsub = values;
             return Ok(());
         }
-
-        // Other actions — update state and re-render
-        let mut states = self.feed_list_states.lock().await;
-        let state = match states.get_mut(&user_id) {
-            Some(s) => s,
-            None => return Ok(()),
-        };
 
         match action {
             "edit" => {
@@ -637,6 +602,153 @@ impl FeedPlugin {
             host.edit_reply(message_id, &json_str)
                 .map_err(|e| e.to_string())?
         };
+
+        Ok(())
+    }
+
+    async fn handle_settings_interaction(
+        &self,
+        payload: serde_json::Value,
+        host: &PluginHost,
+    ) -> Result<(), String> {
+        let custom_id = payload
+            .get("custom_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let message_id = payload
+            .get("message_id")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let action = &custom_id[settings_view::SETTINGS_CUSTOM_ID_PREFIX.len()..];
+
+        let guild_id = payload
+            .get("guild_id")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+
+        let mut states = self.feed_settings_states.lock().await;
+
+        // Handle view_timeout re-keying: on first interaction, find state by guild_id.
+        // Also try guild_id from payload.
+        let state_key = if states.contains_key(&guild_id) {
+            guild_id
+        } else if let Some(gid) = payload.get("guild_id").and_then(|v| v.as_u64()) {
+            gid
+        } else {
+            return Ok(());
+        };
+
+        match action {
+            "toggle" => {
+                let state = match states.get_mut(&state_key) {
+                    Some(s) => s,
+                    None => return Ok(()),
+                };
+                feed_settings_update(FeedSettingsMsg::ToggleEnabled, &mut state.model);
+                let response = settings_view::render_feed_settings(state);
+                let json_str = serde_json::to_string(&response).map_err(|e| e.to_string())?;
+                drop(states);
+                unsafe {
+                    host.edit_reply(message_id, &json_str)
+                        .map_err(|e| e.to_string())?
+                };
+            }
+            "channel" => {
+                let state = match states.get_mut(&state_key) {
+                    Some(s) => s,
+                    None => return Ok(()),
+                };
+                let channel_id = payload
+                    .get("values")
+                    .and_then(|v| v.as_array())
+                    .and_then(|arr| arr.first())
+                    .and_then(|v| v.as_str())
+                    .map(String::from);
+                feed_settings_update(FeedSettingsMsg::SetChannel(channel_id), &mut state.model);
+                let response = settings_view::render_feed_settings(state);
+                let json_str = serde_json::to_string(&response).map_err(|e| e.to_string())?;
+                drop(states);
+                unsafe {
+                    host.edit_reply(message_id, &json_str)
+                        .map_err(|e| e.to_string())?
+                };
+            }
+            "sub_role" => {
+                let state = match states.get_mut(&state_key) {
+                    Some(s) => s,
+                    None => return Ok(()),
+                };
+                let role_id = payload
+                    .get("values")
+                    .and_then(|v| v.as_array())
+                    .and_then(|arr| arr.first())
+                    .and_then(|v| v.as_str())
+                    .map(String::from);
+                feed_settings_update(FeedSettingsMsg::SetSubRole(role_id), &mut state.model);
+                let response = settings_view::render_feed_settings(state);
+                let json_str = serde_json::to_string(&response).map_err(|e| e.to_string())?;
+                drop(states);
+                unsafe {
+                    host.edit_reply(message_id, &json_str)
+                        .map_err(|e| e.to_string())?
+                };
+            }
+            "unsub_role" => {
+                let state = match states.get_mut(&state_key) {
+                    Some(s) => s,
+                    None => return Ok(()),
+                };
+                let role_id = payload
+                    .get("values")
+                    .and_then(|v| v.as_array())
+                    .and_then(|arr| arr.first())
+                    .and_then(|v| v.as_str())
+                    .map(String::from);
+                feed_settings_update(FeedSettingsMsg::SetUnsubRole(role_id), &mut state.model);
+                let response = settings_view::render_feed_settings(state);
+                let json_str = serde_json::to_string(&response).map_err(|e| e.to_string())?;
+                drop(states);
+                unsafe {
+                    host.edit_reply(message_id, &json_str)
+                        .map_err(|e| e.to_string())?
+                };
+            }
+            "save" => {
+                let state = states.remove(&state_key);
+                let state = match state {
+                    Some(s) => s,
+                    None => return Ok(()),
+                };
+                drop(states);
+
+                let feeds = serde_json::json!({
+                    "enabled": state.model.enabled,
+                    "channel_id": state.model.channel_id,
+                    "subscribe_role_id": state.model.subscribe_role_id,
+                    "unsubscribe_role_id": state.model.unsubscribe_role_id,
+                });
+
+                subscription::save_feed_settings(&self.pool(), state.guild_id, &feeds).await?;
+
+                let response = ResponsePayload::text("✅ Feed settings saved.");
+                let json_str = serde_json::to_string(&response).map_err(|e| e.to_string())?;
+                unsafe {
+                    host.edit_reply(message_id, &json_str)
+                        .map_err(|e| e.to_string())?
+                };
+            }
+            "cancel" => {
+                states.remove(&state_key);
+                drop(states);
+                let response = ResponsePayload::text("Settings edit cancelled.");
+                let json_str = serde_json::to_string(&response).map_err(|e| e.to_string())?;
+                unsafe {
+                    host.edit_reply(message_id, &json_str)
+                        .map_err(|e| e.to_string())?
+                };
+            }
+            _ => {}
+        }
 
         Ok(())
     }

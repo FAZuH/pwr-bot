@@ -7,6 +7,8 @@ use std::collections::HashMap;
 use deadpool_postgres::ManagerConfig;
 use deadpool_postgres::Pool;
 use deadpool_postgres::RecyclingMethod;
+use pwr_bot_plugin_util::db_execute;
+use pwr_bot_plugin_util::query_json;
 use pwr_bot_sdk::*;
 use tokio::sync::Mutex;
 
@@ -37,23 +39,7 @@ impl VoicePlugin {
             .as_ref()
             .ok_or("Database pool not initialized")?
             .clone();
-        let client = pool.get().await.map_err(|e| e.to_string())?;
-        let rows = client.query(sql, params).await.map_err(|e| e.to_string())?;
-        let json_rows: Vec<serde_json::Value> = rows
-            .iter()
-            .map(|row| {
-                let mut map = serde_json::Map::new();
-                for (i, col) in row.columns().iter().enumerate() {
-                    let name = col.name();
-                    let value: serde_json::Value = row
-                        .try_get::<_, serde_json::Value>(i)
-                        .unwrap_or(serde_json::Value::Null);
-                    map.insert(name.to_string(), value);
-                }
-                serde_json::Value::Object(map)
-            })
-            .collect();
-        Ok(serde_json::Value::Array(json_rows))
+        query_json(&pool, sql, params).await
     }
 
     async fn db_execute(
@@ -68,8 +54,7 @@ impl VoicePlugin {
             .as_ref()
             .ok_or("Database pool not initialized")?
             .clone();
-        let client = pool.get().await.map_err(|e| e.to_string())?;
-        client.execute(sql, params).await.map_err(|e| e.to_string())
+        db_execute(&pool, sql, params).await
     }
 }
 

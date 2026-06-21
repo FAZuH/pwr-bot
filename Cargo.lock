@@ -3125,6 +3125,7 @@ dependencies = [
  "deadpool-postgres",
  "governor",
  "log",
+ "pwr-bot-plugin-util",
  "pwr-bot-sdk",
  "serde",
  "serde_json",
@@ -3139,12 +3140,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "pwr-bot-plugin-util"
+version = "0.1.0"
+dependencies = [
+ "deadpool-postgres",
+ "serde_json",
+ "tokio-postgres",
+]
+
+[[package]]
 name = "pwr-bot-plugin-voice"
 version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
  "deadpool-postgres",
+ "pwr-bot-plugin-util",
  "pwr-bot-sdk",
  "serde",
  "serde_json",
@@ -3159,6 +3170,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "deadpool-postgres",
+ "pwr-bot-plugin-util",
  "pwr-bot-sdk",
  "serde",
  "serde_json",

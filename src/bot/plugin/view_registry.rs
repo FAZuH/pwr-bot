@@ -23,6 +23,7 @@ const VIEW_TIMEOUT: Duration = Duration::from_secs(120);
 struct ViewEntry {
     plugin_name: String,
     author_id: UserId,
+    guild_id: Option<u64>,
 }
 
 /// Manages the lifecycle of plugin interactive views.
@@ -50,7 +51,13 @@ impl PluginViewRegistry {
     ///
     /// The author_id is used to filter component interactions — only the
     /// original command author may interact with the view.
-    pub async fn register(&self, plugin_name: &str, msg_id: MessageId, author_id: UserId) {
+    pub async fn register(
+        &self,
+        plugin_name: &str,
+        msg_id: MessageId,
+        author_id: UserId,
+        guild_id: Option<u64>,
+    ) {
         tracing::debug!(
             message.id = %msg_id,
             plugin.name = %plugin_name,
@@ -62,6 +69,7 @@ impl PluginViewRegistry {
             ViewEntry {
                 plugin_name: plugin_name.to_string(),
                 author_id,
+                guild_id,
             },
         );
 
@@ -80,7 +88,10 @@ impl PluginViewRegistry {
                 );
                 // Dispatch timeout event to the plugin so it can clean up state
                 if let Some((_, plugin)) = plugin_registry.lookup(&plugin_name_owned).await {
-                    let payload = serde_json::json!({"message_id": msg_id.get()});
+                    let mut payload = serde_json::json!({"message_id": msg_id.get()});
+                    if let Some(gid) = entry.guild_id {
+                        payload["guild_id"] = serde_json::json!(gid);
+                    }
                     let _ =
                         invocation::dispatch_on_event_ffi(&plugin, "view_timeout", payload).await;
                 }

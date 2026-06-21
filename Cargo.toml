@@ -70,4 +70,4 @@ required-features = ["db-tests"]
 serial_test = "3.3.1"
 
 [workspace]
-members = ["crates/pwr_bot_sdk", "crates/pwr-bot-plugin-welcome", "crates/pwr-bot-plugin-feed", "crates/pwr-bot-plugin-voice", "tests/fixtures/pwr-bot-test-plugin"]
+members = ["crates/pwr_bot_sdk", "crates/pwr-bot-plugin-util", "crates/pwr-bot-plugin-welcome", "crates/pwr-bot-plugin-feed", "crates/pwr-bot-plugin-voice", "tests/fixtures/pwr-bot-test-plugin"]

@@ -3,6 +3,7 @@ pub mod update;
 use deadpool_postgres::ManagerConfig;
 use deadpool_postgres::Pool;
 use deadpool_postgres::RecyclingMethod;
+use pwr_bot_plugin_util::query_json;
 use pwr_bot_sdk::*;
 use tokio::sync::Mutex;
 
@@ -24,24 +25,6 @@ impl Default for WelcomePlugin {
     fn default() -> Self {
         Self::new()
     }
-}
-
-fn rows_to_json(rows: &[tokio_postgres::Row]) -> serde_json::Value {
-    let json_rows: Vec<serde_json::Value> = rows
-        .iter()
-        .map(|row| {
-            let mut map = serde_json::Map::new();
-            for (i, col) in row.columns().iter().enumerate() {
-                let name = col.name();
-                let value: serde_json::Value = row
-                    .try_get::<_, serde_json::Value>(i)
-                    .unwrap_or(serde_json::Value::Null);
-                map.insert(name.to_string(), value);
-            }
-            serde_json::Value::Object(map)
-        })
-        .collect();
-    serde_json::Value::Array(json_rows)
 }
 
 #[async_trait::async_trait]
@@ -127,16 +110,13 @@ impl WelcomePlugin {
             .as_ref()
             .ok_or("Database pool not initialized")?
             .clone();
-        let client = pool.get().await.map_err(|e| e.to_string())?;
-        let rows = client
-            .query(
-                "SELECT settings FROM server_settings WHERE guild_id = $1",
-                &[&(guild_id as i64)],
-            )
-            .await
-            .map_err(|e| e.to_string())?;
 
-        let result = rows_to_json(&rows);
+        let result = query_json(
+            &pool,
+            "SELECT settings FROM server_settings WHERE guild_id = $1",
+            &[&(guild_id as i64)],
+        )
+        .await?;
 
         let welcome = result
             .as_array()
