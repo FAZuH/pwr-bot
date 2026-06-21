@@ -103,6 +103,28 @@ impl PoiseHostCtx {
         })
     }
 
+    /// Creates a system context with channel/guild/author metadata.
+    ///
+    /// Used for component interaction dispatch where the plugin needs to edit
+    /// the message, which requires knowing the channel ID.
+    pub fn new_system_with_channel(
+        data: Arc<Data>,
+        http: Arc<Http>,
+        channel_id: u64,
+        guild_id: Option<u64>,
+        author_id: u64,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            guild_id,
+            author_id,
+            channel_id,
+            data,
+            http,
+            interaction: None,
+            state: AtomicU8::new(PENDING),
+        })
+    }
+
     /// Marks as responded (full message, not defer).
     ///
     /// Used by [`gui_test`](crate::bot::command::gui_test) to prevent plugin

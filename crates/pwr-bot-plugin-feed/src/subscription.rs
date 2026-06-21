@@ -15,17 +15,25 @@ pub enum UnsubscribeResult {
     NoneSubscribed { url: String },
 }
 
+pub struct FeedUpdated {
+    pub feed_id: i32,
+    pub feed_name: String,
+    pub feed_description: String,
+    pub source_url: String,
+    pub cover_url: String,
+    pub old_title: Option<String>,
+    pub old_published: Option<i64>,
+    pub new_title: String,
+    pub new_published: i64,
+    pub platform_name: String,
+    pub platform_logo_url: String,
+    pub feed_item_name: String,
+    pub copyright_notice: String,
+}
+
 pub enum FeedUpdateResult {
     NoUpdate,
-    Updated {
-        feed_id: i32,
-        feed_name: String,
-        old_title: Option<String>,
-        new_title: String,
-        platform_name: String,
-        feed_item_name: String,
-        logo_url: String,
-    },
+    Updated(Box<FeedUpdated>),
 }
 
 async fn query_json(
@@ -241,6 +249,83 @@ pub async fn get_feed_by_source_id(
     Ok(result.as_array().and_then(|arr| arr.first().cloned()))
 }
 
+/// Looks up a subscriber ID by target_id (Discord user ID as string).
+pub async fn get_subscriber_by_target(pool: &Pool, target_id: &str) -> Result<Option<i32>, String> {
+    let client = pool.get().await.map_err(|e| e.to_string())?;
+    let row = client
+        .query_opt(
+            "SELECT id FROM subscribers WHERE target_id = $1 AND type = 'dm'",
+            &[&target_id],
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    drop(client);
+    Ok(row.map(|r| r.get::<_, i32>(0)))
+}
+
+/// Counts the total number of subscriptions for a subscriber.
+pub async fn count_subscriptions(pool: &Pool, subscriber_id: i32) -> Result<u32, String> {
+    let client = pool.get().await.map_err(|e| e.to_string())?;
+    let row = client
+        .query_one(
+            "SELECT COUNT(*)::BIGINT FROM feed_subscriptions WHERE subscriber_id = $1",
+            &[&subscriber_id],
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    let count: i64 = row.get(0);
+    Ok(count as u32)
+}
+
+/// Lists a paginated slice of subscriptions for a subscriber.
+///
+/// Returns feed data with latest item info, ordered by feed name.
+pub async fn list_paginated_subscriptions(
+    pool: &Pool,
+    subscriber_id: i32,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<serde_json::Value>, String> {
+    let client = pool.get().await.map_err(|e| e.to_string())?;
+    let rows = client
+        .query(
+            "SELECT f.id, f.name, f.description, f.platform_id, f.source_id, \
+                    f.items_id, f.source_url, f.cover_url, f.tags \
+             FROM feed_subscriptions fs \
+             JOIN feeds f ON f.id = fs.feed_id \
+             WHERE fs.subscriber_id = $1 \
+             ORDER BY f.name \
+             LIMIT $2 OFFSET $3",
+            &[&subscriber_id, &limit, &offset],
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let feeds: Vec<serde_json::Value> = rows
+        .iter()
+        .map(|row| {
+            let mut map = serde_json::Map::new();
+            for (i, col) in row.columns().iter().enumerate() {
+                let name = col.name();
+                let value: serde_json::Value = match col.type_().name() {
+                    "int4" | "int8" => {
+                        let v: i64 = row.get(i);
+                        serde_json::Value::from(v)
+                    }
+                    _ => row
+                        .try_get::<_, serde_json::Value>(i)
+                        .unwrap_or(serde_json::Value::Null),
+                };
+                map.insert(name.to_string(), value);
+            }
+            serde_json::Value::Object(map)
+        })
+        .collect();
+
+    drop(client);
+    Ok(feeds)
+}
+
 pub async fn check_feed_update(
     pool: &Pool,
     _host: &PluginHost,
@@ -253,6 +338,16 @@ pub async fn check_feed_update(
         .and_then(|v| v.as_str())
         .unwrap_or("Unknown")
         .to_string();
+    let feed_description = feed
+        .get("description")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let source_url = feed
+        .get("source_url")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
     let platform_id = feed
         .get("platform_id")
         .and_then(|v| v.as_str())
@@ -260,11 +355,6 @@ pub async fn check_feed_update(
         .to_string();
     let source_id = feed
         .get("source_id")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-    let _items_id = feed
-        .get("items_id")
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
@@ -280,31 +370,35 @@ pub async fn check_feed_update(
         .find(|p| p.get_id() == platform_id)
         .ok_or_else(|| format!("Unknown platform '{platform_id}' for feed '{feed_name}'"))?;
 
+    let platform_info = platform.get_info();
+
     let latest = platform
         .fetch_latest(&source_id)
         .await
         .map_err(|e| e.to_string())?;
 
-    let existing = query_json(
-        pool,
-        "SELECT id, description, published FROM feed_items \
-         WHERE feed_id = $1 ORDER BY published DESC LIMIT 1",
-        &[&feed_id],
-    )
-    .await?;
+    let new_published_ts = latest.published.timestamp();
 
-    let existing_row = existing.as_array().and_then(|arr| arr.first());
+    let client = pool.get().await.map_err(|e| e.to_string())?;
+    let existing_row = client
+        .query_opt(
+            "SELECT description, EXTRACT(EPOCH FROM published)::BIGINT FROM feed_items \
+             WHERE feed_id = $1 ORDER BY published DESC LIMIT 1",
+            &[&feed_id],
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+
+    drop(client);
 
     match existing_row {
         Some(row) => {
-            let existing_desc = row
-                .get("description")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
+            let existing_desc: String = row.get(0);
             if existing_desc == latest.title {
                 return Ok(FeedUpdateResult::NoUpdate);
             }
-            let old_title = Some(existing_desc.to_string());
+            let old_title = Some(existing_desc);
+            let old_published_ts: i64 = row.get(1);
 
             db_execute(
                 pool,
@@ -313,15 +407,21 @@ pub async fn check_feed_update(
             )
             .await?;
 
-            Ok(FeedUpdateResult::Updated {
+            Ok(FeedUpdateResult::Updated(Box::new(FeedUpdated {
                 feed_id,
                 feed_name,
+                feed_description,
+                source_url,
+                cover_url,
                 old_title,
+                old_published: Some(old_published_ts),
                 new_title: latest.title,
-                platform_name: platform.get_info().name.clone(),
-                feed_item_name: platform.get_info().feed_item_name.clone(),
-                logo_url: cover_url,
-            })
+                new_published: new_published_ts,
+                platform_name: platform_info.name.clone(),
+                platform_logo_url: platform_info.logo_url.clone(),
+                feed_item_name: platform_info.feed_item_name.clone(),
+                copyright_notice: platform_info.copyright_notice.clone(),
+            })))
         }
         None => {
             db_execute(
@@ -331,44 +431,61 @@ pub async fn check_feed_update(
             )
             .await?;
 
-            Ok(FeedUpdateResult::Updated {
+            Ok(FeedUpdateResult::Updated(Box::new(FeedUpdated {
                 feed_id,
                 feed_name,
+                feed_description,
+                source_url,
+                cover_url,
                 old_title: None,
+                old_published: None,
                 new_title: latest.title,
-                platform_name: platform.get_info().name.clone(),
-                feed_item_name: platform.get_info().feed_item_name.clone(),
-                logo_url: cover_url,
-            })
+                new_published: new_published_ts,
+                platform_name: platform_info.name.clone(),
+                platform_logo_url: platform_info.logo_url.clone(),
+                feed_item_name: platform_info.feed_item_name.clone(),
+                copyright_notice: platform_info.copyright_notice.clone(),
+            })))
         }
     }
 }
 
 pub async fn publish_update(host: &PluginHost, result: &FeedUpdateResult) {
-    if let FeedUpdateResult::Updated {
-        feed_id,
-        feed_name,
-        old_title,
-        new_title,
-        platform_name,
-        feed_item_name,
-        logo_url,
-    } = result
-    {
+    if let FeedUpdateResult::Updated(data) = result {
+        let FeedUpdated {
+            feed_id,
+            feed_name,
+            feed_description,
+            source_url,
+            cover_url,
+            old_title,
+            old_published,
+            new_title,
+            new_published,
+            platform_name,
+            platform_logo_url,
+            feed_item_name,
+            copyright_notice,
+        } = &**data;
+
         let json = serde_json::json!({
             "feed": {
                 "id": feed_id,
                 "name": feed_name,
+                "description": feed_description,
                 "platform": platform_name,
-                "logo_url": logo_url,
+                "logo_url": platform_logo_url,
+                "cover_url": cover_url,
+                "source_url": source_url,
             },
             "latest": {
                 "title": new_title,
-                "description": new_title,
-                "url": "",
+                "published": new_published,
             },
             "old_title": old_title,
+            "old_published": old_published,
             "item_name": feed_item_name,
+            "copyright_notice": copyright_notice,
         });
 
         let json_str = serde_json::to_string(&json).map_err(|e| e.to_string());

@@ -12,6 +12,8 @@ use std::time::Duration;
 use poise::serenity_prelude::*;
 use tokio::sync::RwLock;
 
+use crate::bot::Data;
+use crate::bot::host_ctx::PoiseHostCtx;
 use crate::bot::plugin::invocation;
 use crate::bot::plugin::registry::PluginRegistry;
 
@@ -65,6 +67,8 @@ impl PluginViewRegistry {
 
         // Spawn timeout task
         let views = self.views.clone();
+        let plugin_registry = self.plugin_registry.clone();
+        let plugin_name_owned = plugin_name.to_string();
         tokio::spawn(async move {
             tokio::time::sleep(VIEW_TIMEOUT).await;
             let entry = views.write().await.remove(&msg_id);
@@ -74,6 +78,12 @@ impl PluginViewRegistry {
                     plugin.name = %entry.plugin_name,
                     "plugin view timed out",
                 );
+                // Dispatch timeout event to the plugin so it can clean up state
+                if let Some((_, plugin)) = plugin_registry.lookup(&plugin_name_owned).await {
+                    let payload = serde_json::json!({"message_id": msg_id.get()});
+                    let _ =
+                        invocation::dispatch_on_event_ffi(&plugin, "view_timeout", payload).await;
+                }
             }
         });
     }
@@ -86,8 +96,14 @@ impl PluginViewRegistry {
     /// Handles a component interaction for a registered plugin view.
     ///
     /// Acknowledges the interaction, then dispatches an event to the plugin
-    /// via [`invocation::dispatch_on_event_ffi`].
-    pub async fn handle_interaction(&self, msg_id: MessageId, interaction: ComponentInteraction) {
+    /// via [`invocation::dispatch_on_event_with_ctx`]. The context includes
+    /// the channel ID so the plugin can edit the message via `host.edit_reply()`.
+    pub async fn handle_interaction(
+        &self,
+        msg_id: MessageId,
+        interaction: ComponentInteraction,
+        data: Arc<Data>,
+    ) {
         let entry = match self.views.read().await.get(&msg_id).cloned() {
             Some(e) => e,
             None => {
@@ -147,9 +163,24 @@ impl PluginViewRegistry {
             "routing component interaction to plugin",
         );
 
+        // Create a context with channel/guild/author metadata so the plugin
+        // can edit the message via host.edit_reply()
+        let ctx = PoiseHostCtx::new_system_with_channel(
+            data,
+            self.http.clone(),
+            interaction.channel_id.get(),
+            interaction.guild_id.map(|g| g.get()),
+            interaction.user.id.get(),
+        );
+
         // Dispatch to the plugin's on_event handler
-        if let Err(e) =
-            invocation::dispatch_on_event_ffi(&plugin, "component_interaction", event_payload).await
+        if let Err(e) = invocation::dispatch_on_event_with_ctx(
+            &plugin,
+            "component_interaction",
+            event_payload,
+            ctx,
+        )
+        .await
         {
             tracing::error!(
                 plugin.name = %entry.plugin_name,

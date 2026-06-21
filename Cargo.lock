@@ -3128,6 +3128,7 @@ dependencies = [
  "pwr-bot-sdk",
  "serde",
  "serde_json",
+ "serenity",
  "thiserror 2.0.18",
  "tokio",
  "tokio-postgres",

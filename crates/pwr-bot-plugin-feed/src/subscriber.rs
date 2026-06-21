@@ -1,5 +1,6 @@
 use deadpool_postgres::Pool;
 use pwr_bot_sdk::*;
+use serenity::all::*;
 use tokio_postgres::types::ToSql;
 
 async fn query_json(
@@ -33,48 +34,124 @@ fn extract_feed_id(payload: &serde_json::Value) -> Option<i64> {
         .and_then(|v| v.as_i64())
 }
 
-fn build_message(payload: &serde_json::Value) -> String {
-    let feed = payload
+fn build_message(payload: &serde_json::Value) -> ResponsePayload {
+    let feed_name = payload
         .get("feed")
         .and_then(|f| f.get("name"))
         .and_then(|v| v.as_str())
         .unwrap_or("Unknown feed");
-    let latest = payload
-        .get("latest")
-        .and_then(|l| l.get("title"))
+    let feed_description = payload
+        .get("feed")
+        .and_then(|f| f.get("description"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let platform_logo_url = payload
+        .get("feed")
+        .and_then(|f| f.get("logo_url"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let cover_url = payload
+        .get("feed")
+        .and_then(|f| f.get("cover_url"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let source_url = payload
+        .get("feed")
+        .and_then(|f| f.get("source_url"))
         .and_then(|v| v.as_str())
         .unwrap_or("");
     let item_name = payload
         .get("item_name")
         .and_then(|v| v.as_str())
         .unwrap_or("item");
-    let platform = payload
-        .get("feed")
-        .and_then(|f| f.get("platform"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-    let url = payload
+    let new_title = payload
         .get("latest")
-        .and_then(|l| l.get("url"))
+        .and_then(|l| l.get("title"))
         .and_then(|v| v.as_str())
         .unwrap_or("");
-    let logo_url = payload
-        .get("feed")
-        .and_then(|f| f.get("logo_url"))
+    let new_published = payload
+        .get("latest")
+        .and_then(|l| l.get("published"))
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
+    let old_title = payload
+        .get("old_title")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty());
+    let old_published = payload
+        .get("old_published")
+        .and_then(|v| v.as_i64())
+        .filter(|v| *v != 0);
+    let copyright_notice = payload
+        .get("copyright_notice")
         .and_then(|v| v.as_str())
         .unwrap_or("");
 
-    let mut msg = format!(
-        "## **{}**\nNew **{}** on *{}*\n> {}",
-        feed, item_name, platform, latest
+    let feed_desc = feed_description
+        .trim()
+        .replace('\n', "\n> ")
+        .replace("<br>", "");
+
+    let mut text_main = format!("### {feed_name}\n\n> {feed_desc}\n\n");
+
+    if let (Some(old_t), Some(old_ts)) = (old_title, old_published) {
+        text_main.push_str(&format!(
+            "**Old {item_name}**: {old_t}\nPublished on <t:{old_ts}>\n\n"
+        ));
+    }
+
+    text_main.push_str(&format!(
+        "**New {item_name}**: {new_title}\nPublished on <t:{new_published}>\n\n"
+    ));
+
+    if !source_url.is_empty() {
+        text_main.push_str(&format!("**[Open in browser \u{2197}]({source_url})**"));
+    }
+
+    let mut container_components: Vec<CreateContainerComponent> = Vec::new();
+
+    let section = CreateSection::new(
+        vec![CreateSectionComponent::TextDisplay(CreateTextDisplay::new(
+            text_main,
+        ))],
+        if !platform_logo_url.is_empty() {
+            CreateSectionAccessory::Thumbnail(CreateThumbnail::new(CreateUnfurledMediaItem::new(
+                platform_logo_url,
+            )))
+        } else {
+            CreateSectionAccessory::Thumbnail(CreateThumbnail::new(CreateUnfurledMediaItem::new(
+                "",
+            )))
+        },
     );
-    if !url.is_empty() {
-        msg.push_str(&format!("\n{}", url));
+    container_components.push(CreateContainerComponent::Section(section));
+
+    container_components.push(CreateContainerComponent::Separator(CreateSeparator::new(
+        false,
+    )));
+
+    if !cover_url.is_empty() {
+        container_components.push(CreateContainerComponent::MediaGallery(
+            CreateMediaGallery::new(vec![CreateMediaGalleryItem::new(
+                CreateUnfurledMediaItem::new(cover_url),
+            )]),
+        ));
     }
-    if !logo_url.is_empty() {
-        msg.push_str(&format!("\n{}", logo_url));
+
+    if !copyright_notice.is_empty() {
+        container_components.push(CreateContainerComponent::TextDisplay(
+            CreateTextDisplay::new(format!("-# {copyright_notice}")),
+        ));
     }
-    msg
+
+    let container = CreateContainer::new(container_components);
+
+    let create_message = CreateMessage::new()
+        .flags(MessageFlags::IS_COMPONENTS_V2)
+        .components(vec![CreateComponent::Container(container)]);
+
+    ResponsePayload::from_serializable(&create_message)
+        .unwrap_or_else(|_| ResponsePayload::text(format!("New {item_name}: {new_title}")))
 }
 
 async fn query_subscribers(pool: &Pool, feed_id: i64, sub_type: &str) -> Vec<serde_json::Value> {
@@ -102,7 +179,8 @@ pub async fn handle_feed_update(
         None => return Err("FeedUpdateEvent missing feed.id".to_string()),
     };
 
-    let message = build_message(&payload);
+    let response = build_message(&payload);
+    let json_str = serde_json::to_string(&response).map_err(|e| e.to_string())?;
 
     let guild_subs = query_subscribers(pool, feed_id, "guild").await;
     for sub in &guild_subs {
@@ -114,7 +192,7 @@ pub async fn handle_feed_update(
             Ok(id) => id,
             Err(_) => continue,
         };
-        let _ = unsafe { host.send_channel_message(guild_id, &message) };
+        let _ = unsafe { host.send_channel_message(guild_id, &json_str) };
     }
 
     let dm_subs = query_subscribers(pool, feed_id, "dm").await;
@@ -127,7 +205,7 @@ pub async fn handle_feed_update(
             Ok(id) => id,
             Err(_) => continue,
         };
-        let _ = unsafe { host.send_dm(user_id, &message) };
+        let _ = unsafe { host.send_dm(user_id, &json_str) };
     }
 
     Ok(())

@@ -13,6 +13,7 @@ pwr-bot-sdk = { path = "../pwr_bot_sdk" }
 async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+serenity = { git = "https://github.com/serenity-rs/serenity", branch = "next", default-features = false, features = ["builder"] }
 chrono = { version = "0.4", features = ["serde"] }
 wreq = "5.3.0"
 wreq-util = "2.2.6"

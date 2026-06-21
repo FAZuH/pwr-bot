@@ -279,7 +279,7 @@ impl BotEventHandler {
         let msg_id = component.message.id;
         self.data
             .view_registry
-            .handle_interaction(msg_id, component.clone())
+            .handle_interaction(msg_id, component.clone(), self.data.clone())
             .await;
     }
 

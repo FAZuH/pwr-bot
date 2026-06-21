@@ -4,7 +4,9 @@ mod publisher;
 mod subscriber;
 pub mod subscription;
 pub mod update;
+mod view;
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use deadpool_postgres::ManagerConfig;
@@ -20,6 +22,7 @@ pwr_bot_sdk::export_plugin!(FeedPlugin, FeedPlugin::new());
 pub struct FeedPlugin {
     platforms: Mutex<Option<Arc<Platforms>>>,
     pool: Mutex<Option<Pool>>,
+    feed_list_states: Mutex<HashMap<u64, view::FeedListState>>,
 }
 
 impl FeedPlugin {
@@ -27,6 +30,7 @@ impl FeedPlugin {
         Self {
             platforms: Mutex::new(None),
             pool: Mutex::new(None),
+            feed_list_states: Mutex::new(HashMap::new()),
         }
     }
 
@@ -151,7 +155,11 @@ impl BotPlugin for FeedPlugin {
     }
 
     fn event_handlers(&self) -> Vec<EventHandlerSpec> {
-        vec![EventHandlerSpec::new("feed_update".to_string())]
+        vec![
+            EventHandlerSpec::new("feed_update".to_string()),
+            EventHandlerSpec::new("component_interaction".to_string()),
+            EventHandlerSpec::new("view_timeout".to_string()),
+        ]
     }
 
     async fn init(&self, _host: &PluginHost) -> Result<(), String> {
@@ -191,6 +199,17 @@ impl BotPlugin for FeedPlugin {
                     .ok_or("Database pool not initialized")?
                     .clone();
                 subscriber::handle_feed_update(&pool, host, payload).await
+            }
+            "component_interaction" => self.handle_component_interaction(payload, host).await,
+            "view_timeout" => {
+                let msg_id = payload
+                    .get("message_id")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                if msg_id > 0 {
+                    self.feed_list_states.lock().await.remove(&msg_id);
+                }
+                Ok(())
             }
             _ => Ok(()),
         }
@@ -276,92 +295,49 @@ impl FeedPlugin {
     async fn cmd_list(&self, host: &PluginHost) -> Result<ResponsePayload, String> {
         unsafe { host.defer().map_err(|e| e.to_string())? };
 
-        let _guild_id = unsafe { host.guild_id() };
         let author_id = unsafe { host.author_id() };
         let target_id = author_id.to_string();
 
-        let result = self
-            .query_json(
-                "SELECT s.id, s.type, s.target_id \
-                 FROM subscribers s \
-                 WHERE s.target_id = $1 AND s.type = 'dm'",
-                &[&target_id],
-            )
-            .await?;
+        let pool = self.pool();
 
-        let rows = match result {
-            serde_json::Value::Array(arr) => arr,
-            _ => vec![],
+        // Find the subscriber
+        let result = subscription::get_subscriber_by_target(&pool, &target_id).await?;
+
+        let subscriber_id = match result {
+            Some(id) => id,
+            None => {
+                return Ok(ResponsePayload::text(
+                    "You have no subscriptions. Use `/feed subscribe` to add some!",
+                ));
+            }
         };
 
-        if rows.is_empty() {
+        // Count total subscriptions
+        let total = subscription::count_subscriptions(&pool, subscriber_id).await?;
+        if total == 0 {
             return Ok(ResponsePayload::text(
                 "You have no subscriptions. Use `/feed subscribe` to add some!",
             ));
         }
 
-        let subscriber_id = rows[0].get("id").and_then(|v| v.as_i64()).unwrap_or(0);
+        let total_pages = total.div_ceil(view::PER_PAGE);
 
-        let feed_result = self
-            .query_json(
-                "SELECT f.id, f.name, f.description, f.platform_id, f.source_id, \
-                        f.items_id, f.source_url, f.cover_url, f.tags, \
-                        fi.description as item_desc, fi.published as item_published \
-                 FROM feed_subscriptions fs \
-                 JOIN feeds f ON f.id = fs.feed_id \
-                 LEFT JOIN feed_items fi ON fi.id = f.items_id \
-                 WHERE fs.subscriber_id = $1 \
-                 ORDER BY f.name",
-                &[&subscriber_id],
-            )
-            .await?;
+        // Create view state
+        let state = view::FeedListState::new(subscriber_id, total_pages);
 
-        let feeds = match feed_result {
-            serde_json::Value::Array(arr) => arr,
-            _ => vec![],
-        };
+        // Query first page
+        let feeds = subscription::list_paginated_subscriptions(
+            &pool,
+            subscriber_id,
+            view::PER_PAGE as i64,
+            0,
+        )
+        .await?;
 
-        let mut lines: Vec<String> = Vec::new();
-        lines.push("## Your Subscriptions".to_string());
-
-        for (i, feed) in feeds.iter().enumerate() {
-            let name = feed
-                .get("name")
-                .and_then(|v| v.as_str())
-                .unwrap_or("Unknown");
-            let source_url = feed
-                .get("source_url")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let tags = feed.get("tags").and_then(|v| v.as_str()).unwrap_or("");
-            let platform = feed
-                .get("platform_id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let item_desc = feed
-                .get("item_desc")
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.is_empty());
-
-            let line = match item_desc {
-                Some(latest) => {
-                    format!(
-                        "{}. **[{name}](<{source_url}>)** ({platform})\n   └ Latest: {latest}",
-                        i + 1
-                    )
-                }
-                None => {
-                    format!("{}. **[{name}](<{source_url}>)** ({platform})", i + 1)
-                }
-            };
-            lines.push(line);
-
-            if !tags.is_empty() {
-                lines.push(format!("   └ Tags: {tags}"));
-            }
-        }
-
-        Ok(ResponsePayload::text(lines.join("\n")))
+        // Render and store state
+        let response = view::render_feed_list(&state, &feeds);
+        self.feed_list_states.lock().await.insert(author_id, state);
+        Ok(response)
     }
 
     async fn cmd_poll_feeds(&self, host: &PluginHost) -> Result<ResponsePayload, String> {
@@ -386,7 +362,11 @@ impl FeedPlugin {
         unsafe { host.defer().map_err(|e| e.to_string())? };
 
         let links = extract_arg(args, "links").unwrap_or_default();
-        let urls: Vec<&str> = links.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+        let urls: Vec<&str> = links
+            .split(',')
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .collect();
         if urls.is_empty() {
             return Ok(ResponsePayload::text_ephemeral(
                 "Please provide at least one feed URL.",
@@ -400,7 +380,8 @@ impl FeedPlugin {
         let pool = self.pool();
 
         // Get or create the subscriber
-        let subscriber = subscription::add_subscriber(&pool, host, _send_into, &author_id.to_string()).await?;
+        let subscriber =
+            subscription::add_subscriber(&pool, host, _send_into, &author_id.to_string()).await?;
         let subscriber_id = subscriber
             .get("id")
             .and_then(|v| v.as_i64())
@@ -453,10 +434,7 @@ impl FeedPlugin {
             return Ok(ResponsePayload::text_ephemeral("No feeds were processed."));
         }
 
-        let content = format!(
-            "## Subscribe Results\n{}",
-            results.join("\n")
-        );
+        let content = format!("## Subscribe Results\n{}", results.join("\n"));
         Ok(ResponsePayload::text(content))
     }
 
@@ -468,7 +446,11 @@ impl FeedPlugin {
         unsafe { host.defer().map_err(|e| e.to_string())? };
 
         let links = extract_arg(args, "links").unwrap_or_default();
-        let urls: Vec<&str> = links.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+        let urls: Vec<&str> = links
+            .split(',')
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .collect();
         if urls.is_empty() {
             return Ok(ResponsePayload::text_ephemeral(
                 "Please provide at least one feed URL.",
@@ -481,7 +463,8 @@ impl FeedPlugin {
         let pool = self.pool();
 
         // Find the subscriber
-        let subscriber = subscription::add_subscriber(&pool, host, _send_into, &author_id.to_string()).await?;
+        let subscriber =
+            subscription::add_subscriber(&pool, host, _send_into, &author_id.to_string()).await?;
         let subscriber_id = subscriber
             .get("id")
             .and_then(|v| v.as_i64())
@@ -535,10 +518,7 @@ impl FeedPlugin {
             return Ok(ResponsePayload::text_ephemeral("No feeds were processed."));
         }
 
-        let content = format!(
-            "## Unsubscribe Results\n{}",
-            results.join("\n")
-        );
+        let content = format!("## Unsubscribe Results\n{}", results.join("\n"));
         Ok(ResponsePayload::text(content))
     }
 
@@ -548,6 +528,117 @@ impl FeedPlugin {
             .ok()
             .and_then(|g| g.clone())
             .expect("pool not initialized")
+    }
+
+    /// Handles a component interaction for the feed list view.
+    ///
+    /// Parses the `custom_id` to determine the action (pagination, edit, save,
+    /// cancel, or select), updates the view state, re-queries the DB if needed,
+    /// and edits the message via `host.edit_reply()`.
+    async fn handle_component_interaction(
+        &self,
+        payload: serde_json::Value,
+        host: &PluginHost,
+    ) -> Result<(), String> {
+        let custom_id = payload
+            .get("custom_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let message_id = payload
+            .get("message_id")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let user_id = payload.get("user_id").and_then(|v| v.as_u64()).unwrap_or(0);
+
+        if !custom_id.starts_with(view::CUSTOM_ID_PREFIX) {
+            return Ok(());
+        }
+
+        let action = &custom_id[view::CUSTOM_ID_PREFIX.len()..];
+        let pool = self.pool();
+
+        // Select menu interaction — just store the selected values, no re-render
+        if action == "select" {
+            let values: Vec<String> = payload
+                .get("values")
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            let mut states = self.feed_list_states.lock().await;
+            if let Some(state) = states.get_mut(&user_id) {
+                state.selected_unsub = values;
+            }
+            return Ok(());
+        }
+
+        // Other actions — update state and re-render
+        let mut states = self.feed_list_states.lock().await;
+        let state = match states.get_mut(&user_id) {
+            Some(s) => s,
+            None => return Ok(()),
+        };
+
+        match action {
+            "edit" => {
+                state.edit_mode = true;
+                state.selected_unsub.clear();
+            }
+            "cancel" => {
+                state.edit_mode = false;
+                state.selected_unsub.clear();
+            }
+            "save" => {
+                let selected = std::mem::take(&mut state.selected_unsub);
+                state.edit_mode = false;
+                let sub_id = state.subscriber_id;
+                for feed_id_str in &selected {
+                    if let Ok(feed_id) = feed_id_str.parse::<i32>() {
+                        let _ = subscription::unsubscribe(&pool, host, feed_id, sub_id).await;
+                    }
+                }
+                let total = subscription::count_subscriptions(&pool, sub_id).await?;
+                state.total_pages = total.div_ceil(view::PER_PAGE);
+                state.page = state.page.min(state.total_pages.max(1));
+            }
+            s if s.starts_with("pg:") => {
+                let page: u32 = s[3..].parse().unwrap_or(1);
+                state.page = page.clamp(1, state.total_pages.max(1));
+            }
+            _ => return Ok(()),
+        }
+
+        let state_clone = state.clone();
+        drop(states);
+
+        // Query feeds based on mode
+        let feeds = if state_clone.edit_mode {
+            subscription::list_paginated_subscriptions(&pool, state_clone.subscriber_id, 25, 0)
+                .await?
+        } else {
+            let offset = ((state_clone.page - 1) * view::PER_PAGE) as i64;
+            subscription::list_paginated_subscriptions(
+                &pool,
+                state_clone.subscriber_id,
+                view::PER_PAGE as i64,
+                offset,
+            )
+            .await?
+        };
+
+        // Render and edit the message
+        let response = view::render_feed_list(&state_clone, &feeds);
+        let json_str = serde_json::to_string(&response).map_err(|e| e.to_string())?;
+        unsafe {
+            host.edit_reply(message_id, &json_str)
+                .map_err(|e| e.to_string())?
+        };
+
+        Ok(())
     }
 }
 
@@ -570,7 +661,10 @@ fn extract_arg<'a>(args: &'a serde_json::Value, name: &str) -> Option<&'a str> {
 }
 
 /// Resolves a source_id from a platform URL.
-fn resolve_source_id<'a>(platforms: Option<&'a crate::platform::Platforms>, url: &'a str) -> Result<&'a str, String> {
+fn resolve_source_id<'a>(
+    platforms: Option<&'a crate::platform::Platforms>,
+    url: &'a str,
+) -> Result<&'a str, String> {
     let platforms = platforms.ok_or("Platforms not initialized")?;
     let platform = platforms
         .get_platform_by_source_url(url)
@@ -579,5 +673,3 @@ fn resolve_source_id<'a>(platforms: Option<&'a crate::platform::Platforms>, url:
         .get_id_from_source_url(url)
         .map_err(|e| format!("Failed to parse URL: {e}"))
 }
-
-

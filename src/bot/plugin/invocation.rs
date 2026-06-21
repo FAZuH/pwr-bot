@@ -237,13 +237,26 @@ pub async fn dispatch_on_event_ffi(
     event_name: &str,
     payload: serde_json::Value,
 ) -> Result<(), String> {
+    let ctx =
+        host_registry::system_ctx().ok_or_else(|| "system context not initialized".to_string())?;
+    dispatch_on_event_with_ctx(loaded, event_name, payload, ctx).await
+}
+
+/// Dispatches an event to an FFI plugin's `on_event` handler with a custom context.
+///
+/// Used for component interactions where the context needs channel/guild/author
+/// metadata so the plugin can edit the message via `host.edit_reply()`.
+pub async fn dispatch_on_event_with_ctx(
+    loaded: &LoadedPlugin,
+    event_name: &str,
+    payload: serde_json::Value,
+    ctx: Arc<PoiseHostCtx>,
+) -> Result<(), String> {
     if loaded.vtable.on_event.is_none() {
         return Ok(());
     }
 
-    let ctx =
-        host_registry::system_ctx().ok_or_else(|| "system context not initialized".to_string())?;
-    let ffi_ctx = Arc::new(FfiHostCtx::new(ctx.clone()));
+    let ffi_ctx = Arc::new(FfiHostCtx::new(ctx));
 
     let event_name_c = CString::new(event_name).map_err(|e| e.to_string())?;
     let payload_c = serde_json::to_string(&payload)
