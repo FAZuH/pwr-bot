@@ -32,17 +32,26 @@ impl PluginHost {
 
     /// Sends a reply to the interaction.
     ///
+    /// Returns the message ID on success.
+    ///
     /// # Safety
     ///
     /// The registered [`HostCallbacks`] must outlive the call. The `reply_json` must be valid
     /// UTF-8 (it will be null-terminated by `CString`).
-    pub unsafe fn send_reply(&self, reply_json: &str) -> Result<(), String> {
+    pub unsafe fn send_reply(&self, reply_json: &str) -> Result<u64, String> {
         let c_str = CString::new(reply_json).map_err(|e| e.to_string())?;
+        let mut out_message_id: u64 = 0;
         let mut out_err: *mut std::ffi::c_char = std::ptr::null_mut();
-        let ok =
-            unsafe { (self.callbacks.send_reply)(self.ctx_handle, c_str.as_ptr(), &mut out_err) };
+        let ok = unsafe {
+            (self.callbacks.send_reply)(
+                self.ctx_handle,
+                c_str.as_ptr(),
+                &mut out_message_id,
+                &mut out_err,
+            )
+        };
         if ok {
-            Ok(())
+            Ok(out_message_id)
         } else if !out_err.is_null() {
             let err = unsafe { CString::from_raw(out_err) }
                 .into_string()

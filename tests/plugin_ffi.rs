@@ -342,12 +342,14 @@ fn ffi_on_event_succeeds() {
     let payload = CString::new(r#"{"value":42}"#).unwrap();
     let ffi_ctx = FfiHostCtx::new(host_ctx);
 
+    let mut out_err: *mut std::ffi::c_char = std::ptr::null_mut();
     let success = unsafe {
         (plugin.vtable.on_event.as_ref().unwrap())(
             event_name.as_ptr(),
             payload.as_ptr(),
             ffi_host_ctx::host_callbacks() as *const _,
             ffi_ctx.handle(),
+            &mut out_err,
         )
     };
 

@@ -10,10 +10,16 @@ mod view;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use chrono::Utc;
 use deadpool_postgres::ManagerConfig;
+use pwr_bot_plugin_util::db_execute;
 use deadpool_postgres::Pool;
 use deadpool_postgres::RecyclingMethod;
 use pwr_bot_sdk::*;
+use serenity::all::*;
+use serenity::builder::CreateCommand;
+use serenity::builder::CreateCommandOption;
+use serenity::model::application::CommandOptionType;
 use tokio::sync::Mutex;
 
 use crate::platform::Platforms;
@@ -61,44 +67,74 @@ impl BotPlugin for FeedPlugin {
         "0.1.0"
     }
 
-    fn commands(&self) -> Vec<CommandSpec> {
-        vec![
-            CommandSpec::new("feed", "Manage feed subscriptions"),
-            CommandSpec::new("feed list", "List your subscriptions"),
-            CommandSpec::new("feed settings", "Configure feed settings"),
-            CommandSpec {
-                name: "feed subscribe".into(),
-                description: "Subscribe to one or more feeds".into(),
-                args: vec![
-                    ArgSpec {
-                        name: "links".into(),
-                        description: "Link(s) of the feeds. Separate with commas".into(),
-                        kind: "String".into(),
-                    },
-                    ArgSpec {
-                        name: "send_into".into(),
-                        description: "Where to send notifications (dm or server)".into(),
-                        kind: "String".into(),
-                    },
-                ],
-            },
-            CommandSpec {
-                name: "feed unsubscribe".into(),
-                description: "Unsubscribe from one or more feeds".into(),
-                args: vec![
-                    ArgSpec {
-                        name: "links".into(),
-                        description: "Link(s) of the feeds to remove".into(),
-                        kind: "String".into(),
-                    },
-                    ArgSpec {
-                        name: "send_into".into(),
-                        description: "Where to send notifications (dm or server)".into(),
-                        kind: "String".into(),
-                    },
-                ],
-            },
-        ]
+    fn commands(&self) -> Vec<CommandDefinition> {
+        let cmd = CreateCommand::new("feed")
+            .description("Feed subscription management")
+            .add_option(CreateCommandOption::new(
+                CommandOptionType::SubCommand,
+                "list",
+                "List your subscriptions",
+            ))
+            .add_option(CreateCommandOption::new(
+                CommandOptionType::SubCommand,
+                "settings",
+                "Configure feed settings",
+            ))
+            .add_option(
+                CreateCommandOption::new(
+                    CommandOptionType::SubCommand,
+                    "subscribe",
+                    "Subscribe to one or more feeds",
+                )
+                .add_sub_option(
+                    CreateCommandOption::new(
+                        CommandOptionType::String,
+                        "links",
+                        "Link(s) of the feeds. Separate with commas",
+                    )
+                    .required(true),
+                )
+                .add_sub_option(
+                    CreateCommandOption::new(
+                        CommandOptionType::String,
+                        "send_into",
+                        "Where to send notifications. Default to DM",
+                    )
+                    .required(false)
+                    .add_string_choice("DM", "dm")
+                    .add_string_choice("Server", "server"),
+                ),
+            )
+            .add_option(
+                CreateCommandOption::new(
+                    CommandOptionType::SubCommand,
+                    "unsubscribe",
+                    "Unsubscribe from one or more feeds",
+                )
+                .add_sub_option(
+                    CreateCommandOption::new(
+                        CommandOptionType::String,
+                        "links",
+                        "Link(s) of the feeds to remove",
+                    )
+                    .required(true),
+                )
+                .add_sub_option(
+                    CreateCommandOption::new(
+                        CommandOptionType::String,
+                        "send_into",
+                        "Where to send notifications. Default to DM",
+                    )
+                    .required(false)
+                    .add_string_choice("DM", "dm")
+                    .add_string_choice("Server", "server"),
+                ),
+            );
+
+        vec![CommandDefinition {
+            name: "feed".into(),
+            data: serde_json::to_value(&cmd).expect("CreateCommand serialization"),
+        }]
     }
 
     fn settings_panels(&self) -> Vec<SettingsPanelSpec> {
@@ -172,7 +208,14 @@ impl BotPlugin for FeedPlugin {
                     .clone();
                 subscriber::handle_feed_update(&pool, host, payload).await
             }
-            "component_interaction" => self.handle_component_interaction(payload, host).await,
+            "component_interaction" => self
+                .handle_component_interaction(payload, host)
+                .await
+                .map_err(|e| {
+                    tracing::error!("component_interaction handler failed: {e}");
+                    eprintln!("component_interaction handler failed: {e}");
+                    e
+                }),
             "view_timeout" => {
                 let msg_id = payload
                     .get("message_id")
@@ -276,13 +319,8 @@ impl FeedPlugin {
             ));
         }
 
-        let total_pages = total.div_ceil(view::PER_PAGE);
-
-        // Create view state
-        let state = view::FeedListState::new(subscriber_id, total_pages);
-
         // Query first page
-        let feeds = subscription::list_paginated_subscriptions(
+        let mut feeds = subscription::list_paginated_subscriptions(
             &pool,
             subscriber_id,
             view::PER_PAGE as i64,
@@ -290,9 +328,19 @@ impl FeedPlugin {
         )
         .await?;
 
+        self.backfill_feeds(&pool, &mut feeds, "cmd_list").await;
+
+        // Re-count total subscriptions (might have changed after backfill)
+        let total = subscription::count_subscriptions(&pool, subscriber_id).await?;
+        let total_pages = total.div_ceil(view::PER_PAGE).max(1);
+
         // Render and store state
+        let state = view::FeedListState::new(subscriber_id, total_pages);
         let response = view::render_feed_list(&state, &feeds);
-        self.feed_list_states.lock().await.insert(author_id, state);
+        self.feed_list_states
+            .lock()
+            .await
+            .insert(author_id, state);
         Ok(response)
     }
 
@@ -329,15 +377,20 @@ impl FeedPlugin {
             ));
         }
 
-        let _guild_id = unsafe { host.guild_id() };
+        let guild_id = unsafe { host.guild_id() };
         let author_id = unsafe { host.author_id() };
-        let _send_into = extract_arg(args, "send_into").unwrap_or("dm");
+        let send_into = extract_arg(args, "send_into").unwrap_or("dm");
+
+        let (sub_type, target_id) = match resolve_subscriber_target(send_into, guild_id, author_id)
+        {
+            Ok(v) => v,
+            Err(msg) => return Ok(ResponsePayload::text_ephemeral(msg)),
+        };
 
         let pool = self.pool();
 
         // Get or create the subscriber
-        let subscriber =
-            subscription::add_subscriber(&pool, host, _send_into, &author_id.to_string()).await?;
+        let subscriber = subscription::add_subscriber(&pool, host, sub_type, &target_id).await?;
         let subscriber_id = subscriber
             .get("id")
             .and_then(|v| v.as_i64())
@@ -345,23 +398,33 @@ impl FeedPlugin {
 
         let platforms = self.platforms.lock().await;
 
-        let mut results: Vec<String> = Vec::new();
-        for url in &urls {
-            // Resolve platform from URL
-            let source_id = match resolve_source_id(platforms.as_deref(), url) {
-                Ok(id) => id,
-                Err(e) => {
-                    results.push(format!("❌ `{url}`: {e}"));
-                    continue;
-                }
-            };
+        // Build initial progress states
+        let mut states: Vec<String> = vec!["⏳ Processing...".to_string(); urls.len()];
 
-            // Check if feed exists in DB
-            let existing = subscription::get_feed_by_source_id(&pool, host, source_id).await?;
-            let feed = match existing {
-                Some(f) => f,
-                None => {
-                    results.push(format!("❌ `{url}`: Feed not found. Add it first."));
+        for (i, url) in urls.iter().enumerate() {
+            // Resolve platform and source ID from URL
+            let (platform, source_id) =
+                match resolve_platform_and_source_id(platforms.as_deref(), url) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        states[i] = format!("❌ `{url}`: {e}");
+                        continue;
+                    }
+                };
+
+            // Get or create the feed (fetches from platform API if needed)
+            let feed = match subscription::get_or_create_feed(
+                &pool,
+                host,
+                platform.as_ref(),
+                url,
+                source_id,
+            )
+            .await
+            {
+                Ok(f) => f,
+                Err(e) => {
+                    states[i] = format!("❌ `{url}`: {e}");
                     continue;
                 }
             };
@@ -375,23 +438,30 @@ impl FeedPlugin {
                 .and_then(|v| v.as_str())
                 .unwrap_or("Unknown")
                 .to_string();
+            let feed_url = feed
+                .get("source_url")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
 
             match subscription::subscribe(&pool, host, feed_id, subscriber_id).await? {
                 subscription::SubscribeResult::Success { .. } => {
-                    results.push(format!("✅ Subscribed to **{feed_name}**"));
+                    states[i] =
+                        format!("✅ **Successfully** subscribed to [{feed_name}](<{feed_url}>)");
                 }
                 subscription::SubscribeResult::AlreadySubscribed { .. } => {
-                    results.push(format!("ℹ️ Already subscribed to **{feed_name}**"));
+                    states[i] =
+                        format!("❌ You are **already subscribed** to [{feed_name}](<{feed_url}>)");
                 }
+            }
+
+            let is_final = i + 1 == urls.len();
+            if is_final {
+                return Ok(render_batch_payload("Subscribe Results", &states, true));
             }
         }
 
-        if results.is_empty() {
-            return Ok(ResponsePayload::text_ephemeral("No feeds were processed."));
-        }
-
-        let content = format!("## Subscribe Results\n{}", results.join("\n"));
-        Ok(ResponsePayload::text(content))
+        Ok(ResponsePayload::text_ephemeral("No feeds were processed."))
     }
 
     async fn cmd_unsubscribe(
@@ -413,36 +483,52 @@ impl FeedPlugin {
             ));
         }
 
+        let guild_id = unsafe { host.guild_id() };
         let author_id = unsafe { host.author_id() };
-        let _send_into = extract_arg(args, "send_into").unwrap_or("dm");
+        let send_into = extract_arg(args, "send_into").unwrap_or("dm");
+
+        let (sub_type, target_id) = match resolve_subscriber_target(send_into, guild_id, author_id)
+        {
+            Ok(v) => v,
+            Err(msg) => return Ok(ResponsePayload::text_ephemeral(msg)),
+        };
 
         let pool = self.pool();
 
         // Find the subscriber
-        let subscriber =
-            subscription::add_subscriber(&pool, host, _send_into, &author_id.to_string()).await?;
+        let subscriber = subscription::add_subscriber(&pool, host, sub_type, &target_id).await?;
         let subscriber_id = subscriber
             .get("id")
             .and_then(|v| v.as_i64())
             .ok_or("Failed to get subscriber ID")? as i32;
 
         let platforms_lock = self.platforms.lock().await;
-        let platforms = platforms_lock.as_deref();
-        let mut results: Vec<String> = Vec::new();
-        for url in &urls {
-            let source_id = match resolve_source_id(platforms, url) {
-                Ok(id) => id,
-                Err(e) => {
-                    results.push(format!("❌ `{url}`: {e}"));
-                    continue;
-                }
-            };
 
-            let existing = subscription::get_feed_by_source_id(&pool, host, source_id).await?;
-            let feed = match existing {
-                Some(f) => f,
-                None => {
-                    results.push(format!("❌ `{url}`: Feed not found."));
+        // Build initial progress states
+        let mut states: Vec<String> = vec!["⏳ Processing...".to_string(); urls.len()];
+
+        for (i, url) in urls.iter().enumerate() {
+            let (platform, source_id) =
+                match resolve_platform_and_source_id(platforms_lock.as_deref(), url) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        states[i] = format!("❌ `{url}`: {e}");
+                        continue;
+                    }
+                };
+
+            let feed = match subscription::get_or_create_feed(
+                &pool,
+                host,
+                platform.as_ref(),
+                url,
+                source_id,
+            )
+            .await
+            {
+                Ok(f) => f,
+                Err(e) => {
+                    states[i] = format!("❌ `{url}`: {e}");
                     continue;
                 }
             };
@@ -456,26 +542,32 @@ impl FeedPlugin {
                 .and_then(|v| v.as_str())
                 .unwrap_or("Unknown")
                 .to_string();
+            let feed_url = feed
+                .get("source_url")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
 
             match subscription::unsubscribe(&pool, host, feed_id, subscriber_id).await? {
                 subscription::UnsubscribeResult::Success { .. } => {
-                    results.push(format!("✅ Unsubscribed from **{feed_name}**"));
+                    states[i] = format!(
+                        "✅ **Successfully** unsubscribed from [{feed_name}](<{feed_url}>)"
+                    );
                 }
-                subscription::UnsubscribeResult::AlreadyUnsubscribed { .. } => {
-                    results.push(format!("ℹ️ Was not subscribed to **{feed_name}**"));
+                subscription::UnsubscribeResult::AlreadyUnsubscribed { .. }
+                | subscription::UnsubscribeResult::NoneSubscribed { .. } => {
+                    states[i] =
+                        format!("❌ You are **not subscribed** to [{feed_name}](<{feed_url}>)");
                 }
-                subscription::UnsubscribeResult::NoneSubscribed { .. } => {
-                    results.push(format!("ℹ️ Not subscribed to **{feed_name}**"));
-                }
+            }
+
+            let is_final = i + 1 == urls.len();
+            if is_final {
+                return Ok(render_batch_payload("Unsubscribe Results", &states, true));
             }
         }
 
-        if results.is_empty() {
-            return Ok(ResponsePayload::text_ephemeral("No feeds were processed."));
-        }
-
-        let content = format!("## Unsubscribe Results\n{}", results.join("\n"));
-        Ok(ResponsePayload::text(content))
+        Ok(ResponsePayload::text_ephemeral("No feeds were processed."))
     }
 
     fn pool(&self) -> deadpool_postgres::Pool {
@@ -484,6 +576,61 @@ impl FeedPlugin {
             .ok()
             .and_then(|g| g.clone())
             .expect("pool not initialized")
+    }
+
+    /// Lazy backfill: for feeds with no `latest_title` (no `feed_items` row),
+    /// try to fetch the latest item from the platform API. On failure, insert
+    /// a placeholder so the feed never perpetually shows "No latest version found."
+    async fn backfill_feeds(
+        &self,
+        pool: &deadpool_postgres::Pool,
+        feeds: &mut [serde_json::Value],
+        context: &str,
+    ) {
+        let platforms_lock = self.platforms.lock().await;
+        let Some(ref platforms) = *platforms_lock else {
+            return;
+        };
+        let all_platforms = platforms.get_all_platforms();
+        for feed in feeds.iter_mut() {
+            let has_title = feed
+                .get("latest_title")
+                .and_then(|v| v.as_str())
+                .is_some_and(|s| !s.is_empty());
+            if has_title {
+                continue;
+            }
+            let feed_id = feed.get("id").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+            let platform_name = feed.get("platform_id").and_then(|v| v.as_str()).unwrap_or("");
+            let items_id = feed.get("items_id").and_then(|v| v.as_str()).unwrap_or("");
+            if feed_id == 0 || items_id.is_empty() {
+                continue;
+            }
+            if let Some(platform) = all_platforms.iter().find(|p| p.get_id() == platform_name) {
+                match platform.fetch_latest(items_id).await {
+                    Ok(latest) => {
+                        let _ = db_execute(
+                            pool,
+                            "INSERT INTO feed_items (feed_id, description, published) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
+                            &[&feed_id, &latest.title, &latest.published.to_rfc3339()],
+                        )
+                        .await;
+                        feed["latest_title"] = serde_json::json!(latest.title);
+                        feed["latest_published"] = serde_json::json!(latest.published.timestamp());
+                    }
+                    Err(e) => {
+                        eprintln!("{context}: fetch_latest failed for feed_id={feed_id} items_id={items_id}: {e}");
+                        let _ = db_execute(
+                            pool,
+                            "INSERT INTO feed_items (feed_id, description, published) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
+                            &[&feed_id, &"", &Utc::now().to_rfc3339()],
+                        )
+                        .await;
+                    }
+                }
+            }
+        }
+        drop(platforms_lock);
     }
 
     /// Handles a component interaction for the feed list view.
@@ -516,6 +663,39 @@ impl FeedPlugin {
         let action = &custom_id[view::CUSTOM_ID_PREFIX.len()..];
         let pool = self.pool();
 
+        // Handle view_subs early — it comes from the batch message which is
+        // not in feed_list_states.
+        if action == "view_subs" {
+            let author_id = unsafe { host.author_id() };
+            let target_id = author_id.to_string();
+            let result = subscription::get_subscriber_by_target(&pool, &target_id).await?;
+            let subscriber_id = match result {
+                Some(id) => id,
+                None => return Ok(()),
+            };
+            let total = subscription::count_subscriptions(&pool, subscriber_id)
+                .await
+                .unwrap_or(0);
+            let total_pages = total.div_ceil(view::PER_PAGE).max(1);
+            let mut feeds = subscription::list_paginated_subscriptions(
+                &pool,
+                subscriber_id,
+                view::PER_PAGE as i64,
+                0,
+            )
+            .await
+            .unwrap_or_default();
+            self.backfill_feeds(&pool, &mut feeds, "view_subs").await;
+            let list_state = view::FeedListState::new(subscriber_id, total_pages);
+            let response = view::render_feed_list(&list_state, &feeds);
+            let json_str = serde_json::to_string(&response).map_err(|e| e.to_string())?;
+            unsafe {
+                host.edit_reply(message_id, &json_str)
+                    .map_err(|e| e.to_string())?
+            };
+            return Ok(());
+        }
+
         // On first interaction, re-key state from author_id to message_id
         // so that view_timeout can find and remove it.
         let mut states = self.feed_list_states.lock().await;
@@ -533,38 +713,33 @@ impl FeedPlugin {
             }
         };
 
-        // Select menu interaction — just store the selected values, no re-render
-        if action == "select" {
-            let values: Vec<String> = payload
-                .get("values")
-                .and_then(|v| v.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|v| v.as_str().map(String::from))
-                        .collect()
-                })
-                .unwrap_or_default();
-            state.selected_unsub = values;
-            return Ok(());
-        }
-
         match action {
             "edit" => {
                 state.edit_mode = true;
                 state.selected_unsub.clear();
             }
-            "cancel" => {
+            "view" => {
                 state.edit_mode = false;
                 state.selected_unsub.clear();
+            }
+            s if s.starts_with("unsub:") => {
+                if let Ok(feed_id) = s[5..].parse::<i32>() {
+                    state.selected_unsub.push(feed_id);
+                }
+                return Ok(()); // No re-render needed, just toggle
+            }
+            s if s.starts_with("undo:") => {
+                if let Ok(feed_id) = s[5..].parse::<i32>() {
+                    state.selected_unsub.retain(|&id| id != feed_id);
+                }
+                return Ok(()); // No re-render needed, just toggle
             }
             "save" => {
                 let selected = std::mem::take(&mut state.selected_unsub);
                 state.edit_mode = false;
                 let sub_id = state.subscriber_id;
-                for feed_id_str in &selected {
-                    if let Ok(feed_id) = feed_id_str.parse::<i32>() {
-                        let _ = subscription::unsubscribe(&pool, host, feed_id, sub_id).await;
-                    }
+                for &feed_id in &selected {
+                    let _ = subscription::unsubscribe(&pool, host, feed_id, sub_id).await;
                 }
                 let total = subscription::count_subscriptions(&pool, sub_id).await?;
                 state.total_pages = total.div_ceil(view::PER_PAGE);
@@ -582,8 +757,13 @@ impl FeedPlugin {
 
         // Query feeds based on mode
         let feeds = if state_clone.edit_mode {
-            subscription::list_paginated_subscriptions(&pool, state_clone.subscriber_id, 25, 0)
-                .await?
+            subscription::list_paginated_subscriptions(
+                &pool,
+                state_clone.subscriber_id,
+                view::EDIT_PER_PAGE as i64,
+                0,
+            )
+            .await?
         } else {
             let offset = ((state_clone.page - 1) * view::PER_PAGE) as i64;
             subscription::list_paginated_subscriptions(
@@ -772,16 +952,71 @@ fn extract_arg<'a>(args: &'a serde_json::Value, name: &str) -> Option<&'a str> {
     None
 }
 
-/// Resolves a source_id from a platform URL.
-fn resolve_source_id<'a>(
+/// Resolves a platform and source_id from a platform URL.
+fn resolve_platform_and_source_id<'a>(
     platforms: Option<&'a crate::platform::Platforms>,
     url: &'a str,
-) -> Result<&'a str, String> {
+) -> Result<(&'a std::sync::Arc<dyn crate::platform::Platform>, &'a str), String> {
     let platforms = platforms.ok_or("Platforms not initialized")?;
     let platform = platforms
         .get_platform_by_source_url(url)
         .ok_or_else(|| format!("Unsupported URL: {url}"))?;
-    platform
+    let source_id = platform
         .get_id_from_source_url(url)
-        .map_err(|e| format!("Failed to parse URL: {e}"))
+        .map_err(|e| format!("Failed to parse URL: {e}"))?;
+    Ok((platform, source_id))
+}
+
+/// Resolves the subscriber type and target ID from the `send_into` argument.
+///
+/// - `"Server"` (or `"server"`) → subscriber type `"guild"`, target ID is the guild ID
+/// - `"DM"` (or `"dm"`, or unset) → subscriber type `"dm"`, target ID is the author ID
+///
+/// Returns an error message when `"server"` is requested outside a guild.
+fn resolve_subscriber_target(
+    send_into: &str,
+    guild_id: u64,
+    author_id: u64,
+) -> Result<(&'static str, String), String> {
+    match send_into.to_lowercase().as_str() {
+        "server" => {
+            if guild_id == 0 {
+                return Err(
+                    "This command can only be used in a server when sending to server.".to_string(),
+                );
+            }
+            Ok(("guild", guild_id.to_string()))
+        }
+        _ => Ok(("dm", author_id.to_string())),
+    }
+}
+
+/// Builds a Components V2 batch message matching the main branch UI.
+///
+/// Each state is rendered as an individual `TextDisplay` inside a `Container`.
+/// When `is_final`, a `View Subscriptions` secondary button is appended.
+fn render_batch_payload(title: &str, states: &[String], is_final: bool) -> ResponsePayload {
+    let text_components: Vec<CreateContainerComponent> = states
+        .iter()
+        .map(|s| CreateContainerComponent::TextDisplay(CreateTextDisplay::new(s.clone())))
+        .collect();
+
+    let mut components = vec![CreateComponent::Container(CreateContainer::new(
+        text_components,
+    ))];
+
+    if is_final {
+        let view_btn = CreateButton::new("feed:view_subs")
+            .label("View Subscriptions")
+            .style(ButtonStyle::Secondary);
+        components.push(CreateComponent::ActionRow(CreateActionRow::Buttons(
+            vec![view_btn].into(),
+        )));
+    }
+
+    let msg = CreateMessage::new()
+        .flags(MessageFlags::IS_COMPONENTS_V2)
+        .components(components);
+
+    ResponsePayload::from_serializable(&msg).unwrap_or_else(|_| ResponsePayload::text(title))
 }

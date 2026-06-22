@@ -7,7 +7,7 @@ use std::fmt;
 /// Plugins must match this version at load time. Bumped when the FFI types
 /// ( [`InvokeRequest`], [`InvokeResponse`], [`PluginVTable`], [`HostCallbacks`])
 /// change in a breaking way.
-pub const PWR_BOT_PLUGIN_API_VERSION: u32 = 3;
+pub const PWR_BOT_PLUGIN_API_VERSION: u32 = 5;
 
 /// Name of the entry point symbol plugins must export.
 ///
@@ -47,6 +47,7 @@ pub struct HostCallbacks {
     pub send_reply: unsafe extern "C" fn(
         ctx_handle: u64,
         reply_json: *const c_char,
+        out_message_id: *mut u64,
         out_err: *mut *mut c_char,
     ) -> bool,
     pub edit_reply: unsafe extern "C" fn(
@@ -107,6 +108,7 @@ pub struct PluginVTable {
             payload_json: *const c_char,
             callbacks: *const HostCallbacks,
             ctx_handle: u64,
+            out_err: *mut *mut c_char,
         ) -> bool,
     >,
     pub free_string: Option<unsafe extern "C" fn(s: *mut c_char)>,

@@ -1,6 +1,7 @@
 use std::ffi::CStr;
 use std::ffi::CString;
 
+use pwr_bot_sdk::CommandDefinition;
 use pwr_bot_sdk::InvokeRequest;
 use pwr_bot_sdk::InvokeResponse;
 use pwr_bot_sdk::PWR_BOT_PLUGIN_API_VERSION;
@@ -22,29 +23,44 @@ impl TestPlugin {
             description: "Integration test plugin for pwr-bot".into(),
             version: "0.1.0".into(),
             commands: vec![
-                pwr_bot_sdk::CommandSpec {
+                CommandDefinition {
                     name: "echo".into(),
-                    description: "Echoes the command and args".into(),
-                    args: vec![],
+                    data: serde_json::json!({
+                        "name": "echo",
+                        "description": "Echoes the command and args",
+                        "options": []
+                    }),
                 },
-                pwr_bot_sdk::CommandSpec {
+                CommandDefinition {
                     name: "config_check".into(),
-                    description: "Returns host config values".into(),
-                    args: vec![],
+                    data: serde_json::json!({
+                        "name": "config_check",
+                        "description": "Returns host config values",
+                        "options": []
+                    }),
                 },
-                pwr_bot_sdk::CommandSpec {
+                CommandDefinition {
                     name: "return_error".into(),
-                    description: "Returns an error".into(),
-                    args: vec![],
+                    data: serde_json::json!({
+                        "name": "return_error",
+                        "description": "Returns an error",
+                        "options": []
+                    }),
                 },
-                pwr_bot_sdk::CommandSpec {
+                CommandDefinition {
                     name: "publish".into(),
-                    description: "Publishes a test event".into(),
-                    args: vec![pwr_bot_sdk::ArgSpec {
-                        name: "event".into(),
-                        description: "Event name to publish".into(),
-                        kind: "String".into(),
-                    }],
+                    data: serde_json::json!({
+                        "name": "publish",
+                        "description": "Publishes a test event",
+                        "options": [
+                            {
+                                "type": 3,
+                                "name": "event",
+                                "description": "Event name to publish",
+                                "required": true
+                            }
+                        ]
+                    }),
                 },
             ],
             event_handlers: vec![pwr_bot_sdk::EventHandlerSpec::new("test.event".into())],
@@ -169,6 +185,7 @@ unsafe extern "C" fn plugin_on_event(
     _payload_json: *const std::ffi::c_char,
     _callbacks: *const pwr_bot_sdk::HostCallbacks,
     _ctx_handle: u64,
+    _out_err: *mut *mut std::ffi::c_char,
 ) -> bool {
     true
 }

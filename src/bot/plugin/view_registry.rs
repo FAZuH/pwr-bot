@@ -175,13 +175,15 @@ impl PluginViewRegistry {
         );
 
         // Create a context with channel/guild/author metadata so the plugin
-        // can edit the message via host.edit_reply()
+        // can edit the message via host.edit_reply(). Pass the interaction
+        // token so edits use the webhook endpoint (avoids channel-edit restrictions).
         let ctx = PoiseHostCtx::new_system_with_channel(
             data,
             self.http.clone(),
             interaction.channel_id.get(),
             interaction.guild_id.map(|g| g.get()),
             interaction.user.id.get(),
+            Some(interaction.token.to_string()),
         );
 
         // Dispatch to the plugin's on_event handler

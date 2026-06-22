@@ -165,6 +165,7 @@ macro_rules! export_plugin {
             payload_json: *const std::ffi::c_char,
             callbacks: *const $crate::abi::HostCallbacks,
             ctx_handle: u64,
+            out_err: *mut *mut std::ffi::c_char,
         ) -> bool {
             let plugin = plugin_instance();
             let name = unsafe { std::ffi::CStr::from_ptr(event_name).to_str().unwrap_or("") };
@@ -177,9 +178,18 @@ macro_rules! export_plugin {
                 serde_json::from_str(payload_str).unwrap_or(serde_json::Value::Null);
             let host = $crate::host::PluginHost::new(ctx_handle, unsafe { &*callbacks });
 
-            plugin_runtime()
+            match plugin_runtime()
                 .block_on(async { plugin.on_event(name, payload, &host).await })
-                .is_ok()
+            {
+                Ok(()) => true,
+                Err(e) => {
+                    if !out_err.is_null() {
+                        let c_err = std::ffi::CString::new(e.clone()).unwrap();
+                        unsafe { *out_err = c_err.into_raw() };
+                    }
+                    false
+                }
+            }
         }
     };
 }

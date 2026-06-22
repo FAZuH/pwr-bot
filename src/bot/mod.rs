@@ -341,7 +341,25 @@ impl BotEventHandler {
 
                 let mut commands = Cogs.commands();
                 commands.extend(self.data.plugin_registry.all_commands().await);
-                match poise::builtins::register_globally(&self.http, &commands).await {
+
+                // Build combined CreateCommand JSON list for Discord registration
+                let mut create_cmds: Vec<serde_json::Value> =
+                    poise::builtins::create_application_commands(commands.iter())
+                        .iter()
+                        .map(|c| serde_json::to_value(c).expect("serialize CreateCommand"))
+                        .collect();
+
+                // Replace poise-generated plugin commands with plugin's full CreateCommand JSONs
+                let plugin_cmds = self.data.plugin_registry.all_command_data_by_name().await;
+                for cmd in &mut create_cmds {
+                    if let Some(name) = cmd.get("name").and_then(|v| v.as_str())
+                        && let Some(plugin_data) = plugin_cmds.get(name)
+                    {
+                        *cmd = plugin_data.clone();
+                    }
+                }
+
+                match self.http.create_global_commands(&create_cmds).await {
                     Ok(_) => {
                         info!("commands registered globally");
 

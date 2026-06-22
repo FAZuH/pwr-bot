@@ -103,6 +103,7 @@ fn ctx_data(ctx_handle: u64) -> Option<Arc<Data>> {
 unsafe extern "C" fn cb_send_reply(
     ctx_handle: u64,
     reply_json: *const std::ffi::c_char,
+    out_message_id: *mut u64,
     out_err: *mut *mut std::ffi::c_char,
 ) -> bool {
     let ctx = match host_registry::get(ctx_handle) {
@@ -127,7 +128,12 @@ unsafe extern "C" fn cb_send_reply(
     };
 
     match host_block_on(async move { ctx.send_message(&MessagePayload(payload.data)).await }) {
-        Ok(_) => true,
+        Ok(msg_id) => {
+            if !out_message_id.is_null() {
+                unsafe { *out_message_id = msg_id.get() };
+            }
+            true
+        }
         Err(e) => {
             let err = CString::new(e.to_string()).unwrap();
             if !out_err.is_null() {

@@ -41,11 +41,17 @@ impl BotPlugin for WelcomePlugin {
         "0.1.0"
     }
 
-    fn commands(&self) -> Vec<CommandSpec> {
-        vec![
-            CommandSpec::new("welcome", "Manage welcome message settings"),
-            CommandSpec::new("welcome settings", "Configure welcome settings"),
-        ]
+    fn commands(&self) -> Vec<CommandDefinition> {
+        vec![CommandDefinition {
+            name: "welcome".into(),
+            data: serde_json::json!({
+                "name": "welcome",
+                "description": "Manage welcome message settings",
+                "options": [
+                    {"type": 1, "name": "settings", "description": "Configure welcome settings"}
+                ]
+            }),
+        }]
     }
 
     fn settings_panels(&self) -> Vec<SettingsPanelSpec> {

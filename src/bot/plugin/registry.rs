@@ -1,21 +1,23 @@
 //! Registry mapping plugin command names to their loaded plugins.
 //!
-//! Also constructs poise `Command` objects from plugin `CommandDescriptor`s
-//! so the framework can route slash commands to plugins.
+//! Each plugin provides [`CommandDefinition`]s whose `data` field is a
+//! serialized `serenity::CreateCommand` JSON.  The host extracts the
+//! top‑level name and sub‑command names for poise routing, stores the
+//! raw JSON for Discord registration, and attaches the static
+//! [`registry_command_handler`] as the slash action.
 
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use poise::Command;
-use pwr_bot_sdk::CommandSpec;
+use pwr_bot_sdk::CommandDefinition;
 use pwr_bot_sdk::EventHandlerSpec;
 use pwr_bot_sdk::SettingsPanelSpec;
 use pwr_bot_sdk::TaskSpec;
 use pwr_bot_sdk::TestStepSpec;
 use tokio::sync::RwLock;
 use tracing::info;
-use tracing::instrument;
 
 use crate::bot::Data;
 use crate::bot::command::Error;
@@ -26,7 +28,7 @@ use crate::bot::plugin::loader::LoadedPlugin;
 /// Thread-safe registry of loaded plugins.
 pub struct PluginRegistry {
     plugins: RwLock<Vec<Arc<LoadedPlugin>>>,
-    /// Command name → plugin index
+    /// Full command name (e.g. `"feed"`, `"feed subscribe"`) → plugin index
     command_map: RwLock<HashMap<String, usize>>,
 }
 
@@ -41,7 +43,7 @@ impl PluginRegistry {
 
     /// Register a loaded `.so` plugin and return its poise `Command` list.
     pub async fn register(&self, plugin: LoadedPlugin) -> Vec<Command<Data, Error>> {
-        let specs = plugin.metadata.commands.clone();
+        let cmd_defs = plugin.metadata.commands.clone();
 
         let plugin = Arc::new(plugin);
         let idx = {
@@ -52,18 +54,58 @@ impl PluginRegistry {
         };
 
         let mut cmds = Vec::new();
-        for spec in &specs {
-            let cmd_name = spec.name.clone();
-            self.command_map.write().await.insert(cmd_name.clone(), idx);
-            cmds.push(build_plugin_command(spec));
+        let mut map = self.command_map.write().await;
+        for def in &cmd_defs {
+            let top_name = def.name.clone();
+            let sub_names = extract_subcommand_names(&def.data);
+
+            // Register all full command names in the map
+            map.insert(top_name.clone(), idx);
+            for sub in &sub_names {
+                map.insert(format!("{top_name} {sub}"), idx);
+            }
+
+            cmds.push(build_routing_command(def));
+
+            let full_names = if sub_names.is_empty() {
+                top_name.clone()
+            } else {
+                format!("{top_name} [{}]", sub_names.join(", "))
+            };
             info!(
-                command.name = %cmd_name,
+                command.name = %full_names,
                 plugin.name = %plugin.name,
                 "plugin command registered",
             );
         }
 
         cmds
+    }
+
+    /// Collect all plugin `CreateCommand` JSONs for Discord registration.
+    pub async fn all_command_data(&self) -> Vec<serde_json::Value> {
+        let mut data = Vec::new();
+        for plugin in self.plugins.read().await.iter() {
+            for def in &plugin.metadata.commands {
+                data.push(def.data.clone());
+            }
+        }
+        data
+    }
+
+    /// Returns plugin `CreateCommand` JSONs keyed by top-level command name.
+    ///
+    /// Used during registration to replace poise-generated `CreateCommand`s
+    /// (which have empty parameters for plugin commands) with the plugin's
+    /// full specification.
+    pub async fn all_command_data_by_name(&self) -> HashMap<String, serde_json::Value> {
+        let mut map = HashMap::new();
+        for plugin in self.plugins.read().await.iter() {
+            for def in &plugin.metadata.commands {
+                map.insert(def.name.clone(), def.data.clone());
+            }
+        }
+        map
     }
 
     /// Look up a plugin by command name.
@@ -126,62 +168,13 @@ impl PluginRegistry {
     }
 
     /// Returns Poise `Command`s for all registered plugins.
-    ///
-    /// Commands with space-separated names (e.g. `"feed list"`) are nested as
-    /// subcommands of their parent (`"feed"`), producing a proper Discord
-    /// command tree that shows subcommands in the autocomplete UI.
     pub async fn all_commands(&self) -> Vec<Command<Data, Error>> {
-        // Collect all specs, grouping by parent name (the token before the first space).
-        struct Group {
-            root: Option<CommandSpec>,
-            sub: Vec<CommandSpec>,
-        }
-        let mut groups: HashMap<String, Group> = HashMap::new();
-
-        for plugin in self.plugins.read().await.iter() {
-            for spec in &plugin.metadata.commands {
-                if let Some((parent, _sub)) = spec.name.split_once(' ') {
-                    let g = groups.entry(parent.to_string()).or_insert(Group {
-                        root: None,
-                        sub: Vec::new(),
-                    });
-                    g.sub.push(spec.clone());
-                } else {
-                    let g = groups.entry(spec.name.clone()).or_insert(Group {
-                        root: None,
-                        sub: Vec::new(),
-                    });
-                    g.root = Some(spec.clone());
-                }
-            }
-        }
-
         let mut cmds = Vec::new();
-        for (_name, group) in groups {
-            let root = group.root.unwrap_or_else(|| CommandSpec {
-                name: _name.clone(),
-                description: String::new(),
-                args: vec![],
-            });
-
-            let mut cmd = build_registry_command(&root);
-            if !group.sub.is_empty() {
-                cmd.subcommands = group
-                    .sub
-                    .iter()
-                    .map(|spec| {
-                        let mut sub_cmd = build_registry_command(spec);
-                        // Strip parent prefix for Discord-compatible subcommand name
-                        if let Some((_, sub_name)) = spec.name.split_once(' ') {
-                            sub_cmd.name = Cow::Owned(sub_name.to_string());
-                        }
-                        sub_cmd
-                    })
-                    .collect();
+        for plugin in self.plugins.read().await.iter() {
+            for def in &plugin.metadata.commands {
+                cmds.push(build_routing_command(def));
             }
-            cmds.push(cmd);
         }
-
         cmds
     }
 }
@@ -192,74 +185,87 @@ impl Default for PluginRegistry {
     }
 }
 
-/// Build a poise `Command` from a plugin `CommandSpec` (metadata-only, no handler).
-fn build_plugin_command(spec: &CommandSpec) -> Command<Data, Error> {
+/// Build a minimal poise `Command` for routing from a serialised
+/// `CreateCommand`.  The actual parameter spec lives in the plugin JSON
+/// and is sent directly to Discord during registration.
+fn build_routing_command(def: &CommandDefinition) -> Command<Data, Error> {
+    let description = def
+        .data
+        .get("description")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    let sub_names = extract_subcommand_names(&def.data);
+
     Command::<Data, Error> {
-        name: Cow::Owned(spec.name.clone()),
-        description: Some(Cow::Owned(spec.description.clone())),
+        name: Cow::Owned(def.name.clone()),
+        description: Some(Cow::Owned(description)),
+        slash_action: Some(|ctx| Box::pin(registry_command_handler(ctx))),
+        subcommands: sub_names
+            .into_iter()
+            .map(|name| Command::<Data, Error> {
+                name: Cow::Owned(name),
+                slash_action: Some(|ctx| Box::pin(registry_command_handler(ctx))),
+                ..Default::default()
+            })
+            .collect(),
         ..Default::default()
     }
+}
+
+/// Extract subcommand names from a serialised `CreateCommand` JSON.
+///
+/// Discord `CommandOptionType::SubCommand` has value `1`.
+fn extract_subcommand_names(data: &serde_json::Value) -> Vec<String> {
+    let mut names = Vec::new();
+    if let Some(options) = data.get("options").and_then(|v| v.as_array()) {
+        for opt in options {
+            if opt.get("type").and_then(|v| v.as_u64()) == Some(1)
+                && let Some(name) = opt.get("name").and_then(|v| v.as_str())
+            {
+                names.push(name.to_string());
+            }
+        }
+    }
+    names
 }
 
 /// Static handler for all registry-resolved plugin slash commands.
 ///
 /// Resolves the plugin from the command name at runtime via the registry
 /// stored in [`Data`], then dispatches through [`dispatch_plugin_command`].
-/// Errors are logged rather than propagated (Poise's `FrameworkError::Command`
-/// is `#[non_exhaustive]` and cannot be constructed externally).
-#[instrument(skip_all, fields(command.name = tracing::field::Empty, guild.id = tracing::field::Empty))]
 async fn registry_command_handler<'a>(
     ctx: poise::ApplicationContext<'a, Data, Error>,
 ) -> Result<(), poise::FrameworkError<'a, Data, Error>> {
-    // Serialize the full CommandData before consuming ctx — the plugin
-    // extracts the options it needs. Any type that implements Serialize
-    // works (CommandData derives Serialize via serenity).
     let args_json = serde_json::to_value(&ctx.interaction.data).unwrap_or(serde_json::Value::Null);
+
+    let cmd_name = {
+        let mut parts = vec![ctx.interaction.data.name.to_string()];
+        if let Some(first) = ctx.interaction.data.options.first() {
+            use poise::serenity_prelude::CommandOptionType;
+            if first.kind() == CommandOptionType::SubCommand {
+                parts.push(first.name.to_string());
+            }
+        }
+        parts.join(" ")
+    };
 
     let poise_ctx: poise::Context<'a, Data, Error> = ctx.into();
 
-    let cmd_name = poise_ctx.invoked_command_name();
     let guild_id = poise_ctx.guild_id().map(|g| g.get());
     let author_id = poise_ctx.author().id.get();
-    tracing::Span::current().record("command.name", cmd_name);
-    if let Some(gid) = guild_id {
-        tracing::Span::current().record("guild.id", gid);
-    }
 
-    tracing::info!(
-        command.name = %cmd_name,
-        guild.id = guild_id,
-        user.id = author_id,
-        "command invoked",
-    );
-    tracing::debug!(
-        command.name = %cmd_name,
-        guild.id = guild_id,
-        user.id = author_id,
-        channel.id = poise_ctx.channel_id().get(),
-        "command dispatch started",
-    );
+    let span = tracing::info_span!("registry_command_handler", command.name = %cmd_name, guild.id = guild_id);
+    let _guard = span.enter();
+
+    tracing::info!(user.id = author_id, "command invoked",);
 
     let registry = &poise_ctx.data().plugin_registry;
     let host_ctx = Arc::new(PoiseHostCtx::new(poise_ctx));
 
-    if let Err(e) = dispatch_plugin_command(registry, &host_ctx, cmd_name, args_json).await {
-        tracing::error!(command.name = %cmd_name, error = %e, "plugin command failed");
-    } else {
-        tracing::debug!(command.name = %cmd_name, "command dispatch completed");
+    if let Err(e) = dispatch_plugin_command(registry, &host_ctx, &cmd_name, args_json).await {
+        tracing::error!(error = %e, "plugin command failed");
     }
     Ok(())
-}
-
-/// Build a poise `Command` from a plugin `CommandSpec` for registry-based dispatch.
-///
-/// The command uses a static handler that resolves the plugin from the
-/// registry at dispatch time.
-fn build_registry_command(spec: &CommandSpec) -> Command<Data, Error> {
-    Command::<Data, Error> {
-        name: Cow::Owned(spec.name.clone()),
-        description: Some(Cow::Owned(spec.description.clone())),
-        slash_action: Some(|ctx| Box::pin(registry_command_handler(ctx))),
-        ..Default::default()
-    }
 }

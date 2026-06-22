@@ -1,31 +1,7 @@
 use deadpool_postgres::Pool;
+use pwr_bot_plugin_util::query_json;
 use pwr_bot_sdk::*;
 use serenity::all::*;
-use tokio_postgres::types::ToSql;
-
-async fn query_json(
-    pool: &Pool,
-    sql: &str,
-    params: &[&(dyn ToSql + Sync)],
-) -> Result<serde_json::Value, String> {
-    let client = pool.get().await.map_err(|e| e.to_string())?;
-    let rows = client.query(sql, params).await.map_err(|e| e.to_string())?;
-    let json_rows: Vec<serde_json::Value> = rows
-        .iter()
-        .map(|row| {
-            let mut map = serde_json::Map::new();
-            for (i, col) in row.columns().iter().enumerate() {
-                let name = col.name();
-                let value: serde_json::Value = row
-                    .try_get::<_, serde_json::Value>(i)
-                    .unwrap_or(serde_json::Value::Null);
-                map.insert(name.to_string(), value);
-            }
-            serde_json::Value::Object(map)
-        })
-        .collect();
-    Ok(serde_json::Value::Array(json_rows))
-}
 
 fn extract_feed_id(payload: &serde_json::Value) -> Option<i64> {
     payload

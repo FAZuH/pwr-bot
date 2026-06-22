@@ -78,13 +78,19 @@ impl BotPlugin for VoicePlugin {
         "0.1.0"
     }
 
-    fn commands(&self) -> Vec<CommandSpec> {
-        vec![
-            CommandSpec::new("vc", "Voice channel tracking and leaderboard"),
-            CommandSpec::new("vc leaderboard", "Show voice leaderboard"),
-            CommandSpec::new("vc stats", "Show your voice statistics"),
-            CommandSpec::new("vc settings", "Configure voice tracking settings"),
-        ]
+    fn commands(&self) -> Vec<CommandDefinition> {
+        vec![CommandDefinition {
+            name: "vc".into(),
+            data: serde_json::json!({
+                "name": "vc",
+                "description": "Voice channel tracking and leaderboard",
+                "options": [
+                    {"type": 1, "name": "leaderboard", "description": "Show voice leaderboard"},
+                    {"type": 1, "name": "stats", "description": "Show your voice statistics"},
+                    {"type": 1, "name": "settings", "description": "Configure voice tracking settings"}
+                ]
+            }),
+        }]
     }
 
     fn settings_panels(&self) -> Vec<SettingsPanelSpec> {

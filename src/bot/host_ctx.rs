@@ -62,6 +62,8 @@ pub struct PoiseHostCtx {
     data: Arc<Data>,
     http: Arc<Http>,
     interaction: Option<CommandInteraction>,
+    /// Interaction token for component interactions where no CommandInteraction exists.
+    interaction_token: Option<String>,
     /// Interaction response state: PENDING (0b00), RESPONDED (0b01), DEFERRED (0b11).
     state: AtomicU8,
 }
@@ -86,6 +88,7 @@ impl PoiseHostCtx {
             data: ctx.data(),
             http,
             interaction,
+            interaction_token: None,
             state: AtomicU8::new(PENDING),
         })
     }
@@ -99,6 +102,7 @@ impl PoiseHostCtx {
             data,
             http,
             interaction: None,
+            interaction_token: None,
             state: AtomicU8::new(PENDING),
         })
     }
@@ -106,13 +110,15 @@ impl PoiseHostCtx {
     /// Creates a system context with channel/guild/author metadata.
     ///
     /// Used for component interaction dispatch where the plugin needs to edit
-    /// the message, which requires knowing the channel ID.
+    /// the message, which requires knowing the channel ID and interaction
+    /// token for webhook-based edits.
     pub fn new_system_with_channel(
         data: Arc<Data>,
         http: Arc<Http>,
         channel_id: u64,
         guild_id: Option<u64>,
         author_id: u64,
+        interaction_token: Option<String>,
     ) -> Arc<Self> {
         Arc::new(Self {
             guild_id,
@@ -121,6 +127,7 @@ impl PoiseHostCtx {
             data,
             http,
             interaction: None,
+            interaction_token,
             state: AtomicU8::new(PENDING),
         })
     }
@@ -173,9 +180,17 @@ impl HostCtx for PoiseHostCtx {
     }
 
     async fn defer(&self) -> Result<(), Error> {
-        // No-op. Plugins run fast enough (<1s from logs) that we skip the
-        // Discord defer entirely. send_message will send the response
-        // directly as the initial interaction response (type 4).
+        if let Some(cmd) = self.cmd_interaction()
+            && self
+                .state
+                .compare_exchange(PENDING, DEFERRED, Ordering::SeqCst, Ordering::SeqCst)
+                .is_ok()
+        {
+            let envelope = serde_json::json!({"type": 5});
+            self.http
+                .create_interaction_response(cmd.id, &cmd.token, &envelope, vec![])
+                .await?;
+        }
         Ok(())
     }
 
@@ -244,16 +259,26 @@ impl HostCtx for PoiseHostCtx {
         message_id: MessageId,
         payload: &MessagePayload,
     ) -> Result<(), Error> {
+        // Strip flags — Discord rejects edits that include message flags (valid only on create).
+        let mut data = payload.0.clone();
+        if let Some(obj) = data.as_object_mut() {
+            obj.remove("flags");
+        }
         if let Some(cmd) = self.cmd_interaction() {
             self.http
-                .edit_original_interaction_response(&cmd.token, &payload.0, vec![])
+                .edit_original_interaction_response(&cmd.token, &data, vec![])
+                .await?;
+        } else if let Some(ref token) = self.interaction_token {
+            // Component interaction — use webhook endpoint to avoid channel-edit restrictions.
+            self.http
+                .edit_original_interaction_response(token, &data, vec![])
                 .await?;
         } else {
             self.http
                 .edit_message(
                     GenericChannelId::new(self.channel_id),
                     message_id,
-                    &payload.0,
+                    &data,
                     vec![],
                 )
                 .await?;

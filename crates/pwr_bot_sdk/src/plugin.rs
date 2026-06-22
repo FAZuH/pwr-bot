@@ -4,34 +4,42 @@ use serde::Serialize;
 
 use crate::host::PluginHost;
 
-/// Describes a single command argument for slash command registration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ArgSpec {
-    pub name: String,
-    pub description: String,
-    pub kind: String,
-}
-
-/// Describes a slash command provided by the plugin.
+/// A command definition produced by a plugin.
 ///
-/// A command with a space-separated name (e.g. `"feed list"`) is registered
-/// as a subcommand of the parent (`"feed"` → `/feed list`).
+/// The `data` field contains a serialized `serenity::CreateCommand` — the
+/// exact JSON that will be sent to Discord's command registration API. The
+/// host uses `name` for slash-command routing and `data` for registration.
+///
+/// Plugins build this by constructing a `serenity::builder::CreateCommand`
+/// with the full builder API (choices, autocomplete, channel types, etc.)
+/// and serializing it:
+///
+/// ```ignore
+/// use serenity::builder::CreateCommand;
+/// use serenity::model::application::CommandOptionType;
+///
+/// let cmd = CreateCommand::new("feed")
+///     .description("Manage feed subscriptions")
+///     .add_option(
+///         CreateCommandOption::new("subscribe", "Subscribe to feeds")
+///             .kind(CommandOptionType::SubCommand)
+///             .add_sub_option(
+///                 CreateCommandOption::new("links", "Feed URLs")
+///                     .kind(CommandOptionType::String)
+///                     .required(true)
+///             )
+///     );
+///
+/// let data = serde_json::to_value(&cmd).expect("CreateCommand serialization");
+/// let name = data.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+/// CommandDefinition { name, data }
+/// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CommandSpec {
+pub struct CommandDefinition {
+    /// Top-level command name (e.g. `"feed"`), used for routing.
     pub name: String,
-    pub description: String,
-    pub args: Vec<ArgSpec>,
-}
-
-impl CommandSpec {
-    /// Creates a new command spec with the given name and description.
-    pub fn new(name: impl Into<String>, description: impl Into<String>) -> Self {
-        Self {
-            name: name.into(),
-            description: description.into(),
-            args: vec![],
-        }
-    }
+    /// Serialized `serenity::CreateCommand` JSON, sent to Discord as-is.
+    pub data: serde_json::Value,
 }
 
 /// Payload returned by a plugin after handling a command invocation.
@@ -76,6 +84,16 @@ impl ResponsePayload {
     pub fn text_ephemeral(content: impl Into<String>) -> Self {
         Self {
             data: serde_json::json!({"content": content.into(), "flags": 64}),
+        }
+    }
+
+    /// Empty response — tells the host to skip sending any message.
+    ///
+    /// Use this when the plugin has already responded via [`send_reply`] or
+    /// [`edit_reply`](crate::PluginHost::edit_reply) during the invoke call.
+    pub fn none() -> Self {
+        Self {
+            data: serde_json::Value::Null,
         }
     }
 }
@@ -162,7 +180,7 @@ pub struct PluginMetadata {
     pub name: String,
     pub description: String,
     pub version: String,
-    pub commands: Vec<CommandSpec>,
+    pub commands: Vec<CommandDefinition>,
     pub event_handlers: Vec<EventHandlerSpec>,
     pub settings_panels: Vec<SettingsPanelSpec>,
     pub test_steps: Vec<TestStepSpec>,
@@ -177,7 +195,7 @@ pub struct PluginMetadata {
 /// # Example
 ///
 /// ```ignore
-/// use pwr_bot_sdk::{BotPlugin, CommandSpec, ResponsePayload, PluginHost, export_plugin};
+/// use pwr_bot_sdk::{BotPlugin, CommandDefinition, ResponsePayload, PluginHost, export_plugin};
 ///
 /// struct MyPlugin;
 ///
@@ -187,11 +205,15 @@ pub struct PluginMetadata {
 ///     fn description(&self) -> &'static str { "My first plugin" }
 ///     fn version(&self) -> &'static str { "0.1.0" }
 ///
-///     fn commands(&self) -> Vec<CommandSpec> {
-///         vec![CommandSpec {
+///     fn commands(&self) -> Vec<CommandDefinition> {
+///         let cmd = serde_json::json!({
+///             "name": "hello",
+///             "description": "Says hello",
+///             "options": []
+///         });
+///         vec![CommandDefinition {
 ///             name: "hello".into(),
-///             description: "Says hello".into(),
-///             args: vec![],
+///             data: cmd,
 ///         }]
 ///     }
 ///
@@ -217,7 +239,7 @@ pub trait BotPlugin: Send + Sync {
     /// Declares the slash commands this plugin provides.
     ///
     /// Called at load time by the host to register commands with Discord.
-    fn commands(&self) -> Vec<CommandSpec>;
+    fn commands(&self) -> Vec<CommandDefinition>;
 
     /// Handles a slash command invocation.
     ///

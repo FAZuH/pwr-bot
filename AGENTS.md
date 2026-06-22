@@ -29,6 +29,10 @@ cargo test --workspace --all-features
 - CI order: `fmt --check` → `build --all-targets` → `clippy -D warnings` → `test`
 - Diagrams: always use `./dev.sh docs`, never invoke `mmdc` directly
 
+## Build & Test Responsibility
+
+**The user builds and tests the app.** Do not run `cargo build`, `cargo test`, or start the bot yourself — these are slow and waste tokens. Focus on code changes. The user will provide relevant log/output snippets for debugging.
+
 ## Testing
 
 ```bash

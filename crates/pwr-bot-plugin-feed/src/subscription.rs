@@ -1,9 +1,12 @@
+use chrono::Utc;
 use deadpool_postgres::Pool;
 use pwr_bot_plugin_util::db_execute;
 use pwr_bot_plugin_util::query_json;
+use pwr_bot_plugin_util::rows_to_json_vec;
 use pwr_bot_sdk::*;
 
 use crate::platform::Platforms;
+use crate::platform::traits::Platform;
 
 pub enum SubscribeResult {
     Success { feed_id: i32, feed_name: String },
@@ -221,6 +224,131 @@ pub async fn get_feed_by_source_id(
     Ok(result.as_array().and_then(|arr| arr.first().cloned()))
 }
 
+/// Returns the feed for `source_id`, creating it from the platform API if it
+/// does not yet exist in the database.
+///
+/// Mirrors the main branch's `FeedSubscriptionService::get_or_create_feed`:
+/// fetches `FeedSource` from the platform, inserts a new row, fetches the
+/// latest item, and inserts it as the initial `feed_items` entry.
+pub async fn get_or_create_feed(
+    pool: &Pool,
+    _host: &PluginHost,
+    platform: &(dyn Platform + Sync),
+    _url: &str,
+    source_id: &str,
+) -> Result<serde_json::Value, String> {
+    // Return existing feed if present
+    if let Some(feed) = get_feed_by_source_id(pool, _host, source_id).await? {
+        // Backfill: ensure at least one feed_item exists for display
+        let feed_id = feed.get("id").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+        let items_id = feed.get("items_id").and_then(|v| v.as_str()).unwrap_or("");
+        tracing::debug!(
+            feed.id = feed_id,
+            feed.name = ?feed.get("name").and_then(|v| v.as_str()),
+            "get_or_create_feed: existing feed",
+        );
+        if feed_id > 0 && !items_id.is_empty() {
+            let has_items = query_json(
+                pool,
+                "SELECT 1 FROM feed_items WHERE feed_id = $1 LIMIT 1",
+                &[&feed_id],
+            )
+            .await
+            .map(|r| r.as_array().map(|a| !a.is_empty()).unwrap_or(false))
+            .unwrap_or(false);
+            if !has_items {
+                match platform.fetch_latest(items_id).await {
+                    Ok(latest) => {
+                        tracing::info!(
+                            feed.id = feed_id,
+                            latest.title = %latest.title,
+                            "get_or_create_feed: backfilling feed_item",
+                        );
+                        let _ = db_execute(
+                            pool,
+                            "INSERT INTO feed_items (feed_id, description, published) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
+                            &[&feed_id, &latest.title, &latest.published.to_rfc3339()],
+                        )
+                        .await;
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            feed.id = feed_id,
+                            items_id = %items_id,
+                            error = %e,
+                            "get_or_create_feed: fetch_latest failed, inserting placeholder",
+                        );
+                        eprintln!(
+                            "get_or_create_feed: fetch_latest failed feed_id={feed_id} items_id={items_id}: {e}",
+                        );
+                        let _ = db_execute(
+                            pool,
+                            "INSERT INTO feed_items (feed_id, description, published) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
+                            &[&feed_id, &"", &Utc::now().to_rfc3339()],
+                        )
+                        .await;
+                    }
+                }
+            } else {
+                tracing::debug!(
+                    feed.id = feed_id,
+                    "get_or_create_feed: feed already has items"
+                );
+            }
+        }
+        return Ok(feed);
+    }
+
+    // Fetch metadata from the platform API
+    let feed_source = platform
+        .fetch_source(source_id)
+        .await
+        .map_err(|e| format!("Failed to fetch feed info: {e}"))?;
+
+    let platform_id = platform.get_id();
+    let tags = &platform.get_info().tags;
+    let cover_url = feed_source.image_url.as_deref().unwrap_or("");
+
+    let feed_id = add_feed(
+        pool,
+        _host,
+        "",
+        &feed_source.name,
+        platform_id,
+        source_id,
+        &feed_source.items_id,
+        &feed_source.source_url,
+        cover_url,
+        tags,
+        &feed_source.description,
+    )
+    .await?;
+
+    // Fetch latest item and create initial version
+    if let Ok(latest) = platform.fetch_latest(&feed_source.items_id).await {
+        let _ = db_execute(
+            pool,
+            "INSERT INTO feed_items (feed_id, description, published) VALUES ($1, $2, $3)",
+            &[&feed_id, &latest.title, &latest.published.to_rfc3339()],
+        )
+        .await;
+    }
+
+    // Return the newly-created feed
+    let result = query_json(
+        pool,
+        "SELECT id, name, description, platform_id, source_id, items_id, source_url, cover_url, tags \
+         FROM feeds WHERE id = $1",
+        &[&feed_id],
+    )
+    .await?;
+
+    result
+        .as_array()
+        .and_then(|arr| arr.first().cloned())
+        .ok_or_else(|| "Failed to read back created feed".to_string())
+}
+
 /// Looks up a subscriber ID by target_id (Discord user ID as string).
 pub async fn get_subscriber_by_target(pool: &Pool, target_id: &str) -> Result<Option<i32>, String> {
     let client = pool.get().await.map_err(|e| e.to_string())?;
@@ -262,9 +390,15 @@ pub async fn list_paginated_subscriptions(
     let rows = client
         .query(
             "SELECT f.id, f.name, f.description, f.platform_id, f.source_id, \
-                    f.items_id, f.source_url, f.cover_url, f.tags \
+                    f.items_id, f.source_url, f.cover_url, f.tags, \
+                    fi.description AS latest_title, \
+                    EXTRACT(EPOCH FROM fi.published)::BIGINT AS latest_published \
              FROM feed_subscriptions fs \
              JOIN feeds f ON f.id = fs.feed_id \
+             LEFT JOIN LATERAL ( \
+               SELECT description, published FROM feed_items \
+               WHERE feed_id = f.id ORDER BY published DESC LIMIT 1 \
+             ) fi ON true \
              WHERE fs.subscriber_id = $1 \
              ORDER BY f.name \
              LIMIT $2 OFFSET $3",
@@ -272,30 +406,8 @@ pub async fn list_paginated_subscriptions(
         )
         .await
         .map_err(|e| e.to_string())?;
-
-    let feeds: Vec<serde_json::Value> = rows
-        .iter()
-        .map(|row| {
-            let mut map = serde_json::Map::new();
-            for (i, col) in row.columns().iter().enumerate() {
-                let name = col.name();
-                let value: serde_json::Value = match col.type_().name() {
-                    "int4" | "int8" => {
-                        let v: i64 = row.get(i);
-                        serde_json::Value::from(v)
-                    }
-                    _ => row
-                        .try_get::<_, serde_json::Value>(i)
-                        .unwrap_or(serde_json::Value::Null),
-                };
-                map.insert(name.to_string(), value);
-            }
-            serde_json::Value::Object(map)
-        })
-        .collect();
-
     drop(client);
-    Ok(feeds)
+    Ok(rows_to_json_vec(&rows))
 }
 
 pub async fn check_feed_update(

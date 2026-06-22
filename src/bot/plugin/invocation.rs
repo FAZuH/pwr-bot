@@ -110,35 +110,36 @@ pub async fn dispatch(
     };
 
     if let Some(msg) = msg_payload {
-        tracing::debug!(ffi.command = %command, "dispatch: sending response");
-        let msg_id = host_ctx.send_message(&msg).await?;
-        tracing::debug!(
-            ffi.command = %command,
-            message.id = %msg_id,
-            "dispatch: response sent",
-        );
-
-        // Register as interactive view if the response contained components
-        if has_components {
-            let data = host_ctx.data();
-            let plugin_name = command.split_whitespace().next().unwrap_or(command);
-            data.view_registry
-                .register(
-                    plugin_name,
-                    msg_id,
-                    UserId::new(host_ctx.author_id()),
-                    host_ctx.guild_id(),
-                )
-                .await;
+        if !msg.0.is_null() {
+            tracing::debug!(ffi.command = %command, "dispatch: sending response");
+            let msg_id = host_ctx.send_message(&msg).await?;
             tracing::debug!(
                 ffi.command = %command,
-                plugin.name = %plugin_name,
                 message.id = %msg_id,
-                "plugin view registered",
+                "dispatch: response sent",
             );
+
+            // Register as interactive view if the response contained components
+            if has_components {
+                let data = host_ctx.data();
+                let plugin_name = command.split_whitespace().next().unwrap_or(command);
+                data.view_registry
+                    .register(
+                        plugin_name,
+                        msg_id,
+                        UserId::new(host_ctx.author_id()),
+                        host_ctx.guild_id(),
+                    )
+                    .await;
+                tracing::debug!(
+                    ffi.command = %command,
+                    message.id = %msg_id,
+                    "dispatch: plugin view registered for interactions",
+                );
+            }
+        } else {
+            tracing::debug!(ffi.command = %command, "dispatch: plugin already responded, skipping");
         }
-    } else {
-        tracing::debug!(ffi.command = %command, "dispatch: no response payload");
     }
 
     Ok(())
@@ -269,14 +270,25 @@ pub async fn dispatch_on_event_with_ctx(
         .and_then(|s| CString::new(s).map_err(|e| e.to_string()))?;
 
     unsafe {
+        let mut out_err: *mut std::ffi::c_char = std::ptr::null_mut();
         let success = (loaded.vtable.on_event.as_ref().unwrap())(
             event_name_c.as_ptr(),
             payload_c.as_ptr(),
             ffi_host_ctx::host_callbacks() as *const _,
             ffi_ctx.handle(),
+            &mut out_err,
         );
         if success {
             Ok(())
+        } else if !out_err.is_null() {
+            let err = std::ffi::CStr::from_ptr(out_err)
+                .to_str()
+                .unwrap_or("unknown error")
+                .to_string();
+            if let Some(free) = loaded.vtable.free_string {
+                free(out_err);
+            }
+            Err(err)
         } else {
             Err("FFI on_event returned false".to_string())
         }
