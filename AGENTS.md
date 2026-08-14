@@ -110,3 +110,17 @@ Source lives in `docs/diagrams/*.mmd`. Export to PNG with `mmdc` after edits.
 |---------|----------|
 | Stripping doc comments during refactoring | Preserve all `///` and `//!` docs when moving code |
 | Wrong commit format | Follow `.opencode/skills/commit/SKILL.md` strictly |
+
+## Agent skills
+
+### Issue tracker
+
+Issues live as GitHub issues; use `gh`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default five-role vocabulary. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context — root `CONTEXT.md` + `docs/adr/`. See `docs/agents/domain.md`.
