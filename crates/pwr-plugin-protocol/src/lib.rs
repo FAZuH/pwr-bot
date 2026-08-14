@@ -13,9 +13,22 @@
 //! (graceful shutdown). Errors are first-class wire values: a failed `resp`
 //! carries `ok:false` plus `error:{kind,msg}`. Panics never cross the wire.
 
+pub mod caps;
+pub mod manifest;
 pub mod msg;
+pub mod view;
 
+pub use caps::ALL_CAPS;
+pub use caps::CapsError;
+pub use caps::HostCap;
+pub use caps::validate_caps;
+pub use manifest::CommandDef;
+pub use manifest::Manifest;
+pub use manifest::ManifestError;
+pub use manifest::PanelDef;
+pub use manifest::TaskDef;
 pub use msg::API_VERSION;
 pub use msg::CallIdSeq;
 pub use msg::Msg;
 pub use msg::WireError;
+pub use view::ViewSpec;
