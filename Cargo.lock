@@ -3651,6 +3651,7 @@ dependencies = [
  "mockall",
  "plotters",
  "poise",
+ "pwr-plugin-protocol",
  "resvg",
  "serde",
  "serde_json",

@@ -12,6 +12,7 @@
 //!   `resp`, keeping a per-process click counter for [`BUTTON_CUSTOM_ID`];
 //! - treats `event` (e.g. `view.timeout`) as one-way, never answering it;
 //! - answers `ping` with `pong`;
+//! - tolerates the host's hello ack silently;
 //! - exits 0 on `bye` and on EOF.
 //!
 //! Drive it from integration tests via `CARGO_BIN_EXE_hello_plugin` (see
@@ -158,7 +159,11 @@ fn main() -> ExitCode {
                 }
             }
             Msg::Pong => {}
-            Msg::Hello { .. } | Msg::Resp { .. } => eprintln!("unexpected message: {line}"),
+            // The host answers our hello with its own; tolerate it silently.
+            // Logging it would be noise, and the stderr test asserts on a
+            // dedicated fixture line instead.
+            Msg::Hello { .. } => {}
+            Msg::Resp { .. } => eprintln!("unexpected message: {line}"),
         }
     }
     ExitCode::SUCCESS
