@@ -1,6 +1,6 @@
 ---
 name: commit
-description: Create git commits following the project's Conventional Commits specification. Handles commit message formatting, types, scopes, user-facing commit detection, and CI skip patterns.
+description: Create git commits following the project's Conventional Commits specification. Handles commit message formatting, types, scopes, and CI skip patterns.
 ---
 
 # Commit Conventions
@@ -32,17 +32,6 @@ This project follows the **Conventional Commits** specification for clear and co
 | `build` | Build system or dependency changes |
 | `ci` | CI/CD changes |
 
-## User-Facing Commits
-
-For commits that should appear in the user-facing changelog, include `[pub]` or `[public]` anywhere in the commit message (subject, body, or footer).
-
-**Examples:**
-- `feat(bot): Add /vc stats command [pub]`
-- `fix(bot): Fix swapped unsubscribe and undo button [public]`
-- `refactor: Separate model & update logic [pub]`
-
-**Why?** The CI detects `[pub]` / `[public]` markers to filter commits for the changelog. Without the marker, the commit is hidden from end users.
-
 ## Version Bumps
 
 Use `chore!(major)` or `chore!(minor)` in the subject to trigger a major or minor version release:
@@ -70,7 +59,6 @@ Use scopes to indicate which part of the codebase changed:
 ## Guidelines
 
 ### Subject Line Rules
-- **Capitalize** the first letter (unless it is strictly lowercase like a variable name)
 - Use **present tense** ("Add feature" not "Added feature")
 - Use **imperative mood** ("Move cursor to..." not "Moves cursor to...")
 - Keep subject under 50 characters when possible
@@ -85,13 +73,12 @@ Use scopes to indicate which part of the codebase changed:
 ### Footer Rules
 - Reference issues: `Closes #123`, `Fixes #456`
 - CI skip: `[skip ci]`, `[no ci]`, `[ci skip]`, `[skip actions]`, `[actions skip]`
-- Public marker: `[pub]` or `[public]`
 
 ## Examples
 
-### Feature Commit (user-facing)
+### Feature Commit
 ```
-feat(bot): Add /vc stats command with contribution grid [pub]
+feat(bot): Add /vc stats command with contribution grid
 
 Add voice activity statistics command that displays historical
 data using GitHub-style contribution heatmaps.
@@ -101,12 +88,12 @@ data using GitHub-style contribution heatmaps.
 - Display total time, average, streak, and most active day
 ```
 
-### Bug Fix Commit (user-facing)
+### Bug Fix Commit
 ```
-fix(bot): Fix swapped unsubscribe and undo button [pub]
+fix(bot): Fix swapped unsubscribe and undo button
 ```
 
-### Internal Refactor (not user-facing)
+### Internal Refactor
 ```
 refactor: Separate model & update logic
 
@@ -139,9 +126,6 @@ docs: Update README [skip ci]
 style: Format code [no ci]
 ```
 
-### Changelog Detection
-The CI automatically detects user-facing commits by looking for `[pub]` or `[public]` markers anywhere in the commit message.
-
 ## Creating Commits
 
 ### Using Git Directly
@@ -162,26 +146,22 @@ git commit -m "feat(bot): Add new command" -m "Add description of changes"
 Before committing, verify:
 - [ ] Type is correct (feat, fix, refactor, etc.)
 - [ ] Scope is appropriate (bot, db, voice, feed, update)
-- [ ] Subject is capitalized and uses imperative mood
-- [ ] User-facing changes have `[pub]` or `[public]` marker
+- [ ] Subject uses imperative mood
 - [ ] Documentation-only commits have `[skip ci]` or similar
 
 ## Common Mistakes
 
 | Mistake | Correction |
 |---------|------------|
-| `feat: add feature` | `feat(bot): Add feature` |
 | `Added new feature` | `feat(bot): Add new feature` |
 | `fix(bot): fixed bug` | `fix(bot): Fix bug` |
 | `refactor: Refactored code` | `refactor(bot): Refactor code structure` |
-| User-facing without `[pub]` | `feat(bot): Add feature [pub]` |
-| Using old `u_` prefix | `feat(bot): Add feature [pub]` |
 
 ## Git Log Reference
 
 Recent commits in this project follow these patterns:
 ```
-23c0370 fix(bot): `/vc leaderboard` instant timeout when initial data is empty [pub]
+23c0370 fix(bot): `/vc leaderboard` instant timeout when initial data is empty
 f597bb6 docs: update docs
 f7a25b4 refactor: remove unused variables
 e8fe0dd refactor: separate model & update logic of voice leaderboard
