@@ -43,6 +43,7 @@ jobs:
       tag: ${{ steps.changelog.outputs.tag }}
       skipped: ${{ steps.changelog.outputs.skipped }}
       changelog: ${{ steps.changelog.outputs.changelog }}
+      mode: ${{ steps.mode.outputs.mode }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -53,6 +54,12 @@ jobs:
       - name: Fetch All Tags
         run: git fetch --tags --force origin '+refs/tags/*:refs/tags/*'
 
+      - name: Read changelog mode
+        id: mode
+        run: |
+          MODE=$(cat .github/changelog-mode 2>/dev/null || echo auto)
+          echo "mode=$MODE" >> "$GITHUB_OUTPUT"
+
       - name: Set Up version.json
         run: |
           LATEST_TAG=$(git tag -l 'v*' --sort=-version:refname | head -1)
@@ -60,8 +67,7 @@ jobs:
 
       - name: Install changelog dependencies
         run: |
-          npm install conventional-changelog-conventionalcommits@7.0.2
-          rm -f package.json package-lock.json
+          npm install --no-save --no-package-lock conventional-changelog-conventionalcommits@7.0.2
 
       - name: Generate Changelog (dry run)
         id: changelog
@@ -70,7 +76,7 @@ jobs:
           skip-commit: true
           skip-tag: true
           github-token: ${{ secrets.PRIVATE_TOKEN }}
-          config-file-path: ./.github/.config.js
+          config-file-path: ./.github/.config.cjs
           version-file: ./version.json
           preset: conventionalcommits
           skip-version-file: true
@@ -84,6 +90,7 @@ jobs:
     uses: ./.github/workflows/patch-version.yml
     with:
       version: ${{ needs.changelog.outputs.tag }}
+      publish-crates: ${{ inputs.publish-crates }}
 
   build:
     name: Build Binaries
@@ -134,6 +141,7 @@ jobs:
         with:
           registry-token: ${{ secrets.CARGO_REGISTRY_TOKEN }}
           args: --allow-dirty
+          packages: ${{ needs.patch-version.outputs.packages }}
 
   publish-changelog:
     name: Publish Changelog Commit
@@ -146,6 +154,7 @@ jobs:
       (needs.publish-crates.result == 'success' || needs.publish-crates.result == 'skipped')
     outputs:
       tag: ${{ steps.commit.outputs.tag }}
+      changelog-body: ${{ steps.manual-body.outputs.body }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -170,13 +179,12 @@ jobs:
 
       - name: Stage patched files
         run: |
-          git add Cargo.toml
+          git add Cargo.toml Cargo.lock
           git add crates/*/Cargo.toml 2>/dev/null || true
 
       - name: Install changelog dependencies
         run: |
-          npm install conventional-changelog-conventionalcommits@7.0.2
-          rm -f package.json package-lock.json
+          npm install --no-save --no-package-lock conventional-changelog-conventionalcommits@7.0.2
 
       - name: Commit, Tag, Push
         id: commit
@@ -185,13 +193,26 @@ jobs:
           github-token: ${{ secrets.PRIVATE_TOKEN }}
           git-user-name: "faz-bot"
           git-user-email: "mail@fazuh.com"
-          config-file-path: ./.github/.config.js
+          config-file-path: ./.github/.config.cjs
           version-file: ./version.json
           preset: conventionalcommits
           skip-version-file: true
           skip-git-pull: true
           skip-on-empty: false
+          output-file: ${{ needs.changelog.outputs.mode == 'manual' && 'false' || 'CHANGELOG.md' }}
           git-push: false
+
+      - name: Materialize [Unreleased] section
+        id: manual-body
+        if: needs.changelog.outputs.mode == 'manual'
+        run: |
+          BODY="$(node ./.github/scripts/materialize-unreleased.cjs CHANGELOG.md "${{ steps.commit.outputs.tag }}" "$(date -u +%Y-%m-%d)")"
+          git add CHANGELOG.md 2>/dev/null || true
+          {
+            echo "body<<EOF"
+            printf '%s\n' "$BODY"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Clean stale artifacts and push release
         run: |
@@ -227,6 +248,8 @@ jobs:
       (needs.publish-crates.result == 'success' || needs.publish-crates.result == 'skipped') &&
       needs.publish-changelog.result == 'success'
     runs-on: ubuntu-latest
+    env:
+      RELEASE_BODY: ${{ needs.changelog.outputs.mode != 'manual' && needs.changelog.outputs.changelog || needs.publish-changelog.outputs.changelog-body }}
     steps:
       - name: Download Artifacts
         if: ${{ inputs.build-binaries }}
@@ -251,7 +274,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.publish-changelog.outputs.tag }}
-          body: ${{ needs.changelog.outputs.changelog }}
+          body: ${{ env.RELEASE_BODY }}
           files: release/*
 
       - name: Post Release on Discord
@@ -260,6 +283,6 @@ jobs:
           webhook-url: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
           embed-color: "9498256"
           embed-title: "${{ inputs.binary-name }} ${{ needs.publish-changelog.outputs.tag }}"
-          embed-description: ${{ needs.changelog.outputs.changelog }}
+          embed-description: ${{ env.RELEASE_BODY }}
           embed-url: ${{ steps.release.outputs.url }}
           embed-timestamp: ${{ github.event.head_commit.timestamp }}
