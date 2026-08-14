@@ -10,15 +10,19 @@ WORKDIR /app
 
 # Cache build dependencies
 COPY Cargo.toml Cargo.lock ./
+COPY ./crates ./crates
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     mkdir src && \
     echo "fn main() {}" > src/main.rs && \
+    mkdir -p crates/pwr-plugin-protocol/src && \
+    touch crates/pwr-plugin-protocol/src/lib.rs && \
     cargo build --release && \
-    rm -rf src
+    rm -rf src crates
 
 # Build app
 COPY ./assets ./assets
 COPY ./src ./src
+COPY ./crates ./crates
 COPY ./migrations ./migrations
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo build --release

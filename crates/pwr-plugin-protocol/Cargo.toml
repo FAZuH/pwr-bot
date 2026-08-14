@@ -1,0 +1,12 @@
+[package]
+name = "pwr-plugin-protocol"
+version = "0.1.0"
+edition = "2024"
+authors = ["FAZuH <mail@fazuh.com>"]
+description = "Wire protocol types for pwr-bot host<->plugin communication"
+license = "MIT"
+repository = "https://github.com/FAZuH/pwr-bot"
+
+[dependencies]
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
