@@ -6,6 +6,14 @@ use serde_json::Value;
 /// rejects a handshake that carries any other value.
 pub const API_VERSION: u32 = 1;
 
+/// Name of the canonical test-plugin fixture: what it announces in
+/// [`Msg::Hello`] and what the host sends as `cmd` on `invoke`/`view.interact`.
+pub const PLUGIN_NAME: &str = "hello";
+
+/// Custom id of the fixture's click button: rendered in the view and echoed
+/// back in `view.interact` args to trigger the click path.
+pub const BUTTON_CUSTOM_ID: &str = "hello:click";
+
 /// A message on the plugin wire, serialized as one compact JSON object per
 /// line. The `t` discriminator names the variant: `hello`, `call`, `resp`,
 /// `event`, `ping`, `pong`, `bye`.
