@@ -90,6 +90,13 @@ pub enum PluginError {
         timeout: Duration,
     },
 
+    /// A plugin with the same name is already registered and running.
+    #[error("plugin `{name}` is already running")]
+    AlreadyRunning {
+        /// Plugin name.
+        name: String,
+    },
+
     /// I/O failure on the plugin's pipes (e.g. broken pipe after death).
     #[error("plugin `{name}` io error: {source}")]
     Io {

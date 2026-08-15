@@ -16,23 +16,25 @@
 //! every in-flight call fails with a `PluginDied` wire error and the reaper
 //! task reaps the child via `wait()`.
 //!
-//! Lifecycle beyond spawn/call/stop (health, respawn, unload policy,
-//! external install, KV, per-guild sets) is later work; the interaction
-//! engine that routes Discord interactions to plugin view sessions lives in
-//! [`interaction`]. This module is shaped so a manager can later hold a map
-//! of [`RunningPlugin`] handles. Dropping a [`RunningPlugin`] kills its
-//! subprocess via the `Drop` impl, so unloading a plugin is drop-and-forget;
-//! graceful unload is [`RunningPlugin::stop`].
+//! Lifecycle beyond spawn/call/stop lives in [`manager`]: health checks,
+//! unload, crash respawn, and binary swap over a map of [`RunningPlugin`]
+//! handles. External install, KV, and per-guild sets are later work
+//! (#110/#112). Dropping a [`RunningPlugin`] kills its subprocess via the
+//! `Drop` impl, so unloading a plugin is drop-and-forget; graceful unload is
+//! [`RunningPlugin::stop`].
 
 pub mod command;
 pub mod error;
 pub mod interaction;
+pub mod manager;
 
 use std::collections::HashMap;
 use std::path::Path;
 use std::process::ExitStatus;
 use std::process::Stdio;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 pub use error::PluginError;
@@ -41,6 +43,10 @@ pub use interaction::InteractionError;
 use log::debug;
 use log::info;
 use log::warn;
+pub use manager::HealthConfig;
+pub use manager::PluginManager;
+pub use manager::RespawnOutcome;
+pub use manager::RespawnPolicy;
 use pwr_plugin_protocol::ALL_CAPS;
 use pwr_plugin_protocol::API_VERSION;
 use pwr_plugin_protocol::CallIdSeq;
@@ -86,6 +92,9 @@ pub struct RunningPlugin {
     child: Arc<Mutex<Option<Child>>>,
     /// The plugin's exit status, published by the waiter task.
     exit: watch::Receiver<Option<ExitStatus>>,
+    /// Total `pong`s received since spawn, incremented by the reader task.
+    /// Liveness accounting for the health checker.
+    pongs: Arc<AtomicU64>,
 }
 
 impl RunningPlugin {
@@ -171,9 +180,16 @@ impl RunningPlugin {
         let inflight = Arc::new(Mutex::new(HashMap::new()));
         let (exit_tx, exit_rx) = watch::channel(None);
         let (died_tx, died_rx) = oneshot::channel();
+        let pongs = Arc::new(AtomicU64::new(0));
 
         tokio::spawn(run_stderr(stderr, name.clone()));
-        tokio::spawn(run_reader(reader, inflight.clone(), name.clone(), died_tx));
+        tokio::spawn(run_reader(
+            reader,
+            inflight.clone(),
+            pongs.clone(),
+            name.clone(),
+            died_tx,
+        ));
         tokio::spawn(run_reaper(child.clone(), exit_tx, died_rx, name.clone()));
 
         Ok(RunningPlugin {
@@ -183,6 +199,7 @@ impl RunningPlugin {
             ids: Mutex::new(CallIdSeq::new()),
             child,
             exit: exit_rx,
+            pongs,
         })
     }
 
@@ -267,6 +284,24 @@ impl RunningPlugin {
         }
     }
 
+    /// Sends a liveness `ping`; the plugin answers with `pong` (no
+    /// correlation id). Fails with [`PluginError::NotRunning`] if the plugin
+    /// is stopped, or [`PluginError::Io`] if the write fails.
+    pub async fn ping(&self) -> Result<(), PluginError> {
+        let mut stdin = self.stdin.lock().await;
+        match stdin.as_mut() {
+            Some(stdin) => write_line(stdin, &Msg::Ping)
+                .await
+                .map_err(|source| PluginError::Io {
+                    name: self.name.clone(),
+                    source,
+                }),
+            None => Err(PluginError::NotRunning {
+                name: self.name.clone(),
+            }),
+        }
+    }
+
     /// Gracefully stops the plugin: sends `bye`, closes stdin (EOF), and
     /// waits up to [`STOP_TIMEOUT`] for a clean exit, killing the child if it
     /// does not comply. Returns the final exit status.
@@ -325,6 +360,20 @@ impl RunningPlugin {
     /// The plugin's exit status once it has exited; `None` while it runs.
     pub fn exit_status(&self) -> Option<ExitStatus> {
         *self.exit.borrow()
+    }
+
+    /// The child process id, if the child has not yet been reaped.
+    pub async fn pid(&self) -> Option<u32> {
+        self.child
+            .lock()
+            .await
+            .as_ref()
+            .and_then(|child| child.id())
+    }
+
+    /// Total `pong`s received since spawn, for liveness accounting.
+    pub fn pongs_received(&self) -> u64 {
+        self.pongs.load(Ordering::Relaxed)
     }
 
     /// Awaits the plugin's exit status, published by the waiter task once the
@@ -456,6 +505,7 @@ async fn run_stderr(stderr: ChildStderr, name: String) {
 async fn run_reader(
     mut reader: BufReader<ChildStdout>,
     inflight: Arc<Mutex<HashMap<u64, oneshot::Sender<Msg>>>>,
+    pongs: Arc<AtomicU64>,
     name: String,
     died: oneshot::Sender<()>,
 ) {
@@ -465,7 +515,7 @@ async fn run_reader(
         match reader.read_line(&mut line).await {
             Ok(0) => break, // EOF: the plugin's stdout closed.
             Ok(_) => match serde_json::from_str::<Msg>(&line) {
-                Ok(msg) => dispatch(&msg, &inflight, &name).await,
+                Ok(msg) => dispatch(&msg, &inflight, &pongs, &name).await,
                 Err(e) => {
                     warn!("plugin {name} wrote an invalid protocol line, treating as death: {e}");
                     break;
@@ -497,6 +547,7 @@ async fn run_reader(
 async fn dispatch(
     msg: &Msg,
     inflight: &Arc<Mutex<HashMap<u64, oneshot::Sender<Msg>>>>,
+    pongs: &Arc<AtomicU64>,
     name: &str,
 ) {
     match msg {
@@ -508,7 +559,9 @@ async fn dispatch(
             }
         }
         Msg::Event { name: event, .. } => info!("plugin {name} emitted event `{event}`"),
-        Msg::Pong => {} // liveness accounting is the health ticket's job
+        Msg::Pong => {
+            pongs.fetch_add(1, Ordering::Relaxed);
+        }
         Msg::Hello { .. } | Msg::Call { .. } | Msg::Ping | Msg::Bye => {
             warn!("plugin {name} sent unexpected message {msg:?}");
         }
@@ -596,5 +649,15 @@ mod tests {
         assert!(caps.iter().any(|c| c == "host.defer"));
         assert!(caps.iter().any(|c| c == "host.kv.get"));
         assert!(caps.iter().any(|c| c == "host.get_config"));
+    }
+
+    // ── pong accounting (the health checker's liveness signal) ──────────────
+
+    #[tokio::test]
+    async fn pong_increments_the_liveness_counter() {
+        let inflight = Arc::new(Mutex::new(HashMap::new()));
+        let pongs = Arc::new(AtomicU64::new(0));
+        dispatch(&Msg::Pong, &inflight, &pongs, "hello").await;
+        assert_eq!(pongs.load(Ordering::Relaxed), 1);
     }
 }

@@ -27,7 +27,7 @@
 //! Rendering seam: this module never touches Discord. `open`/`interact`
 //! return the [`ViewSpec`] and the caller renders `spec.data` verbatim
 //! (e.g. via `ctx.send`/`ctx.edit`); hooking component interactions into
-//! [`InteractionEngine::interact`] is the #109 registry seam.
+//! [`InteractionEngine::interact`] is the #113 registry seam.
 
 use std::collections::HashMap;
 use std::sync::Arc;
