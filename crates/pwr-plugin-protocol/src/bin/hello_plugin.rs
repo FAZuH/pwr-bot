@@ -10,8 +10,9 @@
 //! - announces `hello` (`v`, `name`, `caps`) as its first line after spawn;
 //! - answers `call` (`invoke`, `view.interact`) with a correlation-id-matched
 //!   `resp`, keeping a per-process click counter for [`BUTTON_CUSTOM_ID`];
-//! - issues plugin→host calls for the `host.say`/`host.defer`/`host.edit`
-//!   invoke cmds, forwarding the host's resp back to the original invoke;
+//! - issues plugin→host calls for the `host.say`/`host.defer`/`host.edit`/
+//!   `host.kvget`/`host.kvset`/`host.kvdel` invoke cmds, forwarding the host's
+//!   resp back to the original invoke;
 //! - treats `event` (e.g. `view.timeout`) as one-way, never answering it;
 //! - answers `ping` with `pong`;
 //! - tolerates the host's hello ack silently;
@@ -104,6 +105,9 @@ fn main() -> ExitCode {
             "host.defer".into(),
             "host.send_message".into(),
             "host.edit_message".into(),
+            "host.kv.get".into(),
+            "host.kv.set".into(),
+            "host.kv.delete".into(),
         ],
     };
     if write_msg(&mut out, &hello).is_err() {
@@ -130,6 +134,9 @@ fn main() -> ExitCode {
                     Some("host.say") => Some("host.send_message"),
                     Some("host.defer") => Some("host.defer"),
                     Some("host.edit") => Some("host.edit_message"),
+                    Some("host.kvget") => Some("host.kv.get"),
+                    Some("host.kvset") => Some("host.kv.set"),
+                    Some("host.kvdel") => Some("host.kv.delete"),
                     _ => None,
                 };
                 if op == "invoke"

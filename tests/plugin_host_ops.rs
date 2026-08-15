@@ -4,8 +4,10 @@
 //! fixture's resp echoes the mock's data back to the test. Pure stdio — no
 //! database.
 //!
-//! `defer`/`edit_message` have fixture invoke paths too; `acknowledge` is
-//! exercised against the mock in `src/plugin/host.rs` unit tests.
+//! `defer`/`edit_message`/`kv.get`/`kv.set`/`kv.delete` have fixture invoke
+//! paths too; the kv ops are served via the mocked [`KvStore`] seam.
+//! `acknowledge` is exercised against the mock in `src/plugin/host.rs` unit
+//! tests.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -13,8 +15,10 @@ use std::sync::Arc;
 use pwr_bot::plugin::HostConfig;
 use pwr_bot::plugin::HostIo;
 use pwr_bot::plugin::HostServices;
+use pwr_bot::plugin::KvStore;
 use pwr_bot::plugin::RunningPlugin;
 use pwr_bot::plugin::host::MockHostIo;
+use pwr_bot::plugin::host::MockKvStore;
 use pwr_plugin_protocol::Msg;
 use serde_json::json;
 
@@ -46,7 +50,7 @@ fn fixture_path() -> PathBuf {
     ));
 }
 
-fn host_services(io: Arc<dyn HostIo>) -> Arc<HostServices> {
+fn host_services(io: Arc<dyn HostIo>, kv: Option<Arc<dyn KvStore>>) -> Arc<HostServices> {
     Arc::new(HostServices {
         io: Some(io),
         config: Some(HostConfig {
@@ -54,6 +58,7 @@ fn host_services(io: Arc<dyn HostIo>) -> Arc<HostServices> {
             data_path: PathBuf::from("/tmp/pwr-bot-test"),
             poll_interval: std::time::Duration::from_secs(30),
         }),
+        kv,
     })
 }
 
@@ -73,9 +78,10 @@ async fn host_say_serves_send_message_through_the_seam() {
         .times(1)
         .returning(|_, _, _| Ok(Some(json!({ "message_id": 123_456_789 }))));
 
-    let plugin = RunningPlugin::spawn_with(fixture_path(), Some(host_services(Arc::new(mock))))
-        .await
-        .expect("spawn fixture");
+    let plugin =
+        RunningPlugin::spawn_with(fixture_path(), Some(host_services(Arc::new(mock), None)))
+            .await
+            .expect("spawn fixture");
     let resp = plugin
         .call(
             "invoke",
@@ -119,9 +125,10 @@ async fn host_defer_invoke_serves_defer_through_the_seam() {
         .times(1)
         .returning(|_, _| Ok(()));
 
-    let plugin = RunningPlugin::spawn_with(fixture_path(), Some(host_services(Arc::new(mock))))
-        .await
-        .expect("spawn fixture");
+    let plugin =
+        RunningPlugin::spawn_with(fixture_path(), Some(host_services(Arc::new(mock), None)))
+            .await
+            .expect("spawn fixture");
     let resp = plugin
         .call(
             "invoke",
@@ -161,9 +168,10 @@ async fn host_edit_invoke_serves_edit_message_through_the_seam() {
         .times(1)
         .returning(|_, _, _| Ok(Some(json!({ "message_id": 111_222_333 }))));
 
-    let plugin = RunningPlugin::spawn_with(fixture_path(), Some(host_services(Arc::new(mock))))
-        .await
-        .expect("spawn fixture");
+    let plugin =
+        RunningPlugin::spawn_with(fixture_path(), Some(host_services(Arc::new(mock), None)))
+            .await
+            .expect("spawn fixture");
     let resp = plugin
         .call(
             "invoke",
@@ -245,7 +253,7 @@ async fn concurrent_host_calls_correlate_by_id() {
         .returning(|_, _, _| Ok(Some(json!({ "message_id": 2 }))));
 
     let plugin = Arc::new(
-        RunningPlugin::spawn_with(fixture_path(), Some(host_services(Arc::new(mock))))
+        RunningPlugin::spawn_with(fixture_path(), Some(host_services(Arc::new(mock), None)))
             .await
             .expect("spawn fixture"),
     );
@@ -288,9 +296,10 @@ async fn concurrent_host_calls_correlate_by_id() {
 #[tokio::test]
 async fn call_after_stop_fails_fast() {
     let mock = MockHostIo::new();
-    let plugin = RunningPlugin::spawn_with(fixture_path(), Some(host_services(Arc::new(mock))))
-        .await
-        .expect("spawn fixture");
+    let plugin =
+        RunningPlugin::spawn_with(fixture_path(), Some(host_services(Arc::new(mock), None)))
+            .await
+            .expect("spawn fixture");
     plugin.stop().await.expect("stop fixture");
 
     let err = plugin
@@ -303,4 +312,138 @@ async fn call_after_stop_fails_fast() {
         .unwrap_err();
     let msg = err.to_string();
     assert!(msg.contains("not running"), "err: {msg}");
+}
+
+/// The `host.kvget` invoke issues a plugin→host `host.kv.get` call; the host
+/// serves it through the mocked KV seam and the fixture echoes the value back
+/// to the original invoke.
+#[tokio::test]
+async fn host_kvget_invoke_serves_kv_get_through_the_seam() {
+    let mut mock_kv = MockKvStore::new();
+    mock_kv
+        .expect_get()
+        .with(
+            mockall::predicate::eq("settings"),
+            mockall::predicate::eq("theme"),
+        )
+        .times(1)
+        .returning(|_, _| Ok(Some("dark".into())));
+    let mock_io = MockHostIo::new();
+    let plugin = RunningPlugin::spawn_with(
+        fixture_path(),
+        Some(host_services(Arc::new(mock_io), Some(Arc::new(mock_kv)))),
+    )
+    .await
+    .expect("spawn fixture");
+    let resp = plugin
+        .call(
+            "invoke",
+            Some("host.kvget"),
+            Some(json!({ "namespace": "settings", "key": "theme" })),
+        )
+        .await
+        .expect("host.kvget invoke answered");
+    plugin.stop().await.expect("stop fixture");
+
+    match resp {
+        Msg::Resp {
+            id,
+            ok: true,
+            data: Some(data),
+            error: None,
+        } => {
+            assert_eq!(data, json!({ "value": "dark" }));
+            assert_eq!(id, 0);
+        }
+        other => panic!("expected ok resp echoing the kv value, got {other:?}"),
+    }
+}
+
+/// The `host.kvset` invoke issues a plugin→host `host.kv.set` call; the host
+/// serves it through the mocked KV seam and the fixture forwards the resp (no
+/// data) to the original invoke.
+#[tokio::test]
+async fn host_kvset_invoke_serves_kv_set_through_the_seam() {
+    let mut mock_kv = MockKvStore::new();
+    mock_kv
+        .expect_set()
+        .with(
+            mockall::predicate::eq("settings"),
+            mockall::predicate::eq("theme"),
+            mockall::predicate::eq("light"),
+        )
+        .times(1)
+        .returning(|_, _, _| Ok(()));
+    let mock_io = MockHostIo::new();
+    let plugin = RunningPlugin::spawn_with(
+        fixture_path(),
+        Some(host_services(Arc::new(mock_io), Some(Arc::new(mock_kv)))),
+    )
+    .await
+    .expect("spawn fixture");
+    let resp = plugin
+        .call(
+            "invoke",
+            Some("host.kvset"),
+            Some(json!({
+                "namespace": "settings",
+                "key": "theme",
+                "value": "light",
+            })),
+        )
+        .await
+        .expect("host.kvset invoke answered");
+    plugin.stop().await.expect("stop fixture");
+
+    match resp {
+        Msg::Resp {
+            id,
+            ok: true,
+            data: None,
+            error: None,
+        } => assert_eq!(id, 0),
+        other => panic!("expected ok resp with no data, got {other:?}"),
+    }
+}
+
+/// The `host.kvdel` invoke issues a plugin→host `host.kv.delete` call; the
+/// host serves it through the mocked KV seam and the fixture forwards the
+/// resp (no data) to the original invoke.
+#[tokio::test]
+async fn host_kvdel_invoke_serves_kv_delete_through_the_seam() {
+    let mut mock_kv = MockKvStore::new();
+    mock_kv
+        .expect_delete()
+        .with(
+            mockall::predicate::eq("settings"),
+            mockall::predicate::eq("theme"),
+        )
+        .times(1)
+        .returning(|_, _| Ok(()));
+    let mock_io = MockHostIo::new();
+    let plugin = RunningPlugin::spawn_with(
+        fixture_path(),
+        Some(host_services(Arc::new(mock_io), Some(Arc::new(mock_kv)))),
+    )
+    .await
+    .expect("spawn fixture");
+    let resp = plugin
+        .call(
+            "invoke",
+            Some("host.kvdel"),
+            Some(json!({ "namespace": "settings", "key": "theme" })),
+        )
+        .await
+        .expect("host.kvdel invoke answered");
+    plugin.stop().await.expect("stop fixture");
+
+    match resp {
+        Msg::Resp {
+            id,
+            ok: true,
+            data: None,
+            error: None,
+        } => assert_eq!(id, 0),
+        other => panic!("expected ok resp with no data, got {other:?}"),
+    }
 }

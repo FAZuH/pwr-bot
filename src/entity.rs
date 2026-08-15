@@ -23,6 +23,8 @@ use crate::repo::schema::bot_meta;
 use crate::repo::schema::feed_items;
 use crate::repo::schema::feed_subscriptions;
 use crate::repo::schema::feeds;
+use crate::repo::schema::guild_plugins;
+use crate::repo::schema::plugin_kv;
 use crate::repo::schema::server_settings;
 use crate::repo::schema::subscribers;
 use crate::repo::schema::voice_sessions;
@@ -458,4 +460,36 @@ impl From<BotMetaKey> for String {
     fn from(value: BotMetaKey) -> Self {
         String::from(&value)
     }
+}
+
+/// A string value stored under a plugin's key-value namespace.
+///
+/// Namespaces partition keys between plugins (e.g. the settings plugin reads
+/// and writes under the `settings` namespace), so plugins never collide. This
+/// is the persisted-row shape for the KV store, consumed when #113 wires the
+/// production `PgKvStore` and settings reads.
+#[derive(Queryable, Selectable, Insertable, Identifiable)]
+#[diesel(table_name = plugin_kv)]
+#[diesel(primary_key(namespace, key))]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+#[derive(Serialize, Deserialize, Default, Clone, Debug)]
+pub struct PluginKvEntity {
+    pub namespace: String,
+    pub key: String,
+    pub value: String,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// The per-guild enable/disable state of a plugin.
+///
+/// Wired to command registration in #113; this layer only persists the flag.
+#[derive(Queryable, Selectable, Insertable, Identifiable)]
+#[diesel(table_name = guild_plugins)]
+#[diesel(primary_key(guild_id, plugin_name))]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+#[derive(Serialize, Deserialize, Default, Clone, Debug)]
+pub struct GuildPluginEntity {
+    pub guild_id: DbU64,
+    pub plugin_name: String,
+    pub enabled: bool,
 }

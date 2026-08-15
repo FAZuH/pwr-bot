@@ -3,15 +3,15 @@
 //! The plugin announces the ops it needs in its hello `caps`; the host serves
 //! them as plugin→host [`Msg::Call`]s. All Discord I/O (defer, acknowledge,
 //! send/edit message) lives behind the [`HostIo`] trait so tests can drive it
-//! with a mock instead of a live gateway. `host.get_config` is pure data and
-//! never touches the seam.
+//! with a mock instead of a live gateway; plugin key-value storage lives
+//! behind the [`KvStore`] trait with a Postgres-backed implementation.
+//! `host.get_config` is pure data and never touches a seam.
 //!
 //! Ops not in the v1 surface (unknown `host.*` strings, and non-`host.*` ops
 //! like `invoke`, which only ever travel host→plugin) answer
-//! `UnknownOp`; v1 ops that are not implemented yet ([`HostCap::KvGet`],
-//! [`HostCap::KvSet`], [`HostCap::KvDelete`], [`HostCap::OpenView`]) answer
-//! `Unsupported`; and a missing service answers `HostUnavailable` /
-//! `ConfigUnavailable` instead of panicking.
+//! `UnknownOp`; the v1 op that is not implemented yet ([`HostCap::OpenView`])
+//! answers `Unsupported`; and a missing service answers `HostUnavailable` /
+//! `ConfigUnavailable` / `KvUnavailable` instead of panicking.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -130,6 +130,61 @@ pub enum HostError {
     Serenity(#[from] serenity::Error),
 }
 
+/// The seam between plugin `host.kv.*` ops and key-value storage. The real
+/// implementation wraps the Postgres `plugin_kv` table; tests use the mockall
+/// mock generated from this trait, so no plugin test touches a database.
+#[automock]
+#[async_trait]
+pub trait KvStore: Send + Sync {
+    /// Returns the value for a key in a namespace, or `None` when unset.
+    async fn get(&self, namespace: &str, key: &str) -> Result<Option<String>, KvError>;
+
+    /// Upserts the value for a key in a namespace.
+    async fn set(&self, namespace: &str, key: &str, value: &str) -> Result<(), KvError>;
+
+    /// Deletes a key in a namespace. No-op when the key is absent.
+    async fn delete(&self, namespace: &str, key: &str) -> Result<(), KvError>;
+}
+
+/// An error from a [`KvStore`] operation.
+#[derive(Debug, thiserror::Error)]
+pub enum KvError {
+    /// The underlying database rejected the operation.
+    #[error(transparent)]
+    Database(#[from] crate::repo::error::DatabaseError),
+}
+
+/// The real [`KvStore`], backed by the Postgres `plugin_kv` table. Production
+/// wiring of this store into [`HostServices`] happens in #113; tests build it
+/// through the seam directly.
+pub struct PgKvStore {
+    repo: Box<dyn crate::repo::traits::PluginKvRepository + Send + Sync>,
+}
+
+impl PgKvStore {
+    /// Wraps a plugin key-value repository handle.
+    pub fn new(repo: Box<dyn crate::repo::traits::PluginKvRepository + Send + Sync>) -> Self {
+        Self { repo }
+    }
+}
+
+#[async_trait]
+impl KvStore for PgKvStore {
+    async fn get(&self, namespace: &str, key: &str) -> Result<Option<String>, KvError> {
+        Ok(self.repo.get(namespace, key).await?)
+    }
+
+    async fn set(&self, namespace: &str, key: &str, value: &str) -> Result<(), KvError> {
+        self.repo.set(namespace, key, value).await?;
+        Ok(())
+    }
+
+    async fn delete(&self, namespace: &str, key: &str) -> Result<(), KvError> {
+        self.repo.delete(namespace, key).await?;
+        Ok(())
+    }
+}
+
 /// The host configuration subset served to plugins via `host.get_config`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HostConfig {
@@ -151,15 +206,17 @@ impl From<&crate::config::Config> for HostConfig {
     }
 }
 
-/// What the host can serve a plugin: the Discord I/O seam and the config
-/// subset. Both are optional so a plugin can be spawned without either and
-/// still answer `UnknownOp`/`Unavailable` cleanly.
+/// What the host can serve a plugin: the Discord I/O seam, the config subset,
+/// and the key-value store. All are optional so a plugin can be spawned
+/// without any of them and still answer `UnknownOp`/`Unavailable` cleanly.
 #[derive(Clone, Default)]
 pub struct HostServices {
     /// Discord I/O seam, absent when the host is not wired to Discord.
     pub io: Option<Arc<dyn HostIo>>,
     /// Host config subset, absent when the host has no config to serve.
     pub config: Option<HostConfig>,
+    /// Key-value store, absent when the host has no storage wired in.
+    pub kv: Option<Arc<dyn KvStore>>,
 }
 
 /// Serves one plugin→host [`Msg::Call`], answering with the correlation-id
@@ -179,11 +236,20 @@ pub async fn handle_host_call(
         );
     };
     match cap {
-        HostCap::KvGet | HostCap::KvSet | HostCap::KvDelete | HostCap::OpenView => resp_err(
+        HostCap::OpenView => resp_err(
             id,
             "Unsupported",
             format!("host op `{op}` is not implemented (later ticket)"),
         ),
+        HostCap::KvGet | HostCap::KvSet | HostCap::KvDelete => {
+            let Some(kv) = host.and_then(|host| host.kv.clone()) else {
+                return resp_err(id, "KvUnavailable", "kv store is not configured");
+            };
+            match kv_call(cap, args, &*kv).await {
+                Ok(data) => Msg::resp_ok(id, data),
+                Err(wire) => Msg::resp_err(id, wire),
+            }
+        }
         HostCap::GetConfig => {
             let Some(config) = host.and_then(|host| host.config.as_ref()) else {
                 return resp_err(id, "ConfigUnavailable", "host config is not configured");
@@ -246,6 +312,79 @@ async fn io_call(
         }
         _ => unreachable!("io_call only receives I/O-backed ops"),
     }
+}
+
+/// Runs one KV-backed host op against the seam and turns the outcome into a
+/// wire value: `Ok(data)` for a successful `resp_ok`, `Err(wire)` for a
+/// failed `resp_err` (`InvalidArgs` or `KvStoreError`). An absent key is not
+/// an error: `host.kv.get` answers `{"value": null}` so the plugin can apply
+/// its default.
+async fn kv_call(
+    cap: HostCap,
+    args: Option<&Value>,
+    kv: &dyn KvStore,
+) -> Result<Option<Value>, WireError> {
+    match cap {
+        HostCap::KvGet => {
+            let (namespace, key) = parse_kv_namespace_key(args)?;
+            let value = kv.get(&namespace, &key).await.map_err(kv_err)?;
+            Ok(Some(json!({ "value": value })))
+        }
+        HostCap::KvSet => {
+            let (namespace, key, value) = parse_kv_set(args)?;
+            kv.set(&namespace, &key, &value).await.map_err(kv_err)?;
+            Ok(None)
+        }
+        HostCap::KvDelete => {
+            let (namespace, key) = parse_kv_namespace_key(args)?;
+            kv.delete(&namespace, &key).await.map_err(kv_err)?;
+            Ok(None)
+        }
+        _ => unreachable!("kv_call only receives KV-backed ops"),
+    }
+}
+
+/// Parses the `namespace` and `key` fields shared by all `host.kv.*` ops.
+/// Values are `String` only: numbers, booleans, and objects are rejected with
+/// `InvalidArgs`.
+fn kv_fields(args: Option<&Value>) -> Result<(String, String), WireError> {
+    let obj = args.and_then(Value::as_object).ok_or_else(|| {
+        invalid_args("expected args object with `namespace` (string) and `key` (string)")
+    })?;
+    let namespace = obj
+        .get("namespace")
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid_args("missing `namespace` (string)"))?
+        .to_string();
+    let key = obj
+        .get("key")
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid_args("missing `key` (string)"))?
+        .to_string();
+    Ok((namespace, key))
+}
+
+/// Parses `host.kv.get` / `host.kv.delete` args: a namespace and key. Values
+/// are `String` only: numbers, booleans, and objects are rejected with
+/// `InvalidArgs`.
+fn parse_kv_namespace_key(args: Option<&Value>) -> Result<(String, String), WireError> {
+    kv_fields(args)
+}
+
+/// Parses `host.kv.set` args: a namespace, key, and value. Values are
+/// `String` only: numbers, booleans, and objects are rejected with
+/// `InvalidArgs`.
+fn parse_kv_set(args: Option<&Value>) -> Result<(String, String, String), WireError> {
+    let (namespace, key) = kv_fields(args)?;
+    let obj = args.and_then(Value::as_object).ok_or_else(|| {
+        invalid_args("expected args object with `namespace`, `key`, and `value` (strings)")
+    })?;
+    let value = obj
+        .get("value")
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid_args("missing `value` (string)"))?
+        .to_string();
+    Ok((namespace, key, value))
 }
 
 /// Parses `host.defer` / `host.acknowledge` args: an interaction id and token.
@@ -323,6 +462,13 @@ fn host_io_err(err: HostError) -> WireError {
     }
 }
 
+fn kv_err(err: KvError) -> WireError {
+    WireError {
+        kind: "KvStoreError".into(),
+        msg: err.to_string(),
+    }
+}
+
 fn resp_err(id: u64, kind: &str, msg: impl Into<String>) -> Msg {
     Msg::resp_err(
         id,
@@ -343,7 +489,19 @@ mod tests {
     use super::*;
 
     fn services(io: Option<Arc<dyn HostIo>>, config: Option<HostConfig>) -> HostServices {
-        HostServices { io, config }
+        HostServices {
+            io,
+            config,
+            kv: None,
+        }
+    }
+
+    fn kv_services(
+        io: Option<Arc<dyn HostIo>>,
+        config: Option<HostConfig>,
+        kv: Option<Arc<dyn KvStore>>,
+    ) -> HostServices {
+        HostServices { io, config, kv }
     }
 
     fn sample_config() -> HostConfig {
@@ -598,18 +756,190 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn kv_and_view_ops_are_unsupported() {
+    async fn open_view_is_unsupported() {
         let host = services(None, Some(sample_config()));
-        for op in [
+        let resp = handle_host_call(7, "host.open_view", None, Some(&host)).await;
+        let msg = assert_err(resp, 7, "Unsupported");
+        assert!(msg.contains("host.open_view"), "msg: {msg}");
+    }
+
+    // ── kv ────────────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn kv_get_returns_value_through_the_seam() {
+        let mut mock = MockKvStore::new();
+        mock.expect_get()
+            .with(eq("settings"), eq("theme"))
+            .times(1)
+            .returning(|_, _| Ok(Some("dark".into())));
+        let host = kv_services(None, Some(sample_config()), Some(Arc::new(mock)));
+
+        let resp = handle_host_call(
+            7,
             "host.kv.get",
+            Some(&json!({ "namespace": "settings", "key": "theme" })),
+            Some(&host),
+        )
+        .await;
+        assert_eq!(assert_ok(resp, 7), Some(json!({ "value": "dark" })));
+    }
+
+    #[tokio::test]
+    async fn kv_get_absent_key_returns_null_value() {
+        let mut mock = MockKvStore::new();
+        mock.expect_get()
+            .with(eq("settings"), eq("theme"))
+            .times(1)
+            .returning(|_, _| Ok(None));
+        let host = kv_services(None, Some(sample_config()), Some(Arc::new(mock)));
+
+        let resp = handle_host_call(
+            7,
+            "host.kv.get",
+            Some(&json!({ "namespace": "settings", "key": "theme" })),
+            Some(&host),
+        )
+        .await;
+        assert_eq!(assert_ok(resp, 7), Some(json!({ "value": null })));
+    }
+
+    #[tokio::test]
+    async fn kv_set_routes_through_the_seam() {
+        let mut mock = MockKvStore::new();
+        mock.expect_set()
+            .with(eq("settings"), eq("theme"), eq("light"))
+            .times(1)
+            .returning(|_, _, _| Ok(()));
+        let host = kv_services(None, Some(sample_config()), Some(Arc::new(mock)));
+
+        let resp = handle_host_call(
+            7,
             "host.kv.set",
+            Some(&json!({
+                "namespace": "settings",
+                "key": "theme",
+                "value": "light",
+            })),
+            Some(&host),
+        )
+        .await;
+        assert_eq!(assert_ok(resp, 7), None);
+    }
+
+    #[tokio::test]
+    async fn kv_delete_routes_through_the_seam() {
+        let mut mock = MockKvStore::new();
+        mock.expect_delete()
+            .with(eq("settings"), eq("theme"))
+            .times(1)
+            .returning(|_, _| Ok(()));
+        let host = kv_services(None, Some(sample_config()), Some(Arc::new(mock)));
+
+        let resp = handle_host_call(
+            7,
             "host.kv.delete",
-            "host.open_view",
-        ] {
-            let resp = handle_host_call(7, op, None, Some(&host)).await;
-            let msg = assert_err(resp, 7, "Unsupported");
-            assert!(msg.contains(op), "msg for {op}: {msg}");
-        }
+            Some(&json!({ "namespace": "settings", "key": "theme" })),
+            Some(&host),
+        )
+        .await;
+        assert_eq!(assert_ok(resp, 7), None);
+    }
+
+    #[tokio::test]
+    async fn kv_ops_forward_the_namespace_verbatim() {
+        let mut mock = MockKvStore::new();
+        mock.expect_get()
+            .with(eq("settings"), eq("theme"))
+            .times(1)
+            .returning(|_, _| Ok(Some("dark".into())));
+        mock.expect_get()
+            .with(eq("other"), eq("theme"))
+            .times(1)
+            .returning(|_, _| Ok(None));
+        let host = kv_services(None, Some(sample_config()), Some(Arc::new(mock)));
+
+        let resp = handle_host_call(
+            7,
+            "host.kv.get",
+            Some(&json!({ "namespace": "settings", "key": "theme" })),
+            Some(&host),
+        )
+        .await;
+        assert_eq!(assert_ok(resp, 7), Some(json!({ "value": "dark" })));
+
+        let resp = handle_host_call(
+            7,
+            "host.kv.get",
+            Some(&json!({ "namespace": "other", "key": "theme" })),
+            Some(&host),
+        )
+        .await;
+        assert_eq!(assert_ok(resp, 7), Some(json!({ "value": null })));
+    }
+
+    #[tokio::test]
+    async fn kv_get_missing_key_is_invalid_args() {
+        let mock = MockKvStore::new();
+        let host = kv_services(None, Some(sample_config()), Some(Arc::new(mock)));
+
+        let resp = handle_host_call(
+            7,
+            "host.kv.get",
+            Some(&json!({ "namespace": "settings" })),
+            Some(&host),
+        )
+        .await;
+        assert_err(resp, 7, "InvalidArgs");
+    }
+
+    #[tokio::test]
+    async fn kv_set_missing_value_is_invalid_args() {
+        let mock = MockKvStore::new();
+        let host = kv_services(None, Some(sample_config()), Some(Arc::new(mock)));
+
+        let resp = handle_host_call(
+            7,
+            "host.kv.set",
+            Some(&json!({ "namespace": "settings", "key": "theme" })),
+            Some(&host),
+        )
+        .await;
+        assert_err(resp, 7, "InvalidArgs");
+    }
+
+    #[tokio::test]
+    async fn kv_op_without_kv_is_kv_unavailable() {
+        let host = services(None, Some(sample_config()));
+
+        let resp = handle_host_call(
+            7,
+            "host.kv.get",
+            Some(&json!({ "namespace": "settings", "key": "theme" })),
+            Some(&host),
+        )
+        .await;
+        assert_err(resp, 7, "KvUnavailable");
+    }
+
+    #[tokio::test]
+    async fn kv_store_failure_is_kv_store_error() {
+        let mut mock = MockKvStore::new();
+        mock.expect_get().times(1).returning(|_, _| {
+            Err(KvError::Database(
+                crate::repo::error::DatabaseError::PoolError("boom".into()),
+            ))
+        });
+        let host = kv_services(None, Some(sample_config()), Some(Arc::new(mock)));
+
+        let resp = handle_host_call(
+            7,
+            "host.kv.get",
+            Some(&json!({ "namespace": "settings", "key": "theme" })),
+            Some(&host),
+        )
+        .await;
+        let msg = assert_err(resp, 7, "KvStoreError");
+        assert!(msg.contains("boom"), "msg: {msg}");
     }
 
     // ── seam failures are first-class wire errors ─────────────────────────────

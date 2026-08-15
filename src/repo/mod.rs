@@ -37,6 +37,8 @@ pub struct PgRepos {
     pub server_settings: PgServerSettingsRepo,
     pub voice_sessions: PgVoiceSessionsRepo,
     pub bot_meta: PgBotMetaRepo,
+    pub plugin_kv: PgPluginKvRepo,
+    pub guild_plugins: PgGuildPluginRepo,
 
     pool: DbPool,
     db_url: String,
@@ -58,6 +60,8 @@ impl PgRepos {
             server_settings: PgServerSettingsRepo::new(pool.clone()),
             voice_sessions: PgVoiceSessionsRepo::new(pool.clone()),
             bot_meta: PgBotMetaRepo::new(pool.clone()),
+            plugin_kv: PgPluginKvRepo::new(pool.clone()),
+            guild_plugins: PgGuildPluginRepo::new(pool.clone()),
             pool,
             db_url,
         })
@@ -87,6 +91,8 @@ impl PgRepos {
         self.server_settings.drop_table().await?;
         self.voice_sessions.drop_table().await?;
         self.bot_meta.drop_table().await?;
+        self.plugin_kv.drop_table().await?;
+        self.guild_plugins.drop_table().await?;
         Ok(())
     }
 
@@ -98,6 +104,8 @@ impl PgRepos {
         self.server_settings.delete_all().await?;
         self.voice_sessions.delete_all().await?;
         self.bot_meta.delete_all().await?;
+        self.plugin_kv.delete_all().await?;
+        self.guild_plugins.delete_all().await?;
         Ok(())
     }
 }
@@ -129,5 +137,13 @@ impl Repos for PgRepos {
 
     fn bot_meta(&self) -> Box<dyn BotMetaRepository + Send + Sync> {
         Box::new(self.bot_meta.clone())
+    }
+
+    fn plugin_kv(&self) -> Box<dyn PluginKvRepository + Send + Sync> {
+        Box::new(self.plugin_kv.clone())
+    }
+
+    fn guild_plugins(&self) -> Box<dyn GuildPluginRepository + Send + Sync> {
+        Box::new(self.guild_plugins.clone())
     }
 }
