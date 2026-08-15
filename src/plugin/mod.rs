@@ -21,6 +21,7 @@
 //! subprocess via the `Drop` impl, so unloading a plugin is drop-and-forget;
 //! graceful unload is [`RunningPlugin::stop`].
 
+pub mod command;
 pub mod error;
 
 use std::collections::HashMap;
