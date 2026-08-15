@@ -3673,10 +3673,20 @@ dependencies = [
 name = "pwr-plugin-protocol"
 version = "0.1.0"
 dependencies = [
+ "pwr-poise-components",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
+]
+
+[[package]]
+name = "pwr-poise-components"
+version = "0.1.0"
+dependencies = [
+ "pwr-plugin-protocol",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

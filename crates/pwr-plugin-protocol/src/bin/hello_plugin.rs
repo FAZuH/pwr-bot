@@ -32,25 +32,21 @@ use pwr_plugin_protocol::Manifest;
 use pwr_plugin_protocol::Msg;
 use pwr_plugin_protocol::PLUGIN_NAME;
 use pwr_plugin_protocol::WireError;
+use pwr_poise_components as components;
 use serde_json::Value;
 use serde_json::json;
 
-/// The view payload the fixture renders: raw Discord message JSON with one
-/// action-row button carrying the [`BUTTON_CUSTOM_ID`] custom id.
+/// The view payload the fixture renders: built with the `pwr_poise_components`
+/// builders — one action-row button carrying the [`BUTTON_CUSTOM_ID`] custom
+/// id.
 fn view_data(content: &str) -> Value {
-    json!({
-        "content": content,
-        "components": [{
-            "type": 1,
-            "components": [{
-                "type": 2,
-                "custom_id": BUTTON_CUSTOM_ID,
-                "label": "Click me",
-                "style": 1
-            }]
-        }],
-        "flags": 0
-    })
+    components::view_data(
+        content,
+        [components::action_row([components::button(
+            BUTTON_CUSTOM_ID,
+            "Click me",
+        )])],
+    )
 }
 
 /// The fixture's static declaration, matching what its hello announces. The
