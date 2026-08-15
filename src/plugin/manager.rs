@@ -338,15 +338,13 @@ impl PluginManager {
         let entry = {
             let mut plugins = self.plugins.lock().await;
             match plugins.get(name) {
-                Some(entry) if expected.map_or(true, |e| Arc::ptr_eq(&entry.plugin, e)) => {
+                Some(entry) if expected.is_none_or(|e| Arc::ptr_eq(&entry.plugin, e)) => {
                     plugins.remove(name)
                 }
                 _ => None,
             }
         };
-        let Some(entry) = entry else {
-            return None;
-        };
+        let entry = entry?;
         entry.stop.store(true, Ordering::Relaxed);
         if let Some(http) = &self.http {
             for guild_id in guild_ids {

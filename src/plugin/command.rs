@@ -830,9 +830,7 @@ fn parse_enum_list<T: Copy>(value: Option<&Value>, map: fn(u8) -> Option<T>) -> 
     };
     let mut result = Vec::with_capacity(values.len());
     for value in values {
-        let Some(number) = value.as_u64() else {
-            return None;
-        };
+        let number = value.as_u64()?;
         result.push(map(number as u8)?);
     }
     Some(result)
