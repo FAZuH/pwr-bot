@@ -13,6 +13,7 @@ pub mod test_framework;
 pub mod utils;
 pub mod view;
 
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -26,6 +27,7 @@ use futures::lock::Mutex;
 use log::debug;
 use log::error;
 use log::info;
+use log::warn;
 use poise::Framework;
 use poise::FrameworkOptions;
 use poise::serenity_prelude::*;
@@ -40,6 +42,16 @@ use crate::entity::BotMetaKey;
 use crate::event::VoiceStateEvent;
 use crate::event::event_bus::EventBus;
 use crate::feed::Platforms;
+use crate::plugin::CatalogEntry;
+use crate::plugin::HostConfig;
+use crate::plugin::HostServices;
+use crate::plugin::PgKvStore;
+use crate::plugin::PluginCatalog;
+use crate::plugin::PluginManager;
+use crate::plugin::RespawnPolicy;
+use crate::plugin::SerenityHostIo;
+use crate::plugin::command::commands_from_manifest;
+use crate::repo::traits::Repos;
 use crate::service::Services;
 use crate::subscriber::voice_state::VoiceStateSubscriber;
 
@@ -48,6 +60,9 @@ pub struct Data {
     pub config: Arc<Config>,
     pub platforms: Arc<Platforms>,
     pub service: Arc<Services>,
+    pub repos: Arc<dyn Repos + Send + Sync>,
+    pub plugin_manager: Arc<PluginManager>,
+    pub plugin_catalog: Arc<HashMap<String, CatalogEntry>>,
     pub start_time: Instant,
 }
 
@@ -66,21 +81,40 @@ impl Bot {
         event_bus: Arc<EventBus>,
         platforms: Arc<Platforms>,
         service: Arc<Services>,
+        repos: Arc<dyn Repos + Send + Sync>,
         voice_subscriber: Arc<VoiceStateSubscriber>,
     ) -> Result<Self> {
         info!("Initializing bot...");
 
         let (token, intents) = Self::create_client_config(&config)?;
-        let framework = Self::create_framework(&config)?;
+        // http must exist before the framework: the plugin manager and host
+        // services (guild-command cleanup, Discord I/O seam) wrap it.
         let http = Http::new(token.clone());
         if let Some(application_id) = config.discord_application_id {
             http.set_application_id(ApplicationId::new(application_id));
         }
         let http = Arc::new(http);
+
+        let catalog = Self::load_plugin_catalog(&config);
+        let host_services = Arc::new(HostServices {
+            io: Some(Arc::new(SerenityHostIo::new(http.clone()))),
+            config: Some(HostConfig::from(&*config)),
+            kv: Some(Arc::new(PgKvStore::new(repos.plugin_kv()))),
+        });
+        let plugin_manager = Arc::new(
+            PluginManager::new(Some(http.clone()), RespawnPolicy::default())
+                .with_host_services(host_services),
+        );
+
+        let framework = Self::create_framework(&config, &catalog)?;
+
         let data = Arc::new(Data {
             config: config.clone(),
             platforms,
             service,
+            repos,
+            plugin_manager,
+            plugin_catalog: Arc::new(catalog),
             start_time: Instant::now(),
         });
 
@@ -138,9 +172,21 @@ impl Bot {
     }
 
     /// Creates the Poise framework with commands and configuration.
-    fn create_framework(config: &Config) -> Result<Box<Framework<Data, Error>>> {
+    ///
+    /// The command list is the merge seam: the Cog commands first, then one
+    /// routing command per plugin manifest command, so plugin commands are
+    /// registered on the framework before `Framework::builder().build()`.
+    fn create_framework(
+        config: &Config,
+        catalog: &HashMap<String, CatalogEntry>,
+    ) -> Result<Box<Framework<Data, Error>>> {
+        let mut commands = Cogs.commands();
+        for entry in catalog.values() {
+            commands.extend(commands_from_manifest(&entry.manifest));
+        }
+
         let options = FrameworkOptions::<Data, Error> {
-            commands: Cogs.commands(),
+            commands,
             on_error: |error| Box::pin(Self::on_error(error)),
             prefix_options: poise::PrefixFrameworkOptions {
                 prefix: Some("!".into()),
@@ -157,6 +203,22 @@ impl Bot {
         Ok(Box::new(
             poise::Framework::builder().options(options).build(),
         ))
+    }
+
+    /// Loads the plugin catalog from `plugins.toml`. A missing or invalid
+    /// catalog logs a warning and yields an empty map: the bot stays up with
+    /// plugin commands absent rather than failing startup.
+    fn load_plugin_catalog(config: &Config) -> HashMap<String, CatalogEntry> {
+        match PluginCatalog::load(&config.plugins_toml) {
+            Ok(catalog) => catalog,
+            Err(e) => {
+                warn!(
+                    "failed to load plugin catalog `{}`: {e}",
+                    config.plugins_toml.display()
+                );
+                HashMap::new()
+            }
+        }
     }
 
     /// Creates Discord client configuration (token and intents).

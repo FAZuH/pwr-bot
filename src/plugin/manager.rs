@@ -47,6 +47,7 @@ use log::warn;
 use poise::serenity_prelude as serenity;
 use tokio::sync::Mutex;
 
+use crate::plugin::HostServices;
 use crate::plugin::PluginError;
 use crate::plugin::RunningPlugin;
 use crate::plugin::command::register_in_guild;
@@ -207,9 +208,11 @@ pub struct PluginManager {
     /// Crash-loop tracking per plugin name.
     crash_loops: Mutex<HashMap<String, CrashLoopGuard>>,
     /// Discord HTTP client for guild-command cleanup on unload/swap; `None`
-    /// skips it (e.g. in tests). TODO(#113): nothing wires this yet, so
-    /// callers pass empty guild slices until the registry merge lands.
+    /// skips it (e.g. in tests).
     http: Option<Arc<serenity::Http>>,
+    /// Host services (Discord I/O seam, config subset, KV store) handed to
+    /// every spawned plugin; `None` spawns without services (e.g. in tests).
+    services: Option<Arc<HostServices>>,
     /// Respawn backoff/crash-loop policy.
     respawn_policy: RespawnPolicy,
 }
@@ -222,8 +225,16 @@ impl PluginManager {
             plugins: Mutex::new(HashMap::new()),
             crash_loops: Mutex::new(HashMap::new()),
             http,
+            services: None,
             respawn_policy,
         }
+    }
+
+    /// Wires host services into the manager so every spawned plugin can be
+    /// served `host.*` calls. Builder-style: consumes `self`.
+    pub fn with_host_services(mut self, services: Arc<HostServices>) -> Self {
+        self.services = Some(services);
+        self
     }
 
     /// Spawns the binary at `path` under the name `name` and starts its
@@ -244,7 +255,7 @@ impl PluginManager {
                 });
             }
         }
-        let plugin = Arc::new(RunningPlugin::spawn(&path).await?);
+        let plugin = Arc::new(RunningPlugin::spawn_with(&path, self.services.clone()).await?);
         let stop = Arc::new(AtomicBool::new(false));
         let entry = Entry {
             plugin: plugin.clone(),

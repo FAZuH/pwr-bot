@@ -8,6 +8,7 @@ pub mod about;
 pub mod dump_db;
 pub mod feed;
 pub mod gui_test;
+pub mod plugins;
 pub mod prelude;
 pub mod register;
 pub mod register_owner;
@@ -64,6 +65,7 @@ impl Cog for Cogs {
             dump_db::dump_db(),
             feed::feed(),
             gui_test::gui_test(),
+            plugins::plugins(),
             register::register(),
             register_owner::register_owner(),
             settings::settings(),

@@ -45,6 +45,7 @@ async fn main() -> Result<()> {
         event_bus.clone(),
         platforms,
         services.clone(),
+        repos.clone(),
         voice_subscriber.clone(),
         init_start,
     )
@@ -134,6 +135,7 @@ async fn setup_bot(
     event_bus: Arc<EventBus>,
     platforms: Arc<Platforms>,
     services: Arc<Services>,
+    repos: Arc<dyn Repos + Send + Sync>,
     voice_subscriber: Arc<VoiceStateSubscriber>,
     init_start: Instant,
 ) -> Result<Arc<Bot>> {
@@ -143,6 +145,7 @@ async fn setup_bot(
         event_bus,
         platforms,
         services,
+        repos,
         voice_subscriber,
     )
     .await?;

@@ -63,6 +63,26 @@ fn pinned_entry(name: &str, url: &str, bytes: &[u8]) -> CatalogEntry {
         name: name.to_string(),
         url: url.to_string(),
         sha256: install::sha256_hex(&pin_path).expect("pin sha256"),
+        manifest: catalog_manifest(name),
+    }
+}
+
+/// A catalog manifest for `name`, mirroring the fixture's hello.
+fn catalog_manifest(name: &str) -> pwr_plugin_protocol::Manifest {
+    pwr_plugin_protocol::Manifest {
+        name: name.to_string(),
+        description: "Test plugin".into(),
+        version: "0.1.0".into(),
+        commands: vec![pwr_plugin_protocol::CommandDef {
+            create_command: serde_json::json!({
+                "name": name,
+                "description": "Say hello from a plugin",
+            }),
+        }],
+        event_handlers: vec![],
+        tasks: vec![],
+        settings_panels: vec![],
+        api_version: pwr_plugin_protocol::API_VERSION,
     }
 }
 

@@ -18,6 +18,7 @@ use std::time::Duration;
 
 use futures::StreamExt;
 use log::warn;
+use pwr_plugin_protocol::Manifest;
 use serde::Deserialize;
 use sha2::Digest;
 use sha2::Sha256;
@@ -36,9 +37,11 @@ const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(30);
 /// a plugin binary should never approach 64 MiB.
 const MAX_DOWNLOAD_BYTES: u64 = 64 * 1024 * 1024;
 
-/// One pinned plugin in the catalog: name, https download url, and the
-/// sha256 the binary must match. The plugin's manifest is not part of the
-/// pin — it is exchanged during the hello handshake at spawn.
+/// One pinned plugin in the catalog: name, https download url, the sha256
+/// the binary must match, and the plugin's manifest. The manifest is
+/// embedded in `plugins.toml` as a JSON string (its command blobs are
+/// Discord `CreateCommand` JSON), so the host can register a plugin's slash
+/// commands and validate it before install.
 #[derive(Debug, Clone, Deserialize)]
 pub struct CatalogEntry {
     /// Plugin name; also the installed binary's file name.
@@ -47,6 +50,20 @@ pub struct CatalogEntry {
     pub url: String,
     /// Expected sha256 of the binary, 64 lowercase hex chars.
     pub sha256: String,
+    /// The plugin's manifest, as declared in the catalog.
+    #[serde(deserialize_with = "deserialize_manifest")]
+    pub manifest: Manifest,
+}
+
+/// Deserializes a catalog `manifest` field: the manifest is embedded in
+/// `plugins.toml` as a JSON string, since a `CreateCommand` blob is Discord
+/// JSON and would not survive a TOML round-trip.
+fn deserialize_manifest<'de, D>(deserializer: D) -> Result<Manifest, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let text = String::deserialize(deserializer)?;
+    serde_json::from_str(&text).map_err(serde::de::Error::custom)
 }
 
 /// The `plugins.toml` catalog: a top-level `[[plugins]]` array of tables.
@@ -61,8 +78,8 @@ pub struct PluginCatalog;
 
 impl PluginCatalog {
     /// Parses the catalog at `path` and returns its entries keyed by name.
-    /// Every entry is validated (non-empty name, https url, 64-hex sha256)
-    /// and duplicate names are rejected.
+    /// Every entry is validated (non-empty name, https url, 64-hex sha256,
+    /// valid manifest) and duplicate names are rejected.
     pub fn load(path: &Path) -> Result<HashMap<String, CatalogEntry>, InstallError> {
         let text = fs::read_to_string(path).map_err(|source| InstallError::Catalog {
             path: path.to_path_buf(),
@@ -330,7 +347,7 @@ fn check_elf(entry: &CatalogEntry, path: &Path) -> Result<(), InstallError> {
 }
 
 /// Validates one catalog entry: non-empty name (and not `.`/`..`), https
-/// url, 64-hex sha256.
+/// url, 64-hex sha256, and a manifest that validates and names the entry.
 fn validate_entry(entry: &CatalogEntry, path: &Path) -> Result<(), InstallError> {
     if entry.name.trim().is_empty()
         || entry.name.contains(['/', '\\'])
@@ -362,7 +379,22 @@ fn validate_entry(entry: &CatalogEntry, path: &Path) -> Result<(), InstallError>
             detail: format!("plugin `{}` sha256 must be 64 hex chars", entry.name),
         });
     }
-    Ok(())
+    if entry.manifest.name != entry.name {
+        return Err(InstallError::Catalog {
+            path: path.to_path_buf(),
+            detail: format!(
+                "plugin `{}` manifest names itself `{}`",
+                entry.name, entry.manifest.name
+            ),
+        });
+    }
+    entry
+        .manifest
+        .validate()
+        .map_err(|detail| InstallError::Catalog {
+            path: path.to_path_buf(),
+            detail: format!("plugin `{}` has an invalid manifest: {detail}", entry.name),
+        })
 }
 
 #[cfg(test)]
@@ -387,7 +419,32 @@ mod tests {
             name: "hello".into(),
             url: "https://example.com/hello_plugin".into(),
             sha256: "ab".repeat(32),
+            manifest: valid_manifest(),
         }
+    }
+
+    /// A manifest that validates against the host.
+    fn valid_manifest() -> Manifest {
+        Manifest {
+            name: "hello".into(),
+            description: "Canonical test plugin".into(),
+            version: "0.1.0".into(),
+            commands: vec![pwr_plugin_protocol::CommandDef {
+                create_command: serde_json::json!({
+                    "name": "hello",
+                    "description": "Say hello from a plugin",
+                }),
+            }],
+            event_handlers: vec!["view.timeout".into()],
+            tasks: vec![],
+            settings_panels: vec![],
+            api_version: pwr_plugin_protocol::API_VERSION,
+        }
+    }
+
+    /// The JSON-string form of [`valid_manifest`], as embedded in TOML.
+    fn valid_manifest_json() -> String {
+        serde_json::to_string(&valid_manifest()).unwrap()
     }
 
     #[test]
@@ -399,9 +456,10 @@ mod tests {
             format!(
                 concat!(
                     "[[plugins]]\nname = \"hello\"\nurl = \"https://example.com/hello\"\n",
-                    "sha256 = \"{}\"\n",
+                    "sha256 = \"{}\"\nmanifest = '{}'\n",
                 ),
-                "ab".repeat(32)
+                "ab".repeat(32),
+                valid_manifest_json()
             ),
         )
         .unwrap();
@@ -419,9 +477,10 @@ mod tests {
             format!(
                 concat!(
                     "[[plugins]]\nname = \"hello\"\nurl = \"https://example.com/hello\"\n",
-                    "sha256 = \"  {}  \"\n",
+                    "sha256 = \"  {}  \"\nmanifest = '{}'\n",
                 ),
-                "ab".repeat(32)
+                "ab".repeat(32),
+                valid_manifest_json()
             ),
         )
         .unwrap();
@@ -435,8 +494,14 @@ mod tests {
         let path = dir.path().join("plugins.toml");
         fs::write(
             &path,
-            "[[plugins]]\nname = \"\"\nurl = \"https://example.com/hello\"\nsha256 = \"{}\"\n"
-                .replace("{}", &"ab".repeat(32)),
+            format!(
+                concat!(
+                    "[[plugins]]\nname = \"\"\nurl = \"https://example.com/hello\"\n",
+                    "sha256 = \"{}\"\nmanifest = '{}'\n",
+                ),
+                "ab".repeat(32),
+                valid_manifest_json()
+            ),
         )
         .unwrap();
         let err = PluginCatalog::load(&path).unwrap_err();
@@ -452,9 +517,10 @@ mod tests {
             format!(
                 concat!(
                     "[[plugins]]\nname = \"hello\"\nurl = \"http://example.com/hello\"\n",
-                    "sha256 = \"{}\"\n",
+                    "sha256 = \"{}\"\nmanifest = '{}'\n",
                 ),
-                "ab".repeat(32)
+                "ab".repeat(32),
+                valid_manifest_json()
             ),
         )
         .unwrap();
@@ -468,9 +534,12 @@ mod tests {
         let path = dir.path().join("plugins.toml");
         fs::write(
             &path,
-            concat!(
-                "[[plugins]]\nname = \"hello\"\nurl = \"https://example.com/hello\"\n",
-                "sha256 = \"xyz\"\n",
+            format!(
+                concat!(
+                    "[[plugins]]\nname = \"hello\"\nurl = \"https://example.com/hello\"\n",
+                    "sha256 = \"xyz\"\nmanifest = '{}'\n",
+                ),
+                valid_manifest_json()
             ),
         )
         .unwrap();
@@ -487,11 +556,13 @@ mod tests {
             format!(
                 concat!(
                     "[[plugins]]\nname = \"hello\"\nurl = \"https://example.com/a\"\n",
-                    "sha256 = \"{}\"\n[[plugins]]\nname = \"hello\"\nurl = ",
-                    "\"https://example.com/b\"\nsha256 = \"{}\"\n",
+                    "sha256 = \"{}\"\nmanifest = '{}'\n[[plugins]]\nname = \"hello\"\n",
+                    "url = \"https://example.com/b\"\nsha256 = \"{}\"\nmanifest = '{}'\n",
                 ),
                 "ab".repeat(32),
-                "cd".repeat(32)
+                valid_manifest_json(),
+                "cd".repeat(32),
+                valid_manifest_json()
             ),
         )
         .unwrap();
@@ -609,5 +680,49 @@ mod tests {
             let err = validate_entry(&entry, Path::new("plugins.toml")).unwrap_err();
             assert!(matches!(err, InstallError::Catalog { .. }));
         }
+    }
+
+    #[test]
+    fn catalog_rejects_a_manifest_with_an_unsupported_api_version() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("plugins.toml");
+        let mut manifest = valid_manifest();
+        manifest.api_version = pwr_plugin_protocol::API_VERSION + 1;
+        fs::write(
+            &path,
+            format!(
+                concat!(
+                    "[[plugins]]\nname = \"hello\"\nurl = \"https://example.com/hello\"\n",
+                    "sha256 = \"{}\"\nmanifest = '{}'\n",
+                ),
+                "ab".repeat(32),
+                serde_json::to_string(&manifest).unwrap()
+            ),
+        )
+        .unwrap();
+        let err = PluginCatalog::load(&path).unwrap_err();
+        assert!(matches!(err, InstallError::Catalog { .. }));
+    }
+
+    #[test]
+    fn catalog_rejects_a_manifest_naming_a_different_plugin() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("plugins.toml");
+        let mut manifest = valid_manifest();
+        manifest.name = "other".into();
+        fs::write(
+            &path,
+            format!(
+                concat!(
+                    "[[plugins]]\nname = \"hello\"\nurl = \"https://example.com/hello\"\n",
+                    "sha256 = \"{}\"\nmanifest = '{}'\n",
+                ),
+                "ab".repeat(32),
+                serde_json::to_string(&manifest).unwrap()
+            ),
+        )
+        .unwrap();
+        let err = PluginCatalog::load(&path).unwrap_err();
+        assert!(matches!(err, InstallError::Catalog { .. }));
     }
 }

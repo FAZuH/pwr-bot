@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use log::info;
+use log::warn;
 
 use crate::error::AppError;
 
@@ -19,6 +20,8 @@ pub struct Config {
     pub admin_id: String,
     pub data_path: PathBuf,
     pub logs_path: PathBuf,
+    pub plugins_toml: PathBuf,
+    pub plugins_dir: PathBuf,
     pub features: Features,
     pub version: String,
 }
@@ -66,6 +69,18 @@ impl Config {
 
         self.data_path = self.get_dirpath_mustexist("DATA_PATH", "./data")?;
         self.logs_path = self.get_dirpath_mustexist("LOGS_PATH", "./logs")?;
+        self.plugins_toml = std::env::var("PLUGINS_TOML")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| self.data_path.join("plugins.toml"));
+        self.plugins_dir = std::env::var("PLUGINS_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| self.data_path.join("plugins"));
+        std::fs::create_dir_all(&self.plugins_dir).unwrap_or_else(|e| {
+            warn!(
+                "failed to create plugins dir `{}`: {e}",
+                self.plugins_dir.display()
+            );
+        });
 
         self.features = Features {
             voice_tracking: parse_bool_env("ENABLE_VOICE_TRACKING", true),
