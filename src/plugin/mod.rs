@@ -25,6 +25,7 @@
 
 pub mod command;
 pub mod error;
+pub mod host;
 pub mod install;
 pub mod interaction;
 pub mod manager;
@@ -40,6 +41,11 @@ use std::time::Duration;
 
 pub use error::InstallError;
 pub use error::PluginError;
+pub use host::HostConfig;
+pub use host::HostError;
+pub use host::HostIo;
+pub use host::HostServices;
+pub use host::SerenityHostIo;
 pub use install::CatalogEntry;
 pub use install::PluginCatalog;
 pub use interaction::InteractionEngine;
@@ -105,8 +111,19 @@ impl RunningPlugin {
     /// Spawns the plugin binary at `path`, runs the hello handshake
     /// (validate version + caps, then ack with the host's hello), and returns
     /// a handle ready for calls. A rejected handshake kills the child before
-    /// any work happens.
+    /// any work happens. Host services are absent, so `host.*` calls answer
+    /// `HostUnavailable` / `ConfigUnavailable`.
     pub async fn spawn(path: impl AsRef<Path>) -> Result<RunningPlugin, PluginError> {
+        Self::spawn_with(path, None).await
+    }
+
+    /// Spawns the plugin binary like [`RunningPlugin::spawn`], but wires the
+    /// given host services (Discord I/O seam + config subset) into the reader,
+    /// so plugin→host `host.*` calls can be served.
+    pub async fn spawn_with(
+        path: impl AsRef<Path>,
+        host: Option<Arc<HostServices>>,
+    ) -> Result<RunningPlugin, PluginError> {
         let path = path.as_ref();
         let label = path
             .file_stem()
@@ -193,6 +210,8 @@ impl RunningPlugin {
             pongs.clone(),
             name.clone(),
             died_tx,
+            stdin.clone(),
+            host,
         ));
         tokio::spawn(run_reaper(child.clone(), exit_tx, died_rx, name.clone()));
 
@@ -321,12 +340,12 @@ impl RunningPlugin {
     pub async fn stop(&self) -> Result<ExitStatus, PluginError> {
         {
             let mut stdin = self.stdin.lock().await;
-            if let Some(stdin) = stdin.as_mut() {
-                if let Err(e) = write_line(stdin, &Msg::Bye).await {
-                    // The plugin may already be gone; the wait below reports
-                    // the real outcome.
-                    warn!("failed to send bye to plugin {}: {e}", self.name);
-                }
+            if let Some(stdin) = stdin.as_mut()
+                && let Err(e) = write_line(stdin, &Msg::Bye).await
+            {
+                // The plugin may already be gone; the wait below reports
+                // the real outcome.
+                warn!("failed to send bye to plugin {}: {e}", self.name);
             }
         }
         // EOF: the plugin exits on stdin EOF even without bye.
@@ -512,6 +531,8 @@ async fn run_reader(
     pongs: Arc<AtomicU64>,
     name: String,
     died: oneshot::Sender<()>,
+    stdin: Arc<Mutex<Option<ChildStdin>>>,
+    host: Option<Arc<HostServices>>,
 ) {
     let mut line = String::new();
     loop {
@@ -519,7 +540,7 @@ async fn run_reader(
         match reader.read_line(&mut line).await {
             Ok(0) => break, // EOF: the plugin's stdout closed.
             Ok(_) => match serde_json::from_str::<Msg>(&line) {
-                Ok(msg) => dispatch(&msg, &inflight, &pongs, &name).await,
+                Ok(msg) => dispatch(&msg, &inflight, &pongs, &name, &stdin, host.as_deref()).await,
                 Err(e) => {
                     warn!("plugin {name} wrote an invalid protocol line, treating as death: {e}");
                     break;
@@ -546,13 +567,15 @@ async fn run_reader(
 }
 
 /// Routes one plugin message. `resp`s are matched to their waiting call by
-/// id; everything else is logged (events and liveness policy are later
-/// tickets).
+/// id; plugin→host `host.*` calls are served through the host services and
+/// answered on the plugin's stdin; everything else is logged.
 async fn dispatch(
     msg: &Msg,
     inflight: &Arc<Mutex<HashMap<u64, oneshot::Sender<Msg>>>>,
     pongs: &Arc<AtomicU64>,
     name: &str,
+    stdin: &Arc<Mutex<Option<ChildStdin>>>,
+    host: Option<&HostServices>,
 ) {
     match msg {
         Msg::Resp { id, .. } => {
@@ -562,11 +585,24 @@ async fn dispatch(
                 debug!("plugin {name} answered id {id} which has no waiting call");
             }
         }
+        Msg::Call { id, op, args, .. } => {
+            let resp = host::handle_host_call(*id, op, args.as_ref(), host).await;
+            let mut guard = stdin.lock().await;
+            let Some(mut pipe) = guard.take() else {
+                warn!("plugin {name} call `{op}` arrived after stdin closed");
+                return;
+            };
+            drop(guard);
+            if let Err(e) = write_line(&mut pipe, &resp).await {
+                warn!("plugin {name} call `{op}` failed to answer: {e}");
+            }
+            *stdin.lock().await = Some(pipe);
+        }
         Msg::Event { name: event, .. } => info!("plugin {name} emitted event `{event}`"),
         Msg::Pong => {
             pongs.fetch_add(1, Ordering::Relaxed);
         }
-        Msg::Hello { .. } | Msg::Call { .. } | Msg::Ping | Msg::Bye => {
+        Msg::Hello { .. } | Msg::Ping | Msg::Bye => {
             warn!("plugin {name} sent unexpected message {msg:?}");
         }
     }
@@ -661,7 +697,8 @@ mod tests {
     async fn pong_increments_the_liveness_counter() {
         let inflight = Arc::new(Mutex::new(HashMap::new()));
         let pongs = Arc::new(AtomicU64::new(0));
-        dispatch(&Msg::Pong, &inflight, &pongs, "hello").await;
+        let stdin = Arc::new(Mutex::new(None::<ChildStdin>));
+        dispatch(&Msg::Pong, &inflight, &pongs, "hello", &stdin, None).await;
         assert_eq!(pongs.load(Ordering::Relaxed), 1);
     }
 }

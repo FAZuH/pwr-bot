@@ -10,6 +10,8 @@
 //! - announces `hello` (`v`, `name`, `caps`) as its first line after spawn;
 //! - answers `call` (`invoke`, `view.interact`) with a correlation-id-matched
 //!   `resp`, keeping a per-process click counter for [`BUTTON_CUSTOM_ID`];
+//! - issues plugin→host calls for the `host.say`/`host.defer`/`host.edit`
+//!   invoke cmds, forwarding the host's resp back to the original invoke;
 //! - treats `event` (e.g. `view.timeout`) as one-way, never answering it;
 //! - answers `ping` with `pong`;
 //! - tolerates the host's hello ack silently;
@@ -88,12 +90,21 @@ fn main() -> ExitCode {
     let stdout = std::io::stdout();
     let mut out = stdout.lock();
     let mut count: u64 = 0;
+    let mut next_call_id: u64 = 0;
+    // plugin->host calls in flight: our call id -> the invoke id to answer
+    // with the host's resp.
+    let mut pending: std::collections::HashMap<u64, u64> = std::collections::HashMap::new();
 
     // Announce ourselves: the plugin, not the host, sends hello first.
     let hello = Msg::Hello {
         v: API_VERSION,
         name: PLUGIN_NAME.into(),
-        caps: vec!["command:hello".into()],
+        caps: vec![
+            "command:hello".into(),
+            "host.defer".into(),
+            "host.send_message".into(),
+            "host.edit_message".into(),
+        ],
     };
     if write_msg(&mut out, &hello).is_err() {
         return ExitCode::FAILURE;
@@ -111,6 +122,32 @@ fn main() -> ExitCode {
         match msg {
             Msg::Bye => break,
             Msg::Call { id, op, cmd, args } => {
+                // Plugin->host calls: a `host.*` invoke cmd issues the
+                // corresponding host op with the invoke's args; the resp
+                // arrives later as a Msg::Resp and is forwarded to the
+                // original invoke.
+                let host_op = match cmd.as_deref() {
+                    Some("host.say") => Some("host.send_message"),
+                    Some("host.defer") => Some("host.defer"),
+                    Some("host.edit") => Some("host.edit_message"),
+                    _ => None,
+                };
+                if op == "invoke"
+                    && let Some(host_op) = host_op
+                {
+                    next_call_id += 1;
+                    pending.insert(next_call_id, id);
+                    let host_call = Msg::Call {
+                        id: next_call_id,
+                        op: host_op.into(),
+                        cmd: None,
+                        args: args.clone(),
+                    };
+                    if write_msg(&mut out, &host_call).is_err() {
+                        return ExitCode::FAILURE;
+                    }
+                    continue;
+                }
                 let is_click = args
                     .as_ref()
                     .and_then(|a| a.get("custom_id"))
@@ -163,7 +200,33 @@ fn main() -> ExitCode {
             // Logging it would be noise, and the stderr test asserts on a
             // dedicated fixture line instead.
             Msg::Hello { .. } => {}
-            Msg::Resp { .. } => eprintln!("unexpected message: {line}"),
+            Msg::Resp {
+                id,
+                ok,
+                data,
+                error,
+            } => {
+                // The host's answer to one of our plugin->host calls: forward
+                // it to the invoke that started the round trip.
+                if let Some(invoke_id) = pending.remove(&id) {
+                    let resp = if ok {
+                        Msg::resp_ok(invoke_id, data)
+                    } else {
+                        Msg::resp_err(
+                            invoke_id,
+                            error.unwrap_or_else(|| WireError {
+                                kind: "HostError".into(),
+                                msg: "host call failed".into(),
+                            }),
+                        )
+                    };
+                    if write_msg(&mut out, &resp).is_err() {
+                        return ExitCode::FAILURE;
+                    }
+                } else {
+                    eprintln!("unexpected message: {line}");
+                }
+            }
         }
     }
     ExitCode::SUCCESS
