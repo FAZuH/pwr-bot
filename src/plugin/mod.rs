@@ -10,19 +10,23 @@
 //! (version plus `host.*` caps, rejecting before any work) and answers with
 //! its own `hello` as the ack. Calls then flow host→plugin, correlated by
 //! monotonic ids; each `resp` is matched to its waiting call through a
-//! oneshot channel. When the plugin's stdout closes or the wire corrupts,
+//! oneshot channel. Events flow host→plugin as one-way pushes; the
+//! interaction engine pushes `view.timeout` when a view session is
+//! abandoned. When the plugin's stdout closes or the wire corrupts,
 //! every in-flight call fails with a `PluginDied` wire error and the reaper
 //! task reaps the child via `wait()`.
 //!
 //! Lifecycle beyond spawn/call/stop (health, respawn, unload policy,
-//! external install, KV, per-guild sets, interaction engine) is later work;
-//! this module is shaped so a manager can later hold a map of
-//! [`RunningPlugin`] handles. Dropping a [`RunningPlugin`] kills its
+//! external install, KV, per-guild sets) is later work; the interaction
+//! engine that routes Discord interactions to plugin view sessions lives in
+//! [`interaction`]. This module is shaped so a manager can later hold a map
+//! of [`RunningPlugin`] handles. Dropping a [`RunningPlugin`] kills its
 //! subprocess via the `Drop` impl, so unloading a plugin is drop-and-forget;
 //! graceful unload is [`RunningPlugin::stop`].
 
 pub mod command;
 pub mod error;
+pub mod interaction;
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -32,6 +36,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 pub use error::PluginError;
+pub use interaction::InteractionEngine;
+pub use interaction::InteractionError;
 use log::debug;
 use log::info;
 use log::warn;
@@ -235,6 +241,29 @@ impl RunningPlugin {
                     timeout: CALL_TIMEOUT,
                 })
             }
+        }
+    }
+
+    /// Pushes a one-way event to the plugin (e.g. `view.timeout` on session
+    /// abandonment), without awaiting a reply. Fails with
+    /// [`PluginError::NotRunning`] if the plugin is stopped, or
+    /// [`PluginError::Io`] if the write fails.
+    pub async fn send_event(&self, name: &str, data: Option<Value>) -> Result<(), PluginError> {
+        let msg = Msg::Event {
+            name: name.to_string(),
+            data,
+        };
+        let mut stdin = self.stdin.lock().await;
+        match stdin.as_mut() {
+            Some(stdin) => write_line(stdin, &msg)
+                .await
+                .map_err(|source| PluginError::Io {
+                    name: self.name.clone(),
+                    source,
+                }),
+            None => Err(PluginError::NotRunning {
+                name: self.name.clone(),
+            }),
         }
     }
 

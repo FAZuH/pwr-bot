@@ -32,12 +32,15 @@
 //!
 //! Deferred seams:
 //! - Every built command carries [`plugin_slash_dispatch`] as its action,
-//!   which always errors — the interaction engine (#108) replaces it. No
-//!   silent success: a plugin command that cannot dispatch fails loudly.
+//!   which always errors. The interaction engine (#108) provides the routing
+//!   ([`crate::plugin::InteractionEngine`]); wiring dispatch through it is
+//!   the registry work of #109 — a `slash_action` is a non-capturing
+//!   function pointer and cannot carry an engine handle. No silent success:
+//!   a plugin command that cannot dispatch fails loudly.
 //! - Merging built commands into the framework before
-//!   `Framework::builder().build()` is later work (#108/#109);
+//!   `Framework::builder().build()` is later work (#109);
 //!   [`commands_from_manifest`] documents that call site. The bot-side
-//!   registry that tracks per-plugin commands is #108/#109 as well.
+//!   registry that tracks per-plugin commands is #109 as well.
 //! - [`register_in_guild`] is wired by the `/plugins` command (#113).
 //! - Per-option autocomplete and min/max/length constraints are #114.
 
@@ -318,8 +321,8 @@ pub enum ReparseError {
 /// Parses a `CreateCommand` blob into a routing poise command.
 ///
 /// The command's `slash_action` is the placeholder dispatch
-/// ([`plugin_slash_dispatch`]) until the interaction engine (#108) replaces
-/// it; `on_error`/`checks` are left at framework defaults.
+/// ([`plugin_slash_dispatch`]) until the #109 registry seam wires the
+/// interaction engine in; `on_error`/`checks` are left at framework defaults.
 pub fn command_from_blob(blob: &Value) -> Result<Command<Data, Error>, CommandSpecError> {
     let spec = HostCommandSpec::parse(blob)?;
     Ok(build_command(&spec))
@@ -330,7 +333,7 @@ pub fn command_from_blob(blob: &Value) -> Result<Command<Data, Error>, CommandSp
 ///
 /// The returned list is the merge seam: hand it to the framework before
 /// `Framework::builder().build()` (or fold it into the cog list). Wiring that
-/// merge — and tracking which commands belong to which plugin — is #108/#109.
+/// merge — and tracking which commands belong to which plugin — is #109.
 pub fn commands_from_manifest(manifest: &Manifest) -> Vec<Command<Data, Error>> {
     let mut commands = Vec::new();
     for def in &manifest.commands {
@@ -524,15 +527,17 @@ pub async fn register_in_guild(
 }
 
 /// Placeholder action for every built plugin command. The interaction engine
-/// (#108) replaces it; until then a plugin command fails loudly instead of
-/// succeeding silently.
+/// (#108) provides the routing, but a `slash_action` is a non-capturing
+/// function pointer and cannot carry an engine handle — wiring dispatch
+/// through it is the #109 registry seam. Until then a plugin command fails
+/// loudly instead of succeeding silently.
 fn plugin_slash_dispatch(
     ctx: poise::ApplicationContext<'_, Data, Error>,
 ) -> poise::BoxFuture<'_, Result<(), poise::FrameworkError<'_, Data, Error>>> {
     Box::pin(async move {
         Err(poise::FrameworkError::new_command_structure_mismatch(
             ctx,
-            "plugin command dispatch is not wired yet (#108)",
+            "plugin command dispatch is not wired yet (#109)",
         ))
     })
 }
