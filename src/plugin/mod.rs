@@ -18,13 +18,14 @@
 //!
 //! Lifecycle beyond spawn/call/stop lives in [`manager`]: health checks,
 //! unload, crash respawn, and binary swap over a map of [`RunningPlugin`]
-//! handles. External install, KV, and per-guild sets are later work
-//! (#110/#112). Dropping a [`RunningPlugin`] kills its subprocess via the
-//! `Drop` impl, so unloading a plugin is drop-and-forget; graceful unload is
-//! [`RunningPlugin::stop`].
+//! handles. External install from a pinned catalog lives in [`install`];
+//! KV and per-guild sets are later work (#112). Dropping a
+//! [`RunningPlugin`] kills its subprocess via the `Drop` impl, so unloading
+//! a plugin is drop-and-forget; graceful unload is [`RunningPlugin::stop`].
 
 pub mod command;
 pub mod error;
+pub mod install;
 pub mod interaction;
 pub mod manager;
 
@@ -37,7 +38,10 @@ use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
+pub use error::InstallError;
 pub use error::PluginError;
+pub use install::CatalogEntry;
+pub use install::PluginCatalog;
 pub use interaction::InteractionEngine;
 pub use interaction::InteractionError;
 use log::debug;
