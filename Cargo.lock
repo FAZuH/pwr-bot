@@ -3681,6 +3681,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "pwr-plugin-settings"
+version = "0.1.0"
+dependencies = [
+ "pwr-plugin-protocol",
+ "pwr-poise-components",
+ "serde_json",
+]
+
+[[package]]
 name = "pwr-poise-components"
 version = "0.1.0"
 dependencies = [

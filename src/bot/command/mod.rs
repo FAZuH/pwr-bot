@@ -12,7 +12,6 @@ pub mod plugins;
 pub mod prelude;
 pub mod register;
 pub mod register_owner;
-pub mod settings;
 pub mod unregister;
 pub mod voice;
 pub mod welcome;
@@ -37,7 +36,6 @@ use crate::bot::command::feed::list::FeedListHandler;
 use crate::bot::command::feed::settings::FeedSettingsHandler;
 use crate::bot::command::feed::subscribe::FeedSubscribeHandler;
 use crate::bot::command::feed::unsubscribe::FeedUnsubscribeHandler;
-use crate::bot::command::settings::SettingsMainHandler;
 use crate::bot::command::voice::leaderboard::VoiceLeaderboardHandler;
 use crate::bot::command::voice::settings::VoiceSettingsHandler;
 use crate::bot::command::voice::stats::VoiceStatsHandler;
@@ -68,7 +66,6 @@ impl Cog for Cogs {
             plugins::plugins(),
             register::register(),
             register_owner::register_owner(),
-            settings::settings(),
             unregister::unregister(),
             voice::voice(),
             welcome::welcome(),
@@ -159,7 +156,7 @@ impl<'a> Router<'a> {
         loop {
             let nav = self.pop_next().await?;
             let res: Box<dyn CommandHandler> = match nav {
-                SettingsMain => Box::new(SettingsMainHandler::new(ctx)),
+                SettingsMain => continue,
                 SettingsFeeds => Box::new(FeedSettingsHandler::new(ctx)),
                 SettingsVoice => Box::new(VoiceSettingsHandler::new(ctx)),
                 SettingsWelcome => Box::new(WelcomeSettingsHandler::new(ctx)),

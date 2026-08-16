@@ -45,12 +45,17 @@ use crate::feed::Platforms;
 use crate::plugin::CatalogEntry;
 use crate::plugin::HostConfig;
 use crate::plugin::HostServices;
+use crate::plugin::InteractionEngine;
+use crate::plugin::InteractionError;
 use crate::plugin::PgKvStore;
 use crate::plugin::PluginCatalog;
 use crate::plugin::PluginManager;
 use crate::plugin::RespawnPolicy;
+use crate::plugin::RunningPlugin;
 use crate::plugin::SerenityHostIo;
 use crate::plugin::command::commands_from_manifest;
+use crate::plugin::command::core_settings_command;
+use crate::plugin::command::register_in_guild;
 use crate::repo::traits::Repos;
 use crate::service::Services;
 use crate::subscriber::voice_state::VoiceStateSubscriber;
@@ -63,6 +68,7 @@ pub struct Data {
     pub repos: Arc<dyn Repos + Send + Sync>,
     pub plugin_manager: Arc<PluginManager>,
     pub plugin_catalog: Arc<HashMap<String, CatalogEntry>>,
+    pub plugin_engine: Arc<InteractionEngine<RunningPlugin>>,
     pub start_time: Instant,
 }
 
@@ -96,6 +102,7 @@ impl Bot {
         let http = Arc::new(http);
 
         let catalog = Self::load_plugin_catalog(&config);
+        let plugin_engine = Arc::new(InteractionEngine::<RunningPlugin>::new());
         let host_services = Arc::new(HostServices {
             io: Some(Arc::new(SerenityHostIo::new(http.clone()))),
             config: Some(HostConfig::from(&*config)),
@@ -106,6 +113,17 @@ impl Bot {
                 .with_host_services(host_services),
         );
 
+        // The settings core plugin is spawned once at startup; per-guild
+        // command registration follows in Ready/GuildCreate. A missing
+        // binary is not fatal: the bot stays up and `/settings` reports the
+        // plugin as not running.
+        if let Err(e) = plugin_manager
+            .spawn("settings", &config.settings_plugin_path, None)
+            .await
+        {
+            warn!("failed to spawn settings plugin: {e}");
+        }
+
         let framework = Self::create_framework(&config, &catalog)?;
 
         let data = Arc::new(Data {
@@ -115,6 +133,7 @@ impl Bot {
             repos,
             plugin_manager,
             plugin_catalog: Arc::new(catalog),
+            plugin_engine,
             start_time: Instant::now(),
         });
 
@@ -173,14 +192,16 @@ impl Bot {
 
     /// Creates the Poise framework with commands and configuration.
     ///
-    /// The command list is the merge seam: the Cog commands first, then one
-    /// routing command per plugin manifest command, so plugin commands are
-    /// registered on the framework before `Framework::builder().build()`.
+    /// The command list is the merge seam: the Cog commands first, then the
+    /// core plugin commands, then one routing command per plugin manifest
+    /// command, so plugin commands are registered on the framework before
+    /// `Framework::builder().build()`.
     fn create_framework(
         config: &Config,
         catalog: &HashMap<String, CatalogEntry>,
     ) -> Result<Box<Framework<Data, Error>>> {
         let mut commands = Cogs.commands();
+        commands.push(core_settings_command());
         for entry in catalog.values() {
             commands.extend(commands_from_manifest(&entry.manifest));
         }
@@ -380,6 +401,106 @@ impl BotEventHandler {
             }
         }
     }
+
+    /// Registers the core plugin commands in a guild unless the guild has
+    /// explicitly disabled them. A missing `guild_plugins` row means enabled
+    /// by default (auto-enable); an `enabled = false` row opts out. Failure
+    /// to list state or register commands is logged and skipped — the bot
+    /// stays up and `/settings` simply stays absent in that guild.
+    async fn register_core_plugins_in_guild(&self, guild_id: poise::serenity_prelude::GuildId) {
+        let rows = match self
+            .data
+            .repos
+            .guild_plugins()
+            .list_for_guild(guild_id.get())
+            .await
+        {
+            Ok(rows) => rows,
+            Err(e) => {
+                warn!(
+                    "failed to list guild plugins for guild {}: {e}",
+                    guild_id.get()
+                );
+                return;
+            }
+        };
+
+        let disabled = rows
+            .iter()
+            .any(|row| row.plugin_name == "settings" && !row.enabled);
+        if disabled {
+            debug!(
+                "settings plugin disabled in guild {}, skipping registration",
+                guild_id.get()
+            );
+            return;
+        }
+
+        if let Err(e) = register_in_guild(&self.http, &[core_settings_command()], guild_id).await {
+            warn!(
+                "failed to register core plugin commands in guild {}: {e}",
+                guild_id.get()
+            );
+        }
+    }
+
+    /// Routes a component interaction to the plugin view session open for its
+    /// message. The session's plugin renders a fresh spec; the click is
+    /// acknowledged and the message body is replaced with the spec's raw
+    /// data via a bare HTTP edit — `serenity::Component` is not
+    /// `Deserialize`, so the spec cannot ride a typed `CreateReply`.
+    ///
+    /// A click without an open session is acknowledged and dropped (stale
+    /// view); a dead plugin is acknowledged, logged, and its session is
+    /// abandoned.
+    async fn handle_component_interaction(&self, interaction: &ComponentInteraction) {
+        let message_id = interaction.message.id;
+
+        // Acknowledge the click before the plugin round trip: Discord
+        // requires a response within 3 seconds, and the interact call may
+        // take most of that window. Best-effort — a failed ack is logged,
+        // not fatal.
+        if let Err(e) = interaction
+            .create_response(&self.http, CreateInteractionResponse::Acknowledge)
+            .await
+        {
+            warn!("failed to acknowledge component interaction on message {message_id}: {e}");
+        }
+
+        let result = self
+            .data
+            .plugin_engine
+            .interact(
+                message_id,
+                &interaction.data.custom_id,
+                serde_json::to_value(interaction).unwrap_or_default(),
+            )
+            .await;
+
+        match result {
+            Ok(spec) => {
+                if let Err(e) = self
+                    .http
+                    .edit_message(interaction.channel_id, message_id, &spec.data, Vec::new())
+                    .await
+                {
+                    warn!("failed to update message {message_id} after interaction: {e}");
+                }
+            }
+            Err(InteractionError::NoSession { .. }) => {
+                debug!("component interaction on message {message_id} without an open session");
+            }
+            Err(InteractionError::Plugin(e)) => {
+                warn!("plugin session for message {message_id} failed: {e}");
+                if let Err(e) = self.data.plugin_engine.abandon(message_id).await {
+                    warn!("failed to abandon session for message {message_id}: {e}");
+                }
+            }
+            Err(e) => {
+                warn!("component interaction on message {message_id} failed: {e}");
+            }
+        }
+    }
 }
 
 #[async_trait]
@@ -390,10 +511,16 @@ impl poise::serenity_prelude::EventHandler for BotEventHandler {
                 info!("Bot is ready, scanning voice channels...");
                 self.scan_voice_channels(ctx).await;
 
+                for guild_id in ctx.cache.guilds() {
+                    self.register_core_plugins_in_guild(guild_id).await;
+                }
+
                 // Check if commands need to be re-registered
                 self.register_commands_if_needed().await;
             }
             FullEvent::GuildCreate { guild, .. } => {
+                self.register_core_plugins_in_guild(guild.id).await;
+
                 let is_enabled = self
                     .data
                     .service
@@ -434,6 +561,11 @@ impl poise::serenity_prelude::EventHandler for BotEventHandler {
                     old: old.clone(),
                     new: new.clone(),
                 });
+            }
+            FullEvent::InteractionCreate { interaction, .. } => {
+                if let Interaction::Component(interaction) = interaction {
+                    self.handle_component_interaction(interaction).await;
+                }
             }
             _ => {}
         }

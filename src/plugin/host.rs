@@ -9,8 +9,7 @@
 //!
 //! Ops not in the v1 surface (unknown `host.*` strings, and non-`host.*` ops
 //! like `invoke`, which only ever travel host→plugin) answer
-//! `UnknownOp`; the v1 op that is not implemented yet ([`HostCap::OpenView`])
-//! answers `Unsupported`; and a missing service answers `HostUnavailable` /
+//! `UnknownOp`; and a missing service answers `HostUnavailable` /
 //! `ConfigUnavailable` / `KvUnavailable` instead of panicking.
 
 use std::path::PathBuf;
@@ -236,11 +235,6 @@ pub async fn handle_host_call(
         );
     };
     match cap {
-        HostCap::OpenView => resp_err(
-            id,
-            "Unsupported",
-            format!("host op `{op}` is not implemented (later ticket)"),
-        ),
         HostCap::KvGet | HostCap::KvSet | HostCap::KvDelete => {
             let Some(kv) = host.and_then(|host| host.kv.clone()) else {
                 return resp_err(id, "KvUnavailable", "kv store is not configured");
@@ -263,7 +257,11 @@ pub async fn handle_host_call(
                 })),
             )
         }
-        HostCap::Defer | HostCap::Acknowledge | HostCap::SendMessage | HostCap::EditMessage => {
+        HostCap::Defer
+        | HostCap::Acknowledge
+        | HostCap::SendMessage
+        | HostCap::EditMessage
+        | HostCap::OpenView => {
             let Some(io) = host.and_then(|host| host.io.clone()) else {
                 return resp_err(id, "HostUnavailable", "host io is not configured");
             };
@@ -307,6 +305,12 @@ async fn io_call(
         HostCap::EditMessage => {
             let (channel_id, message_id, data) = parse_edit_message(args)?;
             io.edit_message(channel_id, message_id, data)
+                .await
+                .map_err(host_io_err)
+        }
+        HostCap::OpenView => {
+            let (channel_id, data) = parse_open_view(args)?;
+            io.send_message(channel_id, "", Some(data))
                 .await
                 .map_err(host_io_err)
         }
@@ -446,6 +450,23 @@ fn parse_edit_message(args: Option<&Value>) -> Result<(u64, u64, Value), WireErr
         .cloned()
         .ok_or_else(|| invalid_args("missing `data` (object)"))?;
     Ok((channel_id, message_id, data))
+}
+
+/// Parses `host.open_view` args: a channel id and the full view payload to
+/// render as a new message.
+fn parse_open_view(args: Option<&Value>) -> Result<(u64, Value), WireError> {
+    let obj = args.and_then(Value::as_object).ok_or_else(|| {
+        invalid_args("expected args object with `channel_id` (u64) and `data` (object)")
+    })?;
+    let channel_id = obj
+        .get("channel_id")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| invalid_args("missing `channel_id` (u64)"))?;
+    let data = match obj.get("data") {
+        Some(data) if data.is_object() => data.clone(),
+        _ => return Err(invalid_args("missing `data` (object)")),
+    };
+    Ok((channel_id, data))
 }
 
 fn invalid_args(msg: &str) -> WireError {
@@ -755,12 +776,54 @@ mod tests {
         assert_err(resp, 7, "UnknownOp");
     }
 
+    // ── open_view ─────────────────────────────────────────────────────────────
+
     #[tokio::test]
-    async fn open_view_is_unsupported() {
+    async fn open_view_routes_through_the_seam() {
+        let mut mock = MockHostIo::new();
+        mock.expect_send_message()
+            .with(
+                eq(99_u64),
+                eq(""),
+                eq(Some(json!({ "content": "hello", "flags": 0 }))),
+            )
+            .times(1)
+            .returning(|_, _, _| Ok(Some(json!({ "message_id": 1234 }))));
+        let host = services(Some(Arc::new(mock)), Some(sample_config()));
+
+        let resp = handle_host_call(
+            7,
+            "host.open_view",
+            Some(&json!({
+                "channel_id": 99,
+                "data": { "content": "hello", "flags": 0 },
+            })),
+            Some(&host),
+        )
+        .await;
+        assert_eq!(assert_ok(resp, 7), Some(json!({ "message_id": 1234 })));
+    }
+
+    #[tokio::test]
+    async fn open_view_missing_data_is_invalid_args() {
+        let mock = MockHostIo::new();
+        let host = services(Some(Arc::new(mock)), Some(sample_config()));
+
+        let resp = handle_host_call(
+            7,
+            "host.open_view",
+            Some(&json!({ "channel_id": 99 })),
+            Some(&host),
+        )
+        .await;
+        assert_err(resp, 7, "InvalidArgs");
+    }
+
+    #[tokio::test]
+    async fn open_view_without_io_is_host_unavailable() {
         let host = services(None, Some(sample_config()));
         let resp = handle_host_call(7, "host.open_view", None, Some(&host)).await;
-        let msg = assert_err(resp, 7, "Unsupported");
-        assert!(msg.contains("host.open_view"), "msg: {msg}");
+        assert_err(resp, 7, "HostUnavailable");
     }
 
     // ── kv ────────────────────────────────────────────────────────────────────

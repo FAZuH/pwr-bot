@@ -32,11 +32,10 @@
 //!
 //! Deferred seams:
 //! - Every built command carries [`plugin_slash_dispatch`] as its action,
-//!   which always errors. The interaction engine (#108) provides the routing
-//!   ([`crate::plugin::InteractionEngine`]); wiring dispatch through it is
-//!   the registry work of #113 — a `slash_action` is a non-capturing
-//!   function pointer and cannot carry an engine handle. No silent success:
-//!   a plugin command that cannot dispatch fails loudly.
+//!   which routes the invocation to its core plugin's view session via
+//!   [`CORE_PLUGIN_ROUTES`] (see the function's docs). Catalog commands
+//!   outside that table fail with a structure mismatch until their own
+//!   per-plugin registry exists (#115).
 //! - Merging built commands into the framework before
 //!   `Framework::builder().build()` is later work (#113);
 //!   [`commands_from_manifest`] documents that call site. The bot-side
@@ -320,9 +319,9 @@ pub enum ReparseError {
 
 /// Parses a `CreateCommand` blob into a routing poise command.
 ///
-/// The command's `slash_action` is the placeholder dispatch
-/// ([`plugin_slash_dispatch`]) until the #113 registry seam wires the
-/// interaction engine in; `on_error`/`checks` are left at framework defaults.
+/// The command's `slash_action` is the core-plugin dispatch
+/// ([`plugin_slash_dispatch`]); `on_error`/`checks` are left at framework
+/// defaults.
 pub fn command_from_blob(blob: &Value) -> Result<Command<Data, Error>, CommandSpecError> {
     let spec = HostCommandSpec::parse(blob)?;
     Ok(build_command(&spec))
@@ -526,19 +525,74 @@ pub async fn register_in_guild(
     poise::builtins::register_in_guild(http, commands.iter(), guild_id).await
 }
 
-/// Placeholder action for every built plugin command. The interaction engine
-/// (#108) provides the routing, but a `slash_action` is a non-capturing
-/// function pointer and cannot carry an engine handle — wiring dispatch
-/// through it is the #113 registry seam. Until then a plugin command fails
-/// loudly instead of succeeding silently.
+/// Command-name → plugin-name routes for built-in core plugins. Commands in
+/// this table dispatch through the interaction engine to their plugin; the
+/// `/settings` command is the first core plugin (the settings plugin, #115).
+pub const CORE_PLUGIN_ROUTES: &[(&str, &str)] = &[("settings", "settings")];
+
+/// The built-in `/settings` command: a static blob routed to the settings
+/// core plugin. Registered on the framework alongside the catalog commands.
+pub fn core_settings_command() -> Command<Data, Error> {
+    command_from_blob(&serde_json::json!({
+        "name": "settings",
+        "description": "Manage server settings"
+    }))
+    .expect("static core plugin command blob is valid")
+}
+
+/// Routes a slash invocation to its core plugin's view session.
+///
+/// The invoked command name is looked up in [`CORE_PLUGIN_ROUTES`]; unknown
+/// commands fail with a structure mismatch (a `slash_action` is shared by
+/// every built command, so this guard keeps catalog commands honest until
+/// their own registry exists). The plugin handle comes from the manager, the
+/// initial render is the locked placeholder+open+edit flow: send a loading
+/// message, open the engine session on its id (one `invoke`), then replace
+/// the message body with the returned spec's raw data via a bare HTTP edit —
+/// `serenity::Component` is not `Deserialize`, so the spec cannot ride a
+/// typed `CreateReply`.
 fn plugin_slash_dispatch(
     ctx: poise::ApplicationContext<'_, Data, Error>,
 ) -> poise::BoxFuture<'_, Result<(), poise::FrameworkError<'_, Data, Error>>> {
     Box::pin(async move {
-        Err(poise::FrameworkError::new_command_structure_mismatch(
-            ctx,
-            "plugin command dispatch is not wired yet (#113)",
-        ))
+        let command_name = ctx.command.name.as_ref();
+        let Some((_, plugin_name)) = CORE_PLUGIN_ROUTES
+            .iter()
+            .find(|(name, _)| *name == command_name)
+        else {
+            return Err(poise::FrameworkError::new_command_structure_mismatch(
+                ctx,
+                "command has no core plugin route",
+            ));
+        };
+        let data = ctx.framework.user_data();
+        let Some(plugin) = data.plugin_manager.get(plugin_name).await else {
+            return Err(poise::FrameworkError::new_command(
+                ctx.into(),
+                anyhow::anyhow!("core plugin `{plugin_name}` is not running").into(),
+            ));
+        };
+        let ctx: poise::Context<'_, Data, Error> = ctx.into();
+
+        let reply = ctx
+            .send(poise::CreateReply::new().content("Loading…"))
+            .await
+            .map_err(|error| poise::FrameworkError::new_command(ctx, error.into()))?;
+        let message_id = reply
+            .message()
+            .await
+            .map_err(|error| poise::FrameworkError::new_command(ctx, error.into()))?
+            .id;
+        let spec = data
+            .plugin_engine
+            .open(message_id, plugin, command_name, serde_json::json!({}))
+            .await
+            .map_err(|error| poise::FrameworkError::new_command(ctx, error.into()))?;
+        ctx.http()
+            .edit_message(ctx.channel_id(), message_id, &spec.data, Vec::new())
+            .await
+            .map_err(|error| poise::FrameworkError::new_command(ctx, error.into()))?;
+        Ok(())
     })
 }
 

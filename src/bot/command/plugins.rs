@@ -14,6 +14,7 @@ use std::sync::Arc;
 use crate::bot::command::prelude::*;
 use crate::plugin::CatalogEntry;
 use crate::plugin::PluginError;
+use crate::plugin::command::CORE_PLUGIN_ROUTES;
 use crate::plugin::command::commands_from_manifest;
 use crate::plugin::command::register_in_guild;
 use crate::plugin::install;
@@ -98,9 +99,12 @@ pub async fn disable(ctx: Context<'_>, plugin: String) -> Result<(), Error> {
     match PluginsUpdate::update(PluginsMsg::Disable(plugin.clone()), &mut model) {
         PluginsCmd::Unregister(_) => {
             register_in_guild(ctx.http(), &[], guild_id).await?;
+            // Persist the disabled state instead of deleting the row: an
+            // absent row means auto-enabled, so a deletion would re-enable
+            // the plugin on the next startup/join.
             data.repos
                 .guild_plugins()
-                .delete(guild_id.get(), &plugin)
+                .set_enabled(guild_id.get(), &plugin, false)
                 .await?;
             // A plugin that is not running has nothing to unload; that is
             // not a failure for the disable path.
@@ -165,17 +169,30 @@ fn catalog_entry<'a>(
 }
 
 /// The guild's plugins model: catalog names plus the guild's enabled subset.
+///
+/// Core plugins are auto-enabled: an absent `guild_plugins` row means
+/// enabled, so they are seeded into the enabled subset — only an explicit
+/// `enabled = false` row opts a core plugin out. This mirrors
+/// [`register_core_plugins_in_guild`](crate::bot::BotEventHandler) and lets
+/// `/plugins disable settings` turn the auto-enable off and persist
+/// `enabled = false`.
 async fn guild_model(data: &Arc<crate::bot::Data>, guild_id: GuildId) -> PluginsModel {
     let catalog = data.plugin_catalog.keys().cloned().collect();
-    let enabled = data
+    let rows = data
         .repos
         .guild_plugins()
         .list_for_guild(guild_id.get())
         .await
-        .unwrap_or_default()
-        .into_iter()
+        .unwrap_or_default();
+    let mut enabled: Vec<String> = rows
+        .iter()
         .filter(|entry| entry.enabled)
-        .map(|entry| entry.plugin_name)
+        .map(|entry| entry.plugin_name.clone())
         .collect();
+    for (_, plugin) in CORE_PLUGIN_ROUTES {
+        if !rows.iter().any(|entry| entry.plugin_name == *plugin) {
+            enabled.push((*plugin).to_string());
+        }
+    }
     PluginsModel::new(catalog, enabled)
 }

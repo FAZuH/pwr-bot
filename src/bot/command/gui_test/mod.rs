@@ -14,11 +14,6 @@ mod steps;
 const TEST_STEPS: &[TestStep] = &[
     crate::test_step!("/about", "Bot info and statistics", steps::about::about),
     crate::test_step!(
-        "/settings",
-        "Main settings page",
-        steps::settings::settings_main
-    ),
-    crate::test_step!(
         "/settings > feeds",
         "Feed settings",
         steps::settings::feed_settings

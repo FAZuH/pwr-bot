@@ -18,7 +18,6 @@ pub trait Update {
 pub mod feed_list;
 pub mod feed_settings;
 pub mod plugins;
-pub mod settings_main;
 pub mod voice_leaderboard;
 pub mod voice_stats;
 pub mod welcome_settings;
@@ -36,10 +35,6 @@ pub use plugins::PluginsCmd;
 pub use plugins::PluginsModel;
 pub use plugins::PluginsMsg;
 pub use plugins::PluginsUpdate;
-pub use settings_main::SettingsMainCmd;
-pub use settings_main::SettingsMainModel;
-pub use settings_main::SettingsMainMsg;
-pub use settings_main::SettingsMainUpdate;
 pub use voice_stats::VoiceStatsCmd;
 pub use voice_stats::VoiceStatsModel;
 pub use voice_stats::VoiceStatsMsg;

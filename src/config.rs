@@ -22,6 +22,7 @@ pub struct Config {
     pub logs_path: PathBuf,
     pub plugins_toml: PathBuf,
     pub plugins_dir: PathBuf,
+    pub settings_plugin_path: PathBuf,
     pub features: Features,
     pub version: String,
 }
@@ -81,6 +82,16 @@ impl Config {
                 self.plugins_dir.display()
             );
         });
+
+        self.settings_plugin_path = std::env::var("SETTINGS_PLUGIN_PATH")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| {
+                std::env::current_exe()
+                    .ok()
+                    .and_then(|exe| exe.parent().map(|p| p.to_path_buf()))
+                    .map(|dir| dir.join("pwr-plugin-settings"))
+                    .unwrap_or_else(|| self.data_path.join("pwr-plugin-settings"))
+            });
 
         self.features = Features {
             voice_tracking: parse_bool_env("ENABLE_VOICE_TRACKING", true),

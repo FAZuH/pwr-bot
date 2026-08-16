@@ -337,7 +337,7 @@ impl<P: PluginHandle> InteractionEngine<P> {
 /// Interprets a call response as a [`ViewSpec`]. A failed resp becomes
 /// [`InteractionError::PluginRejected`]; anything that is not a resp — or a
 /// success without a payload — is [`InteractionError::UnexpectedReply`].
-fn view_spec_from_resp(
+pub(crate) fn view_spec_from_resp(
     resp: Msg,
     current_view: Option<Value>,
 ) -> Result<ViewSpec, InteractionError> {

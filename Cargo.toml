@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/pwr-plugin-protocol", "crates/pwr-poise-components"]
+members = ["crates/pwr-plugin-protocol", "crates/pwr-poise-components", "crates/pwr-plugin-settings"]
 resolver = "2"
 
 [package]
