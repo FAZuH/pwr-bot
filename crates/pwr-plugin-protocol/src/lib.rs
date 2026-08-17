@@ -12,6 +12,12 @@
 //! (one-way push, never answered), `ping`/`pong` (liveness), and `bye`
 //! (graceful shutdown). Errors are first-class wire values: a failed `resp`
 //! carries `ok:false` plus `error:{kind,msg}`. Panics never cross the wire.
+//!
+//! Plugin authoring: wrap `main` in `std::panic::catch_unwind`, print the
+//! panic payload to stderr, and exit nonzero; stdout carries protocol lines
+//! only, stderr is the free logging channel. See the `hello_plugin` fixture
+//! (`crates/pwr-plugin-protocol/src/bin/hello_plugin.rs`) for the reference
+//! implementation.
 
 pub mod caps;
 pub mod manifest;
