@@ -17,11 +17,10 @@
 //!   signal) is respawned.
 //! - **Unload**: removes the handle so new calls fail fast, best-effort
 //!   unregisters the plugin's guild commands (the #112 seam), then delegates
-//!   to [`RunningPlugin::stop`] (`bye` → EOF → grace → SIGKILL), whose
-//!   reaper task owns the final `wait()` (no zombies). Group-level SIGTERM
-//!   is not sent: no plugin fixture spawns children, and `stop()`'s SIGKILL
-//!   covers the child (which has `process_group(0)` set at spawn, so a
-//!   future group kill would reach descendants).
+//!   to [`RunningPlugin::stop`] (`bye` → EOF → grace → SIGTERM to the whole
+//!   process group → grace → SIGKILL to the group), whose reaper task owns
+//!   the final `wait()` (no zombies). Plugins spawn with `process_group(0)`,
+//!   so the group signals reach any descendants.
 //! - **Respawn**: inline exponential backoff with deterministic jitter (no
 //!   `backon` dependency), capped attempts, and a crash-loop window: too
 //!   many respawns within the window stop the cycle and leave the plugin
@@ -308,16 +307,15 @@ impl PluginManager {
     /// guild commands in `guild_ids` (an empty command slice unregisters;
     /// the guild list comes from the guild_plugins table, the #112 seam),
     /// then gracefully stops the subprocess via [`RunningPlugin::stop`]
-    /// (`bye` → EOF → grace → SIGKILL) and returns its final exit status.
-    /// The crash-loop guard for `name` is cleared: a manual unload ends any
+    /// (`bye` → EOF → grace → SIGTERM to the whole process group → grace →
+    /// SIGKILL to the group) and returns its final exit status. The
+    /// crash-loop guard for `name` is cleared: a manual unload ends any
     /// crash cycle, so a later spawn starts fresh.
     ///
     /// The reaper task owns the final `wait()`, so no zombie is left behind;
     /// in-flight calls fail with a `PluginDied` wire error when stdout
-    /// closes. Group-level SIGTERM is not sent: no plugin fixture spawns
-    /// children, and `stop()`'s SIGKILL covers the child (which has
-    /// `process_group(0)` set at spawn, so a future group kill would reach
-    /// descendants).
+    /// closes. Plugins spawn with `process_group(0)`, so the group signals
+    /// reach any descendants the plugin spawned.
     pub async fn unload(
         &self,
         name: &str,

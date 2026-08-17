@@ -34,6 +34,7 @@ serde = "1.0.228"
 serde_json = "1.0.149"
 tokio = { version = "1.49.0", features = ["rt-multi-thread", "macros", "signal", "process", "time", "io-util"] }
 futures = "0.3.32"
+libc = "0.2.182"
 log = "0.4.29"
 thiserror = "2.0.18"
 uuid = { version = "1.21.0", features = ["v4"] }
