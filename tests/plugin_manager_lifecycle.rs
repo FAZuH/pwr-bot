@@ -600,7 +600,7 @@ async fn unload_signals_the_whole_process_group_with_sigterm() {
     let _ = std::fs::remove_file(&marker_path);
 
     manager
-        .spawn("group", fixture_script("group_term_plugin.sh"), None)
+        .spawn("group", fixture_script("group_term_plugin.sh"), None, &[])
         .await
         .expect("spawn group-term fixture");
     let child_pid = wait_for_group_child(&base).await;
@@ -647,7 +647,7 @@ async fn unload_sigkills_the_group_when_sigterm_is_ignored() {
     let _ = std::fs::remove_file(&pid_path);
 
     manager
-        .spawn("group", fixture_script("group_kill_plugin.sh"), None)
+        .spawn("group", fixture_script("group_kill_plugin.sh"), None, &[])
         .await
         .expect("spawn group-kill fixture");
     let child_pid = wait_for_group_child(&base).await;
