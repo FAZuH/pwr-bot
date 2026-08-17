@@ -204,6 +204,7 @@ mod tests {
             v: crate::msg::API_VERSION,
             name: "feed".into(),
             caps: vec!["command:feed".into(), "host.send_message".into()],
+            manifest: None,
         };
         let crate::msg::Msg::Hello { caps, .. } = hello else {
             unreachable!()

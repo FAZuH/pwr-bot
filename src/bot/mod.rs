@@ -31,6 +31,7 @@ use log::warn;
 use poise::Framework;
 use poise::FrameworkOptions;
 use poise::serenity_prelude::*;
+use pwr_plugin_protocol::Manifest;
 use serde_json::Value;
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
@@ -137,7 +138,7 @@ impl Bot {
             .get("settings")
             .map(|entry| entry.manifest.tasks.as_slice())
             .unwrap_or(&[]);
-        if let Err(e) = plugin_manager
+        let settings_manifest = match plugin_manager
             .spawn(
                 "settings",
                 &config.settings_plugin_path,
@@ -147,10 +148,14 @@ impl Bot {
             )
             .await
         {
-            warn!("failed to spawn settings plugin: {e}");
-        }
+            Ok(plugin) => plugin.manifest().cloned(),
+            Err(e) => {
+                warn!("failed to spawn settings plugin: {e}");
+                None
+            }
+        };
 
-        let framework = Self::create_framework(&config, &catalog)?;
+        let framework = Self::create_framework(&config, &catalog, settings_manifest.as_ref())?;
 
         let data = Arc::new(Data {
             config: config.clone(),
@@ -220,15 +225,22 @@ impl Bot {
     /// Creates the Poise framework with commands and configuration.
     ///
     /// The command list is the merge seam: the Cog commands first, then the
-    /// core plugin commands, then one routing command per plugin manifest
-    /// command, so plugin commands are registered on the framework before
-    /// `Framework::builder().build()`.
+    /// settings command derived from the settings plugin's wire manifest when
+    /// one was captured at spawn (falling back to the static blob when the
+    /// spawn failed or carried no manifest), then one routing command per
+    /// catalog plugin manifest command, so plugin commands are registered on
+    /// the framework before `Framework::builder().build()`.
     fn create_framework(
         config: &Config,
         catalog: &HashMap<String, CatalogEntry>,
+        settings_manifest: Option<&Manifest>,
     ) -> Result<Box<Framework<Data, Error>>> {
         let mut commands = Cogs.commands();
-        commands.push(core_settings_command());
+        if let Some(settings_manifest) = settings_manifest {
+            commands.extend(commands_from_manifest(settings_manifest));
+        } else {
+            commands.push(core_settings_command());
+        }
         for entry in catalog.values() {
             commands.extend(commands_from_manifest(&entry.manifest));
         }

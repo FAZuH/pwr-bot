@@ -14,6 +14,8 @@ use std::io::Write;
 use std::process::ExitCode;
 
 use pwr_plugin_protocol::API_VERSION;
+use pwr_plugin_protocol::CommandDef;
+use pwr_plugin_protocol::Manifest;
 use pwr_plugin_protocol::Msg;
 use pwr_plugin_protocol::WireError;
 use serde_json::Value;
@@ -40,6 +42,17 @@ fn main() -> ExitCode {
         v: API_VERSION,
         name: PLUGIN_NAME.into(),
         caps: vec![format!("command:{PLUGIN_NAME}")],
+        manifest: Some(Manifest {
+            name: PLUGIN_NAME.into(),
+            description: "Echo plugin args".into(),
+            version: "0.1.0".into(),
+            commands: vec![CommandDef {
+                create_command: json!({"name": PLUGIN_NAME, "description": "Echo plugin args"}),
+            }],
+            event_handlers: vec![],
+            tasks: vec![],
+            api_version: API_VERSION,
+        }),
     };
     if write_msg(&mut out, &hello).is_err() {
         return ExitCode::FAILURE;

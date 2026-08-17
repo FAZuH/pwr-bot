@@ -67,6 +67,7 @@ pub use manager::RespawnPolicy;
 use pwr_plugin_protocol::ALL_CAPS;
 use pwr_plugin_protocol::API_VERSION;
 use pwr_plugin_protocol::CallIdSeq;
+use pwr_plugin_protocol::Manifest;
 use pwr_plugin_protocol::Msg;
 use pwr_plugin_protocol::WireError;
 use pwr_plugin_protocol::validate_caps;
@@ -102,6 +103,9 @@ const STOP_TIMEOUT: Duration = Duration::from_secs(10);
 pub struct RunningPlugin {
     /// Plugin identity announced in its hello, e.g. `hello`.
     name: String,
+    /// The plugin's manifest, validated and stored at handshake when its
+    /// hello carried one; `None` for old hellos without the field.
+    manifest: Option<Manifest>,
     /// Writer to the plugin's stdin. `None` once stopped: dropping the handle
     /// closes the pipe, and the plugin treats stdin EOF as exit.
     stdin: Arc<Mutex<Option<ChildStdin>>>,
@@ -192,7 +196,13 @@ impl RunningPlugin {
                 .await);
             }
         };
-        let Msg::Hello { v, name, caps } = hello else {
+        let Msg::Hello {
+            v,
+            name,
+            caps,
+            manifest,
+        } = hello
+        else {
             return Err(reject(
                 child,
                 PluginError::HelloLost {
@@ -205,6 +215,35 @@ impl RunningPlugin {
         if let Err(reason) = validate_hello(&name, v, &caps) {
             return Err(reject(child, reason).await);
         }
+        let manifest = match manifest {
+            Some(manifest) => {
+                if let Err(e) = manifest.validate() {
+                    return Err(reject(
+                        child,
+                        PluginError::Manifest {
+                            name: name.clone(),
+                            detail: e.to_string(),
+                        },
+                    )
+                    .await);
+                }
+                if manifest.name != name {
+                    return Err(reject(
+                        child,
+                        PluginError::Manifest {
+                            name: name.clone(),
+                            detail: format!(
+                                "manifest names itself `{}`, hello says `{name}`",
+                                manifest.name
+                            ),
+                        },
+                    )
+                    .await);
+                }
+                Some(manifest)
+            }
+            None => None,
+        };
 
         // Acknowledge with the host's own hello (nushell-style both-sides
         // hello). Config values are not part of the ack — the `host.get_config`
@@ -243,6 +282,7 @@ impl RunningPlugin {
 
         Ok(RunningPlugin {
             name,
+            manifest,
             stdin,
             inflight,
             ids: Mutex::new(CallIdSeq::new()),
@@ -437,6 +477,11 @@ impl RunningPlugin {
         self.pongs.load(Ordering::Relaxed)
     }
 
+    /// The plugin's validated manifest, when its hello carried one.
+    pub fn manifest(&self) -> Option<&Manifest> {
+        self.manifest.as_ref()
+    }
+
     /// Awaits the plugin's exit status, published by the waiter task once the
     /// child is reaped.
     async fn wait_for_exit(&self) -> Result<ExitStatus, PluginError> {
@@ -489,6 +534,7 @@ fn host_hello() -> Msg {
             .iter()
             .map(|cap| cap.as_str().to_string())
             .collect(),
+        manifest: None,
     }
 }
 
@@ -771,7 +817,7 @@ mod tests {
 
     #[test]
     fn host_hello_announces_the_full_cap_surface() {
-        let Msg::Hello { v, name, caps } = host_hello() else {
+        let Msg::Hello { v, name, caps, .. } = host_hello() else {
             panic!("host ack must be a hello")
         };
         assert_eq!(v, API_VERSION);

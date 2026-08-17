@@ -52,7 +52,7 @@ async fn hello_plugin_round_trip() {
 
         // 1. Handshake: the plugin announces itself first.
         let hello: Msg = serde_json::from_str(next_line(&mut reader).await.trim()).expect("hello");
-        let Msg::Hello { v, name, caps } = hello else {
+        let Msg::Hello { v, name, caps, .. } = hello else {
             panic!("expected hello, got {hello:?}");
         };
         assert_eq!(v, API_VERSION);

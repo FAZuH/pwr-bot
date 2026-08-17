@@ -2,6 +2,8 @@ use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
 
+use crate::manifest::Manifest;
+
 /// The wire protocol version announced in [`Msg::Hello`] as `v`. The host
 /// rejects a handshake that carries any other value.
 pub const API_VERSION: u32 = 1;
@@ -28,6 +30,11 @@ pub enum Msg {
         name: String,
         /// Capabilities the plugin serves and host ops it requires.
         caps: Vec<String>,
+        /// The plugin's manifest declaration, when the plugin carries one.
+        /// Absent on old hellos, which the host accepts (validated only when
+        /// present).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        manifest: Option<Manifest>,
     },
     /// A request that expects a [`Msg::Resp`] with the same `id`.
     Call {
@@ -148,10 +155,35 @@ mod tests {
             v: API_VERSION,
             name: "feed".into(),
             caps: vec!["command:feed".into()],
+            manifest: None,
         };
         assert_eq!(
             serde_json::to_string(&msg).unwrap(),
             r#"{"t":"hello","v":1,"name":"feed","caps":["command:feed"]}"#
+        );
+    }
+
+    #[test]
+    fn hello_with_manifest_matches_wire_format() {
+        let msg = Msg::Hello {
+            v: API_VERSION,
+            name: "feed".into(),
+            caps: vec!["command:feed".into()],
+            manifest: Some(Manifest {
+                name: "feed".into(),
+                description: "Feed subscriptions".into(),
+                version: "0.1.0".into(),
+                commands: vec![crate::manifest::CommandDef {
+                    create_command: json!({"name": "feed.list", "description": "List feeds"}),
+                }],
+                event_handlers: vec![],
+                tasks: vec![],
+                api_version: API_VERSION,
+            }),
+        };
+        assert_eq!(
+            serde_json::to_string(&msg).unwrap(),
+            r#"{"t":"hello","v":1,"name":"feed","caps":["command:feed"],"manifest":{"name":"feed","description":"Feed subscriptions","version":"0.1.0","commands":[{"create_command":{"description":"List feeds","name":"feed.list"}}],"event_handlers":[],"tasks":[],"api_version":1}}"#
         );
     }
 
@@ -241,6 +273,7 @@ mod tests {
                 v: API_VERSION,
                 name: "feed".into(),
                 caps: vec!["command:feed".into()],
+                manifest: None,
             },
             Msg::Call {
                 id: 1,

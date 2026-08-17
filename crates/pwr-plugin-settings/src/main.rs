@@ -219,6 +219,7 @@ fn main() -> ExitCode {
             "host.kv.set".into(),
             "host.open_view".into(),
         ],
+        manifest: Some(manifest()),
     };
     if write_msg(&mut out, &hello).is_err() {
         return ExitCode::FAILURE;

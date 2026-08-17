@@ -55,6 +55,16 @@ pub enum PluginError {
     #[error(transparent)]
     Caps(#[from] CapsError),
 
+    /// The hello carried a manifest that failed validation, or whose name
+    /// does not match the hello's.
+    #[error("invalid manifest from plugin `{name}`: {detail}")]
+    Manifest {
+        /// Plugin name from its hello.
+        name: String,
+        /// Why the manifest was rejected.
+        detail: String,
+    },
+
     /// A call was not answered within the call timeout.
     #[error("call `{op}` to plugin `{name}` timed out after {timeout:?}")]
     CallTimeout {
