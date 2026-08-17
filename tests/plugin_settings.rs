@@ -12,6 +12,8 @@
 //!   `settings`) and re-registers it via `host.kv.set` before rendering;
 //! - `view.interact` toggles the feature and persists the model via
 //!   `host.kv.set` before answering;
+//! - a `settings:open:<plugin>` nav click issues `host.open_view`, opening
+//!   the target plugin's panel through the manager and interaction engine;
 //! - a second spawn sharing the same store renders the persisted model;
 //! - `bye` exits cleanly with status 0.
 
@@ -21,11 +23,18 @@ use std::sync::Arc;
 use std::sync::Mutex;
 
 use async_trait::async_trait;
+use poise::serenity_prelude as serenity;
 use pwr_bot::plugin::HostConfig;
+use pwr_bot::plugin::HostIo;
 use pwr_bot::plugin::HostServices;
+use pwr_bot::plugin::InteractionEngine;
 use pwr_bot::plugin::KvError;
 use pwr_bot::plugin::KvStore;
+use pwr_bot::plugin::PluginManager;
+use pwr_bot::plugin::RespawnPolicy;
 use pwr_bot::plugin::RunningPlugin;
+use pwr_bot::plugin::host::MockHostIo;
+use pwr_plugin_protocol::BUTTON_CUSTOM_ID;
 use pwr_plugin_protocol::Msg;
 use serde_json::Value;
 use serde_json::json;
@@ -52,6 +61,29 @@ fn settings_path() -> PathBuf {
     panic!(concat!(
         "pwr-plugin-settings not built; run `cargo build -p pwr-plugin-settings` ",
         "(or `cargo build --workspace`) first"
+    ));
+}
+
+/// Locates the `hello_plugin` fixture binary, mirroring
+/// `plugin_host_ops::fixture_path` (`CARGO_BIN_EXE_...` is only set for the
+/// protocol crate's own tests).
+fn fixture_path() -> PathBuf {
+    if let Some(path) = option_env!("CARGO_BIN_EXE_hello_plugin") {
+        return PathBuf::from(path);
+    }
+    let target = match option_env!("CARGO_TARGET_DIR") {
+        Some(dir) => PathBuf::from(dir),
+        None => PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target"),
+    };
+    for profile in ["debug", "release"] {
+        let candidate = target.join(profile).join("hello_plugin");
+        if candidate.exists() {
+            return candidate;
+        }
+    }
+    panic!(concat!(
+        "test-plugin fixture not built; run `cargo build -p pwr-plugin-protocol ",
+        "--bin hello_plugin` (or `cargo build --workspace`) first"
     ));
 }
 
@@ -119,6 +151,26 @@ fn host_services(kv: Option<Arc<dyn KvStore>>) -> Arc<HostServices> {
     })
 }
 
+/// Like [`host_services`], but with the io seam and the interaction engine
+/// wired in so `host.open_view` can post its placeholder and open the target
+/// plugin's session while the settings model still loads from KV.
+fn view_host_services(
+    io: Arc<dyn HostIo>,
+    kv: Arc<dyn KvStore>,
+    engine: InteractionEngine<RunningPlugin>,
+) -> Arc<HostServices> {
+    Arc::new(HostServices {
+        io: Some(io),
+        config: Some(HostConfig {
+            db_url: "postgres://test".into(),
+            data_path: PathBuf::from("/tmp/pwr-bot-test"),
+            poll_interval: std::time::Duration::from_secs(30),
+        }),
+        kv: Some(kv),
+        engine: Some(Arc::new(engine)),
+    })
+}
+
 /// Spawns the settings plugin with the given KV store (or none).
 async fn spawn_settings(kv: Option<Arc<dyn KvStore>>) -> RunningPlugin {
     RunningPlugin::spawn_with(settings_path(), Some(host_services(kv)), None, None)
@@ -156,11 +208,11 @@ fn assert_toggles(view: &Value, feeds: bool, voice: bool, welcome: bool) {
     assert_eq!(model["welcome"], json!(welcome));
 }
 
-/// Asserts the envelope's message data has one action row of three buttons
-/// with the expected custom ids.
+/// Asserts the envelope's message data has the toggle row of three buttons
+/// followed by the nav row carrying the `settings:open:<target>` button.
 fn assert_buttons(data: &Value, enabled: &[bool]) {
     let rows = data["data"]["components"].as_array().expect("components");
-    assert_eq!(rows.len(), 1, "one action row");
+    assert_eq!(rows.len(), 2, "toggle row plus nav row");
     let row = &rows[0];
     assert_eq!(row["type"], json!(1));
     let buttons = row["components"].as_array().expect("row components");
@@ -173,6 +225,13 @@ fn assert_buttons(data: &Value, enabled: &[bool]) {
         // style 3 (success) when enabled, 2 (secondary) when disabled
         assert_eq!(button["style"], json!(if *is_enabled { 3 } else { 2 }));
     }
+
+    let nav = &rows[1];
+    assert_eq!(nav["type"], json!(1));
+    let nav_buttons = nav["components"].as_array().expect("nav components");
+    assert_eq!(nav_buttons.len(), 1, "one nav button");
+    assert_eq!(nav_buttons[0]["type"], json!(2));
+    assert_eq!(nav_buttons[0]["custom_id"], json!("settings:open:hello"));
 }
 
 /// An `invoke` of `settings` answers the full envelope with the default model
@@ -347,4 +406,91 @@ async fn invoke_answers_with_defaults_when_kv_is_unavailable() {
 
     let status = plugin.stop().await.expect("graceful stop");
     assert_eq!(status.code(), Some(0), "clean exit after bye: {status}");
+}
+
+/// The `settings:open:<plugin>` nav click issues `host.open_view` end to end:
+/// the host resolves the target through the manager, posts a placeholder
+/// through the io seam, opens the target's panel as an engine session on the
+/// produced message id, and the settings plugin answers the interaction with
+/// its own envelope. A subsequent interaction on the produced message routes
+/// into the target plugin.
+#[tokio::test]
+async fn nav_click_opens_the_target_plugin_panel() {
+    let channel_id = 987_654_321_u64;
+    let produced = 123_456_789_u64;
+    let mut mock = MockHostIo::new();
+    mock.expect_send_message()
+        .with(
+            mockall::predicate::eq(channel_id),
+            mockall::predicate::eq("Loading…"),
+            mockall::predicate::eq(None::<serde_json::Value>),
+        )
+        .times(1)
+        .returning(move |_, _, _| Ok(Some(json!({ "message_id": produced }))));
+    mock.expect_edit_message()
+        .with(
+            mockall::predicate::eq(channel_id),
+            mockall::predicate::eq(produced),
+            mockall::predicate::function(|data: &serde_json::Value| {
+                data["content"] == "Hello from plugin!"
+            }),
+        )
+        .times(1)
+        .returning(move |_, _, _| Ok(Some(json!({ "message_id": produced }))));
+
+    let engine = InteractionEngine::new();
+    let kv = SharedKv::new();
+    let services = view_host_services(Arc::new(mock), kv.clone(), engine.clone());
+    let manager = Arc::new(PluginManager::new(None, RespawnPolicy::default()));
+    manager
+        .spawn("hello", fixture_path(), None, &[], &[])
+        .await
+        .expect("spawn target plugin");
+
+    let settings =
+        RunningPlugin::spawn_with(settings_path(), Some(services), Some(manager.clone()), None)
+            .await
+            .expect("spawn settings plugin");
+    settings
+        .call("invoke", Some("settings"), Some(json!({})))
+        .await
+        .expect("invoke answered");
+
+    let resp = settings
+        .call(
+            "view.interact",
+            Some("settings"),
+            Some(json!({
+                "custom_id": "settings:open:hello",
+                "channel_id": channel_id,
+            })),
+        )
+        .await
+        .expect("nav click answered");
+
+    let view = assert_envelope(&resp, 1);
+    assert_toggles(&view, false, false, false);
+    let status = settings.stop().await.expect("graceful stop");
+    assert_eq!(status.code(), Some(0), "clean exit after bye: {status}");
+
+    let message_id = serenity::MessageId::new(produced);
+    assert!(
+        engine.has_session(message_id).await,
+        "the produced message has an open session"
+    );
+    let spec = engine
+        .interact(message_id, BUTTON_CUSTOM_ID, json!({}))
+        .await
+        .expect("click routes to the target plugin");
+    assert!(
+        spec.data["content"]
+            .as_str()
+            .expect("content")
+            .contains("count=1")
+    );
+
+    manager
+        .unload("hello", &[])
+        .await
+        .expect("stop target plugin");
 }

@@ -14,6 +14,9 @@
 //! - answers `view.interact` (`settings:feeds` / `settings:voice` /
 //!   `settings:welcome`) by toggling the model via the settings update logic
 //!   and persisting it through `host.kv.set` before replying;
+//! - a `settings:open:<plugin>` nav click issues `host.open_view` for the
+//!   target plugin (the settings hub's promise: navigate to any panel),
+//!   answering the interaction with the settings envelope again;
 //! - every view reply is the full envelope `{"data", "ephemeral", "view"}`
 //!   the interaction engine renders verbatim;
 //! - treats `event` (e.g. `view.timeout`) as one-way, never answering it;
@@ -49,6 +52,14 @@ const CUSTOM_ID_FEEDS: &str = "settings:feeds";
 const CUSTOM_ID_VOICE: &str = "settings:voice";
 const CUSTOM_ID_WELCOME: &str = "settings:welcome";
 
+/// Custom id prefix for the nav button: the target plugin name follows the
+/// separator, so the hub can open any plugin's panel.
+const CUSTOM_ID_OPEN_PREFIX: &str = "settings:open:";
+
+/// The nav button's target while no second core plugin exists: the
+/// hello-style fixture the integration tests spawn.
+const NAV_TARGET_DEFAULT: &str = "hello";
+
 /// A plugin→host call in flight: the invoke id the reply must answer, and
 /// what to do with the host's resp once it arrives.
 #[derive(Debug, Clone, Copy)]
@@ -57,6 +68,8 @@ enum Pending {
     Load(u64),
     /// The `host.kv.set` issued to persist the model after a mutation.
     Save(u64),
+    /// The `host.open_view` issued to open a target plugin's panel.
+    OpenView(u64),
 }
 
 // ── settings update logic (moved from the host's `src/update/settings_main.rs`) ──
@@ -125,14 +138,19 @@ fn update(msg: SettingsMsg, model: &mut SettingsModel) {
 // ── view rendering ───────────────────────────────────────────────────────────
 
 /// Renders the settings entry view: one toggle button per feature, with the
-/// current state in the label and button style (green when enabled).
+/// current state in the label and button style (green when enabled), plus a
+/// nav row opening the default target plugin's panel.
 fn view_data(model: &SettingsModel) -> Value {
     let feeds = toggle_button(CUSTOM_ID_FEEDS, "Feeds", model.feeds_enabled);
     let voice = toggle_button(CUSTOM_ID_VOICE, "Voice", model.voice_enabled);
     let welcome = toggle_button(CUSTOM_ID_WELCOME, "Welcome", model.welcome_enabled);
+    let open = nav_button(NAV_TARGET_DEFAULT);
     components::view_data(
         "-# **Settings**",
-        [components::action_row([feeds, voice, welcome])],
+        [
+            components::action_row([feeds, voice, welcome]),
+            components::action_row([open]),
+        ],
     )
 }
 
@@ -142,6 +160,15 @@ fn toggle_button(custom_id: &str, label: &str, enabled: bool) -> Value {
     let state = if enabled { "✅" } else { "⬜" };
     let style = if enabled { 3 } else { 2 };
     components::button_with_style(custom_id, format!("{state} {label}"), style)
+}
+
+/// The nav button opening another plugin's panel: the target name rides in
+/// the custom id (`settings:open:<target>`), and the label names the target.
+fn nav_button(target: &str) -> Value {
+    components::button(
+        format!("{CUSTOM_ID_OPEN_PREFIX}{target}"),
+        format!("Open {target}"),
+    )
 }
 
 /// The full envelope a view reply carries: raw message data, visibility, and
@@ -182,6 +209,18 @@ fn kv_set_args(model: &SettingsModel) -> Value {
         "namespace": KV_NAMESPACE,
         "key": KV_MODEL_KEY,
         "value": serde_json::to_string(&model.to_value()).expect("serialize settings model"),
+    })
+}
+
+/// The `host.open_view` call args opening the target plugin's panel: the
+/// channel the source interaction came from, the target name as both the
+/// plugin and the command, and no invoke args.
+fn open_view_args(channel_id: u64, plugin: &str) -> Value {
+    json!({
+        "channel_id": channel_id,
+        "plugin": plugin,
+        "command": plugin,
+        "args": {},
     })
 }
 
@@ -251,39 +290,72 @@ fn main() -> ExitCode {
                     continue;
                 }
                 let host_op = match (op.as_str(), cmd.as_deref()) {
-                    ("invoke", Some(PLUGIN_NAME)) => Some(("host.kv.get", Pending::Load(id))),
+                    ("invoke", Some(PLUGIN_NAME)) => {
+                        Some(("host.kv.get", Pending::Load(id), kv_get_args()))
+                    }
                     ("view.interact", Some(PLUGIN_NAME)) => {
                         let custom_id = args
                             .as_ref()
                             .and_then(|a| a.get("custom_id"))
                             .and_then(Value::as_str);
-                        let msg = match custom_id {
-                            Some(CUSTOM_ID_FEEDS) => Some(SettingsMsg::ToggleFeeds),
-                            Some(CUSTOM_ID_VOICE) => Some(SettingsMsg::ToggleVoice),
-                            Some(CUSTOM_ID_WELCOME) => Some(SettingsMsg::ToggleWelcome),
-                            _ => None,
-                        };
-                        let Some(msg) = msg else {
-                            let resp = Msg::resp_err(
-                                id,
-                                WireError {
-                                    kind: "UnknownAction".into(),
-                                    msg: format!("unknown custom_id: {custom_id:?}"),
-                                },
-                            );
-                            if write_msg(&mut out, &resp).is_err() {
-                                return ExitCode::FAILURE;
-                            }
-                            continue;
-                        };
-                        let mut current = model.unwrap_or_default();
-                        update(msg, &mut current);
-                        model = Some(current);
-                        Some(("host.kv.set", Pending::Save(id)))
+                        // A nav click opens another plugin's panel: forward
+                        // the source interaction's channel and the target
+                        // parsed from the custom id to host.open_view.
+                        if let Some(custom_id) = custom_id
+                            && let Some(target) = custom_id.strip_prefix(CUSTOM_ID_OPEN_PREFIX)
+                            && !target.is_empty()
+                        {
+                            let Some(channel_id) = args
+                                .as_ref()
+                                .and_then(|a| a.get("channel_id"))
+                                .and_then(Value::as_u64)
+                            else {
+                                let resp = Msg::resp_err(
+                                    id,
+                                    WireError {
+                                        kind: "InvalidArgs".into(),
+                                        msg: "missing `channel_id` (u64)".into(),
+                                    },
+                                );
+                                if write_msg(&mut out, &resp).is_err() {
+                                    return ExitCode::FAILURE;
+                                }
+                                continue;
+                            };
+                            Some((
+                                "host.open_view",
+                                Pending::OpenView(id),
+                                open_view_args(channel_id, target),
+                            ))
+                        } else {
+                            let msg = match custom_id {
+                                Some(CUSTOM_ID_FEEDS) => Some(SettingsMsg::ToggleFeeds),
+                                Some(CUSTOM_ID_VOICE) => Some(SettingsMsg::ToggleVoice),
+                                Some(CUSTOM_ID_WELCOME) => Some(SettingsMsg::ToggleWelcome),
+                                _ => None,
+                            };
+                            let Some(msg) = msg else {
+                                let resp = Msg::resp_err(
+                                    id,
+                                    WireError {
+                                        kind: "UnknownAction".into(),
+                                        msg: format!("unknown custom_id: {custom_id:?}"),
+                                    },
+                                );
+                                if write_msg(&mut out, &resp).is_err() {
+                                    return ExitCode::FAILURE;
+                                }
+                                continue;
+                            };
+                            let mut current = model.unwrap_or_default();
+                            update(msg, &mut current);
+                            model = Some(current);
+                            Some(("host.kv.set", Pending::Save(id), kv_set_args(&current)))
+                        }
                     }
                     _ => None,
                 };
-                let Some((host_op, pending_kind)) = host_op else {
+                let Some((host_op, pending_kind, host_args)) = host_op else {
                     let cmd_repr = cmd.as_deref().unwrap_or("");
                     let resp = Msg::resp_err(
                         id,
@@ -299,10 +371,6 @@ fn main() -> ExitCode {
                 };
                 next_call_id += 1;
                 pending.insert(next_call_id, pending_kind);
-                let host_args = match host_op {
-                    "host.kv.get" => kv_get_args(),
-                    _ => kv_set_args(&model.unwrap_or_default()),
-                };
                 let host_call = Msg::Call {
                     id: next_call_id,
                     op: host_op.into(),
@@ -368,6 +436,22 @@ fn main() -> ExitCode {
                         if !ok {
                             eprintln!(
                                 "host.kv.set failed: {:?}",
+                                error.unwrap_or_else(|| WireError {
+                                    kind: "HostError".into(),
+                                    msg: "host call failed".into(),
+                                })
+                            );
+                        }
+                        let resp =
+                            Msg::resp_ok(invoke_id, Some(envelope(&model.unwrap_or_default())));
+                        if write_msg(&mut out, &resp).is_err() {
+                            return ExitCode::FAILURE;
+                        }
+                    }
+                    Pending::OpenView(invoke_id) => {
+                        if !ok {
+                            eprintln!(
+                                "host.open_view failed: {:?}",
                                 error.unwrap_or_else(|| WireError {
                                     kind: "HostError".into(),
                                     msg: "host call failed".into(),
@@ -465,6 +549,29 @@ mod tests {
         assert_eq!(buttons[0]["custom_id"], CUSTOM_ID_FEEDS);
         assert_eq!(buttons[1]["custom_id"], CUSTOM_ID_VOICE);
         assert_eq!(buttons[2]["custom_id"], CUSTOM_ID_WELCOME);
+    }
+
+    #[test]
+    fn view_data_renders_a_nav_row_after_the_toggles() {
+        let data = view_data(&SettingsModel::default());
+        let rows = data["components"].as_array().unwrap();
+        assert_eq!(rows.len(), 2, "toggle row plus nav row");
+        let nav = &rows[1]["components"];
+        assert_eq!(nav.as_array().unwrap().len(), 1);
+        assert_eq!(
+            nav[0]["custom_id"],
+            json!(format!("{CUSTOM_ID_OPEN_PREFIX}{NAV_TARGET_DEFAULT}"))
+        );
+        assert_eq!(nav[0]["style"], json!(1));
+    }
+
+    #[test]
+    fn open_view_args_carry_channel_plugin_and_command() {
+        let args = open_view_args(987_654_321, "hello");
+        assert_eq!(args["channel_id"], json!(987_654_321));
+        assert_eq!(args["plugin"], json!("hello"));
+        assert_eq!(args["command"], json!("hello"));
+        assert_eq!(args["args"], json!({}));
     }
 
     #[test]
