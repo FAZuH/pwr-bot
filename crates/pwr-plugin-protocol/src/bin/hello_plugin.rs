@@ -35,6 +35,7 @@ use pwr_plugin_protocol::CommandDef;
 use pwr_plugin_protocol::Manifest;
 use pwr_plugin_protocol::Msg;
 use pwr_plugin_protocol::PLUGIN_NAME;
+use pwr_plugin_protocol::TaskDef;
 use pwr_plugin_protocol::WireError;
 use pwr_poise_components as components;
 use serde_json::Value;
@@ -68,7 +69,11 @@ fn manifest() -> Manifest {
             create_command: json!({"name": PLUGIN_NAME, "description": "Say hello from a plugin"}),
         }],
         event_handlers: vec!["view.timeout".into()],
-        tasks: vec![],
+        tasks: vec![TaskDef {
+            name: "tick".into(),
+            interval_secs: 1,
+            command: "hello.tick".into(),
+        }],
         settings_panels: vec![],
         api_version: API_VERSION,
     }
@@ -192,6 +197,17 @@ fn main() -> ExitCode {
                             msg: "unknown custom_id".into(),
                         },
                     ),
+                    ("invoke", Some("hello.tick"), _, _) => {
+                        eprintln!("task tick invoked");
+                        let event = Msg::Event {
+                            name: "hello.tick".into(),
+                            data: None,
+                        };
+                        if write_msg(&mut out, &event).is_err() {
+                            return ExitCode::FAILURE;
+                        }
+                        Msg::resp_ok(id, None)
+                    }
                     _ => {
                         let cmd_repr = cmd.as_deref().unwrap_or("");
                         Msg::resp_err(

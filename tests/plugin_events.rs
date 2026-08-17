@@ -126,6 +126,7 @@ async fn subscribed_plugin_receives_a_fanned_out_discord_event() {
             fixture_path(),
             None,
             &[VOICE_STATE_EVENT.to_string()],
+            &[],
         )
         .await
         .expect("spawn hello_plugin");
@@ -175,6 +176,7 @@ async fn plugin_event_is_broadcast_on_the_host_event_bus() {
             fixture_path(),
             None,
             &[VOICE_STATE_EVENT.to_string()],
+            &[],
         )
         .await
         .expect("spawn hello_plugin");

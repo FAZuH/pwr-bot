@@ -133,8 +133,18 @@ impl Bot {
             .get("settings")
             .map(|entry| entry.manifest.event_handlers.as_slice())
             .unwrap_or(&[]);
+        let tasks = catalog
+            .get("settings")
+            .map(|entry| entry.manifest.tasks.as_slice())
+            .unwrap_or(&[]);
         if let Err(e) = plugin_manager
-            .spawn("settings", &config.settings_plugin_path, None, handlers)
+            .spawn(
+                "settings",
+                &config.settings_plugin_path,
+                None,
+                handlers,
+                tasks,
+            )
             .await
         {
             warn!("failed to spawn settings plugin: {e}");
