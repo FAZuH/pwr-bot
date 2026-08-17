@@ -117,15 +117,17 @@ impl RunningPlugin {
     /// any work happens. Host services are absent, so `host.*` calls answer
     /// `HostUnavailable` / `ConfigUnavailable`.
     pub async fn spawn(path: impl AsRef<Path>) -> Result<RunningPlugin, PluginError> {
-        Self::spawn_with(path, None).await
+        Self::spawn_with(path, None, None).await
     }
 
     /// Spawns the plugin binary like [`RunningPlugin::spawn`], but wires the
-    /// given host services (Discord I/O seam + config subset) into the reader,
-    /// so plugin→host `host.*` calls can be served.
+    /// given host services (Discord I/O seam + config subset) and plugin
+    /// manager (for `host.open_view` target resolution) into the reader, so
+    /// plugin→host `host.*` calls can be served.
     pub async fn spawn_with(
         path: impl AsRef<Path>,
         host: Option<Arc<HostServices>>,
+        manager: Option<Arc<PluginManager>>,
     ) -> Result<RunningPlugin, PluginError> {
         let path = path.as_ref();
         let label = path
@@ -215,6 +217,7 @@ impl RunningPlugin {
             died_tx,
             stdin.clone(),
             host,
+            manager,
         ));
         tokio::spawn(run_reaper(child.clone(), exit_tx, died_rx, name.clone()));
 
@@ -528,6 +531,7 @@ async fn run_stderr(stderr: ChildStderr, name: String) {
 /// Reads the plugin's stdout lines and dispatches them by message type. EOF
 /// or a decode error is the death signal: every in-flight call fails with a
 /// `PluginDied` wire error and the waiter task is notified to reap the child.
+/// The host services and plugin manager serve plugin→host `host.*` calls.
 async fn run_reader(
     mut reader: BufReader<ChildStdout>,
     inflight: Arc<Mutex<HashMap<u64, oneshot::Sender<Msg>>>>,
@@ -536,6 +540,7 @@ async fn run_reader(
     died: oneshot::Sender<()>,
     stdin: Arc<Mutex<Option<ChildStdin>>>,
     host: Option<Arc<HostServices>>,
+    manager: Option<Arc<PluginManager>>,
 ) {
     let mut line = String::new();
     loop {
@@ -543,7 +548,18 @@ async fn run_reader(
         match reader.read_line(&mut line).await {
             Ok(0) => break, // EOF: the plugin's stdout closed.
             Ok(_) => match serde_json::from_str::<Msg>(&line) {
-                Ok(msg) => dispatch(&msg, &inflight, &pongs, &name, &stdin, host.as_deref()).await,
+                Ok(msg) => {
+                    dispatch(
+                        &msg,
+                        &inflight,
+                        &pongs,
+                        &name,
+                        &stdin,
+                        host.as_deref(),
+                        manager.as_deref(),
+                    )
+                    .await
+                }
                 Err(e) => {
                     warn!("plugin {name} wrote an invalid protocol line, treating as death: {e}");
                     break;
@@ -570,8 +586,9 @@ async fn run_reader(
 }
 
 /// Routes one plugin message. `resp`s are matched to their waiting call by
-/// id; plugin→host `host.*` calls are served through the host services and
-/// answered on the plugin's stdin; everything else is logged.
+/// id; plugin→host `host.*` calls are served through the host services (and
+/// the plugin manager for `host.open_view` targets) and answered on the
+/// plugin's stdin; everything else is logged.
 async fn dispatch(
     msg: &Msg,
     inflight: &Arc<Mutex<HashMap<u64, oneshot::Sender<Msg>>>>,
@@ -579,6 +596,7 @@ async fn dispatch(
     name: &str,
     stdin: &Arc<Mutex<Option<ChildStdin>>>,
     host: Option<&HostServices>,
+    manager: Option<&PluginManager>,
 ) {
     match msg {
         Msg::Resp { id, .. } => {
@@ -589,7 +607,7 @@ async fn dispatch(
             }
         }
         Msg::Call { id, op, args, .. } => {
-            let resp = host::handle_host_call(*id, op, args.as_ref(), host).await;
+            let resp = host::handle_host_call(*id, op, args.as_ref(), host, manager).await;
             let mut guard = stdin.lock().await;
             let Some(mut pipe) = guard.take() else {
                 warn!("plugin {name} call `{op}` arrived after stdin closed");
@@ -701,7 +719,7 @@ mod tests {
         let inflight = Arc::new(Mutex::new(HashMap::new()));
         let pongs = Arc::new(AtomicU64::new(0));
         let stdin = Arc::new(Mutex::new(None::<ChildStdin>));
-        dispatch(&Msg::Pong, &inflight, &pongs, "hello", &stdin, None).await;
+        dispatch(&Msg::Pong, &inflight, &pongs, "hello", &stdin, None, None).await;
         assert_eq!(pongs.load(Ordering::Relaxed), 1);
     }
 }

@@ -17,6 +17,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use log::debug;
+use log::warn;
 use mockall::automock;
 use poise::serenity_prelude as serenity;
 use pwr_plugin_protocol::HostCap;
@@ -24,6 +26,11 @@ use pwr_plugin_protocol::Msg;
 use pwr_plugin_protocol::WireError;
 use serde_json::Value;
 use serde_json::json;
+
+use crate::plugin::InteractionEngine;
+use crate::plugin::InteractionError;
+use crate::plugin::PluginManager;
+use crate::plugin::RunningPlugin;
 
 /// The seam between plugin `host.*` ops and Discord. The real implementation
 /// wraps [`serenity::Http`]; tests use the mockall mock generated from this
@@ -206,7 +213,8 @@ impl From<&crate::config::Config> for HostConfig {
 }
 
 /// What the host can serve a plugin: the Discord I/O seam, the config subset,
-/// and the key-value store. All are optional so a plugin can be spawned
+/// the key-value store, and the interaction engine used to open
+/// `host.open_view` sessions. All are optional so a plugin can be spawned
 /// without any of them and still answer `UnknownOp`/`Unavailable` cleanly.
 #[derive(Clone, Default)]
 pub struct HostServices {
@@ -216,16 +224,21 @@ pub struct HostServices {
     pub config: Option<HostConfig>,
     /// Key-value store, absent when the host has no storage wired in.
     pub kv: Option<Arc<dyn KvStore>>,
+    /// Interaction engine, absent when the host cannot open target sessions.
+    pub engine: Option<Arc<InteractionEngine<RunningPlugin>>>,
 }
 
 /// Serves one plugin→host [`Msg::Call`], answering with the correlation-id
 /// matched `resp`. Every failure crosses the wire as a first-class
-/// [`WireError`]; nothing panics on unknown ops or missing services.
+/// [`WireError`]; nothing panics on unknown ops or missing services. The
+/// plugin manager resolves targets for `host.open_view`; it is optional so
+/// plain spawns without a manager still answer `HostUnavailable`.
 pub async fn handle_host_call(
     id: u64,
     op: &str,
     args: Option<&Value>,
     host: Option<&HostServices>,
+    manager: Option<&PluginManager>,
 ) -> Msg {
     let Some(cap) = HostCap::parse(op) else {
         return resp_err(
@@ -257,15 +270,34 @@ pub async fn handle_host_call(
                 })),
             )
         }
-        HostCap::Defer
-        | HostCap::Acknowledge
-        | HostCap::SendMessage
-        | HostCap::EditMessage
-        | HostCap::OpenView => {
+        HostCap::Defer | HostCap::Acknowledge | HostCap::SendMessage | HostCap::EditMessage => {
             let Some(io) = host.and_then(|host| host.io.clone()) else {
                 return resp_err(id, "HostUnavailable", "host io is not configured");
             };
             match io_call(cap, args, &*io).await {
+                Ok(data) => Msg::resp_ok(id, data),
+                Err(wire) => Msg::resp_err(id, wire),
+            }
+        }
+        HostCap::OpenView => {
+            let Some(io) = host.and_then(|host| host.io.clone()) else {
+                return resp_err(id, "HostUnavailable", "host io is not configured");
+            };
+            let Some(engine) = host.and_then(|host| host.engine.clone()) else {
+                return resp_err(
+                    id,
+                    "HostUnavailable",
+                    "host interaction engine is not configured",
+                );
+            };
+            let Some(manager) = manager else {
+                return resp_err(
+                    id,
+                    "HostUnavailable",
+                    "host plugin manager is not configured",
+                );
+            };
+            match open_view_call(args, &*io, &engine, manager).await {
                 Ok(data) => Msg::resp_ok(id, data),
                 Err(wire) => Msg::resp_err(id, wire),
             }
@@ -308,13 +340,96 @@ async fn io_call(
                 .await
                 .map_err(host_io_err)
         }
-        HostCap::OpenView => {
-            let (channel_id, data) = parse_open_view(args)?;
-            io.send_message(channel_id, "", Some(data))
-                .await
-                .map_err(host_io_err)
-        }
         _ => unreachable!("io_call only receives I/O-backed ops"),
+    }
+}
+
+/// Runs the `host.open_view` op end to end: resolves the target plugin from
+/// the manager, posts a placeholder through the io seam, renders the target's
+/// panel into an interaction-engine session on the produced message id, and
+/// edits the placeholder to the final payload. Returns the produced message
+/// id so the caller can route interactions on it.
+async fn open_view_call(
+    args: Option<&Value>,
+    io: &dyn HostIo,
+    engine: &InteractionEngine<RunningPlugin>,
+    manager: &PluginManager,
+) -> Result<Option<Value>, WireError> {
+    let (channel_id, plugin_name, command, call_args) = parse_open_view(args)?;
+    let Some(target) = manager.get(&plugin_name).await else {
+        return Err(WireError {
+            kind: "PluginNotFound".into(),
+            msg: format!("target plugin `{plugin_name}` is not running"),
+        });
+    };
+    let placeholder = io
+        .send_message(channel_id, "Loading…", None)
+        .await
+        .map_err(host_io_err)?;
+    let message_id = match placeholder {
+        Some(data) => data
+            .get("message_id")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| WireError {
+                kind: "HostIoError".into(),
+                msg: "send_message resp carried no message id".into(),
+            })?,
+        None => {
+            return Err(WireError {
+                kind: "HostIoError".into(),
+                msg: "send_message resp carried no message id".into(),
+            });
+        }
+    };
+    let spec = match engine
+        .open(
+            serenity::MessageId::new(message_id),
+            target,
+            &command,
+            call_args,
+        )
+        .await
+    {
+        Ok(spec) => spec,
+        Err(e) => {
+            // No session was opened, so there is nothing to abandon; the
+            // placeholder stays live as a stale message. Stray clicks on it
+            // hit NoSession and are dropped by the router, like any other
+            // dead session.
+            debug!("open_view left placeholder for message {message_id} with no session: {e}");
+            return Err(open_view_err(e));
+        }
+    };
+    if let Err(e) = io.edit_message(channel_id, message_id, spec.data).await {
+        // The session is live on the placeholder, but the placeholder never
+        // resolved to the final payload; abandon the session so it does not
+        // leak in the engine, mirroring the router's dead-session handling.
+        if let Err(e) = engine.abandon(serenity::MessageId::new(message_id)).await {
+            warn!("failed to abandon open_view session for message {message_id}: {e}");
+        }
+        return Err(host_io_err(e));
+    }
+    Ok(Some(json!({ "message_id": message_id })))
+}
+
+/// Maps an interaction-engine failure during [`open_view_call`] to a wire
+/// error: a plugin rejection forwards the target's own kind, engine failures
+/// get a host-side kind.
+fn open_view_err(err: InteractionError) -> WireError {
+    match err {
+        InteractionError::PluginRejected { kind, msg } => WireError { kind, msg },
+        InteractionError::Plugin(e) => WireError {
+            kind: "PluginOpError".into(),
+            msg: e.to_string(),
+        },
+        InteractionError::UnexpectedReply { detail } => WireError {
+            kind: "UnexpectedReply".into(),
+            msg: detail,
+        },
+        InteractionError::NoSession { .. } => WireError {
+            kind: "NoSession".into(),
+            msg: err.to_string(),
+        },
     }
 }
 
@@ -452,21 +567,35 @@ fn parse_edit_message(args: Option<&Value>) -> Result<(u64, u64, Value), WireErr
     Ok((channel_id, message_id, data))
 }
 
-/// Parses `host.open_view` args: a channel id and the full view payload to
-/// render as a new message.
-fn parse_open_view(args: Option<&Value>) -> Result<(u64, Value), WireError> {
+/// Parses `host.open_view` args: the channel to post into, the target plugin
+/// name, the target command (defaults to the plugin name), and the invoke
+/// args forwarded to the target (defaults to `{}`).
+fn parse_open_view(args: Option<&Value>) -> Result<(u64, String, String, Value), WireError> {
     let obj = args.and_then(Value::as_object).ok_or_else(|| {
-        invalid_args("expected args object with `channel_id` (u64) and `data` (object)")
+        invalid_args("expected args object with `channel_id` (u64) and `plugin` (string)")
     })?;
     let channel_id = obj
         .get("channel_id")
         .and_then(Value::as_u64)
         .ok_or_else(|| invalid_args("missing `channel_id` (u64)"))?;
-    let data = match obj.get("data") {
-        Some(data) if data.is_object() => data.clone(),
-        _ => return Err(invalid_args("missing `data` (object)")),
+    let plugin = obj
+        .get("plugin")
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid_args("missing `plugin` (string)"))?
+        .to_string();
+    let command = match obj.get("command") {
+        None => plugin.clone(),
+        Some(command) => command
+            .as_str()
+            .map(str::to_string)
+            .ok_or_else(|| invalid_args("`command` must be a string"))?,
     };
-    Ok((channel_id, data))
+    let call_args = match obj.get("args") {
+        None | Some(Value::Null) => json!({}),
+        Some(args) if args.is_object() => args.clone(),
+        Some(_) => return Err(invalid_args("`args` must be an object")),
+    };
+    Ok((channel_id, plugin, command, call_args))
 }
 
 fn invalid_args(msg: &str) -> WireError {
@@ -508,12 +637,14 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+    use crate::plugin::RespawnPolicy;
 
     fn services(io: Option<Arc<dyn HostIo>>, config: Option<HostConfig>) -> HostServices {
         HostServices {
             io,
             config,
             kv: None,
+            engine: None,
         }
     }
 
@@ -522,7 +653,23 @@ mod tests {
         config: Option<HostConfig>,
         kv: Option<Arc<dyn KvStore>>,
     ) -> HostServices {
-        HostServices { io, config, kv }
+        HostServices {
+            io,
+            config,
+            kv,
+            engine: None,
+        }
+    }
+
+    /// Host services with an interaction engine wired in, for `open_view`
+    /// tests that need the engine service present.
+    fn view_services(io: Option<Arc<dyn HostIo>>, config: Option<HostConfig>) -> HostServices {
+        HostServices {
+            io,
+            config,
+            kv: None,
+            engine: Some(Arc::new(InteractionEngine::new())),
+        }
     }
 
     fn sample_config() -> HostConfig {
@@ -586,6 +733,7 @@ mod tests {
             "host.defer",
             Some(&json!({ "interaction_id": 42, "token": "token-1" })),
             Some(&host),
+            None,
         )
         .await;
         assert_eq!(assert_ok(resp, 7), None);
@@ -601,6 +749,7 @@ mod tests {
             "host.defer",
             Some(&json!({ "interaction_id": 42 })),
             Some(&host),
+            None,
         )
         .await;
         assert_err(resp, 7, "InvalidArgs");
@@ -608,7 +757,7 @@ mod tests {
 
     #[tokio::test]
     async fn defer_without_services_is_host_unavailable() {
-        let resp = handle_host_call(7, "host.defer", None, None).await;
+        let resp = handle_host_call(7, "host.defer", None, None, None).await;
         assert_err(resp, 7, "HostUnavailable");
     }
 
@@ -628,6 +777,7 @@ mod tests {
             "host.acknowledge",
             Some(&json!({ "interaction_id": 42, "token": "token-1" })),
             Some(&host),
+            None,
         )
         .await;
         assert_eq!(assert_ok(resp, 7), None);
@@ -657,6 +807,7 @@ mod tests {
                 "data": { "flags": 0 },
             })),
             Some(&host),
+            None,
         )
         .await;
         assert_eq!(assert_ok(resp, 7), Some(json!({ "message_id": 1234 })));
@@ -672,6 +823,7 @@ mod tests {
             "host.send_message",
             Some(&json!({ "channel_id": 99 })),
             Some(&host),
+            None,
         )
         .await;
         assert_err(resp, 7, "InvalidArgs");
@@ -687,6 +839,7 @@ mod tests {
             "host.send_message",
             Some(&json!({ "channel_id": 99, "content": "x", "data": "oops" })),
             Some(&host),
+            None,
         )
         .await;
         assert_err(resp, 7, "InvalidArgs");
@@ -712,6 +865,7 @@ mod tests {
                 "data": { "content": "edited" },
             })),
             Some(&host),
+            None,
         )
         .await;
         assert_eq!(assert_ok(resp, 7), Some(json!({ "message_id": 1234 })));
@@ -727,6 +881,7 @@ mod tests {
             "host.edit_message",
             Some(&json!({ "channel_id": 99, "message_id": 1234 })),
             Some(&host),
+            None,
         )
         .await;
         assert_err(resp, 7, "InvalidArgs");
@@ -738,7 +893,7 @@ mod tests {
     async fn get_config_returns_the_three_fields() {
         let host = services(None, Some(sample_config()));
 
-        let resp = handle_host_call(7, "host.get_config", None, Some(&host)).await;
+        let resp = handle_host_call(7, "host.get_config", None, Some(&host), None).await;
         assert_eq!(
             assert_ok(resp, 7),
             Some(json!({
@@ -753,7 +908,7 @@ mod tests {
     async fn get_config_without_config_is_config_unavailable() {
         let host = services(Some(Arc::new(MockHostIo::new())), None);
 
-        let resp = handle_host_call(7, "host.get_config", None, Some(&host)).await;
+        let resp = handle_host_call(7, "host.get_config", None, Some(&host), None).await;
         assert_err(resp, 7, "ConfigUnavailable");
     }
 
@@ -763,7 +918,7 @@ mod tests {
     async fn unknown_host_op_is_unknown_op() {
         let host = services(None, Some(sample_config()));
 
-        let resp = handle_host_call(7, "host.frobnicate", None, Some(&host)).await;
+        let resp = handle_host_call(7, "host.frobnicate", None, Some(&host), None).await;
         let msg = assert_err(resp, 7, "UnknownOp");
         assert!(msg.contains("host.frobnicate"), "msg: {msg}");
     }
@@ -772,48 +927,58 @@ mod tests {
     async fn non_host_op_is_unknown_op() {
         let host = services(None, Some(sample_config()));
 
-        let resp = handle_host_call(7, "invoke", None, Some(&host)).await;
+        let resp = handle_host_call(7, "invoke", None, Some(&host), None).await;
         assert_err(resp, 7, "UnknownOp");
     }
 
     // ── open_view ─────────────────────────────────────────────────────────────
+    // The resolution happy path (placeholder → engine session → edit) needs a
+    // live plugin target, so it lives as an e2e in tests/plugin_host_ops.rs.
+    // These cover the argument and service wiring failure modes.
 
     #[tokio::test]
-    async fn open_view_routes_through_the_seam() {
-        let mut mock = MockHostIo::new();
-        mock.expect_send_message()
-            .with(
-                eq(99_u64),
-                eq(""),
-                eq(Some(json!({ "content": "hello", "flags": 0 }))),
-            )
-            .times(1)
-            .returning(|_, _, _| Ok(Some(json!({ "message_id": 1234 }))));
-        let host = services(Some(Arc::new(mock)), Some(sample_config()));
-
-        let resp = handle_host_call(
-            7,
-            "host.open_view",
-            Some(&json!({
-                "channel_id": 99,
-                "data": { "content": "hello", "flags": 0 },
-            })),
-            Some(&host),
-        )
-        .await;
-        assert_eq!(assert_ok(resp, 7), Some(json!({ "message_id": 1234 })));
-    }
-
-    #[tokio::test]
-    async fn open_view_missing_data_is_invalid_args() {
-        let mock = MockHostIo::new();
-        let host = services(Some(Arc::new(mock)), Some(sample_config()));
+    async fn open_view_missing_plugin_is_invalid_args() {
+        let host = view_services(Some(Arc::new(MockHostIo::new())), Some(sample_config()));
+        let manager = PluginManager::new(None, RespawnPolicy::default());
 
         let resp = handle_host_call(
             7,
             "host.open_view",
             Some(&json!({ "channel_id": 99 })),
             Some(&host),
+            Some(&manager),
+        )
+        .await;
+        assert_err(resp, 7, "InvalidArgs");
+    }
+
+    #[tokio::test]
+    async fn open_view_non_string_command_is_invalid_args() {
+        let host = view_services(Some(Arc::new(MockHostIo::new())), Some(sample_config()));
+        let manager = PluginManager::new(None, RespawnPolicy::default());
+
+        let resp = handle_host_call(
+            7,
+            "host.open_view",
+            Some(&json!({ "channel_id": 99, "plugin": "hello", "command": 7 })),
+            Some(&host),
+            Some(&manager),
+        )
+        .await;
+        assert_err(resp, 7, "InvalidArgs");
+    }
+
+    #[tokio::test]
+    async fn open_view_non_object_args_is_invalid_args() {
+        let host = view_services(Some(Arc::new(MockHostIo::new())), Some(sample_config()));
+        let manager = PluginManager::new(None, RespawnPolicy::default());
+
+        let resp = handle_host_call(
+            7,
+            "host.open_view",
+            Some(&json!({ "channel_id": 99, "plugin": "hello", "args": "nope" })),
+            Some(&host),
+            Some(&manager),
         )
         .await;
         assert_err(resp, 7, "InvalidArgs");
@@ -822,8 +987,41 @@ mod tests {
     #[tokio::test]
     async fn open_view_without_io_is_host_unavailable() {
         let host = services(None, Some(sample_config()));
-        let resp = handle_host_call(7, "host.open_view", None, Some(&host)).await;
+        let manager = PluginManager::new(None, RespawnPolicy::default());
+        let resp = handle_host_call(7, "host.open_view", None, Some(&host), Some(&manager)).await;
         assert_err(resp, 7, "HostUnavailable");
+    }
+
+    #[tokio::test]
+    async fn open_view_without_engine_is_host_unavailable() {
+        // io present so the io check passes; the engine check fires.
+        let host = services(Some(Arc::new(MockHostIo::new())), Some(sample_config()));
+        let manager = PluginManager::new(None, RespawnPolicy::default());
+        let resp = handle_host_call(7, "host.open_view", None, Some(&host), Some(&manager)).await;
+        assert_err(resp, 7, "HostUnavailable");
+    }
+
+    #[tokio::test]
+    async fn open_view_without_manager_is_host_unavailable() {
+        // io and engine present so their checks pass; the manager check fires.
+        let host = view_services(Some(Arc::new(MockHostIo::new())), Some(sample_config()));
+        let resp = handle_host_call(7, "host.open_view", None, Some(&host), None).await;
+        assert_err(resp, 7, "HostUnavailable");
+    }
+
+    #[tokio::test]
+    async fn open_view_unknown_target_is_plugin_not_found() {
+        let host = view_services(Some(Arc::new(MockHostIo::new())), Some(sample_config()));
+        let manager = PluginManager::new(None, RespawnPolicy::default());
+        let resp = handle_host_call(
+            7,
+            "host.open_view",
+            Some(&json!({ "channel_id": 99, "plugin": "nope" })),
+            Some(&host),
+            Some(&manager),
+        )
+        .await;
+        assert_err(resp, 7, "PluginNotFound");
     }
 
     // ── kv ────────────────────────────────────────────────────────────────────
@@ -842,6 +1040,7 @@ mod tests {
             "host.kv.get",
             Some(&json!({ "namespace": "settings", "key": "theme" })),
             Some(&host),
+            None,
         )
         .await;
         assert_eq!(assert_ok(resp, 7), Some(json!({ "value": "dark" })));
@@ -861,6 +1060,7 @@ mod tests {
             "host.kv.get",
             Some(&json!({ "namespace": "settings", "key": "theme" })),
             Some(&host),
+            None,
         )
         .await;
         assert_eq!(assert_ok(resp, 7), Some(json!({ "value": null })));
@@ -884,6 +1084,7 @@ mod tests {
                 "value": "light",
             })),
             Some(&host),
+            None,
         )
         .await;
         assert_eq!(assert_ok(resp, 7), None);
@@ -903,6 +1104,7 @@ mod tests {
             "host.kv.delete",
             Some(&json!({ "namespace": "settings", "key": "theme" })),
             Some(&host),
+            None,
         )
         .await;
         assert_eq!(assert_ok(resp, 7), None);
@@ -926,6 +1128,7 @@ mod tests {
             "host.kv.get",
             Some(&json!({ "namespace": "settings", "key": "theme" })),
             Some(&host),
+            None,
         )
         .await;
         assert_eq!(assert_ok(resp, 7), Some(json!({ "value": "dark" })));
@@ -935,6 +1138,7 @@ mod tests {
             "host.kv.get",
             Some(&json!({ "namespace": "other", "key": "theme" })),
             Some(&host),
+            None,
         )
         .await;
         assert_eq!(assert_ok(resp, 7), Some(json!({ "value": null })));
@@ -950,6 +1154,7 @@ mod tests {
             "host.kv.get",
             Some(&json!({ "namespace": "settings" })),
             Some(&host),
+            None,
         )
         .await;
         assert_err(resp, 7, "InvalidArgs");
@@ -965,6 +1170,7 @@ mod tests {
             "host.kv.set",
             Some(&json!({ "namespace": "settings", "key": "theme" })),
             Some(&host),
+            None,
         )
         .await;
         assert_err(resp, 7, "InvalidArgs");
@@ -979,6 +1185,7 @@ mod tests {
             "host.kv.get",
             Some(&json!({ "namespace": "settings", "key": "theme" })),
             Some(&host),
+            None,
         )
         .await;
         assert_err(resp, 7, "KvUnavailable");
@@ -999,6 +1206,7 @@ mod tests {
             "host.kv.get",
             Some(&json!({ "namespace": "settings", "key": "theme" })),
             Some(&host),
+            None,
         )
         .await;
         let msg = assert_err(resp, 7, "KvStoreError");
@@ -1022,6 +1230,7 @@ mod tests {
             "host.send_message",
             Some(&json!({ "channel_id": 99, "content": "hi" })),
             Some(&host),
+            None,
         )
         .await;
         let msg = assert_err(resp, 7, "HostIoError");

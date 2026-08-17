@@ -255,7 +255,11 @@ impl PluginManager {
                 });
             }
         }
-        let plugin = Arc::new(RunningPlugin::spawn_with(&path, self.services.clone()).await?);
+        // Spawns with the manager itself wired in so `host.open_view` on any
+        // plugin's reader can resolve siblings as targets.
+        let plugin = Arc::new(
+            RunningPlugin::spawn_with(&path, self.services.clone(), Some(Arc::clone(self))).await?,
+        );
         let stop = Arc::new(AtomicBool::new(false));
         let entry = Entry {
             plugin: plugin.clone(),

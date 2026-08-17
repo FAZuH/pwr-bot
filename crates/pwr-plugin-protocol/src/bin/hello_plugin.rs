@@ -11,8 +11,8 @@
 //! - answers `call` (`invoke`, `view.interact`) with a correlation-id-matched
 //!   `resp`, keeping a per-process click counter for [`BUTTON_CUSTOM_ID`];
 //! - issues plugin→host calls for the `host.say`/`host.defer`/`host.edit`/
-//!   `host.kvget`/`host.kvset`/`host.kvdel` invoke cmds, forwarding the host's
-//!   resp back to the original invoke;
+//!   `host.kvget`/`host.kvset`/`host.kvdel`/`host.openview` invoke cmds,
+//!   forwarding the host's resp back to the original invoke;
 //! - treats `event` (e.g. `view.timeout`) as one-way, never answering it;
 //! - answers `ping` with `pong`;
 //! - tolerates the host's hello ack silently;
@@ -104,6 +104,7 @@ fn main() -> ExitCode {
             "host.kv.get".into(),
             "host.kv.set".into(),
             "host.kv.delete".into(),
+            "host.open_view".into(),
         ],
     };
     if write_msg(&mut out, &hello).is_err() {
@@ -133,6 +134,7 @@ fn main() -> ExitCode {
                     Some("host.kvget") => Some("host.kv.get"),
                     Some("host.kvset") => Some("host.kv.set"),
                     Some("host.kvdel") => Some("host.kv.delete"),
+                    Some("host.openview") => Some("host.open_view"),
                     _ => None,
                 };
                 if op == "invoke"
