@@ -25,7 +25,6 @@ pub use caps::validate_caps;
 pub use manifest::CommandDef;
 pub use manifest::Manifest;
 pub use manifest::ManifestError;
-pub use manifest::PanelDef;
 pub use manifest::TaskDef;
 pub use msg::API_VERSION;
 pub use msg::BUTTON_CUSTOM_ID;

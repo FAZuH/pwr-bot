@@ -1079,7 +1079,6 @@ mod tests {
                 .collect(),
             event_handlers: Vec::new(),
             tasks: Vec::new(),
-            settings_panels: Vec::new(),
             api_version: API_VERSION,
         }
     }

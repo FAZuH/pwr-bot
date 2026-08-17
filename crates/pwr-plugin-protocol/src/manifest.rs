@@ -1,9 +1,9 @@
 //! Plugin manifest: the declaration a plugin carries at handshake.
 //!
 //! The manifest is not a wire envelope message; it is the plugin's static
-//! declaration of what it offers (commands, event subscriptions, tasks,
-//! settings panels) and which protocol version it speaks. The host validates
-//! it when the plugin announces itself and rejects the handshake on failure.
+//! declaration of what it offers (commands, event subscriptions, tasks) and
+//! which protocol version it speaks. The host validates it when the plugin
+//! announces itself and rejects the handshake on failure.
 
 use serde::Deserialize;
 use serde::Serialize;
@@ -29,8 +29,6 @@ pub struct Manifest {
     pub event_handlers: Vec<String>,
     /// Recurring tasks the host should drive.
     pub tasks: Vec<TaskDef>,
-    /// Settings panels the plugin exposes to server admins.
-    pub settings_panels: Vec<PanelDef>,
     /// Protocol version this manifest is written for; validated against
     /// [`API_VERSION`].
     pub api_version: u32,
@@ -73,15 +71,6 @@ pub struct TaskDef {
     pub interval_secs: u64,
     /// Command to invoke, e.g. `feed.prune`.
     pub command: String,
-}
-
-/// A settings panel the plugin exposes to server admins.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PanelDef {
-    /// Panel id, e.g. `feed`.
-    pub id: String,
-    /// Human-readable label shown in the settings list.
-    pub label: String,
 }
 
 /// Why a [`Manifest`] failed validation.
@@ -154,10 +143,6 @@ mod tests {
                 interval_secs: 3600,
                 command: "feed.prune".into(),
             }],
-            settings_panels: vec![PanelDef {
-                id: "feed".into(),
-                label: "Feeds".into(),
-            }],
             api_version: API_VERSION,
         }
     }
@@ -168,7 +153,7 @@ mod tests {
     fn manifest_serializes_to_declared_shape() {
         assert_eq!(
             serde_json::to_string(&sample_manifest()).unwrap(),
-            r#"{"name":"feed","description":"Feed subscriptions","version":"0.1.0","commands":[{"create_command":{"description":"List feeds","name":"feed.list","options":[]}}],"event_handlers":["voice_state"],"tasks":[{"name":"prune","interval_secs":3600,"command":"feed.prune"}],"settings_panels":[{"id":"feed","label":"Feeds"}],"api_version":1}"#
+            r#"{"name":"feed","description":"Feed subscriptions","version":"0.1.0","commands":[{"create_command":{"description":"List feeds","name":"feed.list","options":[]}}],"event_handlers":["voice_state"],"tasks":[{"name":"prune","interval_secs":3600,"command":"feed.prune"}],"api_version":1}"#
         );
     }
 
@@ -181,7 +166,7 @@ mod tests {
 
     #[test]
     fn missing_required_field_fails_to_deserialize() {
-        let json = r#"{"name":"feed","description":"d","version":"0.1.0","commands":[],"event_handlers":[],"tasks":[],"api_version":1}"#;
+        let json = r#"{"name":"feed","description":"d","version":"0.1.0","commands":[],"event_handlers":[],"api_version":1}"#;
         assert!(serde_json::from_str::<Manifest>(json).is_err());
     }
 

@@ -167,7 +167,6 @@ fn manifest() -> Manifest {
         }],
         event_handlers: vec!["view.timeout".into()],
         tasks: vec![],
-        settings_panels: vec![],
         api_version: API_VERSION,
     }
 }

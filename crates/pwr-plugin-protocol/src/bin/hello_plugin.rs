@@ -74,7 +74,6 @@ fn manifest() -> Manifest {
             interval_secs: 1,
             command: "hello.tick".into(),
         }],
-        settings_panels: vec![],
         api_version: API_VERSION,
     }
 }
