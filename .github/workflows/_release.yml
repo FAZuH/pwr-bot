@@ -23,6 +23,11 @@ on:
         required: false
         type: boolean
         default: false
+      run-build:
+        description: 'Run the build stage (build.yml) even when build-binaries is false'
+        required: false
+        type: boolean
+        default: false
     outputs:
       tag:
         description: 'The release tag that was created'
@@ -95,11 +100,11 @@ jobs:
   build:
     name: Build Binaries
     needs: [changelog, patch-version]
-    if: ${{ needs.changelog.outputs.skipped != 'true' && inputs.build-binaries }}
+    if: ${{ needs.changelog.outputs.skipped != 'true' && (inputs.build-binaries || inputs.run-build) }}
     uses: ./.github/workflows/build.yml
     with:
       cargo-build-args: '--release --all-features --all-targets'
-      upload-binary: true
+      upload-binary: ${{ inputs.build-binaries }}
       release: true
       require-patched-cargo: true
 
