@@ -1977,6 +1977,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
+name = "hello"
+version = "0.1.0"
+dependencies = [
+ "pwr-plugin-protocol",
+ "pwr-poise-components",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "hermit-abi"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3674,20 +3684,10 @@ dependencies = [
 name = "pwr-plugin-protocol"
 version = "0.1.0"
 dependencies = [
- "pwr-poise-components",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
-]
-
-[[package]]
-name = "pwr-plugin-settings"
-version = "0.1.0"
-dependencies = [
- "pwr-plugin-protocol",
- "pwr-poise-components",
- "serde_json",
 ]
 
 [[package]]
@@ -4450,6 +4450,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.116",
+]
+
+[[package]]
+name = "settings"
+version = "0.1.0"
+dependencies = [
+ "pwr-plugin-protocol",
+ "pwr-poise-components",
+ "serde_json",
 ]
 
 [[package]]

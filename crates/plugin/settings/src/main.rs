@@ -2,7 +2,7 @@
 //! proof of the plugin infrastructure.
 //!
 //! Speaks the pwr-bot plugin wire protocol over JSON-Lines stdio, like the
-//! `hello_plugin` fixture: one compact JSON object per line on stdout,
+//! `hello` plugin: one compact JSON object per line on stdout,
 //! terminated by a single `\n` and flushed after every write; stderr is the
 //! free logging channel.
 //!

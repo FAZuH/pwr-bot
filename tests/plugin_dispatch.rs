@@ -3,7 +3,7 @@
 //! `invoke` call, so these tests assert that the args a dispatch would
 //! produce actually reach the plugin over the wire. Pure stdio — no database.
 //!
-//! The canonical `hello_plugin` renders a static view and cannot echo args,
+//! The canonical `hello` plugin renders a static view and cannot echo args,
 //! and the protocol crate is frozen, so this fixture lives in the host crate
 //! (`src/bin/arg_echo_plugin.rs`) and is built with the test binary.
 

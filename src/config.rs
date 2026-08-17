@@ -89,8 +89,8 @@ impl Config {
                 std::env::current_exe()
                     .ok()
                     .and_then(|exe| exe.parent().map(|p| p.to_path_buf()))
-                    .map(|dir| dir.join("pwr-plugin-settings"))
-                    .unwrap_or_else(|| self.data_path.join("pwr-plugin-settings"))
+                    .map(|dir| dir.join("settings"))
+                    .unwrap_or_else(|| self.data_path.join("settings"))
             });
 
         self.features = Features {

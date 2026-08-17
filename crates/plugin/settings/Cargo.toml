@@ -1,5 +1,5 @@
 [package]
-name = "pwr-plugin-settings"
+name = "settings"
 version = "0.1.0"
 edition = "2024"
 authors = ["FAZuH <mail@fazuh.com>"]
@@ -8,6 +8,6 @@ license = "MIT"
 repository = "https://github.com/FAZuH/pwr-bot"
 
 [dependencies]
-pwr-plugin-protocol = { path = "../pwr-plugin-protocol" }
-pwr-poise-components = { path = "../pwr-poise-components" }
+pwr-plugin-protocol = { path = "../../pwr-plugin-protocol" }
+pwr-poise-components = { path = "../../pwr-poise-components" }
 serde_json = "1.0.149"

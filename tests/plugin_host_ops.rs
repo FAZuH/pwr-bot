@@ -28,8 +28,8 @@ use pwr_plugin_protocol::Msg;
 use pwr_plugin_protocol::PLUGIN_NAME;
 use serde_json::json;
 
-/// Locates the `hello_plugin` fixture binary. `CARGO_BIN_EXE_hello_plugin`
-/// is set by cargo for the protocol crate's own tests; for host-crate tests
+/// Locates the `hello` fixture binary. `CARGO_BIN_EXE_hello`
+/// is set by cargo for the hello crate's own tests; for host-crate tests
 /// the workspace build places the binary under `target/{profile}`. The test
 /// binary does not expose the active profile, so probe `debug` and `release`
 /// instead of guessing: CI (`cargo build --all-targets`) and local
@@ -37,7 +37,7 @@ use serde_json::json;
 /// A missing binary panics with a build hint rather than a confusing spawn
 /// error.
 fn fixture_path() -> PathBuf {
-    if let Some(path) = option_env!("CARGO_BIN_EXE_hello_plugin") {
+    if let Some(path) = option_env!("CARGO_BIN_EXE_hello") {
         return PathBuf::from(path);
     }
     let target = match option_env!("CARGO_TARGET_DIR") {
@@ -45,14 +45,14 @@ fn fixture_path() -> PathBuf {
         None => PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target"),
     };
     for profile in ["debug", "release"] {
-        let candidate = target.join(profile).join("hello_plugin");
+        let candidate = target.join(profile).join("hello");
         if candidate.exists() {
             return candidate;
         }
     }
     panic!(concat!(
-        "test-plugin fixture not built; run `cargo build -p pwr-plugin-protocol ",
-        "--bin hello_plugin` (or `cargo build --workspace`) first"
+        "test-plugin fixture not built; run `cargo build -p hello` ",
+        "(or `cargo build --workspace`) first"
     ));
 }
 

@@ -23,11 +23,11 @@ use pwr_bot::plugin::install;
 use tempfile::tempdir;
 use wreq::Client;
 
-/// Locates the `hello_plugin` fixture binary, mirroring the probe in
-/// `plugin_manager_lifecycle.rs`: `CARGO_BIN_EXE_hello_plugin` when cargo
+/// Locates the `hello` fixture binary, mirroring the probe in
+/// `plugin_manager_lifecycle.rs`: `CARGO_BIN_EXE_hello` when cargo
 /// sets it, otherwise `target/{debug,release}`.
 fn fixture_path() -> PathBuf {
-    if let Some(path) = option_env!("CARGO_BIN_EXE_hello_plugin") {
+    if let Some(path) = option_env!("CARGO_BIN_EXE_hello") {
         return PathBuf::from(path);
     }
     let target = match option_env!("CARGO_TARGET_DIR") {
@@ -35,14 +35,14 @@ fn fixture_path() -> PathBuf {
         None => PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target"),
     };
     for profile in ["debug", "release"] {
-        let candidate = target.join(profile).join("hello_plugin");
+        let candidate = target.join(profile).join("hello");
         if candidate.exists() {
             return candidate;
         }
     }
     panic!(concat!(
-        "test-plugin fixture not built; run `cargo build -p pwr-plugin-protocol ",
-        "--bin hello_plugin` (or `cargo build --workspace`) first"
+        "test-plugin fixture not built; run `cargo build -p hello` ",
+        "(or `cargo build --workspace`) first"
     ));
 }
 

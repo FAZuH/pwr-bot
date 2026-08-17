@@ -15,9 +15,8 @@
 //!
 //! Plugin authoring: wrap `main` in `std::panic::catch_unwind`, print the
 //! panic payload to stderr, and exit nonzero; stdout carries protocol lines
-//! only, stderr is the free logging channel. See the `hello_plugin` fixture
-//! (`crates/pwr-plugin-protocol/src/bin/hello_plugin.rs`) for the reference
-//! implementation.
+//! only, stderr is the free logging channel. See the `hello` plugin
+//! (`crates/plugin/hello/src/main.rs`) for the reference implementation.
 
 pub mod caps;
 pub mod manifest;

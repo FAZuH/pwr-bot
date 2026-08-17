@@ -3,7 +3,7 @@
 //! `data.content`, so a test can assert the parsed arguments a dispatch
 //! produced actually reach a plugin over the wire.
 //!
-//! JSON-Lines over stdio like the canonical `hello_plugin`: one compact JSON
+//! JSON-Lines over stdio like the canonical `hello` plugin: one compact JSON
 //! object per line, every stdout line flushed before the next read (piped
 //! stdout is block-buffered; a missed flush deadlocks the host). The
 //! canonical fixture renders a static view, so it cannot serve this

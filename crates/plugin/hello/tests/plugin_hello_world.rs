@@ -1,6 +1,6 @@
 // Host-side harness: proves the full spawn -> hello -> invoke -> interact ->
 // error -> bye round trip against the typed fixture (see
-// `src/bin/hello_plugin.rs`). Sent messages are typed [`Msg`] values, not
+// `src/main.rs`). Sent messages are typed [`Msg`] values, not
 // hand-written JSON strings: the fixture must be driven by the typed envelope.
 use std::time::Duration;
 
@@ -40,7 +40,7 @@ async fn send_line(stdin: &mut ChildStdin, msg: &Msg) {
 #[tokio::test]
 async fn hello_plugin_round_trip() {
     let result = tokio::time::timeout(Duration::from_secs(15), async {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_hello_plugin"))
+        let mut child = Command::new(env!("CARGO_BIN_EXE_hello"))
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())

@@ -28,7 +28,7 @@
 //! treats it as a crash and applies respawn policy. A `call` with
 //! `cmd: "panic"` triggers the deliberate panic path.
 //!
-//! Drive it from integration tests via `CARGO_BIN_EXE_hello_plugin` (see
+//! Drive it from integration tests via `CARGO_BIN_EXE_hello` (see
 //! `tests/plugin_hello_world.rs`).
 
 use std::io::BufRead;

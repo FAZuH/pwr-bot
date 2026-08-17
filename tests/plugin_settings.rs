@@ -43,7 +43,7 @@ use serde_json::json;
 const KV_NAMESPACE: &str = "settings";
 const KV_MODEL_KEY: &str = "model";
 
-/// Locates the `pwr-plugin-settings` binary. `CARGO_BIN_EXE_...` is only set
+/// Locates the `settings` binary. `CARGO_BIN_EXE_...` is only set
 /// for the crate's own tests; from the host crate the workspace build places
 /// the binary under `target/{profile}`. Probe `debug` and `release` like
 /// `plugin_host_ops::fixture_path`.
@@ -53,22 +53,22 @@ fn settings_path() -> PathBuf {
         None => PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target"),
     };
     for profile in ["debug", "release"] {
-        let candidate = target.join(profile).join("pwr-plugin-settings");
+        let candidate = target.join(profile).join("settings");
         if candidate.exists() {
             return candidate;
         }
     }
     panic!(concat!(
-        "pwr-plugin-settings not built; run `cargo build -p pwr-plugin-settings` ",
+        "settings not built; run `cargo build -p settings` ",
         "(or `cargo build --workspace`) first"
     ));
 }
 
-/// Locates the `hello_plugin` fixture binary, mirroring
+/// Locates the `hello` fixture binary, mirroring
 /// `plugin_host_ops::fixture_path` (`CARGO_BIN_EXE_...` is only set for the
-/// protocol crate's own tests).
+/// hello crate's own tests).
 fn fixture_path() -> PathBuf {
-    if let Some(path) = option_env!("CARGO_BIN_EXE_hello_plugin") {
+    if let Some(path) = option_env!("CARGO_BIN_EXE_hello") {
         return PathBuf::from(path);
     }
     let target = match option_env!("CARGO_TARGET_DIR") {
@@ -76,14 +76,14 @@ fn fixture_path() -> PathBuf {
         None => PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target"),
     };
     for profile in ["debug", "release"] {
-        let candidate = target.join(profile).join("hello_plugin");
+        let candidate = target.join(profile).join("hello");
         if candidate.exists() {
             return candidate;
         }
     }
     panic!(concat!(
-        "test-plugin fixture not built; run `cargo build -p pwr-plugin-protocol ",
-        "--bin hello_plugin` (or `cargo build --workspace`) first"
+        "test-plugin fixture not built; run `cargo build -p hello` ",
+        "(or `cargo build --workspace`) first"
     ));
 }
 
