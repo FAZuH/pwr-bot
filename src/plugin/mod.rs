@@ -20,8 +20,9 @@
 //! unload, crash respawn, and binary swap over a map of [`RunningPlugin`]
 //! handles. External install from a pinned catalog lives in [`install`];
 //! KV and per-guild sets are later work (#112). Dropping a
-//! [`RunningPlugin`] kills its subprocess via the `Drop` impl, so unloading
-//! a plugin is drop-and-forget; graceful unload is [`RunningPlugin::stop`].
+//! [`RunningPlugin`] SIGKILLs its whole process group via the `Drop` impl,
+//! so unloading a plugin is drop-and-forget; graceful unload is
+//! [`RunningPlugin::stop`].
 
 pub mod command;
 pub mod error;
@@ -92,7 +93,8 @@ const HELLO_TIMEOUT: Duration = Duration::from_secs(5);
 const CALL_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// How long [`RunningPlugin::stop`] waits for the plugin to exit after `bye`
-/// before killing it.
+/// before escalating: SIGTERM to the process group, another [`STOP_TIMEOUT`]
+/// grace, then SIGKILL to the group.
 const STOP_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// A running plugin subprocess: owns the stdio pipes, the reader/waiter
@@ -109,6 +111,12 @@ pub struct RunningPlugin {
     ids: Mutex<CallIdSeq>,
     /// The child handle; taken by the waiter task once the plugin dies.
     child: Arc<Mutex<Option<Child>>>,
+    /// The plugin's process group id: its own pid, since plugins spawn with
+    /// `process_group(0)`. Stored separately from the child handle so
+    /// teardown can signal the whole group even after the reaper took the
+    /// child (e.g. the leader died but a descendant ignored SIGTERM).
+    #[cfg(unix)]
+    pgid: u32,
     /// The plugin's exit status, published by the waiter task.
     exit: watch::Receiver<Option<ExitStatus>>,
     /// Total `pong`s received since spawn, incremented by the reader task.
@@ -158,6 +166,8 @@ impl RunningPlugin {
             path: path.to_path_buf(),
             source,
         })?;
+        #[cfg(unix)]
+        let pgid = child.id().expect("spawned child has a pid");
 
         let mut stdin = child.stdin.take().expect("piped stdin");
         let stdout = child.stdout.take().expect("piped stdout");
@@ -237,6 +247,8 @@ impl RunningPlugin {
             inflight,
             ids: Mutex::new(CallIdSeq::new()),
             child,
+            #[cfg(unix)]
+            pgid,
             exit: exit_rx,
             pongs,
         })
@@ -342,17 +354,20 @@ impl RunningPlugin {
     }
 
     /// Gracefully stops the plugin: sends `bye`, closes stdin (EOF), and
-    /// waits up to [`STOP_TIMEOUT`] for a clean exit, killing the child if it
-    /// does not comply. Returns the final exit status.
+    /// waits up to [`STOP_TIMEOUT`] for a clean exit. If the plugin does not
+    /// comply, SIGTERM is sent to the whole process group — the plugin is
+    /// the group leader (`process_group(0)` at spawn), so any descendants
+    /// share the group and the one signal reaches them all. After another
+    /// [`STOP_TIMEOUT`] grace, SIGKILL finishes the group. Returns the final
+    /// exit status.
     ///
     /// `stop()` always returns within a bounded time. A plugin that neither
-    /// exits cleanly nor dies from the kill within the grace period yields
-    /// [`PluginError::StopTimeout`] instead of a hang. The reaper task owns
-    /// the final `wait()` on the child; `stop()` only waits on the published
-    /// exit status. If the reaper has already taken the child (stdout closed
-    /// while the plugin stayed alive), there is nothing left to kill here —
-    /// the reaper is already waiting on it — and `stop()` still returns after
-    /// the grace period.
+    /// exits cleanly nor dies from the group signals within the grace
+    /// periods yields [`PluginError::StopTimeout`] instead of a hang. The
+    /// reaper task owns the final `wait()` on the child; `stop()` only waits
+    /// on the published exit status. The group signals use the pgid stored
+    /// at spawn, so they reach the group even after the reaper took the
+    /// child (the leader died while a descendant outlived it).
     pub async fn stop(&self) -> Result<ExitStatus, PluginError> {
         {
             let mut stdin = self.stdin.lock().await;
@@ -371,27 +386,34 @@ impl RunningPlugin {
             Ok(status) => status,
             Err(_) => {
                 warn!(
-                    "plugin {} did not exit within {STOP_TIMEOUT:?}, killing",
+                    "plugin {} did not exit within {STOP_TIMEOUT:?}, sending SIGTERM to the group",
                     self.name
                 );
-                // The reaper may already own the child (stdout closed while
-                // the plugin stayed alive); then it owns the final wait() and
-                // there is nothing left to kill here.
-                if let Some(child) = self.child.lock().await.as_mut() {
-                    child.start_kill().map_err(|source| PluginError::Io {
-                        name: self.name.clone(),
-                        source,
-                    })?;
+                // SIGTERM the whole group; the reaper publishes the exit
+                // status once the group leader dies.
+                #[cfg(unix)]
+                kill_group(self.pgid, libc::SIGTERM);
+                match tokio::time::timeout(STOP_TIMEOUT, self.wait_for_exit()).await {
+                    Ok(status) => status,
+                    Err(_) => {
+                        warn!(
+                            "plugin {} survived SIGTERM for {STOP_TIMEOUT:?}; SIGKILL to the group",
+                            self.name
+                        );
+                        #[cfg(unix)]
+                        kill_group(self.pgid, libc::SIGKILL);
+                        // Bounded final wait: if the kill (or the reaper)
+                        // has not published an exit status in time, report
+                        // it instead of hanging on a child the reaper may
+                        // never reap.
+                        tokio::time::timeout(STOP_TIMEOUT, self.wait_for_exit())
+                            .await
+                            .map_err(|_| PluginError::StopTimeout {
+                                name: self.name.clone(),
+                                timeout: STOP_TIMEOUT,
+                            })?
+                    }
                 }
-                // Bounded second wait: if the kill (or the reaper) has not
-                // published an exit status in time, report it instead of
-                // hanging on a child the reaper may never reap.
-                tokio::time::timeout(STOP_TIMEOUT, self.wait_for_exit())
-                    .await
-                    .map_err(|_| PluginError::StopTimeout {
-                        name: self.name.clone(),
-                        timeout: STOP_TIMEOUT,
-                    })?
             }
         }
     }
@@ -434,11 +456,14 @@ impl RunningPlugin {
 }
 
 impl Drop for RunningPlugin {
-    /// Kills the subprocess on drop so a discarded handle never orphans it.
-    /// The child is wrapped in an `Arc<Mutex<Option<Child>>>` shared with the
-    /// reaper task, so tokio's `kill_on_drop` cannot fire once that `Arc`
-    /// stays alive — the plugin would keep running with nobody to stop it.
-    /// The reaper reaps the corpse; graceful unload is
+    /// Kills the process group on drop so a discarded handle never orphans
+    /// it or its descendants. The child is wrapped in an
+    /// `Arc<Mutex<Option<Child>>>` shared with the reaper task, so tokio's
+    /// `kill_on_drop` cannot fire once that `Arc` stays alive — the plugin
+    /// would keep running with nobody to stop it. The group SIGKILL reaches
+    /// the whole group (the plugin is the leader, `process_group(0)` at
+    /// spawn); `start_kill` covers the child itself in case the group is
+    /// already gone. The reaper reaps the corpse; graceful unload is
     /// [`RunningPlugin::stop`]. Errors are ignored: the process may already
     /// be gone, or the reaper may be reaping it concurrently.
     fn drop(&mut self) {
@@ -446,6 +471,8 @@ impl Drop for RunningPlugin {
             return;
         };
         if let Some(mut child) = guard.take() {
+            #[cfg(unix)]
+            kill_group(self.pgid, libc::SIGKILL);
             child.start_kill().ok();
         }
     }
@@ -516,9 +543,28 @@ async fn read_hello(
 /// Kills and reaps the child after a rejected handshake, then hands back the
 /// rejection reason.
 async fn reject(mut child: Child, reason: PluginError) -> PluginError {
+    #[cfg(unix)]
+    if let Some(pgid) = child.id() {
+        kill_group(pgid, libc::SIGKILL);
+    }
     child.start_kill().ok();
     let _ = child.wait().await;
     reason
+}
+
+/// Sends `sig` to the process group `pgid`. Plugins spawn with
+/// `process_group(0)`, so the child's pid is its group id and every
+/// descendant shares the group. Errors are ignored: the group may already
+/// be gone (ESRCH), or the signal may be denied (EPERM).
+#[cfg(unix)]
+fn kill_group(pgid: u32, sig: libc::c_int) {
+    let group = -(pgid as libc::pid_t);
+    // SAFETY: `group` is a process group this host spawned (the plugin's own
+    // pid as its leader) and `sig` is a standard teardown signal; the call
+    // has no pointer or memory-safety preconditions.
+    unsafe {
+        libc::kill(group, sig);
+    }
 }
 
 /// Forwards the plugin's stderr (its free logging channel) into the host's

@@ -3646,6 +3646,7 @@ dependencies = [
  "html2md",
  "httpmock",
  "image 0.25.9",
+ "libc",
  "log",
  "minijinja",
  "mockall",

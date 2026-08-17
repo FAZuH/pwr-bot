@@ -6,6 +6,10 @@
 //! so each process owns its state without interference; this binary asserts
 //! on behaviour (not logs) and installs no recording logger.
 
+#[cfg(unix)]
+use std::os::unix::process::ExitStatusExt;
+#[cfg(unix)]
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -54,6 +58,52 @@ fn fixture_script(name: &str) -> PathBuf {
         .join("tests")
         .join("fixtures")
         .join(name)
+}
+
+/// Base path for the process-group fixtures' pid/marker files. The fixtures
+/// derive the same path from their parent's pid (`$PPID`, the test binary)
+/// plus a fixture tag, so each test owns a distinct, stable path.
+#[cfg(unix)]
+fn group_fixture_base(tag: &str) -> PathBuf {
+    PathBuf::from(format!(
+        "/tmp/pwr_bot_plugin_group_{}_{}",
+        std::process::id(),
+        tag
+    ))
+}
+
+/// Reads the child pid the process-group fixtures write, polling until it
+/// appears.
+#[cfg(unix)]
+async fn wait_for_group_child(base: &Path) -> i32 {
+    let pid_path = base.with_extension("pid");
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        if let Ok(raw) = std::fs::read_to_string(&pid_path)
+            && let Ok(pid) = raw.trim().parse()
+        {
+            return pid;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "fixture never wrote the child pid to {}",
+            pid_path.display()
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+/// Whether a process with `pid` exists, via `kill(pid, 0)`: a zero return
+/// means it exists, EPERM means it exists (just not ours to signal), and
+/// ESRCH means it is gone.
+#[cfg(unix)]
+fn process_alive(pid: i32) -> bool {
+    // SAFETY: `kill(pid, 0)` is a pure existence probe — signal 0 has no
+    // effect on a live process — and `pid` came from the fixture.
+    if unsafe { libc::kill(pid, 0) } == 0 {
+        return true;
+    }
+    std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
 }
 
 /// Polls an async condition until it is true or `timeout` elapses.
@@ -535,4 +585,95 @@ async fn swap_with_a_missing_binary_leaves_the_plugin_running() {
     );
 
     manager.unload("hello", &[]).await.expect("teardown");
+}
+
+// ── process-group teardown: SIGTERM reaches the whole group on unload ──────
+
+#[cfg(unix)]
+#[tokio::test]
+async fn unload_signals_the_whole_process_group_with_sigterm() {
+    let manager = Arc::new(PluginManager::new(None, test_policy()));
+    let base = group_fixture_base("term");
+    let pid_path = base.with_extension("pid");
+    let marker_path = base.with_extension("marker");
+    let _ = std::fs::remove_file(&pid_path);
+    let _ = std::fs::remove_file(&marker_path);
+
+    manager
+        .spawn("group", fixture_script("group_term_plugin.sh"), None)
+        .await
+        .expect("spawn group-term fixture");
+    let child_pid = wait_for_group_child(&base).await;
+    assert!(process_alive(child_pid), "fixture child must be running");
+
+    // The plugin ignores bye/EOF, so unload must SIGTERM the whole group:
+    // the plugin dies on SIGTERM (no trap), and the child's marker proves
+    // the same group signal reached it.
+    let status = manager.unload("group", &[]).await.expect("unload");
+    assert_eq!(
+        status.code(),
+        None,
+        "signal death has no exit code: {status}"
+    );
+    #[cfg(unix)]
+    assert_eq!(
+        status.signal(),
+        Some(15),
+        "plugin must die from SIGTERM: {status}"
+    );
+    let marked = wait_until_async(Duration::from_secs(5), || {
+        let marker_path = marker_path.clone();
+        async move {
+            std::fs::read_to_string(&marker_path)
+                .ok()
+                .is_some_and(|content| content.contains("term"))
+        }
+    })
+    .await;
+    assert!(marked, "group child must receive SIGTERM on unload");
+    let dead = wait_until_async(Duration::from_secs(5), || async move {
+        !process_alive(child_pid)
+    })
+    .await;
+    assert!(dead, "group child must be dead after unload");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn unload_sigkills_the_group_when_sigterm_is_ignored() {
+    let manager = Arc::new(PluginManager::new(None, test_policy()));
+    let base = group_fixture_base("kill");
+    let pid_path = base.with_extension("pid");
+    let _ = std::fs::remove_file(&pid_path);
+
+    manager
+        .spawn("group", fixture_script("group_kill_plugin.sh"), None)
+        .await
+        .expect("spawn group-kill fixture");
+    let child_pid = wait_for_group_child(&base).await;
+    assert!(process_alive(child_pid), "fixture child must be running");
+
+    // The plugin and its child ignore SIGTERM, so unload must escalate to
+    // the group SIGKILL after the SIGTERM grace period. The child's death
+    // can only come from SIGKILL, which cannot be trapped.
+    let status = manager.unload("group", &[]).await.expect("unload");
+    assert_eq!(
+        status.code(),
+        None,
+        "signal death has no exit code: {status}"
+    );
+    #[cfg(unix)]
+    assert_eq!(
+        status.signal(),
+        Some(9),
+        "plugin must die from SIGKILL: {status}"
+    );
+    let dead = wait_until_async(Duration::from_secs(5), || async move {
+        !process_alive(child_pid)
+    })
+    .await;
+    assert!(
+        dead,
+        "group child must be SIGKILLed after the SIGTERM grace"
+    );
 }

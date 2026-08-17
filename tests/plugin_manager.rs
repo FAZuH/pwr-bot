@@ -232,8 +232,9 @@ async fn unresponsive_plugin_is_killed_on_stop() {
         .await
         .expect("spawn stubborn fixture");
 
-    // The fixture ignores bye and stdin EOF; stop() must kill it after the
-    // grace period, and the status must reflect a signal death, not exit 0.
+    // The fixture ignores bye and stdin EOF; stop() must SIGTERM it after
+    // the grace period, and the status must reflect a signal death, not
+    // exit 0.
     let status = plugin.stop().await.expect("stop kills the plugin");
     assert_eq!(
         status.code(),
@@ -241,7 +242,7 @@ async fn unresponsive_plugin_is_killed_on_stop() {
         "signal death has no exit code: {status}"
     );
     #[cfg(unix)]
-    assert_eq!(status.signal(), Some(9), "killed with SIGKILL: {status}");
+    assert_eq!(status.signal(), Some(15), "killed with SIGTERM: {status}");
 }
 
 #[tokio::test]
