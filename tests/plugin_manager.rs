@@ -286,6 +286,53 @@ async fn in_flight_call_fails_with_plugin_died_on_crash() {
     assert_eq!(status.signal(), Some(9), "killed with SIGKILL: {status}");
 }
 
+#[tokio::test]
+async fn plugin_panic_exits_nonzero_with_stderr_diagnostics() {
+    init_recording_logger();
+    if let Some(logs) = LOGS.get() {
+        logs.lock().unwrap().clear();
+    }
+
+    let plugin = RunningPlugin::spawn(fixture_path())
+        .await
+        .expect("spawn hello_plugin");
+
+    // The panic fires before any resp is written, so the reader task fails
+    // the in-flight call with the PluginDied wire error (same path as a
+    // crash).
+    let resp = plugin
+        .call("invoke", Some("panic"), None)
+        .await
+        .expect("call while the plugin panics");
+    let Msg::Resp { ok, error, .. } = resp else {
+        panic!("expected resp, got {resp:?}");
+    };
+    assert!(!ok, "panic must fail the in-flight call");
+    let error = error.expect("failed resp carries a wire error");
+    assert_eq!(error.kind, "PluginDied");
+
+    // catch_unwind converts the panic into a nonzero FAILURE exit, not a
+    // signal death, so the reaper records code 1.
+    let reaped = wait_until(Duration::from_secs(5), || plugin.exit_status().is_some()).await;
+    assert!(reaped, "reaper must record the exit status");
+    let status = plugin.exit_status().expect("recorded status");
+    assert_eq!(
+        status.code(),
+        Some(1),
+        "panic exits nonzero with FAILURE: {status}"
+    );
+    #[cfg(unix)]
+    assert_eq!(
+        status.signal(),
+        None,
+        "panic must not be a signal death: {status}"
+    );
+
+    // The stderr diagnostics reached the host logs via the forwarding task.
+    let forwarded = wait_until(Duration::from_secs(5), || logs_contain("plugin panicked")).await;
+    assert!(forwarded, "panic diagnostics did not reach the host logs");
+}
+
 // ── handshake rejection ────────────────────────────────────────────────────
 
 #[tokio::test]
