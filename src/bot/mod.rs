@@ -59,6 +59,7 @@ use crate::plugin::VOICE_STATE_EVENT;
 use crate::plugin::command::commands_from_manifest;
 use crate::plugin::command::core_settings_command;
 use crate::plugin::command::register_in_guild;
+use crate::plugin::interaction::DEFAULT_VIEW_TIMEOUT;
 use crate::repo::traits::Repos;
 use crate::service::Services;
 use crate::subscriber::voice_state::VoiceStateSubscriber;
@@ -105,7 +106,9 @@ impl Bot {
         let http = Arc::new(http);
 
         let catalog = Self::load_plugin_catalog(&config);
-        let plugin_engine = Arc::new(InteractionEngine::<RunningPlugin>::new());
+        let plugin_engine = Arc::new(InteractionEngine::<RunningPlugin>::with_timeout(
+            DEFAULT_VIEW_TIMEOUT,
+        ));
         let plugin_events = Arc::new(PluginEventRouter::new());
         let host_services = Arc::new(HostServices {
             io: Some(Arc::new(SerenityHostIo::new(http.clone()))),

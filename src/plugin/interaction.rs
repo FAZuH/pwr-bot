@@ -20,6 +20,12 @@
 //! `view.timeout` event (the session is dropped regardless of whether the
 //! push succeeds) so the plugin can expire its own state.
 //!
+//! Sessions also expire on their own: an engine built with
+//! [`InteractionEngine::with_timeout`] runs a background collector that drops
+//! sessions idle past the timeout and pushes the same one-way `view.timeout`
+//! event, so the plugin cleans up even when nobody interacts with the view.
+//! Production uses Discord's interaction window ([`DEFAULT_VIEW_TIMEOUT`]).
+//!
 //! The engine is generic over [`PluginHandle`] so it can be unit-tested
 //! against an in-memory fake; [`RunningPlugin`] implements the trait for real
 //! subprocesses. Message ids are [`serenity::MessageId`]s.
@@ -33,6 +39,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use log::warn;
@@ -46,6 +53,10 @@ use tokio::sync::Mutex;
 
 use crate::plugin::PluginError;
 use crate::plugin::RunningPlugin;
+
+/// Discord's interaction window: a view session idle for this long is
+/// expired by the engine ([`InteractionEngine::with_timeout`]).
+pub const DEFAULT_VIEW_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 
 /// How the interaction engine talks to a plugin: correlated calls plus
 /// one-way event pushes. Implemented by [`RunningPlugin`] (and `Arc<P>`
@@ -116,6 +127,9 @@ struct Session<P> {
     generation: u64,
     /// Serializes interacts on one session; one fresh lock per open.
     lock: Arc<Mutex<()>>,
+    /// When the session was last opened or interacted with; sessions idle
+    /// past the engine's timeout are reaped.
+    last_active: tokio::time::Instant,
 }
 
 /// A read-only copy of a session, taken under the sessions lock so callers
@@ -181,6 +195,8 @@ struct EngineInner<P> {
     /// Source of per-session generation tokens; each open-replace takes a
     /// fresh value so old sessions can be told apart from their successors.
     next_generation: AtomicU64,
+    /// Inactivity timeout; `None` disables session expiry (no collector).
+    timeout: Option<Duration>,
 }
 
 impl<P> InteractionEngine<P> {
@@ -190,6 +206,7 @@ impl<P> InteractionEngine<P> {
             inner: Arc::new(EngineInner {
                 sessions: Mutex::new(HashMap::new()),
                 next_generation: AtomicU64::new(0),
+                timeout: None,
             }),
         }
     }
@@ -211,6 +228,31 @@ impl<P> InteractionEngine<P> {
 }
 
 impl<P: PluginHandle> InteractionEngine<P> {
+    /// A new engine with no open sessions and an inactivity timeout:
+    /// sessions idle past `timeout` are reaped by a background collector,
+    /// which pushes `view.timeout` to the plugin before dropping them.
+    pub fn with_timeout(timeout: Duration) -> Self
+    where
+        P: 'static,
+    {
+        let engine = InteractionEngine {
+            inner: Arc::new(EngineInner {
+                sessions: Mutex::new(HashMap::new()),
+                next_generation: AtomicU64::new(0),
+                timeout: Some(timeout),
+            }),
+        };
+        let collector = engine.clone();
+        let poll = poll_interval(timeout);
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(poll).await;
+                collector.collect_expired().await;
+            }
+        });
+        engine
+    }
+
     /// Opens a session for a plugin view: invokes the plugin's command and
     /// stores the returned spec's opaque `view` under `message_id`. Returns
     /// the [`ViewSpec`] the caller renders verbatim (typically via
@@ -233,6 +275,7 @@ impl<P: PluginHandle> InteractionEngine<P> {
                 view: spec.view.clone(),
                 generation,
                 lock: Arc::new(Mutex::new(())),
+                last_active: tokio::time::Instant::now(),
             },
         );
         Ok(spec)
@@ -260,10 +303,11 @@ impl<P: PluginHandle> InteractionEngine<P> {
         // session run one at a time, so each sees the previous one's
         // committed view.
         let (lock, generation) = {
-            let sessions = self.inner.sessions.lock().await;
+            let mut sessions = self.inner.sessions.lock().await;
             let session = sessions
-                .get(&message_id)
+                .get_mut(&message_id)
                 .ok_or(InteractionError::NoSession { message_id })?;
+            session.last_active = tokio::time::Instant::now();
             (session.lock.clone(), session.generation)
         };
         let _guard = lock.lock().await;
@@ -332,6 +376,56 @@ impl<P: PluginHandle> InteractionEngine<P> {
             generation: session.generation,
         })
     }
+
+    /// Reaps sessions idle past the engine's inactivity timeout and pushes
+    /// `view.timeout` for each, so the plugin can expire its own state.
+    /// No-op when the engine has no timeout configured.
+    async fn collect_expired(&self) {
+        let Some(timeout) = self.inner.timeout else {
+            return;
+        };
+        let now = tokio::time::Instant::now();
+        // Snapshot and remove stale sessions in one lock hold, so a
+        // concurrent `interact` refresh cannot race a reap.
+        let stale = {
+            let mut sessions = self.inner.sessions.lock().await;
+            let ids: Vec<_> = sessions
+                .iter()
+                .filter(|(_, s)| now.saturating_duration_since(s.last_active) >= timeout)
+                .map(|(id, _)| *id)
+                .collect();
+            let mut out = Vec::new();
+            for id in ids {
+                if let Some(s) = sessions.remove(&id) {
+                    out.push((
+                        id,
+                        SessionSnapshot {
+                            plugin: s.plugin,
+                            command: s.command,
+                            view: s.view,
+                            generation: s.generation,
+                        },
+                    ));
+                }
+            }
+            out
+        };
+        for (id, snap) in stale {
+            if let Err(e) = snap
+                .plugin
+                .send_event("view.timeout", Some(snap.view))
+                .await
+            {
+                warn!("failed to push view.timeout for message {id}: {e}");
+            }
+        }
+    }
+}
+
+/// How often the expiry collector polls for stale sessions: a quarter of the
+/// timeout, clamped to `[10ms, 30s]`.
+fn poll_interval(timeout: Duration) -> Duration {
+    (timeout / 4).clamp(Duration::from_millis(10), Duration::from_secs(30))
 }
 
 /// Interprets a call response as a [`ViewSpec`]. A failed resp becomes
@@ -1039,5 +1133,71 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, InteractionError::UnexpectedReply { .. }));
+    }
+
+    // ── inactivity expiry ────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn collect_expired_abandons_stale_sessions_and_pushes_view_timeout() {
+        let plugin = Arc::new(FakePlugin::default());
+        let engine = InteractionEngine::with_timeout(Duration::ZERO);
+        let id = opened(&engine, plugin.clone()).await;
+
+        engine.collect_expired().await;
+        assert!(!engine.has_session(id).await);
+        let events = plugin.events.lock().unwrap().clone();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].0, "view.timeout");
+        assert_eq!(
+            events[0].1,
+            Some(Value::Null),
+            "the stored view rides along"
+        );
+    }
+
+    #[tokio::test]
+    async fn collect_expired_keeps_recently_used_sessions() {
+        let plugin = Arc::new(FakePlugin::default());
+        let engine = InteractionEngine::with_timeout(Duration::from_secs(3600));
+        let id = opened(&engine, plugin.clone()).await;
+        engine
+            .interact(id, BUTTON_CUSTOM_ID, json!({}))
+            .await
+            .expect("click");
+
+        engine.collect_expired().await;
+        assert!(engine.has_session(id).await);
+        assert!(
+            plugin.events.lock().unwrap().is_empty(),
+            "no timeout event for a fresh session"
+        );
+    }
+
+    #[tokio::test]
+    async fn interact_refreshes_the_inactivity_deadline() {
+        let plugin = Arc::new(FakePlugin::default());
+        let engine = InteractionEngine::with_timeout(Duration::from_millis(200));
+        let id = opened(&engine, plugin.clone()).await;
+        engine
+            .interact(id, BUTTON_CUSTOM_ID, json!({}))
+            .await
+            .expect("click");
+
+        // 150ms in, the click's refresh still holds (150ms < 200ms).
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        assert!(
+            engine.has_session(id).await,
+            "the click refreshed the deadline"
+        );
+
+        // Past 200ms since the click, the collector reaps the session.
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while tokio::time::Instant::now() < deadline {
+            if !engine.has_session(id).await {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("the session never expired after its inactivity timeout");
     }
 }

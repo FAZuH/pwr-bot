@@ -207,6 +207,61 @@ async fn engine_drives_the_fixture_view_lifecycle() {
     plugin.stop().await.expect("graceful stop");
 }
 
+// ── inactivity expiry ─────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn session_expires_after_inactivity_timeout() {
+    init_recording_logger();
+    if let Some(logs) = LOGS.get() {
+        logs.lock().unwrap().clear();
+    }
+
+    let message_id = serenity::MessageId::new(1);
+    let plugin = Arc::new(
+        RunningPlugin::spawn(fixture_path())
+            .await
+            .expect("spawn hello_plugin"),
+    );
+    let engine = InteractionEngine::with_timeout(Duration::from_millis(200));
+    engine
+        .open(message_id, plugin.clone(), PLUGIN_NAME, json!({}))
+        .await
+        .expect("open the view");
+    assert!(
+        engine.has_session(message_id).await,
+        "the session is open after render"
+    );
+
+    // The engine's collector reaps the idle session ~200ms later.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while tokio::time::Instant::now() < deadline {
+        if !engine.has_session(message_id).await {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(
+        !engine.has_session(message_id).await,
+        "the session never expired after its inactivity timeout"
+    );
+    let timed_out = wait_until(Duration::from_secs(5), || {
+        logs_contain("event: view.timeout received")
+    })
+    .await;
+    assert!(timed_out, "the plugin never saw the view.timeout event");
+
+    let err = engine
+        .interact(message_id, BUTTON_CUSTOM_ID, json!({}))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, InteractionError::NoSession { message_id: id } if id == message_id),
+        "interacting after expiry sees NoSession, got {err:?}"
+    );
+
+    plugin.stop().await.expect("graceful stop");
+}
+
 // ── wire error surfacing ───────────────────────────────────────────────────
 
 #[tokio::test]
