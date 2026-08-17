@@ -28,6 +28,9 @@
 //! - **Swap**: unload the old binary, spawn the new one. External install
 //!   (resolving a pin to a binary path) is #110; the manager takes the new
 //!   path as input.
+//! - **Tasks**: manifest `tasks[]` drive a per-task loop that invokes the
+//!   plugin's command on its interval; loops end on unload (the stop flag)
+//!   or when the plugin is reaped (the respawn restarts them).
 
 use std::collections::HashMap;
 use std::collections::VecDeque;
@@ -41,9 +44,11 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 use std::time::Instant;
 
+use log::debug;
 use log::info;
 use log::warn;
 use poise::serenity_prelude as serenity;
+use pwr_plugin_protocol::TaskDef;
 use tokio::sync::Mutex;
 
 use crate::event::event_bus::EventBus;
@@ -200,6 +205,9 @@ struct Entry {
     /// respawn and swap (subscriptions are keyed by name, so re-subscribing
     /// is idempotent).
     event_handlers: Vec<String>,
+    /// Manifest `tasks[]`: per-task loops invoke the declared command on its
+    /// interval; re-applied on respawn and swap.
+    tasks: Vec<TaskDef>,
 }
 
 /// Owns running plugins by name and drives the lifecycle: health checks,
@@ -268,9 +276,11 @@ impl PluginManager {
     }
 
     /// Spawns the binary at `path` under the name `name`, starts its health
-    /// task if `health` is given, and subscribes it to `event_handlers`
-    /// (the manifest's Discord events) when an event router is wired. Fails
-    /// with [`PluginError::AlreadyRunning`] if the name is already
+    /// task if `health` is given, subscribes it to `event_handlers`
+    /// (the manifest's Discord events) when an event router is wired, and
+    /// starts one task loop per manifest `tasks[]` entry (each invokes the
+    /// declared command on its interval). Fails with
+    /// [`PluginError::AlreadyRunning`] if the name is already
     /// registered.
     pub async fn spawn(
         self: &Arc<Self>,
@@ -278,6 +288,7 @@ impl PluginManager {
         path: impl AsRef<Path>,
         health: Option<HealthConfig>,
         event_handlers: &[String],
+        tasks: &[TaskDef],
     ) -> Result<Arc<RunningPlugin>, PluginError> {
         let path = path.as_ref().to_path_buf();
         {
@@ -306,6 +317,7 @@ impl PluginManager {
             health: health.clone(),
             stop: stop.clone(),
             event_handlers: event_handlers.to_vec(),
+            tasks: tasks.to_vec(),
         };
         // Register under the name. A concurrent spawn that won the race
         // reports itself here: the guard drops before the stop, so the
@@ -331,7 +343,10 @@ impl PluginManager {
             router.subscribe(name, event_handlers).await;
         }
         if let Some(config) = health {
-            start_health_task(self, name.to_string(), config, stop);
+            start_health_task(self, name.to_string(), config, stop.clone());
+        }
+        for task in tasks {
+            start_task_loop(self, name.to_string(), task.clone(), stop.clone());
         }
         Ok(plugin)
     }
@@ -453,7 +468,7 @@ impl PluginManager {
         // replaces the instance, and the identity-gated unload below then
         // leaves the fresh one alone. `NotRunning` is reserved for a name
         // that was never registered.
-        let (path, health, event_handlers) = {
+        let (path, health, event_handlers, tasks) = {
             let plugins = self.plugins.lock().await;
             match plugins.get(name) {
                 None => {
@@ -465,6 +480,7 @@ impl PluginManager {
                     entry.path.clone(),
                     entry.health.clone(),
                     entry.event_handlers.clone(),
+                    entry.tasks.clone(),
                 ),
             }
         };
@@ -485,7 +501,8 @@ impl PluginManager {
         };
         self.with_crash_loop_guard(name, |guard| guard.record(Instant::now()))
             .await;
-        self.spawn(name, &path, health, &event_handlers).await?;
+        self.spawn(name, &path, health, &event_handlers, &tasks)
+            .await?;
         Ok(RespawnOutcome::Respawned)
     }
 
@@ -508,15 +525,20 @@ impl PluginManager {
                 source: io::Error::from(io::ErrorKind::NotFound),
             });
         }
-        let (health, event_handlers) = {
+        let (health, event_handlers, tasks) = {
             let plugins = self.plugins.lock().await;
             match plugins.get(name) {
-                Some(entry) => (entry.health.clone(), entry.event_handlers.clone()),
-                None => (None, Vec::new()),
+                Some(entry) => (
+                    entry.health.clone(),
+                    entry.event_handlers.clone(),
+                    entry.tasks.clone(),
+                ),
+                None => (None, Vec::new(), Vec::new()),
             }
         };
         self.unload(name, guild_ids).await?;
-        self.spawn(name, &new_path, health, &event_handlers).await
+        self.spawn(name, &new_path, health, &event_handlers, &tasks)
+            .await
     }
 
     /// Runs `f` with the crash-loop guard for `name` (creating it on first
@@ -619,6 +641,57 @@ async fn health_loop(
             return;
         }
         tokio::time::sleep(config.interval).await;
+    }
+}
+
+/// Spawns one task loop for a plugin instance, mirroring
+/// [`start_health_task`]: a plain (non-async) function so the spawned task's
+/// `Send` obligation does not cycle through `spawn`.
+fn start_task_loop(
+    manager: &Arc<PluginManager>,
+    name: String,
+    task: TaskDef,
+    stop: Arc<AtomicBool>,
+) {
+    tokio::spawn(task_loop(Arc::clone(manager), name, task, stop));
+}
+
+/// One task loop for a single plugin instance. Each loop iteration checks
+/// the stop flag, then the plugin's exit status (a reaped plugin ends this
+/// task; health owns respawn and the fresh instance's spawn starts its own
+/// task loops), then invokes the task's command and sleeps the interval. The
+/// interval is clamped to at least 1s so a 0s interval cannot busy-spin the
+/// plugin.
+async fn task_loop(
+    manager: Arc<PluginManager>,
+    name: String,
+    task: TaskDef,
+    stop: Arc<AtomicBool>,
+) {
+    info!(
+        "starting task {} on plugin {name}: every {}s, command {}",
+        task.name, task.interval_secs, task.command
+    );
+    loop {
+        if stop.load(Ordering::Relaxed) {
+            return;
+        }
+        let Some(plugin) = manager.get(&name).await else {
+            return; // unloaded concurrently
+        };
+        if stop.load(Ordering::Relaxed) {
+            return;
+        }
+        // A reaped plugin ends this loop; health owns respawn and the fresh
+        // instance's spawn starts its own task loops.
+        if plugin.exit_status().is_some() {
+            return;
+        }
+        match plugin.call("invoke", Some(&task.command), None).await {
+            Ok(_) => debug!("task {} on plugin {name} ran `{}`", task.name, task.command),
+            Err(e) => warn!("task {} on plugin {name} failed: {e}", task.name),
+        }
+        tokio::time::sleep(Duration::from_secs(task.interval_secs.max(1))).await;
     }
 }
 
@@ -740,7 +813,7 @@ mod tests {
         let stub =
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/stubborn_plugin.sh");
         manager
-            .spawn("stubborn", stub, None, &["voice_state".to_string()])
+            .spawn("stubborn", stub, None, &["voice_state".to_string()], &[])
             .await
             .expect("spawn stubborn fixture");
         assert_eq!(router.subscribers("voice_state").await, ["stubborn"]);

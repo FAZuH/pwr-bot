@@ -271,7 +271,7 @@ async fn host_openview_opens_the_target_plugin_view_end_to_end() {
     let services = view_host_services(Arc::new(mock), engine.clone());
     let manager = Arc::new(PluginManager::new(None, RespawnPolicy::default()));
     manager
-        .spawn("hello", fixture_path(), None, &[])
+        .spawn("hello", fixture_path(), None, &[], &[])
         .await
         .expect("spawn target plugin");
 

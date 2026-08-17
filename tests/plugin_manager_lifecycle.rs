@@ -14,6 +14,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use pwr_bot::event::PluginEvent;
+use pwr_bot::event::event_bus::EventBus;
 use pwr_bot::plugin::HealthConfig;
 use pwr_bot::plugin::PluginManager;
 use pwr_bot::plugin::RespawnOutcome;
@@ -22,6 +24,7 @@ use pwr_bot::plugin::RunningPlugin;
 use pwr_plugin_protocol::BUTTON_CUSTOM_ID;
 use pwr_plugin_protocol::Msg;
 use pwr_plugin_protocol::PLUGIN_NAME;
+use pwr_plugin_protocol::TaskDef;
 use serde_json::json;
 
 /// Locates the `hello_plugin` fixture binary. `CARGO_BIN_EXE_hello_plugin`
@@ -175,7 +178,7 @@ async fn click(plugin: &RunningPlugin) -> Result<bool, pwr_bot::plugin::PluginEr
 async fn health_pings_keep_a_healthy_plugin_running() {
     let manager = Arc::new(PluginManager::new(None, test_policy()));
     manager
-        .spawn("hello", fixture_path(), Some(test_health()), &[])
+        .spawn("hello", fixture_path(), Some(test_health()), &[], &[])
         .await
         .expect("spawn hello_plugin");
 
@@ -204,8 +207,8 @@ async fn health_pings_keep_a_healthy_plugin_running() {
 async fn concurrent_spawn_race_keeps_the_winner() {
     let manager = Arc::new(PluginManager::new(None, test_policy()));
     let (a, b) = tokio::join!(
-        manager.spawn("hello", fixture_path(), None, &[]),
-        manager.spawn("hello", fixture_path(), None, &[]),
+        manager.spawn("hello", fixture_path(), None, &[], &[]),
+        manager.spawn("hello", fixture_path(), None, &[], &[]),
     );
     let (winner, loser) = match (a, b) {
         (Ok(winner), Err(loser)) => (winner, loser),
@@ -243,6 +246,7 @@ async fn silent_plugin_is_respawned_after_missed_pongs() {
             fixture_script("hung_plugin.sh"),
             Some(test_health()),
             &[],
+            &[],
         )
         .await
         .expect("spawn hung fixture");
@@ -277,7 +281,7 @@ async fn silent_plugin_is_respawned_after_missed_pongs() {
 async fn killed_plugin_is_respawned_and_serves_fresh_instances() {
     let manager = Arc::new(PluginManager::new(None, test_policy()));
     manager
-        .spawn("hello", fixture_path(), Some(test_health()), &[])
+        .spawn("hello", fixture_path(), Some(test_health()), &[], &[])
         .await
         .expect("spawn hello_plugin");
     let plugin = manager.get("hello").await.expect("registered handle");
@@ -323,7 +327,7 @@ async fn killed_plugin_is_respawned_and_serves_fresh_instances() {
 async fn bye_unload_exits_cleanly_and_reaps() {
     let manager = Arc::new(PluginManager::new(None, test_policy()));
     manager
-        .spawn("hello", fixture_path(), None, &[])
+        .spawn("hello", fixture_path(), None, &[], &[])
         .await
         .expect("spawn hello_plugin");
 
@@ -345,7 +349,7 @@ async fn bye_unload_exits_cleanly_and_reaps() {
 async fn unload_fails_in_flight_calls_with_plugin_died() {
     let manager = Arc::new(PluginManager::new(None, test_policy()));
     manager
-        .spawn("hung", fixture_script("hung_plugin.sh"), None, &[])
+        .spawn("hung", fixture_script("hung_plugin.sh"), None, &[], &[])
         .await
         .expect("spawn hung fixture");
 
@@ -388,6 +392,7 @@ async fn crash_loop_stops_respawning_after_the_cap() {
             fixture_script("crash_plugin.sh"),
             Some(test_health()),
             &[],
+            &[],
         )
         .await
         .expect("spawn crash fixture");
@@ -427,6 +432,7 @@ async fn clean_exit_is_not_respawned() {
             fixture_script("clean_exit_plugin.sh"),
             Some(health),
             &[],
+            &[],
         )
         .await
         .expect("spawn clean-exit fixture");
@@ -459,7 +465,7 @@ async fn stale_respawn_does_not_unload_a_swapped_instance() {
     };
     let manager = Arc::new(PluginManager::new(None, policy));
     manager
-        .spawn("hello", fixture_path(), None, &[])
+        .spawn("hello", fixture_path(), None, &[], &[])
         .await
         .expect("spawn hello_plugin");
     let crashed = manager.get("hello").await.expect("registered handle");
@@ -502,7 +508,7 @@ async fn respawn_of_an_unknown_plugin_fails_with_not_running() {
     // The respawn contract takes the crashed instance (identity check), so
     // any running plugin works as the handle to pass.
     manager
-        .spawn("hello", fixture_path(), None, &[])
+        .spawn("hello", fixture_path(), None, &[], &[])
         .await
         .expect("spawn hello_plugin");
     let probe = manager.get("hello").await.expect("registered handle");
@@ -525,7 +531,7 @@ async fn respawn_of_an_unknown_plugin_fails_with_not_running() {
 async fn swap_replaces_the_running_instance() {
     let manager = Arc::new(PluginManager::new(None, test_policy()));
     manager
-        .spawn("hello", fixture_path(), Some(test_health()), &[])
+        .spawn("hello", fixture_path(), Some(test_health()), &[], &[])
         .await
         .expect("spawn hello_plugin");
     let original = manager.get("hello").await.expect("registered handle");
@@ -558,7 +564,7 @@ async fn swap_replaces_the_running_instance() {
 async fn swap_with_a_missing_binary_leaves_the_plugin_running() {
     let manager = Arc::new(PluginManager::new(None, test_policy()));
     manager
-        .spawn("hello", fixture_path(), None, &[])
+        .spawn("hello", fixture_path(), None, &[], &[])
         .await
         .expect("spawn hello_plugin");
     let original = manager.get("hello").await.expect("registered handle");
@@ -600,7 +606,13 @@ async fn unload_signals_the_whole_process_group_with_sigterm() {
     let _ = std::fs::remove_file(&marker_path);
 
     manager
-        .spawn("group", fixture_script("group_term_plugin.sh"), None, &[])
+        .spawn(
+            "group",
+            fixture_script("group_term_plugin.sh"),
+            None,
+            &[],
+            &[],
+        )
         .await
         .expect("spawn group-term fixture");
     let child_pid = wait_for_group_child(&base).await;
@@ -647,7 +659,13 @@ async fn unload_sigkills_the_group_when_sigterm_is_ignored() {
     let _ = std::fs::remove_file(&pid_path);
 
     manager
-        .spawn("group", fixture_script("group_kill_plugin.sh"), None, &[])
+        .spawn(
+            "group",
+            fixture_script("group_kill_plugin.sh"),
+            None,
+            &[],
+            &[],
+        )
         .await
         .expect("spawn group-kill fixture");
     let child_pid = wait_for_group_child(&base).await;
@@ -676,4 +694,71 @@ async fn unload_sigkills_the_group_when_sigterm_is_ignored() {
         dead,
         "group child must be SIGKILLed after the SIGTERM grace"
     );
+}
+
+// ── tasks: manifest task loops invoke the declared command ─────────────────
+
+#[tokio::test]
+async fn task_loop_invokes_the_declared_command_on_interval() {
+    let bus = Arc::new(EventBus::new());
+    let seen = Arc::new(tokio::sync::Mutex::new(Vec::<PluginEvent>::new()));
+    bus.register_callback({
+        let seen = seen.clone();
+        move |event: PluginEvent| {
+            let seen = seen.clone();
+            async move {
+                seen.lock().await.push(event);
+                Ok(())
+            }
+        }
+    });
+    let manager = Arc::new(PluginManager::new(None, test_policy()).with_event_bus(bus));
+    manager
+        .spawn(
+            "hello",
+            fixture_path(),
+            None,
+            &[],
+            &[TaskDef {
+                name: "tick".into(),
+                interval_secs: 1,
+                command: "hello.tick".into(),
+            }],
+        )
+        .await
+        .expect("spawn hello_plugin");
+
+    // The task must fire repeatedly, not once: wait for two ticks.
+    let ticked = wait_until_async(Duration::from_secs(5), || {
+        let seen = seen.clone();
+        async move {
+            seen.lock()
+                .await
+                .iter()
+                .filter(|e| e.name == "hello.tick")
+                .count()
+                >= 2
+        }
+    })
+    .await;
+    assert!(ticked, "the task loop must invoke its command repeatedly");
+
+    // Unload must cancel the loop. Two samples separated by more than the 1s
+    // interval prove the count is stable, not just slow.
+    manager.unload("hello", &[]).await.expect("teardown");
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    let settled = seen
+        .lock()
+        .await
+        .iter()
+        .filter(|e| e.name == "hello.tick")
+        .count();
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    let later = seen
+        .lock()
+        .await
+        .iter()
+        .filter(|e| e.name == "hello.tick")
+        .count();
+    assert_eq!(later, settled, "no ticks may arrive after unload");
 }

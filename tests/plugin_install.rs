@@ -116,7 +116,7 @@ async fn install_verified_downloads_verifies_and_spawns() {
     // The installed binary is ready for PluginManager::spawn.
     let manager = Arc::new(PluginManager::new(None, RespawnPolicy::default()));
     manager
-        .spawn("hello", &installed, None, &[])
+        .spawn("hello", &installed, None, &[], &[])
         .await
         .expect("spawn installed binary");
     assert!(manager.is_running("hello").await);
