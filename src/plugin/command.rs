@@ -500,6 +500,46 @@ pub fn leaf_options<'a>(
     }
 }
 
+/// Re-parses a slash interaction's options against a command's option schema,
+/// returning the args payload the plugin receives.
+///
+/// The schema is the leaf [`OptionSpec`]s carried in the command's
+/// `custom_data` (set from the `CreateCommand` blob at build time); the
+/// interaction's top-level options are descended to the leaf list via
+/// [`leaf_options`], then resolved with [`reparse_args`]. A command not built
+/// by this module carries no specs and yields an empty object.
+pub fn reparse_command_args(
+    command: &Command<Data, Error>,
+    interaction: &serenity::CommandInteraction,
+) -> Result<Value, ReparseError> {
+    let Some(specs) = command.custom_data.downcast_ref::<Vec<OptionSpec>>() else {
+        return Ok(Value::Object(serde_json::Map::new()));
+    };
+    let values = reparse_args(specs, leaf_options(&interaction.data.options()))?;
+    Ok(Value::Object(
+        values
+            .into_iter()
+            .map(|(name, value)| (name, arg_value_to_json(value)))
+            .collect(),
+    ))
+}
+
+/// Serializes one re-parsed argument into its plugin wire value: choices
+/// carry the chosen label; ids ride as numbers.
+fn arg_value_to_json(value: ArgValue) -> Value {
+    match value {
+        ArgValue::String(text) => Value::String(text),
+        ArgValue::Integer(number) => Value::from(number),
+        ArgValue::Number(number) => Value::from(number),
+        ArgValue::Boolean(flag) => Value::Bool(flag),
+        ArgValue::Choice(label) => Value::String(label),
+        ArgValue::ChannelId(id)
+        | ArgValue::UserId(id)
+        | ArgValue::RoleId(id)
+        | ArgValue::AttachmentId(id) => Value::from(id),
+    }
+}
+
 /// Selects the commands whose names appear in `names`, preserving the order
 /// of `commands`. An empty selection yields an empty list.
 pub fn select_commands<'a>(
@@ -545,12 +585,14 @@ pub fn core_settings_command() -> Command<Data, Error> {
 /// The invoked command name is looked up in [`CORE_PLUGIN_ROUTES`]; unknown
 /// commands fail with a structure mismatch (a `slash_action` is shared by
 /// every built command, so this guard keeps catalog commands honest until
-/// their own registry exists). The plugin handle comes from the manager, the
-/// initial render is the locked placeholder+open+edit flow: send a loading
-/// message, open the engine session on its id (one `invoke`), then replace
-/// the message body with the returned spec's raw data via a bare HTTP edit —
-/// `serenity::Component` is not `Deserialize`, so the spec cannot ride a
-/// typed `CreateReply`.
+/// their own registry exists). The interaction's arguments are re-parsed
+/// against the command's schema ([`reparse_command_args`]) so the plugin
+/// receives the real payload instead of an empty object. The plugin handle
+/// comes from the manager, the initial render is the locked placeholder+open+
+/// edit flow: send a loading message, open the engine session on its id (one
+/// `invoke`), then replace the message body with the returned spec's raw data
+/// via a bare HTTP edit — `serenity::Component` is not `Deserialize`, so the
+/// spec cannot ride a typed `CreateReply`.
 fn plugin_slash_dispatch(
     ctx: poise::ApplicationContext<'_, Data, Error>,
 ) -> poise::BoxFuture<'_, Result<(), poise::FrameworkError<'_, Data, Error>>> {
@@ -564,6 +606,12 @@ fn plugin_slash_dispatch(
                 ctx,
                 "command has no core plugin route",
             ));
+        };
+        // Re-parse the interaction's args against the command's schema before
+        // any side effects, so the plugin receives the real arguments.
+        let args = match reparse_command_args(ctx.command, ctx.interaction) {
+            Ok(args) => args,
+            Err(error) => return Err(poise::FrameworkError::new_command(ctx.into(), error.into())),
         };
         let data = ctx.framework.user_data();
         let Some(plugin) = data.plugin_manager.get(plugin_name).await else {
@@ -585,7 +633,7 @@ fn plugin_slash_dispatch(
             .id;
         let spec = data
             .plugin_engine
-            .open(message_id, plugin, command_name, serde_json::json!({}))
+            .open(message_id, plugin, command_name, args)
             .await
             .map_err(|error| poise::FrameworkError::new_command(ctx, error.into()))?;
         ctx.http()
@@ -615,6 +663,14 @@ fn build_command(spec: &HostCommandSpec) -> Command<Data, Error> {
         Vec::new()
     };
     let subcommand_required = !subcommands.is_empty();
+    // The leaf option specs ride in `custom_data` for the dispatch to
+    // re-parse interaction args against: the parameter kinds are unrecoverable
+    // from `CommandParameter` after build (type_setter is a function pointer).
+    let leaf_specs = if subcommands.is_empty() {
+        spec.options.clone()
+    } else {
+        Vec::new()
+    };
 
     Command {
         name: Cow::Owned(spec.name.clone()),
@@ -622,6 +678,7 @@ fn build_command(spec: &HostCommandSpec) -> Command<Data, Error> {
         subcommands,
         subcommand_required,
         parameters,
+        custom_data: Box::new(leaf_specs),
         slash_action: Some(plugin_slash_dispatch),
         guild_only: spec.guild_only,
         dm_only: spec.dm_only,
@@ -658,12 +715,25 @@ fn build_subcommand(option: &OptionSpec) -> Command<Data, Error> {
         Vec::new()
     };
     let subcommand_required = !subcommands.is_empty();
+    // Same `custom_data` contract as `build_command`: this node's leaf specs,
+    // for the dispatch's arg re-parse when this subcommand is invoked.
+    let leaf_specs = if subcommands.is_empty() {
+        option
+            .options
+            .iter()
+            .filter(|child| !child.kind.is_subcommand())
+            .cloned()
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
     Command {
         name: Cow::Owned(option.name.clone()),
         description: Some(Cow::Owned(option.description.clone().unwrap_or_default())),
         subcommands,
         subcommand_required,
         parameters,
+        custom_data: Box::new(leaf_specs),
         slash_action: Some(plugin_slash_dispatch),
         ..Default::default()
     }
@@ -954,6 +1024,29 @@ mod tests {
     /// serde_json's string deserializer supports.
     fn command_data(payload: Value) -> serenity::CommandData {
         serde_json::from_str(&payload.to_string()).expect("command data deserializes")
+    }
+
+    /// Builds a `CommandInteraction` from a partial payload, the same way
+    /// serenity does when an interaction arrives; `data` is the command data
+    /// the interaction carries. Like [`command_data`], goes through a JSON
+    /// string so resolved values deserialize via `&RawValue`.
+    fn command_interaction(data: Value) -> serenity::CommandInteraction {
+        serde_json::from_str(
+            &json!({
+                "id": "1",
+                "application_id": "1",
+                "channel_id": "1",
+                "token": "token",
+                "version": 1,
+                "app_permissions": "0",
+                "locale": "en-US",
+                "entitlements": [],
+                "attachment_size_limit": 0,
+                "data": data,
+            })
+            .to_string(),
+        )
+        .expect("command interaction deserializes")
     }
 
     /// Builds a leaf `OptionSpec` for the given kind.
@@ -1681,6 +1774,148 @@ mod tests {
         assert_eq!(leaves.len(), 2);
         assert_eq!(leaves[0].name, "url");
         assert_eq!(leaves[1].name, "count");
+    }
+
+    // ── dispatch re-parse (reparse_command_args) ────────────────────────────
+
+    #[test]
+    fn dispatch_reparses_scalar_args_into_the_plugin_payload() {
+        let command = command_from_blob(&json!({
+            "name": "settings",
+            "description": "Settings",
+            "options": [
+                {"name": "channel", "description": "Channel", "type": 7, "required": true},
+                {"name": "note", "description": "Note", "type": 3},
+                {"name": "count", "description": "Count", "type": 4},
+            ],
+        }))
+        .unwrap();
+        let interaction = command_interaction(json!({
+            "id": "1",
+            "name": "settings",
+            "type": 1,
+            "options": [
+                {"name": "channel", "type": 7, "value": "123456789012345678"},
+                {"name": "note", "type": 3, "value": "hello"},
+                {"name": "count", "type": 4, "value": 42},
+            ],
+            "resolved": {
+                "channels": {
+                    "123456789012345678": {
+                        "name": "general",
+                        "type": 0,
+                        "id": "123456789012345678",
+                    },
+                },
+            },
+        }));
+
+        let args = reparse_command_args(&command, &interaction).expect("args reparse");
+        assert_eq!(
+            args,
+            json!({
+                "channel": 123456789012345678_u64,
+                "note": "hello",
+                "count": 42,
+            })
+        );
+    }
+
+    #[test]
+    fn dispatch_descends_subcommands_before_reparsing() {
+        let command = command_from_blob(&json!({
+            "name": "settings",
+            "description": "Settings",
+            "options": [
+                {"name": "feed", "description": "Feed settings", "type": 1, "options": [
+                    {"name": "add", "description": "Add a feed", "type": 1, "options": [
+                        {"name": "url", "description": "Feed URL", "type": 3, "required": true},
+                    ]},
+                ]},
+            ],
+        }))
+        .unwrap();
+        let add = &command.subcommands[0].subcommands[0];
+        let interaction = command_interaction(json!({
+            "id": "1",
+            "name": "settings",
+            "type": 1,
+            "options": [{
+                "name": "feed",
+                "type": 2,
+                "options": [{
+                    "name": "add",
+                    "type": 1,
+                    "options": [{"name": "url", "type": 3, "value": "https://example.com"}],
+                }],
+            }],
+        }));
+
+        let args = reparse_command_args(add, &interaction).expect("leaf args reparse");
+        assert_eq!(args, json!({"url": "https://example.com"}));
+    }
+
+    #[test]
+    fn dispatch_resolves_choices_to_labels() {
+        let command = command_from_blob(&json!({
+            "name": "speed",
+            "description": "Pick a speed",
+            "options": [
+                {"name": "level", "description": "Level", "type": 4, "required": true, "choices": [
+                    {"name": "fast", "value": 0},
+                    {"name": "slow", "value": 1},
+                ]},
+            ],
+        }))
+        .unwrap();
+        let interaction = command_interaction(json!({
+            "id": "1",
+            "name": "speed",
+            "type": 1,
+            "options": [{"name": "level", "type": 4, "value": 1}],
+        }));
+
+        let args = reparse_command_args(&command, &interaction).expect("choice reparse");
+        assert_eq!(args, json!({"level": "slow"}));
+    }
+
+    #[test]
+    fn dispatch_reports_a_missing_required_argument() {
+        let command = command_from_blob(&json!({
+            "name": "run",
+            "description": "Run a job",
+            "options": [
+                {"name": "url", "description": "URL", "type": 3, "required": true},
+            ],
+        }))
+        .unwrap();
+        let interaction = command_interaction(json!({"id": "1", "name": "run", "type": 1}));
+
+        let error = reparse_command_args(&command, &interaction).expect_err("required arg absent");
+        assert_eq!(
+            error,
+            ReparseError::MissingRequired {
+                name: "url".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn dispatch_without_parameters_yields_an_empty_payload() {
+        let command = core_settings_command();
+        let interaction = command_interaction(json!({"id": "1", "name": "settings", "type": 1}));
+
+        let args = reparse_command_args(&command, &interaction).expect("no specs to reparse");
+        assert_eq!(args, json!({}));
+    }
+
+    #[test]
+    fn foreign_commands_without_specs_yield_an_empty_payload() {
+        let command = poise::Command::<Data, Error>::default();
+        let interaction = command_interaction(json!({"id": "1", "name": "x", "type": 1}));
+
+        let args = reparse_command_args(&command, &interaction).expect("downcast failure degrades");
+        assert_eq!(args, json!({}));
     }
 
     // ── commands_from_manifest / select_commands ────────────────────────────
