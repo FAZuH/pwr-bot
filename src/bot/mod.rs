@@ -31,6 +31,7 @@ use log::warn;
 use poise::Framework;
 use poise::FrameworkOptions;
 use poise::serenity_prelude::*;
+use serde_json::Value;
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
 
@@ -49,10 +50,12 @@ use crate::plugin::InteractionEngine;
 use crate::plugin::InteractionError;
 use crate::plugin::PgKvStore;
 use crate::plugin::PluginCatalog;
+use crate::plugin::PluginEventRouter;
 use crate::plugin::PluginManager;
 use crate::plugin::RespawnPolicy;
 use crate::plugin::RunningPlugin;
 use crate::plugin::SerenityHostIo;
+use crate::plugin::VOICE_STATE_EVENT;
 use crate::plugin::command::commands_from_manifest;
 use crate::plugin::command::core_settings_command;
 use crate::plugin::command::register_in_guild;
@@ -103,6 +106,7 @@ impl Bot {
 
         let catalog = Self::load_plugin_catalog(&config);
         let plugin_engine = Arc::new(InteractionEngine::<RunningPlugin>::new());
+        let plugin_events = Arc::new(PluginEventRouter::new());
         let host_services = Arc::new(HostServices {
             io: Some(Arc::new(SerenityHostIo::new(http.clone()))),
             config: Some(HostConfig::from(&*config)),
@@ -111,15 +115,23 @@ impl Bot {
         });
         let plugin_manager = Arc::new(
             PluginManager::new(Some(http.clone()), RespawnPolicy::default())
-                .with_host_services(host_services),
+                .with_host_services(host_services)
+                .with_event_bus(event_bus.clone())
+                .with_event_router(plugin_events.clone()),
         );
 
         // The settings core plugin is spawned once at startup; per-guild
         // command registration follows in Ready/GuildCreate. A missing
         // binary is not fatal: the bot stays up and `/settings` reports the
-        // plugin as not running.
+        // plugin as not running. The spawn subscribes the plugin to the
+        // Discord events it declared in its manifest, so the router can fan
+        // them out to it.
+        let handlers = catalog
+            .get("settings")
+            .map(|entry| entry.manifest.event_handlers.as_slice())
+            .unwrap_or(&[]);
         if let Err(e) = plugin_manager
-            .spawn("settings", &config.settings_plugin_path, None)
+            .spawn("settings", &config.settings_plugin_path, None, handlers)
             .await
         {
             warn!("failed to spawn settings plugin: {e}");
@@ -143,6 +155,7 @@ impl Bot {
             data.clone(),
             voice_subscriber.clone(),
             http.clone(),
+            plugin_events,
         ));
 
         let client_builder = ClientBuilder::new(token.clone(), intents)
@@ -261,6 +274,7 @@ pub struct BotEventHandler {
     data: Arc<Data>,
     voice_subscriber: Arc<VoiceStateSubscriber>,
     http: Arc<poise::serenity_prelude::Http>,
+    plugin_events: Arc<PluginEventRouter>,
 }
 
 impl BotEventHandler {
@@ -269,12 +283,14 @@ impl BotEventHandler {
         data: Arc<Data>,
         voice_subscriber: Arc<VoiceStateSubscriber>,
         http: Arc<poise::serenity_prelude::Http>,
+        plugin_events: Arc<PluginEventRouter>,
     ) -> Self {
         Self {
             event_bus,
             data,
             voice_subscriber,
             http,
+            plugin_events,
         }
     }
 
@@ -445,15 +461,57 @@ impl BotEventHandler {
         }
     }
 
-    /// Routes a component interaction to the plugin view session open for its
-    /// message. The session's plugin renders a fresh spec; the click is
-    /// acknowledged and the message body is replaced with the spec's raw
-    /// data via a bare HTTP edit — `serenity::Component` is not
-    /// `Deserialize`, so the spec cannot ride a typed `CreateReply`.
+    /// Routes a view interaction (component click or modal submit) to the
+    /// plugin view session open for its message. The session's plugin
+    /// renders a fresh spec; the interaction is acknowledged and the message
+    /// body is replaced with the spec's raw data via a bare HTTP edit —
+    /// `serenity::Component` is not `Deserialize`, so the spec cannot ride a
+    /// typed `CreateReply`.
     ///
-    /// A click without an open session is acknowledged and dropped (stale
-    /// view); a dead plugin is acknowledged, logged, and its session is
-    /// abandoned.
+    /// An interaction without an open session is acknowledged and dropped
+    /// (stale view); a dead plugin is acknowledged, logged, and its session
+    /// is abandoned.
+    async fn route_view_interaction(
+        &self,
+        message_id: MessageId,
+        custom_id: &str,
+        interaction: Value,
+        channel_id: GenericChannelId,
+        kind: &str,
+    ) {
+        let result = self
+            .data
+            .plugin_engine
+            .interact(message_id, custom_id, interaction)
+            .await;
+
+        match result {
+            Ok(spec) => {
+                if let Err(e) = self
+                    .http
+                    .edit_message(channel_id, message_id, &spec.data, Vec::new())
+                    .await
+                {
+                    warn!("failed to update message {message_id} after {kind}: {e}");
+                }
+            }
+            Err(InteractionError::NoSession { .. }) => {
+                debug!("{kind} on message {message_id} without an open session");
+            }
+            Err(InteractionError::Plugin(e)) => {
+                warn!("plugin session for message {message_id} failed: {e}");
+                if let Err(e) = self.data.plugin_engine.abandon(message_id).await {
+                    warn!("failed to abandon session for message {message_id}: {e}");
+                }
+            }
+            Err(e) => {
+                warn!("{kind} on message {message_id} failed: {e}");
+            }
+        }
+    }
+
+    /// Routes a component interaction: acknowledges the click, then hands the
+    /// interaction to the open view session.
     async fn handle_component_interaction(&self, interaction: &ComponentInteraction) {
         let message_id = interaction.message.id;
 
@@ -468,39 +526,47 @@ impl BotEventHandler {
             warn!("failed to acknowledge component interaction on message {message_id}: {e}");
         }
 
-        let result = self
-            .data
-            .plugin_engine
-            .interact(
-                message_id,
-                &interaction.data.custom_id,
-                serde_json::to_value(interaction).unwrap_or_default(),
-            )
-            .await;
+        self.route_view_interaction(
+            message_id,
+            &interaction.data.custom_id,
+            serde_json::to_value(interaction).unwrap_or_default(),
+            interaction.channel_id,
+            "component interaction",
+        )
+        .await;
+    }
 
-        match result {
-            Ok(spec) => {
-                if let Err(e) = self
-                    .http
-                    .edit_message(interaction.channel_id, message_id, &spec.data, Vec::new())
-                    .await
-                {
-                    warn!("failed to update message {message_id} after interaction: {e}");
-                }
-            }
-            Err(InteractionError::NoSession { .. }) => {
-                debug!("component interaction on message {message_id} without an open session");
-            }
-            Err(InteractionError::Plugin(e)) => {
-                warn!("plugin session for message {message_id} failed: {e}");
-                if let Err(e) = self.data.plugin_engine.abandon(message_id).await {
-                    warn!("failed to abandon session for message {message_id}: {e}");
-                }
-            }
-            Err(e) => {
-                warn!("component interaction on message {message_id} failed: {e}");
-            }
+    /// Routes a modal submit like a component interaction: acknowledges the
+    /// submit, then hands the interaction to the open view session for the
+    /// message the modal was attached to.
+    async fn handle_modal_submit_interaction(&self, interaction: &ModalInteraction) {
+        if let Err(e) = interaction
+            .create_response(&self.http, CreateInteractionResponse::Acknowledge)
+            .await
+        {
+            warn!(
+                "failed to acknowledge modal submit on message {}: {e}",
+                interaction
+                    .message
+                    .as_ref()
+                    .map(|m| m.id)
+                    .unwrap_or_default()
+            );
         }
+
+        let Some(message) = interaction.message.as_ref() else {
+            debug!("modal submit without a message; not routed");
+            return;
+        };
+
+        self.route_view_interaction(
+            message.id,
+            &interaction.data.custom_id,
+            serde_json::to_value(interaction).unwrap_or_default(),
+            interaction.channel_id,
+            "modal submit",
+        )
+        .await;
     }
 }
 
@@ -558,16 +624,24 @@ impl poise::serenity_prelude::EventHandler for BotEventHandler {
                 }
             }
             FullEvent::VoiceStateUpdate { old, new, .. } => {
-                self.event_bus.publish(VoiceStateEvent {
+                let event = VoiceStateEvent {
                     old: old.clone(),
                     new: new.clone(),
-                });
+                };
+                self.event_bus.publish(event.clone());
+                self.plugin_events
+                    .fan_out(&self.data.plugin_manager, VOICE_STATE_EVENT, &event)
+                    .await;
             }
-            FullEvent::InteractionCreate { interaction, .. } => {
-                if let Interaction::Component(interaction) = interaction {
+            FullEvent::InteractionCreate { interaction, .. } => match interaction {
+                Interaction::Component(interaction) => {
                     self.handle_component_interaction(interaction).await;
                 }
-            }
+                Interaction::Modal(interaction) => {
+                    self.handle_modal_submit_interaction(interaction).await;
+                }
+                _ => {}
+            },
             _ => {}
         }
     }

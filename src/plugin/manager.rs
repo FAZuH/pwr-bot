@@ -47,8 +47,10 @@ use log::warn;
 use poise::serenity_prelude as serenity;
 use tokio::sync::Mutex;
 
+use crate::event::event_bus::EventBus;
 use crate::plugin::HostServices;
 use crate::plugin::PluginError;
+use crate::plugin::PluginEventRouter;
 use crate::plugin::RunningPlugin;
 use crate::plugin::command::register_in_guild;
 
@@ -184,7 +186,8 @@ impl CrashLoopGuard {
 }
 
 /// One registered plugin: the running handle, its spawn spec (binary path),
-/// health config, and the stop flag for its health task.
+/// health config, the stop flag for its health task, and the Discord events
+/// it subscribed to at spawn.
 struct Entry {
     /// The running subprocess handle.
     plugin: Arc<RunningPlugin>,
@@ -194,6 +197,10 @@ struct Entry {
     health: Option<HealthConfig>,
     /// Set when the entry is unloaded; the health task checks it each loop.
     stop: Arc<AtomicBool>,
+    /// Discord events the plugin declared in its manifest; re-applied on
+    /// respawn and swap (subscriptions are keyed by name, so re-subscribing
+    /// is idempotent).
+    event_handlers: Vec<String>,
 }
 
 /// Owns running plugins by name and drives the lifecycle: health checks,
@@ -213,6 +220,12 @@ pub struct PluginManager {
     /// Host services (Discord I/O seam, config subset, KV store) handed to
     /// every spawned plugin; `None` spawns without services (e.g. in tests).
     services: Option<Arc<HostServices>>,
+    /// Event bus plugin→host events are broadcast on; `None` drops them
+    /// (logged) instead.
+    event_bus: Option<Arc<EventBus>>,
+    /// Router Discord events are fanned out through; a plugin with
+    /// `event_handlers` is subscribed to them at spawn.
+    event_router: Option<Arc<PluginEventRouter>>,
     /// Respawn backoff/crash-loop policy.
     respawn_policy: RespawnPolicy,
 }
@@ -226,6 +239,8 @@ impl PluginManager {
             crash_loops: Mutex::new(HashMap::new()),
             http,
             services: None,
+            event_bus: None,
+            event_router: None,
             respawn_policy,
         }
     }
@@ -237,14 +252,33 @@ impl PluginManager {
         self
     }
 
-    /// Spawns the binary at `path` under the name `name` and starts its
-    /// health task if `health` is given. Fails with
-    /// [`PluginError::AlreadyRunning`] if the name is already registered.
+    /// Wires an event bus into the manager so every spawned plugin's
+    /// plugin→host events are broadcast on it. Builder-style: consumes
+    /// `self`.
+    pub fn with_event_bus(mut self, event_bus: Arc<EventBus>) -> Self {
+        self.event_bus = Some(event_bus);
+        self
+    }
+
+    /// Wires an event router into the manager so every spawned plugin with
+    /// manifest `event_handlers` is subscribed to those Discord events.
+    /// Builder-style: consumes `self`.
+    pub fn with_event_router(mut self, event_router: Arc<PluginEventRouter>) -> Self {
+        self.event_router = Some(event_router);
+        self
+    }
+
+    /// Spawns the binary at `path` under the name `name`, starts its health
+    /// task if `health` is given, and subscribes it to `event_handlers`
+    /// (the manifest's Discord events) when an event router is wired. Fails
+    /// with [`PluginError::AlreadyRunning`] if the name is already
+    /// registered.
     pub async fn spawn(
         self: &Arc<Self>,
         name: &str,
         path: impl AsRef<Path>,
         health: Option<HealthConfig>,
+        event_handlers: &[String],
     ) -> Result<Arc<RunningPlugin>, PluginError> {
         let path = path.as_ref().to_path_buf();
         {
@@ -258,7 +292,13 @@ impl PluginManager {
         // Spawns with the manager itself wired in so `host.open_view` on any
         // plugin's reader can resolve siblings as targets.
         let plugin = Arc::new(
-            RunningPlugin::spawn_with(&path, self.services.clone(), Some(Arc::clone(self))).await?,
+            RunningPlugin::spawn_with(
+                &path,
+                self.services.clone(),
+                Some(Arc::clone(self)),
+                self.event_bus.clone(),
+            )
+            .await?,
         );
         let stop = Arc::new(AtomicBool::new(false));
         let entry = Entry {
@@ -266,6 +306,7 @@ impl PluginManager {
             path: path.clone(),
             health: health.clone(),
             stop: stop.clone(),
+            event_handlers: event_handlers.to_vec(),
         };
         // Register under the name. A concurrent spawn that won the race
         // reports itself here: the guard drops before the stop, so the
@@ -286,6 +327,9 @@ impl PluginManager {
             return Err(PluginError::AlreadyRunning {
                 name: name.to_string(),
             });
+        }
+        if let Some(router) = &self.event_router {
+            router.subscribe(name, event_handlers).await;
         }
         if let Some(config) = health {
             start_health_task(self, name.to_string(), config, stop);
@@ -411,7 +455,7 @@ impl PluginManager {
         // replaces the instance, and the identity-gated unload below then
         // leaves the fresh one alone. `NotRunning` is reserved for a name
         // that was never registered.
-        let (path, health) = {
+        let (path, health, event_handlers) = {
             let plugins = self.plugins.lock().await;
             match plugins.get(name) {
                 None => {
@@ -419,7 +463,11 @@ impl PluginManager {
                         name: name.to_string(),
                     });
                 }
-                Some(entry) => (entry.path.clone(), entry.health.clone()),
+                Some(entry) => (
+                    entry.path.clone(),
+                    entry.health.clone(),
+                    entry.event_handlers.clone(),
+                ),
             }
         };
         let delay = backoff_delay(
@@ -439,7 +487,7 @@ impl PluginManager {
         };
         self.with_crash_loop_guard(name, |guard| guard.record(Instant::now()))
             .await;
-        self.spawn(name, &path, health).await?;
+        self.spawn(name, &path, health, &event_handlers).await?;
         Ok(RespawnOutcome::Respawned)
     }
 
@@ -462,12 +510,15 @@ impl PluginManager {
                 source: io::Error::from(io::ErrorKind::NotFound),
             });
         }
-        let health = {
+        let (health, event_handlers) = {
             let plugins = self.plugins.lock().await;
-            plugins.get(name).and_then(|entry| entry.health.clone())
+            match plugins.get(name) {
+                Some(entry) => (entry.health.clone(), entry.event_handlers.clone()),
+                None => (None, Vec::new()),
+            }
         };
         self.unload(name, guild_ids).await?;
-        self.spawn(name, &new_path, health).await
+        self.spawn(name, &new_path, health, &event_handlers).await
     }
 
     /// Runs `f` with the crash-loop guard for `name` (creating it on first
@@ -681,5 +732,20 @@ mod tests {
         let manager = Arc::new(PluginManager::new(None, test_policy()));
         let err = manager.unload("nope", &[]).await.unwrap_err();
         assert!(matches!(err, PluginError::NotRunning { .. }));
+    }
+
+    #[tokio::test]
+    async fn spawn_subscribes_the_plugin_to_its_event_handlers() {
+        let router = Arc::new(PluginEventRouter::new());
+        let manager =
+            Arc::new(PluginManager::new(None, test_policy()).with_event_router(router.clone()));
+        let stub =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/stubborn_plugin.sh");
+        manager
+            .spawn("stubborn", stub, None, &["voice_state".to_string()])
+            .await
+            .expect("spawn stubborn fixture");
+        assert_eq!(router.subscribers("voice_state").await, ["stubborn"]);
+        manager.unload("stubborn", &[]).await.expect("teardown");
     }
 }

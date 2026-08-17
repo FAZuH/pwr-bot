@@ -25,6 +25,7 @@
 
 pub mod command;
 pub mod error;
+pub mod events;
 pub mod host;
 pub mod install;
 pub mod interaction;
@@ -41,6 +42,8 @@ use std::time::Duration;
 
 pub use error::InstallError;
 pub use error::PluginError;
+pub use events::PluginEventRouter;
+pub use events::VOICE_STATE_EVENT;
 pub use host::HostConfig;
 pub use host::HostError;
 pub use host::HostIo;
@@ -78,6 +81,9 @@ use tokio::process::Command;
 use tokio::sync::Mutex;
 use tokio::sync::oneshot;
 use tokio::sync::watch;
+
+use crate::event::PluginEvent;
+use crate::event::event_bus::EventBus;
 
 /// How long the host waits for the plugin's `hello` after spawn.
 const HELLO_TIMEOUT: Duration = Duration::from_secs(5);
@@ -117,17 +123,20 @@ impl RunningPlugin {
     /// any work happens. Host services are absent, so `host.*` calls answer
     /// `HostUnavailable` / `ConfigUnavailable`.
     pub async fn spawn(path: impl AsRef<Path>) -> Result<RunningPlugin, PluginError> {
-        Self::spawn_with(path, None, None).await
+        Self::spawn_with(path, None, None, None).await
     }
 
     /// Spawns the plugin binary like [`RunningPlugin::spawn`], but wires the
     /// given host services (Discord I/O seam + config subset) and plugin
     /// manager (for `host.open_view` target resolution) into the reader, so
-    /// plugin→host `host.*` calls can be served.
+    /// plugin→host `host.*` calls can be served, and the given event bus
+    /// (if any) so plugin→host `Msg::Event`s are broadcast on it instead of
+    /// being dropped.
     pub async fn spawn_with(
         path: impl AsRef<Path>,
         host: Option<Arc<HostServices>>,
         manager: Option<Arc<PluginManager>>,
+        event_bus: Option<Arc<EventBus>>,
     ) -> Result<RunningPlugin, PluginError> {
         let path = path.as_ref();
         let label = path
@@ -218,6 +227,7 @@ impl RunningPlugin {
             stdin.clone(),
             host,
             manager,
+            event_bus,
         ));
         tokio::spawn(run_reaper(child.clone(), exit_tx, died_rx, name.clone()));
 
@@ -541,6 +551,7 @@ async fn run_reader(
     stdin: Arc<Mutex<Option<ChildStdin>>>,
     host: Option<Arc<HostServices>>,
     manager: Option<Arc<PluginManager>>,
+    event_bus: Option<Arc<EventBus>>,
 ) {
     let mut line = String::new();
     loop {
@@ -557,6 +568,7 @@ async fn run_reader(
                         &stdin,
                         host.as_deref(),
                         manager.as_deref(),
+                        event_bus.as_deref(),
                     )
                     .await
                 }
@@ -588,7 +600,9 @@ async fn run_reader(
 /// Routes one plugin message. `resp`s are matched to their waiting call by
 /// id; plugin→host `host.*` calls are served through the host services (and
 /// the plugin manager for `host.open_view` targets) and answered on the
-/// plugin's stdin; everything else is logged.
+/// plugin's stdin; plugin→host events are logged and, when an event bus is
+/// wired, broadcast on it so host subscribers (e.g. the bot's internal bus)
+/// see them instead of them being dropped.
 async fn dispatch(
     msg: &Msg,
     inflight: &Arc<Mutex<HashMap<u64, oneshot::Sender<Msg>>>>,
@@ -597,6 +611,7 @@ async fn dispatch(
     stdin: &Arc<Mutex<Option<ChildStdin>>>,
     host: Option<&HostServices>,
     manager: Option<&PluginManager>,
+    event_bus: Option<&EventBus>,
 ) {
     match msg {
         Msg::Resp { id, .. } => {
@@ -619,7 +634,16 @@ async fn dispatch(
             }
             *stdin.lock().await = Some(pipe);
         }
-        Msg::Event { name: event, .. } => info!("plugin {name} emitted event `{event}`"),
+        Msg::Event { name: event, data } => {
+            info!("plugin {name} emitted event `{event}`");
+            if let Some(bus) = event_bus {
+                bus.publish(PluginEvent {
+                    plugin: name.to_string(),
+                    name: event.clone(),
+                    data: data.clone(),
+                });
+            }
+        }
         Msg::Pong => {
             pongs.fetch_add(1, Ordering::Relaxed);
         }
@@ -719,7 +743,88 @@ mod tests {
         let inflight = Arc::new(Mutex::new(HashMap::new()));
         let pongs = Arc::new(AtomicU64::new(0));
         let stdin = Arc::new(Mutex::new(None::<ChildStdin>));
-        dispatch(&Msg::Pong, &inflight, &pongs, "hello", &stdin, None, None).await;
+        dispatch(
+            &Msg::Pong,
+            &inflight,
+            &pongs,
+            "hello",
+            &stdin,
+            None,
+            None,
+            None,
+        )
+        .await;
         assert_eq!(pongs.load(Ordering::Relaxed), 1);
+    }
+
+    // ── plugin→host event broadcast ────────────────────────────────────────
+
+    #[tokio::test]
+    async fn plugin_event_is_broadcast_on_the_event_bus() {
+        let bus = Arc::new(EventBus::new());
+        let seen = Arc::new(tokio::sync::Mutex::new(Vec::<PluginEvent>::new()));
+        bus.register_callback({
+            let seen = seen.clone();
+            move |event: PluginEvent| {
+                let seen = seen.clone();
+                async move {
+                    seen.lock().await.push(event);
+                    Ok(())
+                }
+            }
+        });
+        let inflight = Arc::new(Mutex::new(HashMap::new()));
+        let pongs = Arc::new(AtomicU64::new(0));
+        let stdin = Arc::new(Mutex::new(None::<ChildStdin>));
+        let msg = Msg::Event {
+            name: "settings.saved".into(),
+            data: Some(serde_json::json!({"guild_id": "1"})),
+        };
+        dispatch(
+            &msg,
+            &inflight,
+            &pongs,
+            "settings",
+            &stdin,
+            None,
+            None,
+            Some(&bus),
+        )
+        .await;
+
+        // `publish` runs the callback on a spawned task; poll until it lands.
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            if !seen.lock().await.is_empty() {
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the broadcast never reached the bus"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+
+        let seen = seen.lock().await;
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].plugin, "settings");
+        assert_eq!(seen[0].name, "settings.saved");
+        assert_eq!(seen[0].data, Some(serde_json::json!({"guild_id": "1"})));
+    }
+
+    #[tokio::test]
+    async fn plugin_event_without_a_bus_is_logged_but_not_broadcast() {
+        let inflight = Arc::new(Mutex::new(HashMap::new()));
+        let pongs = Arc::new(AtomicU64::new(0));
+        let stdin = Arc::new(Mutex::new(None::<ChildStdin>));
+        let msg = Msg::Event {
+            name: "settings.saved".into(),
+            data: None,
+        };
+        dispatch(
+            &msg, &inflight, &pongs, "settings", &stdin, None, None, None,
+        )
+        .await;
+        assert!(inflight.lock().await.is_empty());
     }
 }

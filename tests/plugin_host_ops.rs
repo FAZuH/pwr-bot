@@ -107,6 +107,7 @@ async fn host_say_serves_send_message_through_the_seam() {
         fixture_path(),
         Some(host_services(Arc::new(mock), None)),
         None,
+        None,
     )
     .await
     .expect("spawn fixture");
@@ -157,6 +158,7 @@ async fn host_defer_invoke_serves_defer_through_the_seam() {
         fixture_path(),
         Some(host_services(Arc::new(mock), None)),
         None,
+        None,
     )
     .await
     .expect("spawn fixture");
@@ -202,6 +204,7 @@ async fn host_edit_invoke_serves_edit_message_through_the_seam() {
     let plugin = RunningPlugin::spawn_with(
         fixture_path(),
         Some(host_services(Arc::new(mock), None)),
+        None,
         None,
     )
     .await
@@ -268,13 +271,14 @@ async fn host_openview_opens_the_target_plugin_view_end_to_end() {
     let services = view_host_services(Arc::new(mock), engine.clone());
     let manager = Arc::new(PluginManager::new(None, RespawnPolicy::default()));
     manager
-        .spawn("hello", fixture_path(), None)
+        .spawn("hello", fixture_path(), None, &[])
         .await
         .expect("spawn target plugin");
 
-    let caller = RunningPlugin::spawn_with(fixture_path(), Some(services), Some(manager.clone()))
-        .await
-        .expect("spawn caller plugin");
+    let caller =
+        RunningPlugin::spawn_with(fixture_path(), Some(services), Some(manager.clone()), None)
+            .await
+            .expect("spawn caller plugin");
     let resp = caller
         .call(
             "invoke",
@@ -329,7 +333,7 @@ async fn host_openview_opens_the_target_plugin_view_end_to_end() {
 /// of panicking or hanging.
 #[tokio::test]
 async fn host_call_without_services_is_host_unavailable() {
-    let plugin = RunningPlugin::spawn_with(fixture_path(), None, None)
+    let plugin = RunningPlugin::spawn_with(fixture_path(), None, None, None)
         .await
         .expect("spawn fixture");
     let resp = plugin
@@ -382,6 +386,7 @@ async fn concurrent_host_calls_correlate_by_id() {
             fixture_path(),
             Some(host_services(Arc::new(mock), None)),
             None,
+            None,
         )
         .await
         .expect("spawn fixture"),
@@ -429,6 +434,7 @@ async fn call_after_stop_fails_fast() {
         fixture_path(),
         Some(host_services(Arc::new(mock), None)),
         None,
+        None,
     )
     .await
     .expect("spawn fixture");
@@ -464,6 +470,7 @@ async fn host_kvget_invoke_serves_kv_get_through_the_seam() {
     let plugin = RunningPlugin::spawn_with(
         fixture_path(),
         Some(host_services(Arc::new(mock_io), Some(Arc::new(mock_kv)))),
+        None,
         None,
     )
     .await
@@ -512,6 +519,7 @@ async fn host_kvset_invoke_serves_kv_set_through_the_seam() {
         fixture_path(),
         Some(host_services(Arc::new(mock_io), Some(Arc::new(mock_kv)))),
         None,
+        None,
     )
     .await
     .expect("spawn fixture");
@@ -558,6 +566,7 @@ async fn host_kvdel_invoke_serves_kv_delete_through_the_seam() {
     let plugin = RunningPlugin::spawn_with(
         fixture_path(),
         Some(host_services(Arc::new(mock_io), Some(Arc::new(mock_kv)))),
+        None,
         None,
     )
     .await
