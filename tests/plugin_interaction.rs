@@ -234,6 +234,40 @@ async fn engine_surfaces_unknown_custom_id_from_the_fixture() {
     plugin.stop().await.expect("graceful stop");
 }
 
+// ── modal submit routing ───────────────────────────────────────────────────
+
+#[tokio::test]
+async fn modal_submit_round_trips_through_the_fixture() {
+    let message_id = serenity::MessageId::new(1);
+    let (plugin, engine, _) = spawn_engine_and_open(message_id).await;
+
+    // A Discord modal submit arrives as a view.interact with the modal's
+    // custom id and the component values in the payload.
+    let spec = engine
+        .interact(
+            message_id,
+            "hello:modal",
+            json!({
+                "custom_id": "hello:modal",
+                "components": [{"type": 4, "custom_id": "note", "value": "hi"}],
+            }),
+        )
+        .await
+        .expect("modal submit");
+    assert!(
+        spec.data["content"]
+            .as_str()
+            .expect("content")
+            .contains("Modal submitted! count=1")
+    );
+    assert!(
+        engine.has_session(message_id).await,
+        "the session survives the modal submit"
+    );
+
+    plugin.stop().await.expect("graceful stop");
+}
+
 // ── concurrent sessions ────────────────────────────────────────────────────
 
 #[tokio::test]

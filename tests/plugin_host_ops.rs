@@ -78,10 +78,13 @@ async fn host_say_serves_send_message_through_the_seam() {
         .times(1)
         .returning(|_, _, _| Ok(Some(json!({ "message_id": 123_456_789 }))));
 
-    let plugin =
-        RunningPlugin::spawn_with(fixture_path(), Some(host_services(Arc::new(mock), None)))
-            .await
-            .expect("spawn fixture");
+    let plugin = RunningPlugin::spawn_with(
+        fixture_path(),
+        Some(host_services(Arc::new(mock), None)),
+        None,
+    )
+    .await
+    .expect("spawn fixture");
     let resp = plugin
         .call(
             "invoke",
@@ -125,10 +128,13 @@ async fn host_defer_invoke_serves_defer_through_the_seam() {
         .times(1)
         .returning(|_, _| Ok(()));
 
-    let plugin =
-        RunningPlugin::spawn_with(fixture_path(), Some(host_services(Arc::new(mock), None)))
-            .await
-            .expect("spawn fixture");
+    let plugin = RunningPlugin::spawn_with(
+        fixture_path(),
+        Some(host_services(Arc::new(mock), None)),
+        None,
+    )
+    .await
+    .expect("spawn fixture");
     let resp = plugin
         .call(
             "invoke",
@@ -168,10 +174,13 @@ async fn host_edit_invoke_serves_edit_message_through_the_seam() {
         .times(1)
         .returning(|_, _, _| Ok(Some(json!({ "message_id": 111_222_333 }))));
 
-    let plugin =
-        RunningPlugin::spawn_with(fixture_path(), Some(host_services(Arc::new(mock), None)))
-            .await
-            .expect("spawn fixture");
+    let plugin = RunningPlugin::spawn_with(
+        fixture_path(),
+        Some(host_services(Arc::new(mock), None)),
+        None,
+    )
+    .await
+    .expect("spawn fixture");
     let resp = plugin
         .call(
             "invoke",
@@ -204,7 +213,7 @@ async fn host_edit_invoke_serves_edit_message_through_the_seam() {
 /// of panicking or hanging.
 #[tokio::test]
 async fn host_call_without_services_is_host_unavailable() {
-    let plugin = RunningPlugin::spawn_with(fixture_path(), None)
+    let plugin = RunningPlugin::spawn_with(fixture_path(), None, None)
         .await
         .expect("spawn fixture");
     let resp = plugin
@@ -253,9 +262,13 @@ async fn concurrent_host_calls_correlate_by_id() {
         .returning(|_, _, _| Ok(Some(json!({ "message_id": 2 }))));
 
     let plugin = Arc::new(
-        RunningPlugin::spawn_with(fixture_path(), Some(host_services(Arc::new(mock), None)))
-            .await
-            .expect("spawn fixture"),
+        RunningPlugin::spawn_with(
+            fixture_path(),
+            Some(host_services(Arc::new(mock), None)),
+            None,
+        )
+        .await
+        .expect("spawn fixture"),
     );
     let (one, two) = tokio::join!(
         plugin.call(
@@ -296,10 +309,13 @@ async fn concurrent_host_calls_correlate_by_id() {
 #[tokio::test]
 async fn call_after_stop_fails_fast() {
     let mock = MockHostIo::new();
-    let plugin =
-        RunningPlugin::spawn_with(fixture_path(), Some(host_services(Arc::new(mock), None)))
-            .await
-            .expect("spawn fixture");
+    let plugin = RunningPlugin::spawn_with(
+        fixture_path(),
+        Some(host_services(Arc::new(mock), None)),
+        None,
+    )
+    .await
+    .expect("spawn fixture");
     plugin.stop().await.expect("stop fixture");
 
     let err = plugin
@@ -332,6 +348,7 @@ async fn host_kvget_invoke_serves_kv_get_through_the_seam() {
     let plugin = RunningPlugin::spawn_with(
         fixture_path(),
         Some(host_services(Arc::new(mock_io), Some(Arc::new(mock_kv)))),
+        None,
     )
     .await
     .expect("spawn fixture");
@@ -378,6 +395,7 @@ async fn host_kvset_invoke_serves_kv_set_through_the_seam() {
     let plugin = RunningPlugin::spawn_with(
         fixture_path(),
         Some(host_services(Arc::new(mock_io), Some(Arc::new(mock_kv)))),
+        None,
     )
     .await
     .expect("spawn fixture");
@@ -424,6 +442,7 @@ async fn host_kvdel_invoke_serves_kv_delete_through_the_seam() {
     let plugin = RunningPlugin::spawn_with(
         fixture_path(),
         Some(host_services(Arc::new(mock_io), Some(Arc::new(mock_kv)))),
+        None,
     )
     .await
     .expect("spawn fixture");

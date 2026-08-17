@@ -125,7 +125,7 @@ async fn click(plugin: &RunningPlugin) -> Result<bool, pwr_bot::plugin::PluginEr
 async fn health_pings_keep_a_healthy_plugin_running() {
     let manager = Arc::new(PluginManager::new(None, test_policy()));
     manager
-        .spawn("hello", fixture_path(), Some(test_health()))
+        .spawn("hello", fixture_path(), Some(test_health()), &[])
         .await
         .expect("spawn hello_plugin");
 
@@ -154,8 +154,8 @@ async fn health_pings_keep_a_healthy_plugin_running() {
 async fn concurrent_spawn_race_keeps_the_winner() {
     let manager = Arc::new(PluginManager::new(None, test_policy()));
     let (a, b) = tokio::join!(
-        manager.spawn("hello", fixture_path(), None),
-        manager.spawn("hello", fixture_path(), None),
+        manager.spawn("hello", fixture_path(), None, &[]),
+        manager.spawn("hello", fixture_path(), None, &[]),
     );
     let (winner, loser) = match (a, b) {
         (Ok(winner), Err(loser)) => (winner, loser),
@@ -192,6 +192,7 @@ async fn silent_plugin_is_respawned_after_missed_pongs() {
             "hung",
             fixture_script("hung_plugin.sh"),
             Some(test_health()),
+            &[],
         )
         .await
         .expect("spawn hung fixture");
@@ -226,7 +227,7 @@ async fn silent_plugin_is_respawned_after_missed_pongs() {
 async fn killed_plugin_is_respawned_and_serves_fresh_instances() {
     let manager = Arc::new(PluginManager::new(None, test_policy()));
     manager
-        .spawn("hello", fixture_path(), Some(test_health()))
+        .spawn("hello", fixture_path(), Some(test_health()), &[])
         .await
         .expect("spawn hello_plugin");
     let plugin = manager.get("hello").await.expect("registered handle");
@@ -272,7 +273,7 @@ async fn killed_plugin_is_respawned_and_serves_fresh_instances() {
 async fn bye_unload_exits_cleanly_and_reaps() {
     let manager = Arc::new(PluginManager::new(None, test_policy()));
     manager
-        .spawn("hello", fixture_path(), None)
+        .spawn("hello", fixture_path(), None, &[])
         .await
         .expect("spawn hello_plugin");
 
@@ -294,7 +295,7 @@ async fn bye_unload_exits_cleanly_and_reaps() {
 async fn unload_fails_in_flight_calls_with_plugin_died() {
     let manager = Arc::new(PluginManager::new(None, test_policy()));
     manager
-        .spawn("hung", fixture_script("hung_plugin.sh"), None)
+        .spawn("hung", fixture_script("hung_plugin.sh"), None, &[])
         .await
         .expect("spawn hung fixture");
 
@@ -336,6 +337,7 @@ async fn crash_loop_stops_respawning_after_the_cap() {
             "crash",
             fixture_script("crash_plugin.sh"),
             Some(test_health()),
+            &[],
         )
         .await
         .expect("spawn crash fixture");
@@ -374,6 +376,7 @@ async fn clean_exit_is_not_respawned() {
             "clean",
             fixture_script("clean_exit_plugin.sh"),
             Some(health),
+            &[],
         )
         .await
         .expect("spawn clean-exit fixture");
@@ -406,7 +409,7 @@ async fn stale_respawn_does_not_unload_a_swapped_instance() {
     };
     let manager = Arc::new(PluginManager::new(None, policy));
     manager
-        .spawn("hello", fixture_path(), None)
+        .spawn("hello", fixture_path(), None, &[])
         .await
         .expect("spawn hello_plugin");
     let crashed = manager.get("hello").await.expect("registered handle");
@@ -449,7 +452,7 @@ async fn respawn_of_an_unknown_plugin_fails_with_not_running() {
     // The respawn contract takes the crashed instance (identity check), so
     // any running plugin works as the handle to pass.
     manager
-        .spawn("hello", fixture_path(), None)
+        .spawn("hello", fixture_path(), None, &[])
         .await
         .expect("spawn hello_plugin");
     let probe = manager.get("hello").await.expect("registered handle");
@@ -472,7 +475,7 @@ async fn respawn_of_an_unknown_plugin_fails_with_not_running() {
 async fn swap_replaces_the_running_instance() {
     let manager = Arc::new(PluginManager::new(None, test_policy()));
     manager
-        .spawn("hello", fixture_path(), Some(test_health()))
+        .spawn("hello", fixture_path(), Some(test_health()), &[])
         .await
         .expect("spawn hello_plugin");
     let original = manager.get("hello").await.expect("registered handle");
@@ -505,7 +508,7 @@ async fn swap_replaces_the_running_instance() {
 async fn swap_with_a_missing_binary_leaves_the_plugin_running() {
     let manager = Arc::new(PluginManager::new(None, test_policy()));
     manager
-        .spawn("hello", fixture_path(), None)
+        .spawn("hello", fixture_path(), None, &[])
         .await
         .expect("spawn hello_plugin");
     let original = manager.get("hello").await.expect("registered handle");

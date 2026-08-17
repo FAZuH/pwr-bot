@@ -13,7 +13,11 @@
 //! - issues plugin→host calls for the `host.say`/`host.defer`/`host.edit`/
 //!   `host.kvget`/`host.kvset`/`host.kvdel` invoke cmds, forwarding the host's
 //!   resp back to the original invoke;
-//! - treats `event` (e.g. `view.timeout`) as one-way, never answering it;
+//! - treats `event` (e.g. `view.timeout`) as one-way, never answering it; a
+//!   `voice_state` event is echoed back as `voice_state.ack` (plugin→host
+//!   event, broadcast by the host on its event bus);
+//! - answers `view.interact` on [`MODAL_CUSTOM_ID`] with a modal-submit
+//!   counter, mirroring how a real plugin handles a Discord modal submit;
 //! - answers `ping` with `pong`;
 //! - tolerates the host's hello ack silently;
 //! - exits 0 on `bye` and on EOF.
@@ -35,6 +39,10 @@ use pwr_plugin_protocol::WireError;
 use pwr_poise_components as components;
 use serde_json::Value;
 use serde_json::json;
+
+/// Custom id the fixture's modal view answers; a Discord modal submit arrives
+/// as a `view.interact` with this custom id.
+const MODAL_CUSTOM_ID: &str = "hello:modal";
 
 /// The view payload the fixture renders: built with the `pwr_poise_components`
 /// builders — one action-row button carrying the [`BUTTON_CUSTOM_ID`] custom
@@ -156,16 +164,26 @@ fn main() -> ExitCode {
                     .and_then(|a| a.get("custom_id"))
                     .and_then(Value::as_str)
                     == Some(BUTTON_CUSTOM_ID);
-                let resp = match (op.as_str(), cmd.as_deref(), is_click) {
-                    ("invoke", Some(PLUGIN_NAME), _) => {
+                let is_modal = args
+                    .as_ref()
+                    .and_then(|a| a.get("custom_id"))
+                    .and_then(Value::as_str)
+                    == Some(MODAL_CUSTOM_ID);
+                let resp = match (op.as_str(), cmd.as_deref(), is_click, is_modal) {
+                    ("invoke", Some(PLUGIN_NAME), _, _) => {
                         Msg::resp_ok(id, Some(view_data("Hello from plugin!")))
                     }
-                    ("view.interact", Some(PLUGIN_NAME), true) => {
+                    ("view.interact", Some(PLUGIN_NAME), true, _) => {
                         count += 1;
                         let content = format!("Button clicked! count={count}");
                         Msg::resp_ok(id, Some(view_data(&content)))
                     }
-                    ("view.interact", Some(PLUGIN_NAME), false) => Msg::resp_err(
+                    ("view.interact", Some(PLUGIN_NAME), _, true) => {
+                        count += 1;
+                        let content = format!("Modal submitted! count={count}");
+                        Msg::resp_ok(id, Some(view_data(&content)))
+                    }
+                    ("view.interact", Some(PLUGIN_NAME), false, false) => Msg::resp_err(
                         id,
                         WireError {
                             kind: "UnknownAction".into(),
@@ -187,10 +205,21 @@ fn main() -> ExitCode {
                     return ExitCode::FAILURE;
                 }
             }
-            Msg::Event { name, .. } => {
-                // One-way push: never reply. Note it on stderr only.
-                if name == "view.timeout" {
-                    eprintln!("event: view.timeout received");
+            Msg::Event { name, data } => {
+                // One-way push: never reply. Note it on stderr only, except
+                // voice_state, which is echoed back as a plugin→host event
+                // (the host broadcasts it on its event bus).
+                if name == "voice_state" {
+                    eprintln!("event: voice_state received");
+                    let echo = Msg::Event {
+                        name: "voice_state.ack".into(),
+                        data: data.clone(),
+                    };
+                    if write_msg(&mut out, &echo).is_err() {
+                        return ExitCode::FAILURE;
+                    }
+                } else {
+                    eprintln!("event: {name} received");
                 }
             }
             Msg::Ping => {
