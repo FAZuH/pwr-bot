@@ -588,11 +588,12 @@ pub fn core_settings_command() -> Command<Data, Error> {
 /// their own registry exists). The interaction's arguments are re-parsed
 /// against the command's schema ([`reparse_command_args`]) so the plugin
 /// receives the real payload instead of an empty object. The plugin handle
-/// comes from the manager, the initial render is the locked placeholder+open+
-/// edit flow: send a loading message, open the engine session on its id (one
-/// `invoke`), then replace the message body with the returned spec's raw data
-/// via a bare HTTP edit — `serenity::Component` is not `Deserialize`, so the
-/// spec cannot ride a typed `CreateReply`.
+/// comes from the manager, the initial render is invoke+placeholder+edit:
+/// invoke the plugin for its spec first (so the loading reply can carry
+/// `spec.ephemeral`), register the engine session on the reply's message id,
+/// then replace the message body with the returned spec's raw data via a
+/// bare HTTP edit — `serenity::Component` is not `Deserialize`, so the spec
+/// cannot ride a typed `CreateReply`.
 fn plugin_slash_dispatch(
     ctx: poise::ApplicationContext<'_, Data, Error>,
 ) -> poise::BoxFuture<'_, Result<(), poise::FrameworkError<'_, Data, Error>>> {
@@ -620,10 +621,25 @@ fn plugin_slash_dispatch(
                 anyhow::anyhow!("core plugin `{plugin_name}` is not running").into(),
             ));
         };
+        // The interaction token outlives the `Context` conversion below and is
+        // needed to edit the reply through the interaction-webhook route.
+        let interaction_token = ctx.interaction.token.as_str();
         let ctx: poise::Context<'_, Data, Error> = ctx.into();
 
+        // Invoke the plugin before sending anything, so the initial reply can
+        // carry the view's ephemeral flag (Discord only honors ephemeral on
+        // the first interaction response).
+        let spec = data
+            .plugin_engine
+            .invoke(plugin.clone(), command_name, args)
+            .await
+            .map_err(|error| poise::FrameworkError::new_command(ctx, error.into()))?;
         let reply = ctx
-            .send(poise::CreateReply::new().content("Loading…"))
+            .send(
+                poise::CreateReply::new()
+                    .content("Loading…")
+                    .ephemeral(spec.ephemeral),
+            )
             .await
             .map_err(|error| poise::FrameworkError::new_command(ctx, error.into()))?;
         let message_id = reply
@@ -631,13 +647,16 @@ fn plugin_slash_dispatch(
             .await
             .map_err(|error| poise::FrameworkError::new_command(ctx, error.into()))?
             .id;
-        let spec = data
-            .plugin_engine
-            .open(message_id, plugin, command_name, args)
-            .await
-            .map_err(|error| poise::FrameworkError::new_command(ctx, error.into()))?;
+        data.plugin_engine
+            .register(message_id, plugin, command_name, spec.clone())
+            .await;
+        // Ephemeral replies cannot be edited via the channel-message route
+        // (`PATCH /channels/{id}/messages/{id}` returns Unknown Message for
+        // ephemeral messages); the interaction-webhook route is the only one
+        // that works, for both ephemeral and public replies. The message id
+        // fetched above is still needed for the engine session registration.
         ctx.http()
-            .edit_message(ctx.channel_id(), message_id, &spec.data, Vec::new())
+            .edit_original_interaction_response(interaction_token, &spec.data, Vec::new())
             .await
             .map_err(|error| poise::FrameworkError::new_command(ctx, error.into()))?;
         Ok(())

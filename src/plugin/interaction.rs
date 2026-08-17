@@ -253,19 +253,32 @@ impl<P: PluginHandle> InteractionEngine<P> {
         engine
     }
 
-    /// Opens a session for a plugin view: invokes the plugin's command and
-    /// stores the returned spec's opaque `view` under `message_id`. Returns
-    /// the [`ViewSpec`] the caller renders verbatim (typically via
-    /// `ctx.send`). Any session already open for `message_id` is replaced.
-    pub async fn open(
+    /// Invokes the plugin's command and returns the [`ViewSpec`] to render:
+    /// a pure call + parse, no session and no message id required. The
+    /// caller sends `spec.data` verbatim (e.g. via `ctx.send`), then opens
+    /// the session for the sent message with
+    /// [`InteractionEngine::register`] — the two-step split lets the reply
+    /// carry `spec.ephemeral` before the session exists.
+    pub async fn invoke(
         &self,
-        message_id: serenity::MessageId,
         plugin: Arc<P>,
         command: &str,
         args: Value,
     ) -> Result<ViewSpec, InteractionError> {
         let resp = plugin.call("invoke", Some(command), Some(args)).await?;
-        let spec = view_spec_from_resp(resp, None)?;
+        view_spec_from_resp(resp, None)
+    }
+
+    /// Registers the session for an already-computed [`ViewSpec`] under
+    /// `message_id`, storing the spec's opaque `view` as the session state.
+    /// Any session already open for `message_id` is replaced.
+    pub async fn register(
+        &self,
+        message_id: serenity::MessageId,
+        plugin: Arc<P>,
+        command: &str,
+        spec: ViewSpec,
+    ) {
         let generation = self.inner.next_generation.fetch_add(1, Ordering::SeqCst);
         self.inner.sessions.lock().await.insert(
             message_id,
@@ -278,6 +291,23 @@ impl<P: PluginHandle> InteractionEngine<P> {
                 last_active: tokio::time::Instant::now(),
             },
         );
+    }
+
+    /// Opens a session for a plugin view: invokes the plugin's command
+    /// ([`InteractionEngine::invoke`]) and registers the returned spec's
+    /// session under `message_id` ([`InteractionEngine::register`]). Returns
+    /// the [`ViewSpec`] the caller renders verbatim (typically via
+    /// `ctx.send`). Any session already open for `message_id` is replaced.
+    pub async fn open(
+        &self,
+        message_id: serenity::MessageId,
+        plugin: Arc<P>,
+        command: &str,
+        args: Value,
+    ) -> Result<ViewSpec, InteractionError> {
+        let spec = self.invoke(plugin.clone(), command, args).await?;
+        self.register(message_id, plugin, command, spec.clone())
+            .await;
         Ok(spec)
     }
 
@@ -752,6 +782,49 @@ mod tests {
             .expect("second click");
         assert_eq!(spec.data["content"], "count=2");
         assert_eq!(engine.view_state(id).await, Some(json!({"clicks": 2})));
+    }
+
+    #[tokio::test]
+    async fn invoke_returns_a_spec_without_opening_a_session() {
+        let plugin = Arc::new(FakePlugin::default());
+        let engine = InteractionEngine::new();
+        let id = serenity::MessageId::new(7);
+
+        let spec = engine
+            .invoke(plugin, "hello", json!({}))
+            .await
+            .expect("invoke returns the view spec");
+        assert_eq!(spec.data, json!({"content": "hello"}));
+        assert!(
+            !engine.has_session(id).await,
+            "invoke alone must not open a session"
+        );
+    }
+
+    #[tokio::test]
+    async fn invoke_then_register_opens_a_session_that_interact_routes_to() {
+        let plugin = Arc::new(FakePlugin::default());
+        let engine = InteractionEngine::new();
+        let id = serenity::MessageId::new(7);
+
+        let spec = engine
+            .invoke(plugin.clone(), "hello", json!({}))
+            .await
+            .expect("invoke returns the view spec");
+        assert!(!engine.has_session(id).await);
+        engine.register(id, plugin, "hello", spec).await;
+        assert!(engine.has_session(id).await);
+
+        let spec = engine
+            .interact(id, BUTTON_CUSTOM_ID, json!({"user_id": 1}))
+            .await
+            .expect("click routes to the registered session");
+        assert_eq!(spec.data["content"], "count=1");
+        assert_eq!(
+            engine.view_state(id).await,
+            Some(json!({"clicks": 1})),
+            "the envelope view becomes the session state"
+        );
     }
 
     #[tokio::test]
