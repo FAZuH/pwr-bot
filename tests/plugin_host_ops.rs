@@ -12,14 +12,20 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use poise::serenity_prelude as serenity;
 use pwr_bot::plugin::HostConfig;
 use pwr_bot::plugin::HostIo;
 use pwr_bot::plugin::HostServices;
+use pwr_bot::plugin::InteractionEngine;
 use pwr_bot::plugin::KvStore;
+use pwr_bot::plugin::PluginManager;
+use pwr_bot::plugin::RespawnPolicy;
 use pwr_bot::plugin::RunningPlugin;
 use pwr_bot::plugin::host::MockHostIo;
 use pwr_bot::plugin::host::MockKvStore;
+use pwr_plugin_protocol::BUTTON_CUSTOM_ID;
 use pwr_plugin_protocol::Msg;
+use pwr_plugin_protocol::PLUGIN_NAME;
 use serde_json::json;
 
 /// Locates the `hello_plugin` fixture binary. `CARGO_BIN_EXE_hello_plugin`
@@ -59,6 +65,25 @@ fn host_services(io: Arc<dyn HostIo>, kv: Option<Arc<dyn KvStore>>) -> Arc<HostS
             poll_interval: std::time::Duration::from_secs(30),
         }),
         kv,
+        engine: None,
+    })
+}
+
+/// Like [`host_services`], but with the interaction engine wired in so
+/// `host.open_view` sessions can be opened.
+fn view_host_services(
+    io: Arc<dyn HostIo>,
+    engine: InteractionEngine<RunningPlugin>,
+) -> Arc<HostServices> {
+    Arc::new(HostServices {
+        io: Some(io),
+        config: Some(HostConfig {
+            db_url: "postgres://test".into(),
+            data_path: PathBuf::from("/tmp/pwr-bot-test"),
+            poll_interval: std::time::Duration::from_secs(30),
+        }),
+        kv: None,
+        engine: Some(Arc::new(engine)),
     })
 }
 
@@ -78,10 +103,13 @@ async fn host_say_serves_send_message_through_the_seam() {
         .times(1)
         .returning(|_, _, _| Ok(Some(json!({ "message_id": 123_456_789 }))));
 
-    let plugin =
-        RunningPlugin::spawn_with(fixture_path(), Some(host_services(Arc::new(mock), None)))
-            .await
-            .expect("spawn fixture");
+    let plugin = RunningPlugin::spawn_with(
+        fixture_path(),
+        Some(host_services(Arc::new(mock), None)),
+        None,
+    )
+    .await
+    .expect("spawn fixture");
     let resp = plugin
         .call(
             "invoke",
@@ -125,10 +153,13 @@ async fn host_defer_invoke_serves_defer_through_the_seam() {
         .times(1)
         .returning(|_, _| Ok(()));
 
-    let plugin =
-        RunningPlugin::spawn_with(fixture_path(), Some(host_services(Arc::new(mock), None)))
-            .await
-            .expect("spawn fixture");
+    let plugin = RunningPlugin::spawn_with(
+        fixture_path(),
+        Some(host_services(Arc::new(mock), None)),
+        None,
+    )
+    .await
+    .expect("spawn fixture");
     let resp = plugin
         .call(
             "invoke",
@@ -168,10 +199,13 @@ async fn host_edit_invoke_serves_edit_message_through_the_seam() {
         .times(1)
         .returning(|_, _, _| Ok(Some(json!({ "message_id": 111_222_333 }))));
 
-    let plugin =
-        RunningPlugin::spawn_with(fixture_path(), Some(host_services(Arc::new(mock), None)))
-            .await
-            .expect("spawn fixture");
+    let plugin = RunningPlugin::spawn_with(
+        fixture_path(),
+        Some(host_services(Arc::new(mock), None)),
+        None,
+    )
+    .await
+    .expect("spawn fixture");
     let resp = plugin
         .call(
             "invoke",
@@ -200,11 +234,102 @@ async fn host_edit_invoke_serves_edit_message_through_the_seam() {
     }
 }
 
+/// The `host.openview` invoke opens the target plugin's view end to end: the
+/// host resolves the target through the manager, posts a placeholder through
+/// the io seam, renders the target's panel into an interaction-engine session
+/// on the produced message id, then edits the placeholder to the final
+/// payload. The resp carries the produced message id, and a subsequent
+/// interaction routes through that session back into the target plugin.
+#[tokio::test]
+async fn host_openview_opens_the_target_plugin_view_end_to_end() {
+    let channel_id = 987_654_321_u64;
+    let produced = 123_456_789_u64;
+    let mut mock = MockHostIo::new();
+    mock.expect_send_message()
+        .with(
+            mockall::predicate::eq(channel_id),
+            mockall::predicate::eq("Loading…"),
+            mockall::predicate::eq(None::<serde_json::Value>),
+        )
+        .times(1)
+        .returning(move |_, _, _| Ok(Some(json!({ "message_id": produced }))));
+    mock.expect_edit_message()
+        .with(
+            mockall::predicate::eq(channel_id),
+            mockall::predicate::eq(produced),
+            mockall::predicate::function(|data: &serde_json::Value| {
+                data["content"] == "Hello from plugin!"
+            }),
+        )
+        .times(1)
+        .returning(move |_, _, _| Ok(Some(json!({ "message_id": produced }))));
+
+    let engine = InteractionEngine::new();
+    let services = view_host_services(Arc::new(mock), engine.clone());
+    let manager = Arc::new(PluginManager::new(None, RespawnPolicy::default()));
+    manager
+        .spawn("hello", fixture_path(), None)
+        .await
+        .expect("spawn target plugin");
+
+    let caller = RunningPlugin::spawn_with(fixture_path(), Some(services), Some(manager.clone()))
+        .await
+        .expect("spawn caller plugin");
+    let resp = caller
+        .call(
+            "invoke",
+            Some("host.openview"),
+            Some(json!({
+                "channel_id": channel_id,
+                "plugin": "hello",
+                "command": PLUGIN_NAME,
+                "args": {},
+            })),
+        )
+        .await
+        .expect("host.openview invoke answered");
+    caller.stop().await.expect("stop caller");
+
+    match resp {
+        Msg::Resp {
+            id,
+            ok: true,
+            data: Some(data),
+            error: None,
+        } => {
+            assert_eq!(data, json!({ "message_id": produced }));
+            assert_eq!(id, 0);
+        }
+        other => panic!("expected ok resp echoing the produced message id, got {other:?}"),
+    }
+
+    let message_id = serenity::MessageId::new(produced);
+    assert!(
+        engine.has_session(message_id).await,
+        "the produced message has an open session"
+    );
+    let spec = engine
+        .interact(message_id, BUTTON_CUSTOM_ID, json!({}))
+        .await
+        .expect("click routes to the target plugin");
+    assert!(
+        spec.data["content"]
+            .as_str()
+            .expect("content")
+            .contains("count=1")
+    );
+
+    manager
+        .unload("hello", &[])
+        .await
+        .expect("stop target plugin");
+}
+
 /// Without services wired, a `host.*` call answers `HostUnavailable` instead
 /// of panicking or hanging.
 #[tokio::test]
 async fn host_call_without_services_is_host_unavailable() {
-    let plugin = RunningPlugin::spawn_with(fixture_path(), None)
+    let plugin = RunningPlugin::spawn_with(fixture_path(), None, None)
         .await
         .expect("spawn fixture");
     let resp = plugin
@@ -253,9 +378,13 @@ async fn concurrent_host_calls_correlate_by_id() {
         .returning(|_, _, _| Ok(Some(json!({ "message_id": 2 }))));
 
     let plugin = Arc::new(
-        RunningPlugin::spawn_with(fixture_path(), Some(host_services(Arc::new(mock), None)))
-            .await
-            .expect("spawn fixture"),
+        RunningPlugin::spawn_with(
+            fixture_path(),
+            Some(host_services(Arc::new(mock), None)),
+            None,
+        )
+        .await
+        .expect("spawn fixture"),
     );
     let (one, two) = tokio::join!(
         plugin.call(
@@ -296,10 +425,13 @@ async fn concurrent_host_calls_correlate_by_id() {
 #[tokio::test]
 async fn call_after_stop_fails_fast() {
     let mock = MockHostIo::new();
-    let plugin =
-        RunningPlugin::spawn_with(fixture_path(), Some(host_services(Arc::new(mock), None)))
-            .await
-            .expect("spawn fixture");
+    let plugin = RunningPlugin::spawn_with(
+        fixture_path(),
+        Some(host_services(Arc::new(mock), None)),
+        None,
+    )
+    .await
+    .expect("spawn fixture");
     plugin.stop().await.expect("stop fixture");
 
     let err = plugin
@@ -332,6 +464,7 @@ async fn host_kvget_invoke_serves_kv_get_through_the_seam() {
     let plugin = RunningPlugin::spawn_with(
         fixture_path(),
         Some(host_services(Arc::new(mock_io), Some(Arc::new(mock_kv)))),
+        None,
     )
     .await
     .expect("spawn fixture");
@@ -378,6 +511,7 @@ async fn host_kvset_invoke_serves_kv_set_through_the_seam() {
     let plugin = RunningPlugin::spawn_with(
         fixture_path(),
         Some(host_services(Arc::new(mock_io), Some(Arc::new(mock_kv)))),
+        None,
     )
     .await
     .expect("spawn fixture");
@@ -424,6 +558,7 @@ async fn host_kvdel_invoke_serves_kv_delete_through_the_seam() {
     let plugin = RunningPlugin::spawn_with(
         fixture_path(),
         Some(host_services(Arc::new(mock_io), Some(Arc::new(mock_kv)))),
+        None,
     )
     .await
     .expect("spawn fixture");

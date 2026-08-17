@@ -115,12 +115,13 @@ fn host_services(kv: Option<Arc<dyn KvStore>>) -> Arc<HostServices> {
             poll_interval: std::time::Duration::from_secs(30),
         }),
         kv,
+        engine: None,
     })
 }
 
 /// Spawns the settings plugin with the given KV store (or none).
 async fn spawn_settings(kv: Option<Arc<dyn KvStore>>) -> RunningPlugin {
-    RunningPlugin::spawn_with(settings_path(), Some(host_services(kv)))
+    RunningPlugin::spawn_with(settings_path(), Some(host_services(kv)), None)
         .await
         .expect("spawn settings plugin")
 }

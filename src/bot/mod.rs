@@ -107,6 +107,7 @@ impl Bot {
             io: Some(Arc::new(SerenityHostIo::new(http.clone()))),
             config: Some(HostConfig::from(&*config)),
             kv: Some(Arc::new(PgKvStore::new(repos.plugin_kv()))),
+            engine: Some(plugin_engine.clone()),
         });
         let plugin_manager = Arc::new(
             PluginManager::new(Some(http.clone()), RespawnPolicy::default())
