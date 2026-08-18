@@ -14,7 +14,6 @@ use std::sync::Arc;
 use crate::bot::command::prelude::*;
 use crate::plugin::CatalogEntry;
 use crate::plugin::PluginError;
-use crate::plugin::command::CORE_PLUGIN_ROUTES;
 use crate::plugin::command::commands_from_manifest;
 use crate::plugin::command::register_in_guild;
 use crate::plugin::install;
@@ -170,12 +169,12 @@ fn catalog_entry<'a>(
 
 /// The guild's plugins model: catalog names plus the guild's enabled subset.
 ///
-/// Core plugins are auto-enabled: an absent `guild_plugins` row means
-/// enabled, so they are seeded into the enabled subset — only an explicit
-/// `enabled = false` row opts a core plugin out. This mirrors
-/// [`register_core_plugins_in_guild`](crate::bot::BotEventHandler) and lets
-/// `/plugins disable settings` turn the auto-enable off and persist
-/// `enabled = false`.
+/// Auto-enabled plugins (core plugins plus catalog entries flagged
+/// `auto_enable`) are seeded into the enabled subset: an absent
+/// `guild_plugins` row means enabled, so only an explicit `enabled = false`
+/// row opts one out. This mirrors
+/// [`register_plugins_in_guild`](crate::bot::BotEventHandler) and lets
+/// `/plugins disable` turn an auto-enable off and persist `enabled = false`.
 async fn guild_model(data: &Arc<crate::bot::Data>, guild_id: GuildId) -> PluginsModel {
     let catalog = data.plugin_catalog.keys().cloned().collect();
     let rows = data
@@ -189,9 +188,9 @@ async fn guild_model(data: &Arc<crate::bot::Data>, guild_id: GuildId) -> Plugins
         .filter(|entry| entry.enabled)
         .map(|entry| entry.plugin_name.clone())
         .collect();
-    for (_, plugin) in CORE_PLUGIN_ROUTES {
-        if !rows.iter().any(|entry| entry.plugin_name == *plugin) {
-            enabled.push((*plugin).to_string());
+    for plugin in data.auto_enable_plugins() {
+        if !rows.iter().any(|entry| entry.plugin_name == plugin) {
+            enabled.push(plugin);
         }
     }
     PluginsModel::new(catalog, enabled)

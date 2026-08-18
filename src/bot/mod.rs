@@ -57,9 +57,10 @@ use crate::plugin::RespawnPolicy;
 use crate::plugin::RunningPlugin;
 use crate::plugin::SerenityHostIo;
 use crate::plugin::VOICE_STATE_EVENT;
+use crate::plugin::command::PluginRoutes;
 use crate::plugin::command::commands_from_manifest;
-use crate::plugin::command::core_settings_command;
 use crate::plugin::command::register_in_guild;
+use crate::plugin::command::routes_from_manifests;
 use crate::plugin::interaction::DEFAULT_VIEW_TIMEOUT;
 use crate::repo::traits::Repos;
 use crate::service::Services;
@@ -74,7 +75,39 @@ pub struct Data {
     pub plugin_manager: Arc<PluginManager>,
     pub plugin_catalog: Arc<HashMap<String, CatalogEntry>>,
     pub plugin_engine: Arc<InteractionEngine<RunningPlugin>>,
+    /// Command-name → plugin-name routes for dispatch; built at startup from
+    /// the loaded manifests ([`routes_from_manifests`]).
+    pub plugin_routes: Arc<PluginRoutes>,
+    /// Manifests of the core plugins spawned at startup, by plugin name.
+    pub core_manifests: Arc<HashMap<String, Manifest>>,
     pub start_time: Instant,
+}
+
+impl Data {
+    /// The names of plugins that auto-enable in every guild: the configured
+    /// core plugins plus catalog entries flagged `auto_enable`.
+    pub fn auto_enable_plugins(&self) -> Vec<String> {
+        let mut names: Vec<String> = self
+            .config
+            .core_plugins
+            .iter()
+            .map(|spec| spec.name.clone())
+            .collect();
+        for (name, entry) in self.plugin_catalog.iter() {
+            if entry.auto_enable && !names.contains(name) {
+                names.push(name.clone());
+            }
+        }
+        names
+    }
+
+    /// The manifest for an auto-enabled plugin: the core plugin's manifest
+    /// captured at spawn when there is one, else the catalog entry's.
+    pub fn manifest_for(&self, name: &str) -> Option<&Manifest> {
+        self.core_manifests
+            .get(name)
+            .or_else(|| self.plugin_catalog.get(name).map(|entry| &entry.manifest))
+    }
 }
 
 /// Discord bot client and framework.
@@ -124,38 +157,35 @@ impl Bot {
                 .with_event_router(plugin_events.clone()),
         );
 
-        // The settings core plugin is spawned once at startup; per-guild
-        // command registration follows in Ready/GuildCreate. A missing
-        // binary is not fatal: the bot stays up and `/settings` reports the
-        // plugin as not running. The spawn subscribes the plugin to the
-        // Discord events it declared in its manifest, so the router can fan
-        // them out to it.
-        let handlers = catalog
-            .get("settings")
-            .map(|entry| entry.manifest.event_handlers.as_slice())
-            .unwrap_or(&[]);
-        let tasks = catalog
-            .get("settings")
-            .map(|entry| entry.manifest.tasks.as_slice())
-            .unwrap_or(&[]);
-        let settings_manifest = match plugin_manager
-            .spawn(
-                "settings",
-                &config.settings_plugin_path,
-                None,
-                handlers,
-                tasks,
-            )
-            .await
-        {
-            Ok(plugin) => plugin.manifest().cloned(),
-            Err(e) => {
-                warn!("failed to spawn settings plugin: {e}");
-                None
+        // Core plugins are spawned once at startup with no event
+        // subscriptions; per-guild command registration follows in
+        // Ready/GuildCreate. A missing binary is not fatal: the bot stays up
+        // and the plugin's commands simply stay unregistered.
+        let mut manifest_sources: Vec<(String, Option<Manifest>)> = Vec::new();
+        for spec in &config.core_plugins {
+            match plugin_manager
+                .spawn(&spec.name, &spec.path, None, &[], &[])
+                .await
+            {
+                Ok(plugin) => {
+                    manifest_sources.push((spec.name.clone(), plugin.manifest().cloned()));
+                }
+                Err(e) => warn!("failed to spawn core plugin {}: {e}", spec.name),
             }
-        };
+        }
+        let core_manifests = Arc::new(
+            manifest_sources
+                .iter()
+                .filter_map(|(name, manifest)| manifest.clone().map(|m| (name.clone(), m)))
+                .collect::<HashMap<_, _>>(),
+        );
+        let mut route_sources = manifest_sources;
+        for (name, entry) in &catalog {
+            route_sources.push((name.clone(), Some(entry.manifest.clone())));
+        }
+        let plugin_routes = Arc::new(routes_from_manifests(route_sources));
 
-        let framework = Self::create_framework(&config, &catalog, settings_manifest.as_ref())?;
+        let framework = Self::create_framework(&config, &catalog, &core_manifests)?;
 
         let data = Arc::new(Data {
             config: config.clone(),
@@ -165,6 +195,8 @@ impl Bot {
             plugin_manager,
             plugin_catalog: Arc::new(catalog),
             plugin_engine,
+            plugin_routes,
+            core_manifests,
             start_time: Instant::now(),
         });
 
@@ -224,22 +256,18 @@ impl Bot {
 
     /// Creates the Poise framework with commands and configuration.
     ///
-    /// The command list is the merge seam: the Cog commands first, then the
-    /// settings command derived from the settings plugin's wire manifest when
-    /// one was captured at spawn (falling back to the static blob when the
-    /// spawn failed or carried no manifest), then one routing command per
-    /// catalog plugin manifest command, so plugin commands are registered on
-    /// the framework before `Framework::builder().build()`.
+    /// The command list is the merge seam: the Cog commands first, then one
+    /// routing command per core plugin manifest captured at spawn, then one
+    /// routing command per catalog plugin manifest, so plugin commands are
+    /// registered on the framework before `Framework::builder().build()`.
     fn create_framework(
         config: &Config,
         catalog: &HashMap<String, CatalogEntry>,
-        settings_manifest: Option<&Manifest>,
+        core_manifests: &HashMap<String, Manifest>,
     ) -> Result<Box<Framework<Data, Error>>> {
         let mut commands = Cogs.commands();
-        if let Some(settings_manifest) = settings_manifest {
-            commands.extend(commands_from_manifest(settings_manifest));
-        } else {
-            commands.push(core_settings_command());
+        for manifest in core_manifests.values() {
+            commands.extend(commands_from_manifest(manifest));
         }
         for entry in catalog.values() {
             commands.extend(commands_from_manifest(&entry.manifest));
@@ -444,12 +472,13 @@ impl BotEventHandler {
         }
     }
 
-    /// Registers the core plugin commands in a guild unless the guild has
-    /// explicitly disabled them. A missing `guild_plugins` row means enabled
-    /// by default (auto-enable); an `enabled = false` row opts out. Failure
-    /// to list state or register commands is logged and skipped — the bot
-    /// stays up and `/settings` simply stays absent in that guild.
-    async fn register_core_plugins_in_guild(&self, guild_id: poise::serenity_prelude::GuildId) {
+    /// Registers the auto-enabled plugins' commands in a guild in one bulk
+    /// call unless the guild has explicitly disabled them. A missing
+    /// `guild_plugins` row means enabled by default (auto-enable); an
+    /// `enabled = false` row opts out. Failure to list state or register
+    /// commands is logged and skipped — the bot stays up and the plugin's
+    /// commands simply stay absent in that guild.
+    async fn register_plugins_in_guild(&self, guild_id: poise::serenity_prelude::GuildId) {
         let rows = match self
             .data
             .repos
@@ -467,20 +496,37 @@ impl BotEventHandler {
             }
         };
 
-        let disabled = rows
-            .iter()
-            .any(|row| row.plugin_name == "settings" && !row.enabled);
-        if disabled {
-            debug!(
-                "settings plugin disabled in guild {}, skipping registration",
-                guild_id.get()
-            );
+        // Collect every enabled auto-enabled plugin's commands first, then
+        // register them in one bulk call: Discord's per-guild registration is
+        // a bulk overwrite, so one call per plugin would clobber the others.
+        let mut commands = Vec::new();
+        for plugin_name in self.data.auto_enable_plugins() {
+            let disabled = rows
+                .iter()
+                .any(|row| row.plugin_name == plugin_name && !row.enabled);
+            if disabled {
+                debug!(
+                    "plugin `{plugin_name}` disabled in guild {}, skipping registration",
+                    guild_id.get()
+                );
+                continue;
+            }
+            let Some(manifest) = self.data.manifest_for(&plugin_name) else {
+                warn!(
+                    "no manifest for auto-enabled plugin `{plugin_name}`; \
+                     skipping registration in guild {}",
+                    guild_id.get()
+                );
+                continue;
+            };
+            commands.extend(commands_from_manifest(manifest));
+        }
+        if commands.is_empty() {
             return;
         }
-
-        if let Err(e) = register_in_guild(&self.http, &[core_settings_command()], guild_id).await {
+        if let Err(e) = register_in_guild(&self.http, &commands, guild_id).await {
             warn!(
-                "failed to register core plugin commands in guild {}: {e}",
+                "failed to register auto-enabled plugin commands in guild {}: {e}",
                 guild_id.get()
             );
         }
@@ -604,14 +650,14 @@ impl poise::serenity_prelude::EventHandler for BotEventHandler {
                 self.scan_voice_channels(ctx).await;
 
                 for guild_id in ctx.cache.guilds() {
-                    self.register_core_plugins_in_guild(guild_id).await;
+                    self.register_plugins_in_guild(guild_id).await;
                 }
 
                 // Check if commands need to be re-registered
                 self.register_commands_if_needed().await;
             }
             FullEvent::GuildCreate { guild, .. } => {
-                self.register_core_plugins_in_guild(guild.id).await;
+                self.register_plugins_in_guild(guild.id).await;
 
                 let is_enabled = self
                     .data

@@ -23,8 +23,19 @@ pub struct Config {
     pub plugins_toml: PathBuf,
     pub plugins_dir: PathBuf,
     pub settings_plugin_path: PathBuf,
+    /// Core plugins the host spawns at startup, in order.
+    pub core_plugins: Vec<CorePluginSpec>,
     pub features: Features,
     pub version: String,
+}
+
+/// One core plugin the host spawns at startup: its name and binary path.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CorePluginSpec {
+    /// Plugin name, e.g. `settings`.
+    pub name: String,
+    /// Binary path to spawn.
+    pub path: PathBuf,
 }
 
 /// Feature flags for optional bot components.
@@ -92,6 +103,10 @@ impl Config {
                     .map(|dir| dir.join("settings"))
                     .unwrap_or_else(|| self.data_path.join("settings"))
             });
+        self.core_plugins = vec![CorePluginSpec {
+            name: "settings".to_string(),
+            path: self.settings_plugin_path.clone(),
+        }];
 
         self.features = Features {
             voice_tracking: parse_bool_env("ENABLE_VOICE_TRACKING", true),

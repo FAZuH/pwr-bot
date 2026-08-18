@@ -53,6 +53,10 @@ pub struct CatalogEntry {
     /// The plugin's manifest, as declared in the catalog.
     #[serde(deserialize_with = "deserialize_manifest")]
     pub manifest: Manifest,
+    /// Whether the plugin is enabled in every guild by default (an absent
+    /// `guild_plugins` row means enabled). `false` by default.
+    #[serde(default)]
+    pub auto_enable: bool,
 }
 
 /// Deserializes a catalog `manifest` field: the manifest is embedded in
@@ -420,6 +424,7 @@ mod tests {
             url: "https://example.com/hello_plugin".into(),
             sha256: "ab".repeat(32),
             manifest: valid_manifest(),
+            auto_enable: false,
         }
     }
 

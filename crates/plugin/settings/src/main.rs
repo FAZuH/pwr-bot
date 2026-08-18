@@ -17,6 +17,9 @@
 //! - a `settings:open:<plugin>` nav click issues `host.open_view` for the
 //!   target plugin (the settings hub's promise: navigate to any panel),
 //!   answering the interaction with the settings envelope again;
+//! - the nav row is built at runtime from the host's running plugins
+//!   (`host.list_plugins`); a host without that cap — or a manager-less
+//!   spawn — falls back to the single default target;
 //! - every view reply is the full envelope `{"data", "ephemeral", "view"}`
 //!   the interaction engine renders verbatim;
 //! - treats `event` (e.g. `view.timeout`) as one-way, never answering it;
@@ -56,19 +59,22 @@ const CUSTOM_ID_WELCOME: &str = "settings:welcome";
 /// separator, so the hub can open any plugin's panel.
 const CUSTOM_ID_OPEN_PREFIX: &str = "settings:open:";
 
-/// The nav button's target while no second core plugin exists: the
-/// hello-style fixture the integration tests spawn.
+/// The nav button's target while discovery has not run or the host did not
+/// answer `host.list_plugins`: the hello-style fixture the integration tests
+/// spawn.
 const NAV_TARGET_DEFAULT: &str = "hello";
 
-/// The nav row's targets: the settings hub renders one "Open <target>"
-/// button per entry. The row is built from this plugin-side capability list
-/// — settings cannot enumerate running plugins (that is #129) — so a plugin
-/// the hub does not offer is never rendered a button. A listed target that
-/// is not running still answers with the host's PluginNotFound, which the
-/// settings plugin logs and re-renders past. The single default keeps the
-/// hello-style fixture the integration tests spawn; #129 replaces this list
-/// with runtime discovery.
-const NAV_TARGETS: &[&str] = &[NAV_TARGET_DEFAULT];
+/// The nav row's targets: discovered from the host's running plugins at the
+/// first view load. A `Fallback` renders the single default target; a
+/// `Discovered` list renders one "Open <name>" button per entry — an empty
+/// list renders no nav row at all (the #128 gate).
+enum NavTargets {
+    /// Discovery failed (no `host.list_plugins` cap, a manager-less spawn, or
+    /// a malformed resp): fall back to [`NAV_TARGET_DEFAULT`].
+    Fallback,
+    /// The names of the running plugins the host reported.
+    Discovered(Vec<String>),
+}
 
 /// A plugin→host call in flight: the invoke id the reply must answer, and
 /// what to do with the host's resp once it arrives.
@@ -80,6 +86,8 @@ enum Pending {
     Save(u64),
     /// The `host.open_view` issued to open a target plugin's panel.
     OpenView(u64),
+    /// The `host.list_plugins` issued to discover the nav row's targets.
+    ListPlugins(u64),
 }
 
 impl Pending {
@@ -90,6 +98,7 @@ impl Pending {
             Pending::Load(_) => "host.kv.get",
             Pending::Save(_) => "host.kv.set",
             Pending::OpenView(_) => "host.open_view",
+            Pending::ListPlugins(_) => "host.list_plugins",
         }
     }
 }
@@ -175,12 +184,18 @@ fn update(msg: SettingsMsg, model: &mut SettingsModel) {
 
 /// Renders the settings entry view: one toggle button per feature, with the
 /// current state in the label and button style (green when enabled), plus a
-/// nav row opening each declared target plugin's panel.
-fn view_data(model: &SettingsModel) -> Value {
+/// nav row opening each discovered target plugin's panel.
+fn view_data(model: &SettingsModel, nav: &NavTargets) -> Value {
     let feeds = toggle_button(CUSTOM_ID_FEEDS, "Feeds", model.feeds_enabled);
     let voice = toggle_button(CUSTOM_ID_VOICE, "Voice", model.voice_enabled);
     let welcome = toggle_button(CUSTOM_ID_WELCOME, "Welcome", model.welcome_enabled);
-    let open = nav_buttons(NAV_TARGETS);
+    let open = match nav {
+        NavTargets::Fallback => nav_buttons(&[NAV_TARGET_DEFAULT]),
+        NavTargets::Discovered(targets) => {
+            let refs: Vec<&str> = targets.iter().map(String::as_str).collect();
+            nav_buttons(&refs)
+        }
+    };
     let mut rows = vec![components::action_row([feeds, voice, welcome])];
     if !open.is_empty() {
         rows.push(components::action_row(open));
@@ -213,12 +228,21 @@ fn nav_button(target: &str) -> Value {
 
 /// The full envelope a view reply carries: raw message data, visibility, and
 /// the opaque view state the host stores and hands back on interactions.
-fn envelope(model: &SettingsModel) -> Value {
+fn envelope(model: &SettingsModel, nav: &NavTargets) -> Value {
     json!({
-        "data": view_data(model),
+        "data": view_data(model, nav),
         "ephemeral": false,
         "view": model.to_value(),
     })
+}
+
+/// Parses a `host.list_plugins` resp into the running plugin names. `None`
+/// on a missing, non-object, or malformed payload, so the caller falls back
+/// to [`NavTargets::Fallback`].
+fn parse_list_plugins(data: Option<&Value>) -> Option<Vec<String>> {
+    let plugins = data?.get("plugins")?.as_array()?;
+    let names: Vec<&str> = plugins.iter().map(Value::as_str).collect::<Option<_>>()?;
+    Some(names.into_iter().map(str::to_string).collect())
 }
 
 // ── protocol helpers ─────────────────────────────────────────────────────────
@@ -286,6 +310,30 @@ fn reply_err(out: &mut impl Write, invoke_id: u64, kind: &str, msg: impl Into<St
     write_msg(out, &resp).is_ok()
 }
 
+/// Issues a plugin→host call: assigns the next call id, records the pending
+/// kind its resp will resolve, and writes the `Msg::Call` line. Returns
+/// whether the write succeeded.
+fn issue_host_call(
+    out: &mut impl Write,
+    pending: &mut HashMap<u64, Pending>,
+    next_call_id: &mut u64,
+    call: HostCall,
+) -> bool {
+    *next_call_id += 1;
+    let HostCall {
+        pending: pending_kind,
+        args,
+    } = call;
+    pending.insert(*next_call_id, pending_kind);
+    let call_msg = Msg::Call {
+        id: *next_call_id,
+        op: pending_kind.op().into(),
+        cmd: None,
+        args: Some(args),
+    };
+    write_msg(out, &call_msg).is_ok()
+}
+
 /// Answers an invoke after its chained host call completed: a failed host
 /// call is logged, not fatal — the envelope still renders with the current
 /// model. Returns whether the write succeeded.
@@ -296,6 +344,7 @@ fn answer_envelope(
     error: Option<WireError>,
     pending_kind: Pending,
     model: Option<SettingsModel>,
+    nav: &NavTargets,
 ) -> bool {
     if !ok {
         eprintln!(
@@ -307,7 +356,7 @@ fn answer_envelope(
             })
         );
     }
-    let resp = Msg::resp_ok(invoke_id, Some(envelope(&model.unwrap_or_default())));
+    let resp = Msg::resp_ok(invoke_id, Some(envelope(&model.unwrap_or_default(), nav)));
     write_msg(out, &resp).is_ok()
 }
 
@@ -321,6 +370,7 @@ fn main() -> ExitCode {
     let stdout = std::io::stdout();
     let mut out = stdout.lock();
     let mut model: Option<SettingsModel> = None;
+    let mut nav = NavTargets::Fallback;
     let mut next_call_id: u64 = 0;
     // plugin->host calls in flight: our call id -> the invoke id to answer
     // once the host's resp arrives.
@@ -335,6 +385,7 @@ fn main() -> ExitCode {
             "host.kv.get".into(),
             "host.kv.set".into(),
             "host.open_view".into(),
+            "host.list_plugins".into(),
         ],
         manifest: Some(manifest()),
     };
@@ -361,7 +412,7 @@ fn main() -> ExitCode {
                 // with the entry view; the first invoke loads from KV first.
                 if (op.as_str(), cmd.as_deref()) == ("invoke", Some(PLUGIN_NAME)) && model.is_some()
                 {
-                    let resp = Msg::resp_ok(id, Some(envelope(&model.unwrap_or_default())));
+                    let resp = Msg::resp_ok(id, Some(envelope(&model.unwrap_or_default(), &nav)));
                     if write_msg(&mut out, &resp).is_err() {
                         return ExitCode::FAILURE;
                     }
@@ -440,19 +491,7 @@ fn main() -> ExitCode {
                     }
                     continue;
                 };
-                next_call_id += 1;
-                let HostCall {
-                    pending: pending_kind,
-                    args,
-                } = call;
-                pending.insert(next_call_id, pending_kind);
-                let call_msg = Msg::Call {
-                    id: next_call_id,
-                    op: pending_kind.op().into(),
-                    cmd: None,
-                    args: Some(args),
-                };
-                if write_msg(&mut out, &call_msg).is_err() {
+                if !issue_host_call(&mut out, &mut pending, &mut next_call_id, call) {
                     return ExitCode::FAILURE;
                 }
             }
@@ -482,7 +521,7 @@ fn main() -> ExitCode {
                 match pending_kind {
                     Pending::Load(invoke_id) => {
                         // The stored model, or the default when unset or
-                        // failed; then register the panel state in KV before
+                        // failed; then discover the nav row's targets before
                         // the first render.
                         let loaded = if ok {
                             data.as_ref()
@@ -495,25 +534,40 @@ fn main() -> ExitCode {
                         };
                         let current = loaded.unwrap_or_default();
                         model = Some(current);
-                        next_call_id += 1;
-                        let call = HostCall::new(Pending::Save(invoke_id), kv_set_args(&current));
-                        let HostCall {
-                            pending: pending_kind,
-                            args,
-                        } = call;
-                        pending.insert(next_call_id, pending_kind);
-                        let call_msg = Msg::Call {
-                            id: next_call_id,
-                            op: pending_kind.op().into(),
-                            cmd: None,
-                            args: Some(args),
-                        };
-                        if write_msg(&mut out, &call_msg).is_err() {
+                        let call = HostCall::new(Pending::ListPlugins(invoke_id), json!({}));
+                        if !issue_host_call(&mut out, &mut pending, &mut next_call_id, call) {
+                            return ExitCode::FAILURE;
+                        }
+                    }
+                    Pending::ListPlugins(invoke_id) => {
+                        // The running plugin names, or the default target when
+                        // discovery failed; then persist the panel state
+                        // before the first render.
+                        match parse_list_plugins(data.as_ref()) {
+                            Some(targets) => nav = NavTargets::Discovered(targets),
+                            None => {
+                                eprintln!("host.list_plugins failed: {error:?}");
+                                nav = NavTargets::Fallback;
+                            }
+                        }
+                        let call = HostCall::new(
+                            Pending::Save(invoke_id),
+                            kv_set_args(&model.unwrap_or_default()),
+                        );
+                        if !issue_host_call(&mut out, &mut pending, &mut next_call_id, call) {
                             return ExitCode::FAILURE;
                         }
                     }
                     Pending::Save(invoke_id) | Pending::OpenView(invoke_id) => {
-                        if !answer_envelope(&mut out, invoke_id, ok, error, pending_kind, model) {
+                        if !answer_envelope(
+                            &mut out,
+                            invoke_id,
+                            ok,
+                            error,
+                            pending_kind,
+                            model,
+                            &nav,
+                        ) {
                             return ExitCode::FAILURE;
                         }
                     }
@@ -587,7 +641,7 @@ mod tests {
 
     #[test]
     fn envelope_carries_data_ephemeral_and_view() {
-        let envelope = envelope(&SettingsModel::default());
+        let envelope = envelope(&SettingsModel::default(), &NavTargets::Fallback);
         assert!(envelope.get("data").is_some());
         assert_eq!(envelope["ephemeral"], false);
         assert!(envelope.get("view").is_some());
@@ -595,7 +649,7 @@ mod tests {
 
     #[test]
     fn view_data_renders_one_toggle_per_feature() {
-        let data = view_data(&SettingsModel::default());
+        let data = view_data(&SettingsModel::default(), &NavTargets::Fallback);
         assert_eq!(data["content"], "-# **Settings**");
         let buttons = &data["components"][0]["components"];
         assert_eq!(buttons.as_array().unwrap().len(), 3);
@@ -605,24 +659,38 @@ mod tests {
     }
 
     #[test]
-    fn view_data_renders_a_nav_row_after_the_toggles() {
-        let data = view_data(&SettingsModel::default());
+    fn view_data_fallback_renders_a_nav_row_after_the_toggles() {
+        let data = view_data(&SettingsModel::default(), &NavTargets::Fallback);
         let rows = data["components"].as_array().unwrap();
         assert_eq!(rows.len(), 2, "toggle row plus nav row");
         let nav = &rows[1]["components"];
         let buttons = nav.as_array().unwrap();
+        assert_eq!(buttons.len(), 1, "the default target");
         assert_eq!(
-            buttons.len(),
-            NAV_TARGETS.len(),
-            "one nav button per declared target"
+            buttons[0]["custom_id"],
+            json!(format!("{CUSTOM_ID_OPEN_PREFIX}{NAV_TARGET_DEFAULT}"))
         );
-        for (button, target) in buttons.iter().zip(NAV_TARGETS) {
-            assert_eq!(
-                button["custom_id"],
-                json!(format!("{CUSTOM_ID_OPEN_PREFIX}{target}"))
-            );
-            assert_eq!(button["style"], json!(1));
-        }
+        assert_eq!(buttons[0]["style"], json!(1));
+    }
+
+    #[test]
+    fn view_data_discovered_renders_one_button_per_running_plugin() {
+        let nav = NavTargets::Discovered(vec!["hello".into(), "feed".into()]);
+        let data = view_data(&SettingsModel::default(), &nav);
+        let rows = data["components"].as_array().unwrap();
+        assert_eq!(rows.len(), 2, "toggle row plus nav row");
+        let buttons = rows[1]["components"].as_array().unwrap();
+        assert_eq!(buttons.len(), 2, "one nav button per running plugin");
+        assert_eq!(buttons[0]["custom_id"], json!("settings:open:hello"));
+        assert_eq!(buttons[1]["custom_id"], json!("settings:open:feed"));
+    }
+
+    #[test]
+    fn view_data_discovered_empty_renders_no_nav_row() {
+        let nav = NavTargets::Discovered(Vec::new());
+        let data = view_data(&SettingsModel::default(), &nav);
+        let rows = data["components"].as_array().unwrap();
+        assert_eq!(rows.len(), 1, "no nav row when no plugin is running");
     }
 
     #[test]
@@ -633,6 +701,36 @@ mod tests {
         assert_eq!(buttons[0]["custom_id"], json!("settings:open:hello"));
         assert_eq!(buttons[0]["label"], json!("Open hello"));
         assert_eq!(buttons[1]["custom_id"], json!("settings:open:voice"));
+    }
+
+    #[test]
+    fn parse_list_plugins_extracts_the_running_names() {
+        assert_eq!(
+            parse_list_plugins(Some(&json!({ "plugins": ["settings", "hello"] }))),
+            Some(vec!["settings".into(), "hello".into()])
+        );
+    }
+
+    #[test]
+    fn parse_list_plugins_accepts_an_empty_list() {
+        assert_eq!(
+            parse_list_plugins(Some(&json!({ "plugins": [] }))),
+            Some(Vec::new())
+        );
+    }
+
+    #[test]
+    fn parse_list_plugins_fails_on_a_malformed_payload() {
+        assert_eq!(parse_list_plugins(None), None);
+        assert_eq!(parse_list_plugins(Some(&json!({}))), None);
+        assert_eq!(
+            parse_list_plugins(Some(&json!({ "plugins": [1, 2] }))),
+            None
+        );
+        assert_eq!(
+            parse_list_plugins(Some(&json!({ "plugins": "nope" }))),
+            None
+        );
     }
 
     #[test]
@@ -651,7 +749,7 @@ mod tests {
             voice_enabled: false,
             welcome_enabled: false,
         };
-        let buttons = &view_data(&model)["components"][0]["components"];
+        let buttons = &view_data(&model, &NavTargets::Fallback)["components"][0]["components"];
         assert_eq!(buttons[0]["style"], 3);
         assert_eq!(buttons[1]["style"], 2);
     }

@@ -302,6 +302,17 @@ pub async fn handle_host_call(
                 Err(wire) => Msg::resp_err(id, wire),
             }
         }
+        HostCap::ListPlugins => {
+            let Some(manager) = manager else {
+                return resp_err(
+                    id,
+                    "HostUnavailable",
+                    "host plugin manager is not configured",
+                );
+            };
+            let names = manager.running_names().await;
+            Msg::resp_ok(id, Some(json!({ "plugins": names })))
+        }
     }
 }
 
@@ -1022,6 +1033,32 @@ mod tests {
         )
         .await;
         assert_err(resp, 7, "PluginNotFound");
+    }
+
+    // ── list_plugins ───────────────────────────────────────────────────────────
+    // The happy path needs a live plugin in the manager, so it spawns the
+    // stubborn fixture; the failure mode is the manager-less spawn.
+
+    #[tokio::test]
+    async fn list_plugins_returns_the_running_names() {
+        let manager = Arc::new(PluginManager::new(None, RespawnPolicy::default()));
+        let stub =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/stubborn_plugin.sh");
+        manager
+            .spawn("stubborn", stub, None, &[], &[])
+            .await
+            .expect("spawn stubborn fixture");
+
+        let resp = handle_host_call(7, "host.list_plugins", None, None, Some(&manager)).await;
+        assert_eq!(assert_ok(resp, 7), Some(json!({ "plugins": ["stubborn"] })));
+
+        manager.unload("stubborn", &[]).await.expect("teardown");
+    }
+
+    #[tokio::test]
+    async fn list_plugins_without_manager_is_host_unavailable() {
+        let resp = handle_host_call(7, "host.list_plugins", None, None, None).await;
+        assert_err(resp, 7, "HostUnavailable");
     }
 
     // ── kv ────────────────────────────────────────────────────────────────────

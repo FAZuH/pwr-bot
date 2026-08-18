@@ -32,10 +32,9 @@
 //!
 //! Deferred seams:
 //! - Every built command carries [`plugin_slash_dispatch`] as its action,
-//!   which routes the invocation to its core plugin's view session via
-//!   [`CORE_PLUGIN_ROUTES`] (see the function's docs). Catalog commands
-//!   outside that table fail with a structure mismatch until their own
-//!   per-plugin registry exists (#115).
+//!   which routes the invocation to its plugin's view session via the
+//!   command-name → plugin-name route table built from loaded manifests
+//!   ([`routes_from_manifests`]; see the function's docs).
 //! - Merging built commands into the framework before
 //!   `Framework::builder().build()` is later work (#113);
 //!   [`commands_from_manifest`] documents that call site. The bot-side
@@ -565,47 +564,57 @@ pub async fn register_in_guild(
     poise::builtins::register_in_guild(http, commands.iter(), guild_id).await
 }
 
-/// Command-name → plugin-name routes for built-in core plugins. Commands in
-/// this table dispatch through the interaction engine to their plugin; the
-/// `/settings` command is the first core plugin (the settings plugin, #115).
-pub const CORE_PLUGIN_ROUTES: &[(&str, &str)] = &[("settings", "settings")];
+/// Command-name → plugin-name routes. Built from the manifests of the plugins
+/// loaded at startup ([`routes_from_manifests`]); [`plugin_slash_dispatch`]
+/// looks an invoked command name up here to find its owning plugin.
+pub type PluginRoutes = HashMap<String, String>;
 
-/// The built-in `/settings` command: a static blob routed to the settings
-/// core plugin. Registered on the framework alongside the catalog commands.
-pub fn core_settings_command() -> Command<Data, Error> {
-    command_from_blob(&serde_json::json!({
-        "name": "settings",
-        "description": "Manage server settings"
-    }))
-    .expect("static core plugin command blob is valid")
+/// Builds the command-name → plugin-name route table from per-plugin
+/// manifests. Plugins with a `None` manifest (spawned without one) and
+/// command blobs [`HostCommandSpec::parse`] rejects are skipped — the same
+/// acceptance the framework uses to build the commands themselves, so a
+/// route exists exactly when its command was registered.
+pub fn routes_from_manifests(
+    manifests: impl IntoIterator<Item = (String, Option<Manifest>)>,
+) -> PluginRoutes {
+    let mut routes = PluginRoutes::new();
+    for (name, manifest) in manifests {
+        let Some(manifest) = manifest else {
+            continue;
+        };
+        for command in &manifest.commands {
+            if let Ok(spec) = HostCommandSpec::parse(&command.create_command) {
+                routes.insert(spec.name, name.clone());
+            }
+        }
+    }
+    routes
 }
 
-/// Routes a slash invocation to its core plugin's view session.
+/// Routes a slash invocation to its owning plugin's view session.
 ///
-/// The invoked command name is looked up in [`CORE_PLUGIN_ROUTES`]; unknown
-/// commands fail with a structure mismatch (a `slash_action` is shared by
-/// every built command, so this guard keeps catalog commands honest until
-/// their own registry exists). The interaction's arguments are re-parsed
-/// against the command's schema ([`reparse_command_args`]) so the plugin
-/// receives the real payload instead of an empty object. The plugin handle
-/// comes from the manager, the initial render is invoke+placeholder+edit:
-/// invoke the plugin for its spec first (so the loading reply can carry
-/// `spec.ephemeral`), register the engine session on the reply's message id,
-/// then replace the message body with the returned spec's raw data via a
-/// bare HTTP edit — `serenity::Component` is not `Deserialize`, so the spec
-/// cannot ride a typed `CreateReply`.
+/// The invoked command name is looked up in the plugin route table built from
+/// the loaded manifests ([`routes_from_manifests`]); unknown commands fail
+/// with a structure mismatch (a `slash_action` is shared by every built
+/// command, so this guard keeps unregistered commands honest). The
+/// interaction's arguments are re-parsed against the command's schema
+/// ([`reparse_command_args`]) so the plugin receives the real payload instead
+/// of an empty object. The plugin handle comes from the manager, the initial
+/// render is invoke+placeholder+edit: invoke the plugin for its spec first
+/// (so the loading reply can carry `spec.ephemeral`), register the engine
+/// session on the reply's message id, then replace the message body with the
+/// returned spec's raw data via a bare HTTP edit — `serenity::Component` is
+/// not `Deserialize`, so the spec cannot ride a typed `CreateReply`.
 fn plugin_slash_dispatch(
     ctx: poise::ApplicationContext<'_, Data, Error>,
 ) -> poise::BoxFuture<'_, Result<(), poise::FrameworkError<'_, Data, Error>>> {
     Box::pin(async move {
         let command_name = ctx.command.name.as_ref();
-        let Some((_, plugin_name)) = CORE_PLUGIN_ROUTES
-            .iter()
-            .find(|(name, _)| *name == command_name)
-        else {
+        let data = ctx.framework.user_data();
+        let Some(plugin_name) = data.plugin_routes.get(command_name) else {
             return Err(poise::FrameworkError::new_command_structure_mismatch(
                 ctx,
-                "command has no core plugin route",
+                "command has no plugin route",
             ));
         };
         // Re-parse the interaction's args against the command's schema before
@@ -618,7 +627,7 @@ fn plugin_slash_dispatch(
         let Some(plugin) = data.plugin_manager.get(plugin_name).await else {
             return Err(poise::FrameworkError::new_command(
                 ctx.into(),
-                anyhow::anyhow!("core plugin `{plugin_name}` is not running").into(),
+                anyhow::anyhow!("plugin `{plugin_name}` is not running").into(),
             ));
         };
         // The interaction token outlives the `Context` conversion below and is
@@ -1920,7 +1929,11 @@ mod tests {
 
     #[test]
     fn dispatch_without_parameters_yields_an_empty_payload() {
-        let command = core_settings_command();
+        let command = command_from_blob(&json!({
+            "name": "settings",
+            "description": "Manage server settings",
+        }))
+        .unwrap();
         let interaction = command_interaction(json!({"id": "1", "name": "settings", "type": 1}));
 
         let args = reparse_command_args(&command, &interaction).expect("no specs to reparse");
@@ -1963,5 +1976,35 @@ mod tests {
         assert_eq!(names, ["alpha", "gamma"]); // order of `commands`, not `names`
 
         assert!(select_commands(&commands, &[]).is_empty());
+    }
+
+    // ── routes_from_manifests ───────────────────────────────────────────────
+
+    #[test]
+    fn routes_from_manifests_maps_command_names_to_their_plugins() {
+        let routes = routes_from_manifests([
+            (
+                "settings".to_string(),
+                Some(manifest(vec![
+                    json!({"name": "settings", "description": "S"}),
+                ])),
+            ),
+            ("hello".to_string(), None),
+        ]);
+
+        assert_eq!(
+            routes,
+            PluginRoutes::from([("settings".to_string(), "settings".to_string())])
+        );
+    }
+
+    #[test]
+    fn routes_from_manifests_skips_blobs_without_a_name() {
+        let routes = routes_from_manifests([(
+            "hello".to_string(),
+            Some(manifest(vec![json!({"description": "no name"})])),
+        )]);
+
+        assert!(routes.is_empty());
     }
 }

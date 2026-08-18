@@ -31,6 +31,8 @@ pub enum HostCap {
     OpenView,
     /// Fetch host configuration (db url, data path, poll interval).
     GetConfig,
+    /// List the names of all running plugins.
+    ListPlugins,
 }
 
 /// Every op in the v1 host capability surface, in declaration order. The
@@ -47,6 +49,7 @@ pub const ALL_CAPS: &[HostCap] = &[
     HostCap::KvDelete,
     HostCap::OpenView,
     HostCap::GetConfig,
+    HostCap::ListPlugins,
 ];
 
 impl HostCap {
@@ -64,6 +67,7 @@ impl HostCap {
             HostCap::KvDelete => "host.kv.delete",
             HostCap::OpenView => "host.open_view",
             HostCap::GetConfig => "host.get_config",
+            HostCap::ListPlugins => "host.list_plugins",
         }
     }
 
@@ -133,7 +137,7 @@ mod tests {
 
     #[test]
     fn all_caps_is_exactly_the_v1_surface() {
-        assert_eq!(ALL_CAPS.len(), 9);
+        assert_eq!(ALL_CAPS.len(), 10);
         let mut seen = std::collections::HashSet::new();
         for cap in ALL_CAPS {
             assert!(seen.insert(*cap), "duplicate op in ALL_CAPS");

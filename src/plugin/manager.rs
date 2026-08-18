@@ -365,6 +365,13 @@ impl PluginManager {
         self.plugins.lock().await.contains_key(name)
     }
 
+    /// The names of all currently registered plugins, sorted.
+    pub async fn running_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.plugins.lock().await.keys().cloned().collect();
+        names.sort();
+        names
+    }
+
     /// Unloads `name`: removes the handle (new calls fail fast with
     /// [`PluginError::NotRunning`]), best-effort unregisters the plugin's
     /// guild commands in `guild_ids` (an empty command slice unregisters;

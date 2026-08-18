@@ -43,6 +43,7 @@ fn pinned_entry(name: &str, url: &str, bytes: &[u8]) -> CatalogEntry {
         url: url.to_string(),
         sha256: install::sha256_hex(&pin_path).expect("pin sha256"),
         manifest: catalog_manifest(name),
+        auto_enable: false,
     }
 }
 

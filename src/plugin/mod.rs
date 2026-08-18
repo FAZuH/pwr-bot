@@ -822,10 +822,11 @@ mod tests {
         };
         assert_eq!(v, API_VERSION);
         assert_eq!(name, "host");
-        assert_eq!(caps.len(), 9, "every v1 host cap must be announced");
+        assert_eq!(caps.len(), 10, "every v1 host cap must be announced");
         assert!(caps.iter().any(|c| c == "host.defer"));
         assert!(caps.iter().any(|c| c == "host.kv.get"));
         assert!(caps.iter().any(|c| c == "host.get_config"));
+        assert!(caps.iter().any(|c| c == "host.list_plugins"));
     }
 
     // ── pong accounting (the health checker's liveness signal) ──────────────
