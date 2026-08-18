@@ -18,8 +18,9 @@
 //!   target plugin (the settings hub's promise: navigate to any panel),
 //!   answering the interaction with the settings envelope again;
 //! - the nav row is built at runtime from the host's running plugins
-//!   (`host.list_plugins`); a host without that cap — or a manager-less
-//!   spawn — falls back to the single default target;
+//!   (`host.list_plugins`), minus the settings plugin itself; a host
+//!   without that cap — or a manager-less spawn — falls back to the
+//!   single default target;
 //! - every view reply is the full envelope `{"data", "ephemeral", "view"}`
 //!   the interaction engine renders verbatim;
 //! - treats `event` (e.g. `view.timeout`) as one-way, never answering it;
@@ -236,13 +237,20 @@ fn envelope(model: &SettingsModel, nav: &NavTargets) -> Value {
     })
 }
 
-/// Parses a `host.list_plugins` resp into the running plugin names. `None`
+/// Parses a `host.list_plugins` resp into the running plugin names, minus
+/// the plugin itself: the hub never renders a self-opening nav row. `None`
 /// on a missing, non-object, or malformed payload, so the caller falls back
 /// to [`NavTargets::Fallback`].
 fn parse_list_plugins(data: Option<&Value>) -> Option<Vec<String>> {
     let plugins = data?.get("plugins")?.as_array()?;
     let names: Vec<&str> = plugins.iter().map(Value::as_str).collect::<Option<_>>()?;
-    Some(names.into_iter().map(str::to_string).collect())
+    Some(
+        names
+            .into_iter()
+            .filter(|name| *name != PLUGIN_NAME)
+            .map(str::to_string)
+            .collect(),
+    )
 }
 
 // ── protocol helpers ─────────────────────────────────────────────────────────
@@ -704,10 +712,18 @@ mod tests {
     }
 
     #[test]
-    fn parse_list_plugins_extracts_the_running_names() {
+    fn parse_list_plugins_extracts_the_running_names_except_self() {
         assert_eq!(
             parse_list_plugins(Some(&json!({ "plugins": ["settings", "hello"] }))),
-            Some(vec!["settings".into(), "hello".into()])
+            Some(vec!["hello".into()])
+        );
+    }
+
+    #[test]
+    fn parse_list_plugins_drops_a_self_only_list_to_empty() {
+        assert_eq!(
+            parse_list_plugins(Some(&json!({ "plugins": ["settings"] }))),
+            Some(Vec::new())
         );
     }
 

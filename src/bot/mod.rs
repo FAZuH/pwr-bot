@@ -104,10 +104,22 @@ impl Data {
     /// The manifest for an auto-enabled plugin: the core plugin's manifest
     /// captured at spawn when there is one, else the catalog entry's.
     pub fn manifest_for(&self, name: &str) -> Option<&Manifest> {
-        self.core_manifests
-            .get(name)
-            .or_else(|| self.plugin_catalog.get(name).map(|entry| &entry.manifest))
+        manifest_for(&self.core_manifests, &self.plugin_catalog, name)
     }
+}
+
+/// The manifest for `name`: the core plugin's manifest when there is one,
+/// else the catalog entry's. Shared by [`Data::manifest_for`] and the
+/// `/plugins` toggle union, which look up by plugin name over the same two
+/// maps.
+pub(crate) fn manifest_for<'a>(
+    core_manifests: &'a HashMap<String, Manifest>,
+    catalog: &'a HashMap<String, CatalogEntry>,
+    name: &str,
+) -> Option<&'a Manifest> {
+    core_manifests
+        .get(name)
+        .or_else(|| catalog.get(name).map(|entry| &entry.manifest))
 }
 
 /// Discord bot client and framework.
@@ -258,20 +270,17 @@ impl Bot {
     ///
     /// The command list is the merge seam: the Cog commands first, then one
     /// routing command per core plugin manifest captured at spawn, then one
-    /// routing command per catalog plugin manifest, so plugin commands are
-    /// registered on the framework before `Framework::builder().build()`.
+    /// routing command per catalog plugin manifest — each group sorted by
+    /// plugin name for a stable order across restarts (see
+    /// [`plugin_commands`]) — so plugin commands are registered on the
+    /// framework before `Framework::builder().build()`.
     fn create_framework(
         config: &Config,
         catalog: &HashMap<String, CatalogEntry>,
         core_manifests: &HashMap<String, Manifest>,
     ) -> Result<Box<Framework<Data, Error>>> {
         let mut commands = Cogs.commands();
-        for manifest in core_manifests.values() {
-            commands.extend(commands_from_manifest(manifest));
-        }
-        for entry in catalog.values() {
-            commands.extend(commands_from_manifest(&entry.manifest));
-        }
+        commands.extend(plugin_commands(core_manifests, catalog));
 
         let options = FrameworkOptions::<Data, Error> {
             commands,
@@ -319,6 +328,27 @@ impl Bot {
     async fn on_error(error: poise::FrameworkError<'_, Data, Error>) {
         ErrorHandler::handle(error).await;
     }
+}
+
+/// The plugin routing commands for the framework: core plugin manifests
+/// first, then catalog plugin manifests, each group sorted by plugin name
+/// so the assembled command order is stable across restarts.
+fn plugin_commands(
+    core_manifests: &HashMap<String, Manifest>,
+    catalog: &HashMap<String, CatalogEntry>,
+) -> Vec<poise::Command<Data, Error>> {
+    let mut commands = Vec::new();
+    let mut core: Vec<&Manifest> = core_manifests.values().collect();
+    core.sort_by(|a, b| a.name.cmp(&b.name));
+    for manifest in core {
+        commands.extend(commands_from_manifest(manifest));
+    }
+    let mut entries: Vec<&CatalogEntry> = catalog.values().collect();
+    entries.sort_by(|a, b| a.name.cmp(&b.name));
+    for entry in entries {
+        commands.extend(commands_from_manifest(&entry.manifest));
+    }
+    commands
 }
 
 /// Event handler for Discord gateway events.
@@ -715,5 +745,32 @@ impl poise::serenity_prelude::EventHandler for BotEventHandler {
             },
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_helpers::entry_named;
+    use crate::test_helpers::manifest_named;
+
+    #[test]
+    fn plugin_commands_sort_each_group_by_plugin_name() {
+        let core_manifests = HashMap::from([
+            ("zeta".to_string(), manifest_named("zeta")),
+            ("alpha".to_string(), manifest_named("alpha")),
+        ]);
+        let catalog = HashMap::from([
+            ("mike".to_string(), entry_named("mike")),
+            ("bravo".to_string(), entry_named("bravo")),
+        ]);
+
+        let commands = plugin_commands(&core_manifests, &catalog);
+        let names: Vec<&str> = commands
+            .iter()
+            .map(|command| command.name.as_ref())
+            .collect();
+
+        assert_eq!(names, ["alpha", "zeta", "bravo", "mike"]);
     }
 }

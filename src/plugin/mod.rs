@@ -19,7 +19,8 @@
 //! Lifecycle beyond spawn/call/stop lives in [`manager`]: health checks,
 //! unload, crash respawn, and binary swap over a map of [`RunningPlugin`]
 //! handles. External install from a pinned catalog lives in [`install`];
-//! KV and per-guild sets are later work (#112). Dropping a
+//! KV storage ([`PgKvStore`]) and per-guild enablement (`guild_plugins`)
+//! ship with the plugin system. Dropping a
 //! [`RunningPlugin`] SIGKILLs its whole process group via the `Drop` impl,
 //! so unloading a plugin is drop-and-forget; graceful unload is
 //! [`RunningPlugin::stop`].

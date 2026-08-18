@@ -9,9 +9,15 @@
 //! [`PluginsCmd`](crate::update::PluginsCmd) drives the Discord/DB side
 //! effects.
 
+use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
+use pwr_plugin_protocol::Manifest;
+
 use crate::bot::command::prelude::*;
+use crate::bot::manifest_for;
 use crate::plugin::CatalogEntry;
 use crate::plugin::PluginError;
 use crate::plugin::command::commands_from_manifest;
@@ -58,20 +64,32 @@ pub async fn list(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-/// Enables a catalog plugin for this guild: registers its commands and marks
-/// it enabled.
+/// Enables a catalog plugin for this guild, registering the union of all
+/// enabled plugins' commands.
 #[poise::command(slash_command)]
 pub async fn enable(ctx: Context<'_>, plugin: String) -> Result<(), Error> {
     is_author_guild_admin(ctx).await?;
     let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?;
     let data = ctx.data();
-    let entry = catalog_entry(&data, &plugin)?;
+    catalog_entry(&data, &plugin)?;
     let mut model = guild_model(&data, guild_id).await;
 
     match PluginsUpdate::update(PluginsMsg::Enable(plugin.clone()), &mut model) {
         PluginsCmd::Register(_) => {
-            let commands = commands_from_manifest(&entry.manifest);
-            register_in_guild(ctx.http(), &commands, guild_id).await?;
+            register_enabled_plugins(
+                &data.core_manifests,
+                &data.plugin_catalog,
+                &model.enabled,
+                |commands| {
+                    let http = ctx.serenity_context().http.clone();
+                    Box::pin(async move {
+                        register_in_guild(&http, &commands, guild_id)
+                            .await
+                            .map_err(Into::into)
+                    })
+                },
+            )
+            .await?;
             data.repos
                 .guild_plugins()
                 .set_enabled(guild_id.get(), &plugin, true)
@@ -87,7 +105,8 @@ pub async fn enable(ctx: Context<'_>, plugin: String) -> Result<(), Error> {
     Ok(())
 }
 
-/// Disables a plugin for this guild: unregisters and unloads it.
+/// Disables a plugin for this guild: unregisters the remaining enabled
+/// plugins' commands.
 #[poise::command(slash_command)]
 pub async fn disable(ctx: Context<'_>, plugin: String) -> Result<(), Error> {
     is_author_guild_admin(ctx).await?;
@@ -97,7 +116,20 @@ pub async fn disable(ctx: Context<'_>, plugin: String) -> Result<(), Error> {
 
     match PluginsUpdate::update(PluginsMsg::Disable(plugin.clone()), &mut model) {
         PluginsCmd::Unregister(_) => {
-            register_in_guild(ctx.http(), &[], guild_id).await?;
+            register_enabled_plugins(
+                &data.core_manifests,
+                &data.plugin_catalog,
+                &model.enabled,
+                |commands| {
+                    let http = ctx.serenity_context().http.clone();
+                    Box::pin(async move {
+                        register_in_guild(&http, &commands, guild_id)
+                            .await
+                            .map_err(Into::into)
+                    })
+                },
+            )
+            .await?;
             // Persist the disabled state instead of deleting the row: an
             // absent row means auto-enabled, so a deletion would re-enable
             // the plugin on the next startup/join.
@@ -194,4 +226,164 @@ async fn guild_model(data: &Arc<crate::bot::Data>, guild_id: GuildId) -> Plugins
         }
     }
     PluginsModel::new(catalog, enabled)
+}
+
+/// The routing commands of every plugin in `enabled`: the union a
+/// `/plugins` toggle registers in one bulk call, so toggling one plugin
+/// never erases another's registered commands. Plugins without a manifest
+/// (a failed spawn with no catalog entry) contribute nothing. Sorted by
+/// plugin name so the registered order is stable across restarts.
+fn commands_for_enabled_plugins(
+    core_manifests: &HashMap<String, Manifest>,
+    catalog: &HashMap<String, CatalogEntry>,
+    enabled: &[String],
+) -> Vec<poise::Command<crate::bot::Data, Error>> {
+    let mut commands = Vec::new();
+    let mut enabled_names: Vec<&String> = enabled.iter().collect();
+    enabled_names.sort();
+    for name in enabled_names {
+        let Some(manifest) = manifest_for(core_manifests, catalog, name) else {
+            continue;
+        };
+        commands.extend(commands_from_manifest(manifest));
+    }
+    commands
+}
+
+/// Registers the union of every enabled plugin's routing commands via
+/// `register` — one bulk call, so a `/plugins` toggle never erases another
+/// plugin's commands. Production passes [`register_in_guild`]; tests pass a
+/// recording closure so the wiring is asserted without a Discord
+/// connection.
+async fn register_enabled_plugins<F>(
+    core_manifests: &HashMap<String, Manifest>,
+    catalog: &HashMap<String, CatalogEntry>,
+    enabled: &[String],
+    register: F,
+) -> Result<(), Error>
+where
+    F: FnOnce(
+        Vec<poise::Command<crate::bot::Data, Error>>,
+    ) -> Pin<Box<dyn Future<Output = Result<(), Error>> + Send + 'static>>,
+{
+    let commands = commands_for_enabled_plugins(core_manifests, catalog, enabled);
+    register(commands).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_helpers::entry_named;
+    use crate::test_helpers::manifest_named;
+
+    #[test]
+    fn enabling_one_plugin_registers_all_enabled_plugins_commands() {
+        let core = HashMap::from([("settings".to_string(), manifest_named("settings"))]);
+        let catalog = HashMap::from([("feed".to_string(), entry_named("feed"))]);
+
+        let commands = commands_for_enabled_plugins(
+            &core,
+            &catalog,
+            &["settings".to_string(), "feed".to_string()],
+        );
+        let names: Vec<&str> = commands
+            .iter()
+            .map(|command| command.name.as_ref())
+            .collect();
+
+        assert_eq!(names, ["feed", "settings"]);
+    }
+
+    #[test]
+    fn disabling_one_plugin_registers_the_remaining_plugins_commands() {
+        let core = HashMap::from([("settings".to_string(), manifest_named("settings"))]);
+        let catalog = HashMap::from([("feed".to_string(), entry_named("feed"))]);
+
+        // After `feed` is disabled, the remaining enabled set is just
+        // `settings`; the re-registered union carries only its commands.
+        let commands = commands_for_enabled_plugins(&core, &catalog, &["settings".to_string()]);
+        let names: Vec<&str> = commands
+            .iter()
+            .map(|command| command.name.as_ref())
+            .collect();
+
+        assert_eq!(names, ["settings"]);
+    }
+
+    #[test]
+    fn commands_for_enabled_plugins_skip_names_without_a_manifest() {
+        let core = HashMap::from([("settings".to_string(), manifest_named("settings"))]);
+
+        let commands = commands_for_enabled_plugins(
+            &core,
+            &HashMap::new(),
+            &["ghost".to_string(), "settings".to_string()],
+        );
+        let names: Vec<&str> = commands
+            .iter()
+            .map(|command| command.name.as_ref())
+            .collect();
+
+        assert_eq!(names, ["settings"]);
+    }
+
+    #[tokio::test]
+    async fn register_enabled_plugins_registers_the_union_of_all_enabled_plugins() {
+        let core = HashMap::from([("settings".to_string(), manifest_named("settings"))]);
+        let catalog = HashMap::from([("feed".to_string(), entry_named("feed"))]);
+
+        let mut calls = 0;
+        let mut registered: Vec<String> = Vec::new();
+        let result = register_enabled_plugins(
+            &core,
+            &catalog,
+            &["settings".to_string(), "feed".to_string()],
+            |commands| {
+                calls += 1;
+                registered.extend(commands.iter().map(|command| command.name.to_string()));
+                Box::pin(async { Ok(()) })
+            },
+        )
+        .await;
+
+        assert!(result.is_ok());
+        assert_eq!(calls, 1);
+        assert_eq!(registered, ["feed", "settings"]);
+    }
+
+    #[tokio::test]
+    async fn register_enabled_plugins_keeps_the_remaining_plugins_commands_after_a_disable() {
+        let core = HashMap::from([("settings".to_string(), manifest_named("settings"))]);
+        let catalog = HashMap::from([("feed".to_string(), entry_named("feed"))]);
+
+        let mut registered: Vec<String> = Vec::new();
+        let result =
+            register_enabled_plugins(&core, &catalog, &["settings".to_string()], |commands| {
+                registered.extend(commands.iter().map(|command| command.name.to_string()));
+                Box::pin(async { Ok(()) })
+            })
+            .await;
+
+        assert!(result.is_ok());
+        assert_eq!(registered, ["settings"]);
+    }
+
+    #[tokio::test]
+    async fn register_enabled_plugins_with_no_enabled_plugins_registers_an_empty_set() {
+        let core = HashMap::from([("settings".to_string(), manifest_named("settings"))]);
+        let catalog = HashMap::from([("feed".to_string(), entry_named("feed"))]);
+
+        let mut calls = 0;
+        let mut registered: Vec<String> = Vec::new();
+        let result = register_enabled_plugins(&core, &catalog, &[], |commands| {
+            calls += 1;
+            registered.extend(commands.iter().map(|command| command.name.to_string()));
+            Box::pin(async { Ok(()) })
+        })
+        .await;
+
+        assert!(result.is_ok());
+        assert_eq!(calls, 1);
+        assert!(registered.is_empty());
+    }
 }

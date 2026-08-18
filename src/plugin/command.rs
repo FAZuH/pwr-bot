@@ -1038,7 +1038,6 @@ fn bool_flag(object: &serde_json::Map<String, Value>, key: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use pwr_plugin_protocol::API_VERSION;
     use pwr_plugin_protocol::CommandDef;
     use pwr_plugin_protocol::Manifest;
     use serde_json::json;
@@ -1097,18 +1096,12 @@ mod tests {
 
     /// Builds a manifest carrying the given command blobs.
     fn manifest(create_commands: Vec<Value>) -> Manifest {
-        Manifest {
-            name: "test-plugin".to_string(),
-            description: "Test plugin".to_string(),
-            version: "1.0.0".to_string(),
-            commands: create_commands
-                .into_iter()
-                .map(|create_command| CommandDef { create_command })
-                .collect(),
-            event_handlers: Vec::new(),
-            tasks: Vec::new(),
-            api_version: API_VERSION,
-        }
+        let mut manifest = crate::test_helpers::manifest_named("test-plugin");
+        manifest.commands = create_commands
+            .into_iter()
+            .map(|create_command| CommandDef { create_command })
+            .collect();
+        manifest
     }
 
     // ── HostCommandSpec::parse ──────────────────────────────────────────────
