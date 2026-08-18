@@ -60,6 +60,16 @@ const CUSTOM_ID_OPEN_PREFIX: &str = "settings:open:";
 /// hello-style fixture the integration tests spawn.
 const NAV_TARGET_DEFAULT: &str = "hello";
 
+/// The nav row's targets: the settings hub renders one "Open <target>"
+/// button per entry. The row is built from this plugin-side capability list
+/// — settings cannot enumerate running plugins (that is #129) — so a plugin
+/// the hub does not offer is never rendered a button. A listed target that
+/// is not running still answers with the host's PluginNotFound, which the
+/// settings plugin logs and re-renders past. The single default keeps the
+/// hello-style fixture the integration tests spawn; #129 replaces this list
+/// with runtime discovery.
+const NAV_TARGETS: &[&str] = &[NAV_TARGET_DEFAULT];
+
 /// A plugin→host call in flight: the invoke id the reply must answer, and
 /// what to do with the host's resp once it arrives.
 #[derive(Debug, Clone, Copy)]
@@ -70,6 +80,32 @@ enum Pending {
     Save(u64),
     /// The `host.open_view` issued to open a target plugin's panel.
     OpenView(u64),
+}
+
+impl Pending {
+    /// The host op this pending kind belongs to. The op string lives here so
+    /// it stays paired with the kind that resolves its resp.
+    fn op(self) -> &'static str {
+        match self {
+            Pending::Load(_) => "host.kv.get",
+            Pending::Save(_) => "host.kv.set",
+            Pending::OpenView(_) => "host.open_view",
+        }
+    }
+}
+
+/// A plugin→host call decided by an incoming message: the pending kind its
+/// resp will resolve, and the call's args. The op string is always
+/// [`Pending::op`], never stored separately.
+struct HostCall {
+    pending: Pending,
+    args: Value,
+}
+
+impl HostCall {
+    fn new(pending: Pending, args: Value) -> Self {
+        Self { pending, args }
+    }
 }
 
 // ── settings update logic (moved from the host's `src/update/settings_main.rs`) ──
@@ -139,19 +175,23 @@ fn update(msg: SettingsMsg, model: &mut SettingsModel) {
 
 /// Renders the settings entry view: one toggle button per feature, with the
 /// current state in the label and button style (green when enabled), plus a
-/// nav row opening the default target plugin's panel.
+/// nav row opening each declared target plugin's panel.
 fn view_data(model: &SettingsModel) -> Value {
     let feeds = toggle_button(CUSTOM_ID_FEEDS, "Feeds", model.feeds_enabled);
     let voice = toggle_button(CUSTOM_ID_VOICE, "Voice", model.voice_enabled);
     let welcome = toggle_button(CUSTOM_ID_WELCOME, "Welcome", model.welcome_enabled);
-    let open = nav_button(NAV_TARGET_DEFAULT);
-    components::view_data(
-        "-# **Settings**",
-        [
-            components::action_row([feeds, voice, welcome]),
-            components::action_row([open]),
-        ],
-    )
+    let open = nav_buttons(NAV_TARGETS);
+    let mut rows = vec![components::action_row([feeds, voice, welcome])];
+    if !open.is_empty() {
+        rows.push(components::action_row(open));
+    }
+    components::view_data("-# **Settings**", rows)
+}
+
+/// The nav row's buttons, one per declared target: empty when no target is
+/// declared, so a plugin the hub cannot open never renders a dead button.
+fn nav_buttons(targets: &[&str]) -> Vec<Value> {
+    targets.iter().map(|target| nav_button(target)).collect()
 }
 
 /// One feature toggle button: the label shows the state and the style follows
@@ -233,6 +273,44 @@ fn write_msg(out: &mut impl Write, msg: &Msg) -> std::io::Result<()> {
     out.flush()
 }
 
+/// Writes a `resp_err` answering `invoke_id` with the given error kind and
+/// message; returns whether the write succeeded.
+fn reply_err(out: &mut impl Write, invoke_id: u64, kind: &str, msg: impl Into<String>) -> bool {
+    let resp = Msg::resp_err(
+        invoke_id,
+        WireError {
+            kind: kind.into(),
+            msg: msg.into(),
+        },
+    );
+    write_msg(out, &resp).is_ok()
+}
+
+/// Answers an invoke after its chained host call completed: a failed host
+/// call is logged, not fatal — the envelope still renders with the current
+/// model. Returns whether the write succeeded.
+fn answer_envelope(
+    out: &mut impl Write,
+    invoke_id: u64,
+    ok: bool,
+    error: Option<WireError>,
+    pending_kind: Pending,
+    model: Option<SettingsModel>,
+) -> bool {
+    if !ok {
+        eprintln!(
+            "{} failed: {:?}",
+            pending_kind.op(),
+            error.unwrap_or_else(|| WireError {
+                kind: "HostError".into(),
+                msg: "host call failed".into(),
+            })
+        );
+    }
+    let resp = Msg::resp_ok(invoke_id, Some(envelope(&model.unwrap_or_default())));
+    write_msg(out, &resp).is_ok()
+}
+
 fn main() -> ExitCode {
     if let Err(e) = manifest().validate() {
         eprintln!("manifest invalid: {e}");
@@ -289,9 +367,9 @@ fn main() -> ExitCode {
                     }
                     continue;
                 }
-                let host_op = match (op.as_str(), cmd.as_deref()) {
+                let host_call = match (op.as_str(), cmd.as_deref()) {
                     ("invoke", Some(PLUGIN_NAME)) => {
-                        Some(("host.kv.get", Pending::Load(id), kv_get_args()))
+                        Some(HostCall::new(Pending::Load(id), kv_get_args()))
                     }
                     ("view.interact", Some(PLUGIN_NAME)) => {
                         let custom_id = args
@@ -310,20 +388,17 @@ fn main() -> ExitCode {
                                 .and_then(|a| a.get("channel_id"))
                                 .and_then(Value::as_u64)
                             else {
-                                let resp = Msg::resp_err(
+                                if !reply_err(
+                                    &mut out,
                                     id,
-                                    WireError {
-                                        kind: "InvalidArgs".into(),
-                                        msg: "missing `channel_id` (u64)".into(),
-                                    },
-                                );
-                                if write_msg(&mut out, &resp).is_err() {
+                                    "InvalidArgs",
+                                    "missing `channel_id` (u64)",
+                                ) {
                                     return ExitCode::FAILURE;
                                 }
                                 continue;
                             };
-                            Some((
-                                "host.open_view",
+                            Some(HostCall::new(
                                 Pending::OpenView(id),
                                 open_view_args(channel_id, target),
                             ))
@@ -335,14 +410,12 @@ fn main() -> ExitCode {
                                 _ => None,
                             };
                             let Some(msg) = msg else {
-                                let resp = Msg::resp_err(
+                                if !reply_err(
+                                    &mut out,
                                     id,
-                                    WireError {
-                                        kind: "UnknownAction".into(),
-                                        msg: format!("unknown custom_id: {custom_id:?}"),
-                                    },
-                                );
-                                if write_msg(&mut out, &resp).is_err() {
+                                    "UnknownAction",
+                                    format!("unknown custom_id: {custom_id:?}"),
+                                ) {
                                     return ExitCode::FAILURE;
                                 }
                                 continue;
@@ -350,34 +423,36 @@ fn main() -> ExitCode {
                             let mut current = model.unwrap_or_default();
                             update(msg, &mut current);
                             model = Some(current);
-                            Some(("host.kv.set", Pending::Save(id), kv_set_args(&current)))
+                            Some(HostCall::new(Pending::Save(id), kv_set_args(&current)))
                         }
                     }
                     _ => None,
                 };
-                let Some((host_op, pending_kind, host_args)) = host_op else {
+                let Some(call) = host_call else {
                     let cmd_repr = cmd.as_deref().unwrap_or("");
-                    let resp = Msg::resp_err(
+                    if !reply_err(
+                        &mut out,
                         id,
-                        WireError {
-                            kind: "UnknownOp".into(),
-                            msg: format!("unknown op {op} for cmd {cmd_repr}"),
-                        },
-                    );
-                    if write_msg(&mut out, &resp).is_err() {
+                        "UnknownOp",
+                        format!("unknown op {op} for cmd {cmd_repr}"),
+                    ) {
                         return ExitCode::FAILURE;
                     }
                     continue;
                 };
                 next_call_id += 1;
+                let HostCall {
+                    pending: pending_kind,
+                    args,
+                } = call;
                 pending.insert(next_call_id, pending_kind);
-                let host_call = Msg::Call {
+                let call_msg = Msg::Call {
                     id: next_call_id,
-                    op: host_op.into(),
+                    op: pending_kind.op().into(),
                     cmd: None,
-                    args: Some(host_args),
+                    args: Some(args),
                 };
-                if write_msg(&mut out, &host_call).is_err() {
+                if write_msg(&mut out, &call_msg).is_err() {
                     return ExitCode::FAILURE;
                 }
             }
@@ -421,46 +496,24 @@ fn main() -> ExitCode {
                         let current = loaded.unwrap_or_default();
                         model = Some(current);
                         next_call_id += 1;
-                        pending.insert(next_call_id, Pending::Save(invoke_id));
-                        let host_call = Msg::Call {
+                        let call = HostCall::new(Pending::Save(invoke_id), kv_set_args(&current));
+                        let HostCall {
+                            pending: pending_kind,
+                            args,
+                        } = call;
+                        pending.insert(next_call_id, pending_kind);
+                        let call_msg = Msg::Call {
                             id: next_call_id,
-                            op: "host.kv.set".into(),
+                            op: pending_kind.op().into(),
                             cmd: None,
-                            args: Some(kv_set_args(&current)),
+                            args: Some(args),
                         };
-                        if write_msg(&mut out, &host_call).is_err() {
+                        if write_msg(&mut out, &call_msg).is_err() {
                             return ExitCode::FAILURE;
                         }
                     }
-                    Pending::Save(invoke_id) => {
-                        if !ok {
-                            eprintln!(
-                                "host.kv.set failed: {:?}",
-                                error.unwrap_or_else(|| WireError {
-                                    kind: "HostError".into(),
-                                    msg: "host call failed".into(),
-                                })
-                            );
-                        }
-                        let resp =
-                            Msg::resp_ok(invoke_id, Some(envelope(&model.unwrap_or_default())));
-                        if write_msg(&mut out, &resp).is_err() {
-                            return ExitCode::FAILURE;
-                        }
-                    }
-                    Pending::OpenView(invoke_id) => {
-                        if !ok {
-                            eprintln!(
-                                "host.open_view failed: {:?}",
-                                error.unwrap_or_else(|| WireError {
-                                    kind: "HostError".into(),
-                                    msg: "host call failed".into(),
-                                })
-                            );
-                        }
-                        let resp =
-                            Msg::resp_ok(invoke_id, Some(envelope(&model.unwrap_or_default())));
-                        if write_msg(&mut out, &resp).is_err() {
+                    Pending::Save(invoke_id) | Pending::OpenView(invoke_id) => {
+                        if !answer_envelope(&mut out, invoke_id, ok, error, pending_kind, model) {
                             return ExitCode::FAILURE;
                         }
                     }
@@ -557,12 +610,29 @@ mod tests {
         let rows = data["components"].as_array().unwrap();
         assert_eq!(rows.len(), 2, "toggle row plus nav row");
         let nav = &rows[1]["components"];
-        assert_eq!(nav.as_array().unwrap().len(), 1);
+        let buttons = nav.as_array().unwrap();
         assert_eq!(
-            nav[0]["custom_id"],
-            json!(format!("{CUSTOM_ID_OPEN_PREFIX}{NAV_TARGET_DEFAULT}"))
+            buttons.len(),
+            NAV_TARGETS.len(),
+            "one nav button per declared target"
         );
-        assert_eq!(nav[0]["style"], json!(1));
+        for (button, target) in buttons.iter().zip(NAV_TARGETS) {
+            assert_eq!(
+                button["custom_id"],
+                json!(format!("{CUSTOM_ID_OPEN_PREFIX}{target}"))
+            );
+            assert_eq!(button["style"], json!(1));
+        }
+    }
+
+    #[test]
+    fn nav_buttons_render_one_button_per_declared_target() {
+        assert!(nav_buttons(&[]).is_empty(), "no targets, no nav row");
+        let buttons = nav_buttons(&["hello", "voice"]);
+        assert_eq!(buttons.len(), 2);
+        assert_eq!(buttons[0]["custom_id"], json!("settings:open:hello"));
+        assert_eq!(buttons[0]["label"], json!("Open hello"));
+        assert_eq!(buttons[1]["custom_id"], json!("settings:open:voice"));
     }
 
     #[test]

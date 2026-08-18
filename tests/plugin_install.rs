@@ -10,7 +10,6 @@
 //! uses the https-only [`download_client`](pwr_bot::plugin::install::download_client).
 
 use std::os::unix::fs::PermissionsExt;
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use httpmock::Method::GET;
@@ -23,28 +22,8 @@ use pwr_bot::plugin::install;
 use tempfile::tempdir;
 use wreq::Client;
 
-/// Locates the `hello` fixture binary, mirroring the probe in
-/// `plugin_manager_lifecycle.rs`: `CARGO_BIN_EXE_hello` when cargo
-/// sets it, otherwise `target/{debug,release}`.
-fn fixture_path() -> PathBuf {
-    if let Some(path) = option_env!("CARGO_BIN_EXE_hello") {
-        return PathBuf::from(path);
-    }
-    let target = match option_env!("CARGO_TARGET_DIR") {
-        Some(dir) => PathBuf::from(dir),
-        None => PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target"),
-    };
-    for profile in ["debug", "release"] {
-        let candidate = target.join(profile).join("hello");
-        if candidate.exists() {
-            return candidate;
-        }
-    }
-    panic!(concat!(
-        "test-plugin fixture not built; run `cargo build -p hello` ",
-        "(or `cargo build --workspace`) first"
-    ));
-}
+mod probe;
+use probe::probe_binary;
 
 /// A plain client for the local http mock. No `https_only`: the mock serves
 /// plain http on localhost, which production's https-only
@@ -90,7 +69,7 @@ fn catalog_manifest(name: &str) -> pwr_plugin_protocol::Manifest {
 #[tokio::test]
 async fn install_verified_downloads_verifies_and_spawns() {
     let server = MockServer::start();
-    let binary = std::fs::read(fixture_path()).expect("read fixture binary");
+    let binary = std::fs::read(probe_binary("hello")).expect("read fixture binary");
     let mock = server.mock(|when, then| {
         when.method(GET).path("/hello_plugin");
         then.status(200).body(&binary);
@@ -128,7 +107,7 @@ async fn install_verified_downloads_verifies_and_spawns() {
 #[tokio::test]
 async fn install_verified_rejects_tampered_bytes_and_installs_nothing() {
     let server = MockServer::start();
-    let binary = std::fs::read(fixture_path()).expect("read fixture binary");
+    let binary = std::fs::read(probe_binary("hello")).expect("read fixture binary");
     let mut tampered = binary.clone();
     tampered[0] ^= 0xff;
     server.mock(|when, then| {

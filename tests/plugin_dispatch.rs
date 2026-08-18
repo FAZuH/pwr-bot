@@ -7,7 +7,6 @@
 //! and the protocol crate is frozen, so this fixture lives in the host crate
 //! (`src/bin/arg_echo_plugin.rs`) and is built with the test binary.
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use poise::serenity_prelude as serenity;
@@ -19,30 +18,8 @@ use pwr_plugin_protocol::ViewSpec;
 use serde_json::Value;
 use serde_json::json;
 
-/// Locates the `arg_echo_plugin` fixture binary. `CARGO_BIN_EXE_arg_echo_plugin`
-/// is set by cargo for the same-package integration tests; fall back to
-/// probing `target/{profile}` for manual runs, mirroring `plugin_interaction`.
-/// A missing binary panics with a build hint rather than a confusing spawn
-/// error.
-fn fixture_path() -> PathBuf {
-    if let Some(path) = option_env!("CARGO_BIN_EXE_arg_echo_plugin") {
-        return PathBuf::from(path);
-    }
-    let target = match option_env!("CARGO_TARGET_DIR") {
-        Some(dir) => PathBuf::from(dir),
-        None => PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target"),
-    };
-    for profile in ["debug", "release"] {
-        let candidate = target.join(profile).join("arg_echo_plugin");
-        if candidate.exists() {
-            return candidate;
-        }
-    }
-    panic!(concat!(
-        "test-plugin fixture not built; run `cargo build -p pwr-bot ",
-        "--bin arg_echo_plugin` first"
-    ));
-}
+mod probe;
+use probe::probe_binary;
 
 /// Builds a `CommandInteraction` from a partial payload, the same way serenity
 /// does when an interaction arrives; `data` is the command data the
@@ -79,7 +56,7 @@ fn parse_echoed_args(spec: &ViewSpec) -> Value {
 /// of the test) and the args the fixture echoed back.
 async fn echo_args(command: &str, args: Value) -> (Arc<RunningPlugin>, Value) {
     let plugin = Arc::new(
-        RunningPlugin::spawn(fixture_path())
+        RunningPlugin::spawn(probe_binary("arg_echo_plugin"))
             .await
             .expect("spawn arg_echo_plugin"),
     );

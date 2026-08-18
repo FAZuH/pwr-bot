@@ -5,7 +5,6 @@
 //! A separate test binary from `plugin_manager.rs` so each process owns its
 //! recording-logger static without interference.
 
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::Once;
@@ -24,33 +23,8 @@ use pwr_plugin_protocol::ViewSpec;
 use serde_json::Value;
 use serde_json::json;
 
-/// Locates the `hello` fixture binary. `CARGO_BIN_EXE_hello`
-/// is set by cargo for the hello crate's own tests; for host-crate tests
-/// the workspace build places the binary under `target/{profile}`. The test
-/// binary does not expose the active profile, so probe `debug` and `release`
-/// instead of guessing: CI (`cargo build --all-targets`) and local
-/// `cargo build --workspace` both land the fixture in one of the two.
-/// A missing binary panics with a build hint rather than a confusing spawn
-/// error.
-fn fixture_path() -> PathBuf {
-    if let Some(path) = option_env!("CARGO_BIN_EXE_hello") {
-        return PathBuf::from(path);
-    }
-    let target = match option_env!("CARGO_TARGET_DIR") {
-        Some(dir) => PathBuf::from(dir),
-        None => PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target"),
-    };
-    for profile in ["debug", "release"] {
-        let candidate = target.join(profile).join("hello");
-        if candidate.exists() {
-            return candidate;
-        }
-    }
-    panic!(concat!(
-        "test-plugin fixture not built; run `cargo build -p hello` ",
-        "(or `cargo build --workspace`) first"
-    ));
-}
+mod probe;
+use probe::probe_binary;
 
 /// Polls `cond` until it is true or `timeout` elapses.
 async fn wait_until(timeout: Duration, mut cond: impl FnMut() -> bool) -> bool {
@@ -87,7 +61,7 @@ async fn spawn_engine_and_open(
     ViewSpec,
 ) {
     let plugin = Arc::new(
-        RunningPlugin::spawn(fixture_path())
+        RunningPlugin::spawn(probe_binary("hello"))
             .await
             .expect("spawn hello_plugin"),
     );
@@ -218,7 +192,7 @@ async fn session_expires_after_inactivity_timeout() {
 
     let message_id = serenity::MessageId::new(1);
     let plugin = Arc::new(
-        RunningPlugin::spawn(fixture_path())
+        RunningPlugin::spawn(probe_binary("hello"))
             .await
             .expect("spawn hello_plugin"),
     );

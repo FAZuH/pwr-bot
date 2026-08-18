@@ -7,7 +7,6 @@
 //! A separate test binary from `plugin_interaction.rs` so each process owns
 //! its recording-logger static without interference.
 
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::Once;
@@ -25,33 +24,8 @@ use pwr_bot::plugin::VOICE_STATE_EVENT;
 use pwr_plugin_protocol::PLUGIN_NAME;
 use serde_json::json;
 
-/// Locates the `hello` fixture binary. `CARGO_BIN_EXE_hello`
-/// is set by cargo for the hello crate's own tests; for host-crate tests
-/// the workspace build places the binary under `target/{profile}`. The test
-/// binary does not expose the active profile, so probe `debug` and `release`
-/// instead of guessing: CI (`cargo build --all-targets`) and local
-/// `cargo build --workspace` both land the fixture in one of the two.
-/// A missing binary panics with a build hint rather than a confusing spawn
-/// error.
-fn fixture_path() -> PathBuf {
-    if let Some(path) = option_env!("CARGO_BIN_EXE_hello") {
-        return PathBuf::from(path);
-    }
-    let target = match option_env!("CARGO_TARGET_DIR") {
-        Some(dir) => PathBuf::from(dir),
-        None => PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target"),
-    };
-    for profile in ["debug", "release"] {
-        let candidate = target.join(profile).join("hello");
-        if candidate.exists() {
-            return candidate;
-        }
-    }
-    panic!(concat!(
-        "test-plugin fixture not built; run `cargo build -p hello` ",
-        "(or `cargo build --workspace`) first"
-    ));
-}
+mod probe;
+use probe::probe_binary;
 
 /// Polls `cond` until it is true or `timeout` elapses.
 async fn wait_until(timeout: Duration, mut cond: impl FnMut() -> bool) -> bool {
@@ -123,7 +97,7 @@ async fn subscribed_plugin_receives_a_fanned_out_discord_event() {
     let plugin = manager
         .spawn(
             PLUGIN_NAME,
-            fixture_path(),
+            probe_binary("hello"),
             None,
             &[VOICE_STATE_EVENT.to_string()],
             &[],
@@ -173,7 +147,7 @@ async fn plugin_event_is_broadcast_on_the_host_event_bus() {
     let plugin = manager
         .spawn(
             PLUGIN_NAME,
-            fixture_path(),
+            probe_binary("hello"),
             None,
             &[VOICE_STATE_EVENT.to_string()],
             &[],

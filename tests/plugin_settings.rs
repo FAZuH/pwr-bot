@@ -43,49 +43,8 @@ use serde_json::json;
 const KV_NAMESPACE: &str = "settings";
 const KV_MODEL_KEY: &str = "model";
 
-/// Locates the `settings` binary. `CARGO_BIN_EXE_...` is only set
-/// for the crate's own tests; from the host crate the workspace build places
-/// the binary under `target/{profile}`. Probe `debug` and `release` like
-/// `plugin_host_ops::fixture_path`.
-fn settings_path() -> PathBuf {
-    let target = match option_env!("CARGO_TARGET_DIR") {
-        Some(dir) => PathBuf::from(dir),
-        None => PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target"),
-    };
-    for profile in ["debug", "release"] {
-        let candidate = target.join(profile).join("settings");
-        if candidate.exists() {
-            return candidate;
-        }
-    }
-    panic!(concat!(
-        "settings not built; run `cargo build -p settings` ",
-        "(or `cargo build --workspace`) first"
-    ));
-}
-
-/// Locates the `hello` fixture binary, mirroring
-/// `plugin_host_ops::fixture_path` (`CARGO_BIN_EXE_...` is only set for the
-/// hello crate's own tests).
-fn fixture_path() -> PathBuf {
-    if let Some(path) = option_env!("CARGO_BIN_EXE_hello") {
-        return PathBuf::from(path);
-    }
-    let target = match option_env!("CARGO_TARGET_DIR") {
-        Some(dir) => PathBuf::from(dir),
-        None => PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target"),
-    };
-    for profile in ["debug", "release"] {
-        let candidate = target.join(profile).join("hello");
-        if candidate.exists() {
-            return candidate;
-        }
-    }
-    panic!(concat!(
-        "test-plugin fixture not built; run `cargo build -p hello` ",
-        "(or `cargo build --workspace`) first"
-    ));
-}
+mod probe;
+use probe::probe_binary;
 
 /// A stateful in-memory [`KvStore`]: a `(namespace, key)` → value map shared
 /// across every handle that holds it, so a second spawned instance observes
@@ -173,9 +132,14 @@ fn view_host_services(
 
 /// Spawns the settings plugin with the given KV store (or none).
 async fn spawn_settings(kv: Option<Arc<dyn KvStore>>) -> RunningPlugin {
-    RunningPlugin::spawn_with(settings_path(), Some(host_services(kv)), None, None)
-        .await
-        .expect("spawn settings plugin")
+    RunningPlugin::spawn_with(
+        probe_binary("settings"),
+        Some(host_services(kv)),
+        None,
+        None,
+    )
+    .await
+    .expect("spawn settings plugin")
 }
 
 /// Asserts a resp is the settings envelope and returns its `view` object.
@@ -443,14 +407,18 @@ async fn nav_click_opens_the_target_plugin_panel() {
     let services = view_host_services(Arc::new(mock), kv.clone(), engine.clone());
     let manager = Arc::new(PluginManager::new(None, RespawnPolicy::default()));
     manager
-        .spawn("hello", fixture_path(), None, &[], &[])
+        .spawn("hello", probe_binary("hello"), None, &[], &[])
         .await
         .expect("spawn target plugin");
 
-    let settings =
-        RunningPlugin::spawn_with(settings_path(), Some(services), Some(manager.clone()), None)
-            .await
-            .expect("spawn settings plugin");
+    let settings = RunningPlugin::spawn_with(
+        probe_binary("settings"),
+        Some(services),
+        Some(manager.clone()),
+        None,
+    )
+    .await
+    .expect("spawn settings plugin");
     settings
         .call("invoke", Some("settings"), Some(json!({})))
         .await

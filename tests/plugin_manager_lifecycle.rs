@@ -27,33 +27,8 @@ use pwr_plugin_protocol::PLUGIN_NAME;
 use pwr_plugin_protocol::TaskDef;
 use serde_json::json;
 
-/// Locates the `hello` fixture binary. `CARGO_BIN_EXE_hello`
-/// is set by cargo for the hello crate's own tests; for host-crate tests
-/// the workspace build places the binary under `target/{profile}`. The test
-/// binary does not expose the active profile, so probe `debug` and `release`
-/// instead of guessing: CI (`cargo build --all-targets`) and local
-/// `cargo build --workspace` both land the fixture in one of the two.
-/// A missing binary panics with a build hint rather than a confusing spawn
-/// error.
-fn fixture_path() -> PathBuf {
-    if let Some(path) = option_env!("CARGO_BIN_EXE_hello") {
-        return PathBuf::from(path);
-    }
-    let target = match option_env!("CARGO_TARGET_DIR") {
-        Some(dir) => PathBuf::from(dir),
-        None => PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target"),
-    };
-    for profile in ["debug", "release"] {
-        let candidate = target.join(profile).join("hello");
-        if candidate.exists() {
-            return candidate;
-        }
-    }
-    panic!(concat!(
-        "test-plugin fixture not built; run `cargo build -p hello` ",
-        "(or `cargo build --workspace`) first"
-    ));
-}
+mod probe;
+use probe::probe_binary;
 
 /// Absolute path to a test-only shell fixture in `tests/fixtures/`.
 fn fixture_script(name: &str) -> PathBuf {
@@ -178,7 +153,13 @@ async fn click(plugin: &RunningPlugin) -> Result<bool, pwr_bot::plugin::PluginEr
 async fn health_pings_keep_a_healthy_plugin_running() {
     let manager = Arc::new(PluginManager::new(None, test_policy()));
     manager
-        .spawn("hello", fixture_path(), Some(test_health()), &[], &[])
+        .spawn(
+            "hello",
+            probe_binary("hello"),
+            Some(test_health()),
+            &[],
+            &[],
+        )
         .await
         .expect("spawn hello_plugin");
 
@@ -207,8 +188,8 @@ async fn health_pings_keep_a_healthy_plugin_running() {
 async fn concurrent_spawn_race_keeps_the_winner() {
     let manager = Arc::new(PluginManager::new(None, test_policy()));
     let (a, b) = tokio::join!(
-        manager.spawn("hello", fixture_path(), None, &[], &[]),
-        manager.spawn("hello", fixture_path(), None, &[], &[]),
+        manager.spawn("hello", probe_binary("hello"), None, &[], &[]),
+        manager.spawn("hello", probe_binary("hello"), None, &[], &[]),
     );
     let (winner, loser) = match (a, b) {
         (Ok(winner), Err(loser)) => (winner, loser),
@@ -281,7 +262,13 @@ async fn silent_plugin_is_respawned_after_missed_pongs() {
 async fn killed_plugin_is_respawned_and_serves_fresh_instances() {
     let manager = Arc::new(PluginManager::new(None, test_policy()));
     manager
-        .spawn("hello", fixture_path(), Some(test_health()), &[], &[])
+        .spawn(
+            "hello",
+            probe_binary("hello"),
+            Some(test_health()),
+            &[],
+            &[],
+        )
         .await
         .expect("spawn hello_plugin");
     let plugin = manager.get("hello").await.expect("registered handle");
@@ -327,7 +314,7 @@ async fn killed_plugin_is_respawned_and_serves_fresh_instances() {
 async fn bye_unload_exits_cleanly_and_reaps() {
     let manager = Arc::new(PluginManager::new(None, test_policy()));
     manager
-        .spawn("hello", fixture_path(), None, &[], &[])
+        .spawn("hello", probe_binary("hello"), None, &[], &[])
         .await
         .expect("spawn hello_plugin");
 
@@ -465,7 +452,7 @@ async fn stale_respawn_does_not_unload_a_swapped_instance() {
     };
     let manager = Arc::new(PluginManager::new(None, policy));
     manager
-        .spawn("hello", fixture_path(), None, &[], &[])
+        .spawn("hello", probe_binary("hello"), None, &[], &[])
         .await
         .expect("spawn hello_plugin");
     let crashed = manager.get("hello").await.expect("registered handle");
@@ -478,7 +465,7 @@ async fn stale_respawn_does_not_unload_a_swapped_instance() {
     });
     tokio::time::sleep(Duration::from_millis(100)).await;
     let swapped = manager
-        .swap("hello", fixture_path(), &[])
+        .swap("hello", probe_binary("hello"), &[])
         .await
         .expect("swap during the backoff");
     let outcome = respawn_task
@@ -508,7 +495,7 @@ async fn respawn_of_an_unknown_plugin_fails_with_not_running() {
     // The respawn contract takes the crashed instance (identity check), so
     // any running plugin works as the handle to pass.
     manager
-        .spawn("hello", fixture_path(), None, &[], &[])
+        .spawn("hello", probe_binary("hello"), None, &[], &[])
         .await
         .expect("spawn hello_plugin");
     let probe = manager.get("hello").await.expect("registered handle");
@@ -531,13 +518,19 @@ async fn respawn_of_an_unknown_plugin_fails_with_not_running() {
 async fn swap_replaces_the_running_instance() {
     let manager = Arc::new(PluginManager::new(None, test_policy()));
     manager
-        .spawn("hello", fixture_path(), Some(test_health()), &[], &[])
+        .spawn(
+            "hello",
+            probe_binary("hello"),
+            Some(test_health()),
+            &[],
+            &[],
+        )
         .await
         .expect("spawn hello_plugin");
     let original = manager.get("hello").await.expect("registered handle");
 
     let swapped = manager
-        .swap("hello", fixture_path(), &[])
+        .swap("hello", probe_binary("hello"), &[])
         .await
         .expect("swap to the same binary");
     assert!(
@@ -564,7 +557,7 @@ async fn swap_replaces_the_running_instance() {
 async fn swap_with_a_missing_binary_leaves_the_plugin_running() {
     let manager = Arc::new(PluginManager::new(None, test_policy()));
     manager
-        .spawn("hello", fixture_path(), None, &[], &[])
+        .spawn("hello", probe_binary("hello"), None, &[], &[])
         .await
         .expect("spawn hello_plugin");
     let original = manager.get("hello").await.expect("registered handle");
@@ -716,7 +709,7 @@ async fn task_loop_invokes_the_declared_command_on_interval() {
     manager
         .spawn(
             "hello",
-            fixture_path(),
+            probe_binary("hello"),
             None,
             &[],
             &[TaskDef {

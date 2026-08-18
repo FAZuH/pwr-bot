@@ -19,33 +19,8 @@ use pwr_plugin_protocol::Msg;
 use pwr_plugin_protocol::PLUGIN_NAME;
 use serde_json::json;
 
-/// Locates the `hello` fixture binary. `CARGO_BIN_EXE_hello`
-/// is set by cargo for the hello crate's own tests; for host-crate tests
-/// the workspace build places the binary under `target/{profile}`. The test
-/// binary does not expose the active profile, so probe `debug` and `release`
-/// instead of guessing: CI (`cargo build --all-targets`) and local
-/// `cargo build --workspace` both land the fixture in one of the two.
-/// A missing binary panics with a build hint rather than a confusing spawn
-/// error.
-fn fixture_path() -> PathBuf {
-    if let Some(path) = option_env!("CARGO_BIN_EXE_hello") {
-        return PathBuf::from(path);
-    }
-    let target = match option_env!("CARGO_TARGET_DIR") {
-        Some(dir) => PathBuf::from(dir),
-        None => PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target"),
-    };
-    for profile in ["debug", "release"] {
-        let candidate = target.join(profile).join("hello");
-        if candidate.exists() {
-            return candidate;
-        }
-    }
-    panic!(concat!(
-        "test-plugin fixture not built; run `cargo build -p hello` ",
-        "(or `cargo build --workspace`) first"
-    ));
-}
+mod probe;
+use probe::probe_binary;
 
 /// Absolute path to a test-only shell fixture in `tests/fixtures/`.
 fn fixture_script(name: &str) -> PathBuf {
@@ -113,7 +88,7 @@ fn logs_contain(fragment: &str) -> bool {
 
 #[tokio::test]
 async fn spawn_hello_invoke_bye_round_trip() {
-    let plugin = RunningPlugin::spawn(fixture_path())
+    let plugin = RunningPlugin::spawn(probe_binary("hello"))
         .await
         .expect("spawn hello_plugin");
 
@@ -141,7 +116,7 @@ async fn spawn_hello_invoke_bye_round_trip() {
 
 #[tokio::test]
 async fn concurrent_calls_resolve_to_their_own_resps() {
-    let plugin = RunningPlugin::spawn(fixture_path())
+    let plugin = RunningPlugin::spawn(probe_binary("hello"))
         .await
         .expect("spawn hello_plugin");
 
@@ -293,7 +268,7 @@ async fn plugin_panic_exits_nonzero_with_stderr_diagnostics() {
         logs.lock().unwrap().clear();
     }
 
-    let plugin = RunningPlugin::spawn(fixture_path())
+    let plugin = RunningPlugin::spawn(probe_binary("hello"))
         .await
         .expect("spawn hello_plugin");
 
