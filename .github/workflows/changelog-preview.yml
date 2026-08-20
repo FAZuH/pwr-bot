@@ -89,6 +89,10 @@ jobs:
         if: steps.mode.outputs.mode == 'manual'
         run: |
           if [ -s /tmp/next_tag.txt ] && [ -f CHANGELOG.md ]; then
+            FIRST=$(grep -m1 '^## ' CHANGELOG.md || true)
+            if [ "$FIRST" != "## [Unreleased]" ]; then
+              touch /tmp/manual_missing_unreleased.txt
+            fi
             cp CHANGELOG.md /tmp/CHANGELOG.preview.md
             node ./.github/scripts/materialize-unreleased.cjs /tmp/CHANGELOG.preview.md "$(cat /tmp/next_tag.txt)" "$(date -u +%Y-%m-%d)" > /tmp/manual_release_body.txt
           fi
@@ -109,6 +113,7 @@ jobs:
             // Parse latest maintainer comment for overrides (auto mode only)
             let bumpOverrides = {};
             let changelog = null;
+            let noUnreleasedNote = false;
             if (mode !== 'manual') {
               const { data: prComments } = await github.rest.issues.listComments({
                 owner: context.repo.owner,
@@ -154,8 +159,9 @@ jobs:
               const skipped = fs.readFileSync('/tmp/skipped.txt', 'utf8').trim();
               if (skipped !== 'true') {
                 try {
-                  changelog = fs.readFileSync('/tmp/manual_release_body.txt', 'utf8').trim();
+                  changelog = fs.readFileSync('/tmp/manual_release_body.txt', 'utf8').trim() || null;
                 } catch (e) { changelog = null; }
+                noUnreleasedNote = fs.existsSync('/tmp/manual_missing_unreleased.txt');
               }
             }
 
@@ -184,6 +190,9 @@ jobs:
             let commentBody = '## Release Preview\n\n';
             if (tag) {
               commentBody += '**Next version:** `' + tag + '`\n\n';
+            }
+            if (noUnreleasedNote) {
+              commentBody += '> **Note:** CHANGELOG.md has no `## [Unreleased]` section. An empty one was created for this preview — add your entries under it to preview the release body.\n\n';
             }
 
             const memberNames = Object.keys(memberVersions);

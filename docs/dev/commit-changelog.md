@@ -81,12 +81,18 @@ commits and commits it to the release branch.
 
 **manual** — the release workflow does NOT generate CHANGELOG.md. On
 release, the CI renames the topmost `## [Unreleased]` section to
-`## <version> (<date>)`, inserts a fresh empty `## [Unreleased]` above it,
-and commits the change. The GitHub release body and the Discord embed read
-the renamed section. Version bumping and tag creation still happen
-automatically. On a pull request, the preview bot shows the materialized
-release body (the `[Unreleased]` section renamed to
+`## <version> (<date>)` and commits the change. The GitHub release body and
+the Discord embed read the renamed section. Version bumping and tag creation
+still happen automatically. On a pull request, the preview bot shows the
+materialized release body (the `[Unreleased]` section renamed to
 `## <version> (<date>)`), matching what the release will post.
+
+If the topmost section is not `## [Unreleased]` (or the file has none), the
+tooling inserts one before materializing it. The inserted section is then
+renamed in the same release, so the release body is just the version heading;
+it never shows a previous release's notes. Add and populate a
+`## [Unreleased]` section during development so the preview and release body
+carry the real entries.
 
 The file is project-local. `sync.sh` never ships it, and never pulls it.
 
@@ -135,7 +141,7 @@ the materialized release body (the `[Unreleased]` section renamed to
 
 | Aspect | auto | manual |
 |--------|------|--------|
-| CHANGELOG.md | generated and committed by the release | hand-written; `[Unreleased]` header renamed to version + date and fresh section inserted by the release |
+| CHANGELOG.md | generated and committed by the release | hand-written; `[Unreleased]` header renamed to version + date by the release |
 | GitHub release body | generated changelog | renamed `[Unreleased]` section (version + date) |
 | Discord embed | generated changelog | renamed `[Unreleased]` section (version + date) |
 | PR preview | changelog + version + bump table | materialized release body + version |
