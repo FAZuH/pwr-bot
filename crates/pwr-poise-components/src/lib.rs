@@ -111,6 +111,49 @@ pub fn view_data(content: impl Into<String>, components: impl IntoIterator<Item 
     })
 }
 
+/// The Discord message flag marking a payload as Components V2: every visible
+/// element must be a component (text display, section, container, ...), and
+/// the legacy top-level `content` must stay empty.
+pub const IS_COMPONENTS_V2: u32 = 1 << 15;
+
+/// A text display: Discord type 10. Markdown-only leaf component; the only
+/// way to show text in a Components V2 message.
+pub fn text_display(content: impl Into<String>) -> Value {
+    json!({
+        "type": 10,
+        "content": content.into()
+    })
+}
+
+/// A section: Discord type 9. Groups up to three [`text_display`] children
+/// with one `accessory` rendered beside them (a thumbnail or a button).
+pub fn section(children: impl IntoIterator<Item = Value>, accessory: Value) -> Value {
+    json!({
+        "type": 9,
+        "components": children.into_iter().collect::<Vec<_>>(),
+        "accessory": accessory
+    })
+}
+
+/// A container: Discord type 17. The visual box nesting other components —
+/// including other containers — with an optional accent stripe.
+pub fn container(children: impl IntoIterator<Item = Value>) -> Value {
+    json!({
+        "type": 17,
+        "components": children.into_iter().collect::<Vec<_>>()
+    })
+}
+
+/// Assembles a Components V2 message payload: the given components plus the
+/// [`IS_COMPONENTS_V2`] flag. No top-level `content`: all text lives in
+/// [`text_display`] components.
+pub fn view_data_v2(components: impl IntoIterator<Item = Value>) -> Value {
+    json!({
+        "components": components.into_iter().collect::<Vec<_>>(),
+        "flags": IS_COMPONENTS_V2
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use pwr_plugin_protocol::ViewSpec;
@@ -214,6 +257,40 @@ mod tests {
                 "flags": 0
             })
         );
+    }
+
+    #[test]
+    fn text_display_emits_the_discord_shape() {
+        assert_eq!(
+            serde_json::to_string(&text_display("-# **Settings**")).unwrap(),
+            r#"{"content":"-# **Settings**","type":10}"#
+        );
+    }
+
+    #[test]
+    fn section_wraps_text_displays_and_the_accessory() {
+        let text = text_display("hello");
+        let accessory = button("btn", "Click");
+        let section = section([text.clone()], accessory.clone());
+        assert_eq!(section["type"], 9);
+        assert_eq!(section["components"][0], text);
+        assert_eq!(section["accessory"], accessory);
+    }
+
+    #[test]
+    fn container_wraps_its_children() {
+        let child = text_display("hello");
+        let boxed = container([child.clone()]);
+        assert_eq!(boxed["type"], 17);
+        assert_eq!(boxed["components"][0], child);
+    }
+
+    #[test]
+    fn view_data_v2_sets_the_components_v2_flag_and_omits_content() {
+        let data = view_data_v2([container([text_display("-# **Settings**")])]);
+        assert_eq!(data["flags"], json!(IS_COMPONENTS_V2));
+        assert!(data.get("content").is_none());
+        assert_eq!(data["components"][0]["type"], 17);
     }
 
     #[test]

@@ -6,12 +6,19 @@
 //!
 //! Assertions mirror the plugin's documented contract:
 //! - an `invoke` of `settings` answers the full envelope
-//!   `{"data", "ephemeral", "view"}` with one action row of three toggles and
-//!   the loaded (or default) model in `view`;
+//!   `{"data", "ephemeral", "view"}` whose data is a Components V2 container
+//!   mirroring the original monolith hub, carrying the loaded (or default)
+//!   model and the session's page in `view`;
 //! - the first invoke loads the model from `host.kv.get` (namespace
 //!   `settings`) and re-registers it via `host.kv.set` before rendering;
-//! - `view.interact` toggles the feature and persists the model via
+//! - `view.interact` on the toggle select (`settings:toggle`) flips every
+//!   selected feature of the session's own model and persists it via
 //!   `host.kv.set` before answering;
+//! - About/Back swap the session's page without touching the model; the page
+//!   rides the per-session `view` payload, so concurrent hubs stay
+//!   independent and every fresh invoke opens the hub;
+//! - a `settings:config:<feature>` button re-renders the current page (the
+//!   panels it would open are not plugins yet);
 //! - a `settings:open:<plugin>` nav click issues `host.open_view`, opening
 //!   the target plugin's panel through the manager and interaction engine;
 //! - a second spawn sharing the same store renders the persisted model;
@@ -36,6 +43,7 @@ use pwr_bot::plugin::RunningPlugin;
 use pwr_bot::plugin::host::MockHostIo;
 use pwr_plugin_protocol::BUTTON_CUSTOM_ID;
 use pwr_plugin_protocol::Msg;
+use pwr_poise_components::IS_COMPONENTS_V2;
 use serde_json::Value;
 use serde_json::json;
 
@@ -145,7 +153,8 @@ async fn spawn_settings(kv: Option<Arc<dyn KvStore>>) -> RunningPlugin {
 /// Asserts a resp is the settings envelope and returns its `view` object.
 /// `expected_id` is the host's call id this resp answers: each sequential
 /// `plugin.call` on the same instance bumps the id (0, 1, 2, ...), and the
-/// plugin echoes it back end to end.
+/// plugin echoes it back end to end. The hub is a Components V2 message, so
+/// the payload carries the v2 flag and no legacy top-level content.
 fn assert_envelope(resp: &Msg, expected_id: u64) -> Value {
     match resp {
         Msg::Resp {
@@ -156,41 +165,88 @@ fn assert_envelope(resp: &Msg, expected_id: u64) -> Value {
         } => {
             assert_eq!(*id, expected_id, "resp answers its own invoke id");
             assert_eq!(data["ephemeral"], json!(false));
-            assert_eq!(data["data"]["content"], json!("-# **Settings**"));
+            assert_eq!(data["data"]["flags"], json!(IS_COMPONENTS_V2));
+            assert!(
+                data["data"].get("content").is_none(),
+                "v2 payloads carry no top-level content"
+            );
             data["view"].clone()
         }
         other => panic!("expected ok settings envelope, got {other:?}"),
     }
 }
 
-/// Asserts the envelope's action row carries the three feature toggles with
-/// the given enabled state in their labels and styles.
+/// Asserts the envelope's `view` state carries the session model with the
+/// given enabled state per feature.
 fn assert_toggles(view: &Value, feeds: bool, voice: bool, welcome: bool) {
-    let model = view.as_object().expect("view is an object");
+    let model = view["model"].as_object().expect("view carries a model");
     assert_eq!(model["feeds"], json!(feeds));
     assert_eq!(model["voice"], json!(voice));
     assert_eq!(model["welcome"], json!(welcome));
 }
 
-/// Asserts the envelope's message data has the toggle row of three buttons
-/// followed by the nav row carrying the `settings:open:<target>` button.
-fn assert_buttons(data: &Value, enabled: &[bool]) {
-    let rows = data["data"]["components"].as_array().expect("components");
-    assert_eq!(rows.len(), 2, "toggle row plus nav row");
-    let row = &rows[0];
-    assert_eq!(row["type"], json!(1));
-    let buttons = row["components"].as_array().expect("row components");
-    assert_eq!(buttons.len(), 3, "three toggle buttons");
+/// Asserts the envelope renders the original monolith hub layout as
+/// Components V2: one container holding the header, both info sections,
+/// the feature-button row, the toggle select (labels reflecting `enabled`),
+/// and the plugin nav row; plus the About button row outside the container.
+fn assert_hub(data: &Value, enabled: &[bool; 3]) {
+    let components = data["data"]["components"].as_array().expect("components");
+    assert_eq!(components.len(), 2, "container plus the About row");
+    let about_row = &components[1];
+    assert_eq!(about_row["type"], json!(1));
+    assert_eq!(
+        about_row["components"][0]["custom_id"],
+        json!("settings:about")
+    );
 
-    let custom_ids = ["settings:feeds", "settings:voice", "settings:welcome"];
-    for (button, (custom_id, is_enabled)) in buttons.iter().zip(custom_ids.iter().zip(enabled)) {
+    let boxed = &components[0];
+    assert_eq!(boxed["type"], json!(17));
+    let children = boxed["components"].as_array().expect("container children");
+    assert_eq!(
+        children.len(),
+        6,
+        "header, configure info, buttons, toggle info, select, nav"
+    );
+
+    let header = &children[0];
+    assert_eq!(header["type"], json!(10));
+    assert_eq!(header["content"], json!("-# **Settings**"));
+
+    let config_buttons = children[2]["components"].as_array().expect("config row");
+    let config_ids = [
+        "settings:config:feeds",
+        "settings:config:voice",
+        "settings:config:welcome",
+    ];
+    for (button, custom_id) in config_buttons.iter().zip(config_ids) {
         assert_eq!(button["type"], json!(2));
         assert_eq!(button["custom_id"], json!(custom_id));
-        // style 3 (success) when enabled, 2 (secondary) when disabled
-        assert_eq!(button["style"], json!(if *is_enabled { 3 } else { 2 }));
+        assert_eq!(button["style"], json!(2), "secondary like the original");
     }
 
-    let nav = &rows[1];
+    let select = &children[4]["components"][0];
+    assert_eq!(select["type"], json!(3));
+    assert_eq!(select["custom_id"], json!("settings:toggle"));
+    let emojis = ["✅", "⬜"];
+    let labels = ["Feeds", "Voice", "Welcome"];
+    for (index, option) in select["options"]
+        .as_array()
+        .expect("options")
+        .iter()
+        .enumerate()
+    {
+        assert_eq!(
+            option["label"],
+            json!(format!(
+                "{} {}",
+                emojis[usize::from(!enabled[index])],
+                labels[index]
+            ))
+        );
+        assert_eq!(option["value"], json!(labels[index]));
+    }
+
+    let nav = &children[5];
     assert_eq!(nav["type"], json!(1));
     let nav_buttons = nav["components"].as_array().expect("nav components");
     assert_eq!(nav_buttons.len(), 1, "one nav button");
@@ -255,8 +311,9 @@ async fn second_invoke_answers_immediately_with_the_loaded_model() {
     assert_eq!(status.code(), Some(0), "clean exit after bye: {status}");
 }
 
-/// A `view.interact` click toggles the feature, persists the model through
-/// `host.kv.set` (namespace `settings`), and answers the fresh envelope.
+/// A `view.interact` on the toggle select flips the selected feature,
+/// persists the model through `host.kv.set` (namespace `settings`), and
+/// answers the fresh envelope.
 #[tokio::test]
 async fn interact_toggles_a_feature_and_persists_it() {
     let kv = SharedKv::new();
@@ -271,7 +328,10 @@ async fn interact_toggles_a_feature_and_persists_it() {
         .call(
             "view.interact",
             Some("settings"),
-            Some(json!({ "custom_id": "settings:feeds" })),
+            Some(json!({
+                "custom_id": "settings:toggle",
+                "data": { "values": ["Feeds"] }
+            })),
         )
         .await
         .expect("interact answered");
@@ -311,7 +371,10 @@ async fn a_restarted_plugin_renders_the_persisted_model() {
         .call(
             "view.interact",
             Some("settings"),
-            Some(json!({ "custom_id": "settings:feeds" })),
+            Some(json!({
+                "custom_id": "settings:toggle",
+                "data": { "values": ["Feeds"] }
+            })),
         )
         .await
         .expect("first toggle answered");
@@ -330,10 +393,11 @@ async fn a_restarted_plugin_renders_the_persisted_model() {
     assert_eq!(status.code(), Some(0), "second instance exits 0: {status}");
 }
 
-/// An envelope's action row carries the three toggles with labels reflecting
-/// the current state.
+/// The envelope renders the original hub layout: the v2 container with both
+/// info sections, the feature buttons, and the toggle select whose labels
+/// mirror the model.
 #[tokio::test]
-async fn envelope_carries_three_toggle_buttons() {
+async fn envelope_renders_the_original_hub_layout() {
     let plugin = spawn_settings(None).await;
 
     let resp = plugin
@@ -341,13 +405,14 @@ async fn envelope_carries_three_toggle_buttons() {
         .await
         .expect("invoke answered");
 
+    assert_envelope(&resp, 0);
     let Msg::Resp {
         data: Some(data), ..
     } = &resp
     else {
         panic!("expected ok envelope, got {resp:?}");
     };
-    assert_buttons(data, &[false, false, false]);
+    assert_hub(data, &[false, false, false]);
 
     let status = plugin.stop().await.expect("graceful stop");
     assert_eq!(status.code(), Some(0), "clean exit after bye: {status}");
@@ -461,4 +526,201 @@ async fn nav_click_opens_the_target_plugin_panel() {
         .unload("hello", &[])
         .await
         .expect("stop target plugin");
+}
+
+/// The About click answers immediately with the plugin-side About panel (a
+/// v2 container holding a section with a link-button accessory), and Back
+/// restores the hub.
+#[tokio::test]
+async fn about_click_renders_the_about_panel_and_back_restores_the_hub() {
+    let plugin = spawn_settings(None).await;
+
+    plugin
+        .call("invoke", Some("settings"), Some(json!({})))
+        .await
+        .expect("invoke answered");
+
+    let resp = plugin
+        .call(
+            "view.interact",
+            Some("settings"),
+            Some(json!({ "custom_id": "settings:about" })),
+        )
+        .await
+        .expect("about click answered");
+
+    assert_envelope(&resp, 1);
+    let Msg::Resp {
+        data: Some(data), ..
+    } = &resp
+    else {
+        panic!("expected ok envelope, got {resp:?}");
+    };
+    let components = data["data"]["components"].as_array().expect("components");
+    assert_eq!(components.len(), 2, "container plus the Back row");
+    assert_eq!(
+        components[1]["components"][0]["custom_id"],
+        json!("settings:about:back")
+    );
+    let children = components[0]["components"].as_array().expect("children");
+    assert_eq!(children.len(), 2, "section plus the license row");
+    let section = &children[0];
+    assert_eq!(section["type"], json!(9));
+    let text = &section["components"][0];
+    assert_eq!(text["type"], json!(10));
+    assert!(
+        text["content"]
+            .as_str()
+            .unwrap()
+            .contains("Settings > About"),
+        "the About copy names the page"
+    );
+    assert_eq!(section["accessory"]["type"], json!(2));
+    assert_eq!(section["accessory"]["style"], json!(5), "link accessory");
+
+    let back = plugin
+        .call(
+            "view.interact",
+            Some("settings"),
+            Some(json!({ "custom_id": "settings:about:back" })),
+        )
+        .await
+        .expect("back click answered");
+    let view = assert_envelope(&back, 2);
+    assert_toggles(&view, false, false, false);
+
+    let status = plugin.stop().await.expect("graceful stop");
+    assert_eq!(status.code(), Some(0), "clean exit after bye: {status}");
+}
+
+/// Asserts the envelope's `view` state names the given page.
+fn assert_page(view: &Value, expected: &str) {
+    assert_eq!(view["page"], json!(expected), "session page");
+}
+
+/// A config button click answers the hub unchanged:
+/// routing to per-feature panels is future work, so the stub re-renders the
+/// current page without touching the model.
+#[tokio::test]
+async fn a_config_button_answers_the_hub_without_changing_the_model() {
+    let plugin = spawn_settings(None).await;
+
+    plugin
+        .call("invoke", Some("settings"), Some(json!({})))
+        .await
+        .expect("invoke answered");
+
+    let resp = plugin
+        .call(
+            "view.interact",
+            Some("settings"),
+            Some(json!({ "custom_id": "settings:config:voice" })),
+        )
+        .await
+        .expect("config click answered");
+
+    let view = assert_envelope(&resp, 1);
+    assert_toggles(&view, false, false, false);
+
+    let status = plugin.stop().await.expect("graceful stop");
+    assert_eq!(status.code(), Some(0), "clean exit after bye: {status}");
+}
+
+/// Two concurrently open hubs keep independent session state: an About click
+/// on one flips only that session's page — the other still toggles on the
+/// hub page, against its own model.
+#[tokio::test]
+async fn concurrent_hubs_keep_independent_pages() {
+    let plugin = spawn_settings(None).await;
+
+    let first_view = {
+        let resp = plugin
+            .call("invoke", Some("settings"), Some(json!({})))
+            .await
+            .expect("first invoke answered");
+        assert_envelope(&resp, 0)
+    };
+    let second_view = {
+        let resp = plugin
+            .call("invoke", Some("settings"), Some(json!({})))
+            .await
+            .expect("second invoke answered");
+        assert_envelope(&resp, 1)
+    };
+
+    // Session two goes to About; the host echoes its own view state back.
+    let about_resp = plugin
+        .call(
+            "view.interact",
+            Some("settings"),
+            Some(json!({
+                "custom_id": "settings:about",
+                "view": second_view,
+            })),
+        )
+        .await
+        .expect("about click answered");
+    let about_view = assert_envelope(&about_resp, 2);
+    assert_page(&about_view, "about");
+
+    // Session one never left the hub: its toggle answers the hub page with
+    // the model of ITS session (voice on, feeds and welcome untouched).
+    let toggle_resp = plugin
+        .call(
+            "view.interact",
+            Some("settings"),
+            Some(json!({
+                "custom_id": "settings:toggle",
+                "data": { "values": ["Voice"] },
+                "view": first_view,
+            })),
+        )
+        .await
+        .expect("toggle answered");
+    let toggled_view = assert_envelope(&toggle_resp, 3);
+    assert_page(&toggled_view, "hub");
+    assert_toggles(&toggled_view, false, true, false);
+
+    let status = plugin.stop().await.expect("graceful stop");
+    assert_eq!(status.code(), Some(0), "clean exit after bye: {status}");
+}
+
+/// A fresh `/settings` invoke always opens the hub, even right after an
+/// About click left a session showing the About panel.
+#[tokio::test]
+async fn a_fresh_invoke_after_an_about_click_renders_the_hub() {
+    let plugin = spawn_settings(None).await;
+
+    let first_view = {
+        let resp = plugin
+            .call("invoke", Some("settings"), Some(json!({})))
+            .await
+            .expect("invoke answered");
+        assert_envelope(&resp, 0)
+    };
+    let about_resp = plugin
+        .call(
+            "view.interact",
+            Some("settings"),
+            Some(json!({
+                "custom_id": "settings:about",
+                "view": first_view,
+            })),
+        )
+        .await
+        .expect("about click answered");
+    let about_view = assert_envelope(&about_resp, 1);
+    assert_page(&about_view, "about");
+
+    let again_view = {
+        let resp = plugin
+            .call("invoke", Some("settings"), Some(json!({})))
+            .await
+            .expect("second invoke answered");
+        assert_envelope(&resp, 2)
+    };
+    assert_page(&again_view, "hub");
+
+    let status = plugin.stop().await.expect("graceful stop");
+    assert_eq!(status.code(), Some(0), "clean exit after bye: {status}");
 }
