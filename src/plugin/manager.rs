@@ -9,12 +9,15 @@
 //! ticket (#113).
 //!
 //! Lifecycle policy:
-//! - **Health**: a per-plugin background task sends `ping` every
-//!   [`HealthConfig::interval`]. A plugin that misses
-//!   [`HealthConfig::max_missed_pongs`] consecutive pongs is unloaded and
-//!   respawned. A reaped plugin is judged by its exit status: exit 0 is a
-//!   clean, intentional exit (not respawned); a crash (nonzero exit or
-//!   signal) is respawned.
+//! - **Supervision**: every spawned instance gets a crash-supervisor task
+//!   awaiting its exit status, regardless of any health config: exit 0 is a
+//!   clean, intentional exit (unloaded without respawn); a crash (nonzero
+//!   exit or signal) is respawned under the backoff/crash-loop policy.
+//! - **Health**: when a [`HealthConfig`] is supplied, a per-plugin
+//!   background task sends `ping` every [`HealthConfig::interval`]. A plugin
+//!   that misses [`HealthConfig::max_missed_pongs`] consecutive pongs is
+//!   unloaded and respawned. The health task owns liveness only — exit
+//!   classification belongs to the crash supervisor.
 //! - **Unload**: removes the handle so new calls fail fast, best-effort
 //!   unregisters the plugin's guild commands (the #112 seam), then delegates
 //!   to [`RunningPlugin::stop`] (`bye` → EOF → grace → SIGTERM to the whole
@@ -199,7 +202,9 @@ struct Entry {
     path: PathBuf,
     /// Health config; `None` disables the health task.
     health: Option<HealthConfig>,
-    /// Set when the entry is unloaded; the health task checks it each loop.
+    /// Set when the entry is unloaded; the health task checks it each loop,
+    /// and the crash supervisor consumes it to suppress respawns during
+    /// teardown.
     stop: Arc<AtomicBool>,
     /// Discord events the plugin declared in its manifest; re-applied on
     /// respawn and swap (subscriptions are keyed by name, so re-subscribing
@@ -213,9 +218,10 @@ struct Entry {
 /// Owns running plugins by name and drives the lifecycle: health checks,
 /// unload, respawn, and swap.
 ///
-/// Methods that can start a health-check task (`spawn`, `respawn`, `swap`)
-/// take `self: &Arc<Self>` because the spawned task holds an `Arc` clone of
-/// the manager; the rest take `&self`.
+/// Methods that start background tasks (`spawn`, `respawn`, `swap` — health
+/// checks, task loops, and crash supervision) take `self: &Arc<Self>` because
+/// the spawned task holds an `Arc` clone of the manager; the rest take
+/// `&self`.
 pub struct PluginManager {
     /// Running plugins keyed by plugin name.
     plugins: Mutex<HashMap<String, Entry>>,
@@ -275,8 +281,9 @@ impl PluginManager {
         self
     }
 
-    /// Spawns the binary at `path` under the name `name`, starts its health
-    /// task if `health` is given, subscribes it to `event_handlers`
+    /// Spawns the binary at `path` under the name `name`, starts its
+    /// unconditional crash-supervisor task, starts its health task if
+    /// `health` is given, subscribes it to `event_handlers`
     /// (the manifest's Discord events) when an event router is wired, and
     /// starts one task loop per manifest `tasks[]` entry (each invokes the
     /// declared command on its interval). Fails with
@@ -342,6 +349,7 @@ impl PluginManager {
         if let Some(router) = &self.event_router {
             router.subscribe(name, event_handlers).await;
         }
+        start_crash_supervisor(self, name.to_string(), plugin.clone(), stop.clone());
         if let Some(config) = health {
             start_health_task(self, name.to_string(), config, stop.clone());
         }
@@ -448,8 +456,8 @@ impl PluginManager {
     /// reserved for a name that was never registered.
     ///
     /// Callers pass the crashed handle so the respawn never unloads a
-    /// differently-registered instance; the health task passes the plugin it
-    /// was watching.
+    /// differently-registered instance; the health task and crash supervisor
+    /// each pass the instance they were watching.
     pub async fn respawn(
         self: &Arc<Self>,
         name: &str,
@@ -566,6 +574,70 @@ impl PluginManager {
     }
 }
 
+/// Spawns one crash-supervisor task for a plugin instance, mirroring
+/// [`start_health_task`]: a plain (non-async) function so the spawned
+/// task's future awaits `respawn` → `spawn`, which would make the `Send`
+/// obligation cycle through `spawn`.
+fn start_crash_supervisor(
+    manager: &Arc<PluginManager>,
+    name: String,
+    plugin: Arc<RunningPlugin>,
+    stop: Arc<AtomicBool>,
+) {
+    tokio::spawn(crash_supervisor(Arc::clone(manager), name, plugin, stop));
+}
+
+/// One crash-supervisor task for a single plugin instance. Awaits the
+/// instance's exit watch channel and owns every exit-driven decision: a
+/// clean exit (code 0) unloads without respawn, anything else is a crash
+/// and gets respawned under the policy. Runs unconditionally, so plugins
+/// spawned without a [`HealthConfig`] — the core plugins — are supervised
+/// too; `HealthConfig` stays solely responsible for liveness pings.
+///
+/// Ownership: this task — never [`health_loop`] — classifies an exit, so a
+/// death cannot be handled twice. An intentional teardown raises the
+/// instance's stop flag in [`PluginManager::unload_matching`] *before*
+/// stopping the process, so any exit observed after it (including a
+/// SIGKILL escalation) returns without respawning. A respawned instance's
+/// spawn starts its own supervisor.
+async fn crash_supervisor(
+    manager: Arc<PluginManager>,
+    name: String,
+    plugin: Arc<RunningPlugin>,
+    stop: Arc<AtomicBool>,
+) {
+    let Ok(status) = plugin.wait_for_exit().await else {
+        // The reaper ended without publishing a status. Nothing observes
+        // this process anymore; treat the unknown-status death like a crash.
+        if !stop.load(Ordering::Relaxed) {
+            warn!("plugin {name} died with no exit status; respawning");
+            respawn_or_warn(&manager, &name, &plugin).await;
+        }
+        return;
+    };
+    // Teardown owns this death: the flag goes up before the process stops,
+    // so an unload/swap landing first must not be undone here.
+    if stop.load(Ordering::Relaxed) {
+        return;
+    }
+    if status.code() == Some(0) {
+        info!("plugin {name} exited cleanly; unloading without respawn");
+        match manager.unload_matching(&name, &[], Some(&plugin)).await {
+            // A swap won; the fresh instance stays.
+            None => {}
+            Some(result) => {
+                manager.crash_loops.lock().await.remove(&name);
+                if let Err(e) = result {
+                    warn!("failed to unload clean-exited plugin {name}: {e}");
+                }
+            }
+        }
+        return;
+    }
+    warn!("plugin {name} crashed: {status}; respawning");
+    respawn_or_warn(&manager, &name, &plugin).await;
+}
+
 /// Spawns one health-check task for a plugin instance. A plain (non-async)
 /// function: the spawned task's future awaits `respawn` → `spawn`, which
 /// itself starts another health task, so spawning the task inline would make
@@ -582,12 +654,13 @@ fn start_health_task(
 }
 
 /// One health-check task for a single plugin instance. Each loop iteration
-/// checks the stop flag, then the plugin's exit status (a reaped plugin is
-/// clean-exit-or-crash and ends this task), then pings and counts missed
-/// pongs. A pong that lands late — after its window but before the next ping
-/// — resets the missed count instead of being double-counted; this is
-/// deliberate leniency for a busy plugin. On the missed-pong threshold it
-/// unloads and respawns; the fresh instance gets its own health task.
+/// checks the stop flag, then whether the fetched instance was already
+/// reaped (the crash supervisor owns that respawn, so the task just ends),
+/// then pings and counts missed pongs. A pong that lands late — after its
+/// window but before the next ping — resets the missed count instead of
+/// being double-counted; this is deliberate leniency for a busy plugin. On
+/// the missed-pong threshold it unloads and respawns; the fresh instance
+/// gets its own health task.
 async fn health_loop(
     manager: Arc<PluginManager>,
     name: String,
@@ -607,25 +680,10 @@ async fn health_loop(
         if stop.load(Ordering::Relaxed) {
             return;
         }
-        // A reaped plugin: exit 0 is intentional (no respawn); anything else
-        // is a crash and gets respawned under the policy.
-        if let Some(status) = plugin.exit_status() {
-            if status.code() == Some(0) {
-                info!("plugin {name} exited cleanly; unloading without respawn");
-                match manager.unload_matching(&name, &[], Some(&plugin)).await {
-                    // A swap won; the fresh instance stays.
-                    None => {}
-                    Some(result) => {
-                        manager.crash_loops.lock().await.remove(&name);
-                        if let Err(e) = result {
-                            warn!("failed to unload clean-exited plugin {name}: {e}");
-                        }
-                    }
-                }
-            } else {
-                warn!("plugin {name} crashed: {status}; respawning");
-                respawn_or_warn(&manager, &name, &plugin).await;
-            }
+        // A reaped plugin ends this task: the crash supervisor owns the
+        // exit-driven decisions, and the fresh instance's spawn starts its
+        // own health task.
+        if plugin.exit_status().is_some() {
             return;
         }
         // Liveness: a pong must arrive within the window or the ping counts
@@ -665,10 +723,10 @@ fn start_task_loop(
 
 /// One task loop for a single plugin instance. Each loop iteration checks
 /// the stop flag, then the plugin's exit status (a reaped plugin ends this
-/// task; health owns respawn and the fresh instance's spawn starts its own
-/// task loops), then invokes the task's command and sleeps the interval. The
-/// interval is clamped to at least 1s so a 0s interval cannot busy-spin the
-/// plugin.
+/// task; the crash supervisor owns exit-path respawn and the fresh
+/// instance's spawn starts its own task loops), then invokes the task's
+/// command and sleeps the interval. The interval is clamped to at least 1s
+/// so a 0s interval cannot busy-spin the plugin.
 async fn task_loop(
     manager: Arc<PluginManager>,
     name: String,
@@ -689,8 +747,9 @@ async fn task_loop(
         if stop.load(Ordering::Relaxed) {
             return;
         }
-        // A reaped plugin ends this loop; health owns respawn and the fresh
-        // instance's spawn starts its own task loops.
+        // A reaped plugin ends this loop; the crash supervisor owns
+        // exit-path respawn and the fresh instance's spawn starts its own
+        // task loops.
         if plugin.exit_status().is_some() {
             return;
         }
@@ -702,8 +761,9 @@ async fn task_loop(
     }
 }
 
-/// Best-effort respawn used by the health task: logs the outcome instead of
-/// returning it, since the task has no caller to report to.
+/// Best-effort respawn used by the crash supervisor and health task: logs
+/// the outcome instead of returning it, since the task has no caller to
+/// report to.
 async fn respawn_or_warn(manager: &Arc<PluginManager>, name: &str, crashed: &Arc<RunningPlugin>) {
     match manager.respawn(name, crashed).await {
         Ok(RespawnOutcome::Respawned) => {}

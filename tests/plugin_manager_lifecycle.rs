@@ -256,7 +256,7 @@ async fn silent_plugin_is_respawned_after_missed_pongs() {
     let _ = manager.unload("hung", &[]).await;
 }
 
-// ── health: kill → respawn serves a fresh instance ─────────────────────────
+// ── supervision: kill → respawn serves a fresh instance ───────────────────
 
 #[tokio::test]
 async fn killed_plugin_is_respawned_and_serves_fresh_instances() {
@@ -306,6 +306,84 @@ async fn killed_plugin_is_respawned_and_serves_fresh_instances() {
     assert!(respawned, "manager must respawn a killed plugin");
 
     manager.unload("hello", &[]).await.expect("teardown");
+}
+
+// ── supervision: crashes are respawned without a health config ─────────────
+
+#[tokio::test]
+async fn killed_plugin_is_respawned_even_without_a_health_config() {
+    // Core plugins spawn with health = None (src/bot/mod.rs); supervision
+    // must not depend on it.
+    let manager = Arc::new(PluginManager::new(None, test_policy()));
+    manager
+        .spawn("hello", probe_binary("hello"), None, &[], &[])
+        .await
+        .expect("spawn hello_plugin");
+    let plugin = manager.get("hello").await.expect("registered handle");
+    assert!(
+        click(&plugin).await.expect("first click"),
+        "count=1 on the first process"
+    );
+
+    // SIGKILL the child; the crash supervisor must notice the death and
+    // respawn even though no health task exists.
+    let pid = plugin.pid().await.expect("child pid");
+    let killed = std::process::Command::new("kill")
+        .args(["-9", &pid.to_string()])
+        .status()
+        .expect("kill child");
+    assert!(killed.success(), "kill -9 must succeed");
+
+    let respawned = wait_until_async(Duration::from_secs(5), || {
+        let manager = manager.clone();
+        async move {
+            if !manager.is_running("hello").await {
+                return false;
+            }
+            let Some(plugin) = manager.get("hello").await else {
+                return false;
+            };
+            // Only a fresh process answers with its counter reset to 1; the
+            // killed process had already served count=1 before the kill.
+            click(&plugin).await.unwrap_or(false)
+        }
+    })
+    .await;
+    assert!(
+        respawned,
+        "a killed plugin must be respawned without a health config"
+    );
+
+    manager.unload("hello", &[]).await.expect("teardown");
+}
+
+#[tokio::test]
+async fn clean_exit_without_a_health_config_is_unloaded_not_respawned() {
+    let manager = Arc::new(PluginManager::new(None, test_policy()));
+    manager
+        .spawn(
+            "clean",
+            fixture_script("clean_exit_plugin.sh"),
+            None,
+            &[],
+            &[],
+        )
+        .await
+        .expect("spawn clean-exit fixture");
+
+    // The fixture exits 0 on its own; with no health task running, the
+    // crash supervisor must unload it without respawning.
+    let unloaded = wait_until_async(Duration::from_secs(5), || {
+        let manager = manager.clone();
+        async move { !manager.is_running("clean").await }
+    })
+    .await;
+    assert!(unloaded, "clean exit must remove the plugin");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(
+        !manager.is_running("clean").await,
+        "clean exit must not be respawned"
+    );
 }
 
 // ── unload: bye → clean exit, reaped, calls fail fast ──────────────────────
