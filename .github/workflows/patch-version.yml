@@ -20,6 +20,9 @@ on:
       packages:
         description: 'Space-separated list of package names to publish'
         value: ${{ jobs.patch.outputs.packages }}
+      manifests_b64:
+        description: 'Base64 gzip tar of the patched manifests (Cargo.toml, Cargo.lock, crates/**/Cargo.toml)'
+        value: ${{ jobs.patch.outputs.manifests_b64 }}
 
 jobs:
   patch:
@@ -200,6 +203,15 @@ jobs:
       - name: Regenerate Cargo.lock
         run: cargo generate-lockfile
 
+      - name: Encode patched manifests
+        id: encode-manifests
+        run: |
+          find crates -name Cargo.toml 2>/dev/null | sort > /tmp/member-tomls.txt
+          tar czf /tmp/patched-manifests.tar.gz Cargo.toml Cargo.lock --files-from /tmp/member-tomls.txt
+          B64=$(base64 -w0 /tmp/patched-manifests.tar.gz)
+          echo "manifests_b64=$B64" >> "$GITHUB_OUTPUT"
+          echo "Encoded $(wc -c < /tmp/patched-manifests.tar.gz) bytes gzipped (${#B64} chars b64)"
+
       - name: Upload patched manifests
         uses: actions/upload-artifact@v4
         with:
@@ -208,3 +220,4 @@ jobs:
             Cargo.toml
             Cargo.lock
             crates/**/Cargo.toml
+          retention-days: 3

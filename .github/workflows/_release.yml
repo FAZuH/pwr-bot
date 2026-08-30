@@ -126,11 +126,11 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Download patched Cargo.toml
-        uses: actions/download-artifact@v4
-        with:
-          name: patched-cargo-toml
-          path: .
+      - name: Restore patched manifests
+        env:
+          MANIFESTS_B64: ${{ needs.patch-version.outputs.manifests_b64 }}
+        run: |
+          printf '%s' "$MANIFESTS_B64" | base64 -d | tar xzf -
 
       - name: Install Rust Toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -150,7 +150,7 @@ jobs:
 
   publish-changelog:
     name: Publish Changelog Commit
-    needs: [changelog, build, publish-crates]
+    needs: [changelog, patch-version, build, publish-crates]
     if: |
       always() && 
       needs.changelog.outputs.skipped != 'true' && 
@@ -176,11 +176,11 @@ jobs:
           LATEST_TAG=$(git tag -l 'v*' --sort=-version:refname | head -1)
           echo "{\"version\":\"${LATEST_TAG:-v0.0.0}\"}" > version.json
 
-      - name: Download patched Cargo.toml
-        uses: actions/download-artifact@v4
-        with:
-          name: patched-cargo-toml
-          path: .
+      - name: Restore patched manifests
+        env:
+          MANIFESTS_B64: ${{ needs.patch-version.outputs.manifests_b64 }}
+        run: |
+          printf '%s' "$MANIFESTS_B64" | base64 -d | tar xzf -
 
       - name: Stage patched files
         run: |
