@@ -715,8 +715,8 @@ fn build_command(spec: &HostCommandSpec) -> Command<Data, Error> {
             .unwrap_or_else(serenity::Permissions::empty),
         nsfw_only: spec.nsfw_only,
         ephemeral: spec.ephemeral,
-        install_context: spec.install_context.clone(),
-        interaction_context: spec.interaction_context.clone(),
+        install_context: spec.install_context.clone().map(Cow::Owned),
+        interaction_context: spec.interaction_context.clone().map(Cow::Owned),
         ..Default::default()
     }
 }
@@ -792,6 +792,7 @@ fn build_parameter(option: &OptionSpec) -> CommandParameter<Data, Error> {
         description_localizations: Cow::Owned(Vec::new()),
         required: option.required,
         type_setter: Some(type_setter_for(option.kind, !choices.is_empty())),
+        file_types: None,
         choices: choices
             .iter()
             .map(|label| CommandParameterChoice {
@@ -1063,6 +1064,17 @@ mod tests {
                 "id": "1",
                 "application_id": "1",
                 "channel_id": "1",
+                "channel": {
+                    "type": 1,
+                    "id": "1",
+                    "name": null,
+                    "last_message_id": null,
+                    "last_pin_timestamp": null,
+                    "rate_limit_per_user": null,
+                    "permissions": null,
+                    "app_permissions": null,
+                    "topic": null,
+                },
                 "token": "token",
                 "version": 1,
                 "app_permissions": "0",

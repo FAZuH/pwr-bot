@@ -70,9 +70,9 @@ const CUSTOM_ID_ABOUT_BACK: &str = "settings:about:back";
 /// the button text and the select option value (as in the monolith UI), and
 /// the message is the toggle it applies.
 const FEATURES: [(&str, SettingsMsg); 3] = [
-    ("Feeds", SettingsMsg::ToggleFeeds),
-    ("Voice", SettingsMsg::ToggleVoice),
-    ("Welcome", SettingsMsg::ToggleWelcome),
+    ("Feeds", SettingsMsg::Feeds),
+    ("Voice", SettingsMsg::Voice),
+    ("Welcome", SettingsMsg::Welcome),
 ];
 
 /// Custom id prefix for the nav button: the target plugin name follows the
@@ -144,9 +144,9 @@ impl HostCall {
 /// Messages that mutate the settings model.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SettingsMsg {
-    ToggleFeeds,
-    ToggleVoice,
-    ToggleWelcome,
+    Feeds,
+    Voice,
+    Welcome,
 }
 
 /// The settings model: one enable flag per feature plus a dirty marker.
@@ -159,7 +159,7 @@ struct SettingsModel {
 
 impl SettingsModel {
     /// The model as the JSON value persisted in KV.
-    fn to_value(&self) -> Value {
+    fn to_value(self) -> Value {
         json!({
             "feeds": self.feeds_enabled,
             "voice": self.voice_enabled,
@@ -196,9 +196,9 @@ impl Default for SettingsModel {
 fn update(msg: SettingsMsg, model: &mut SettingsModel) {
     use SettingsMsg::*;
     match msg {
-        ToggleFeeds => model.feeds_enabled = !model.feeds_enabled,
-        ToggleVoice => model.voice_enabled = !model.voice_enabled,
-        ToggleWelcome => model.welcome_enabled = !model.welcome_enabled,
+        Feeds => model.feeds_enabled = !model.feeds_enabled,
+        Voice => model.voice_enabled = !model.voice_enabled,
+        Welcome => model.welcome_enabled = !model.welcome_enabled,
     }
 }
 
@@ -257,7 +257,7 @@ impl ViewState {
     /// The state as the envelope's `view` value. The KV copy of the model
     /// stays bare ([`SettingsModel::to_value`]); only the wire payload nests
     /// it under `model`.
-    fn to_value(&self) -> Value {
+    fn to_value(self) -> Value {
         json!({
             "model": self.model.to_value(),
             "page": page_name(self.page),
@@ -284,9 +284,9 @@ impl ViewState {
 /// The enabled state of one feature: the select labels mirror it.
 fn feature_enabled(model: &SettingsModel, msg: SettingsMsg) -> bool {
     match msg {
-        SettingsMsg::ToggleFeeds => model.feeds_enabled,
-        SettingsMsg::ToggleVoice => model.voice_enabled,
-        SettingsMsg::ToggleWelcome => model.welcome_enabled,
+        SettingsMsg::Feeds => model.feeds_enabled,
+        SettingsMsg::Voice => model.voice_enabled,
+        SettingsMsg::Welcome => model.welcome_enabled,
     }
 }
 
@@ -880,32 +880,32 @@ mod tests {
     #[test]
     fn toggle_feeds_flips_feeds() {
         let mut model = SettingsModel::default();
-        update(SettingsMsg::ToggleFeeds, &mut model);
+        update(SettingsMsg::Feeds, &mut model);
         assert!(model.feeds_enabled);
         assert!(!model.voice_enabled);
-        update(SettingsMsg::ToggleFeeds, &mut model);
+        update(SettingsMsg::Feeds, &mut model);
         assert!(!model.feeds_enabled);
     }
 
     #[test]
     fn toggle_voice_flips_voice() {
         let mut model = SettingsModel::default();
-        update(SettingsMsg::ToggleVoice, &mut model);
+        update(SettingsMsg::Voice, &mut model);
         assert!(model.voice_enabled);
     }
 
     #[test]
     fn toggle_welcome_flips_welcome() {
         let mut model = SettingsModel::default();
-        update(SettingsMsg::ToggleWelcome, &mut model);
+        update(SettingsMsg::Welcome, &mut model);
         assert!(model.welcome_enabled);
     }
 
     #[test]
     fn multiple_toggles_are_independent() {
         let mut model = SettingsModel::default();
-        update(SettingsMsg::ToggleFeeds, &mut model);
-        update(SettingsMsg::ToggleWelcome, &mut model);
+        update(SettingsMsg::Feeds, &mut model);
+        update(SettingsMsg::Welcome, &mut model);
         assert!(model.feeds_enabled);
         assert!(!model.voice_enabled);
         assert!(model.welcome_enabled);
@@ -914,8 +914,8 @@ mod tests {
     #[test]
     fn model_round_trips_through_value() {
         let mut model = SettingsModel::default();
-        update(SettingsMsg::ToggleFeeds, &mut model);
-        update(SettingsMsg::ToggleVoice, &mut model);
+        update(SettingsMsg::Feeds, &mut model);
+        update(SettingsMsg::Voice, &mut model);
         let parsed = SettingsModel::from_value(&model.to_value());
         assert_eq!(parsed, model);
     }
@@ -1128,9 +1128,9 @@ mod tests {
 
     #[test]
     fn toggle_msg_for_maps_feature_labels() {
-        assert_eq!(toggle_msg_for("Feeds"), Some(SettingsMsg::ToggleFeeds));
-        assert_eq!(toggle_msg_for("Voice"), Some(SettingsMsg::ToggleVoice));
-        assert_eq!(toggle_msg_for("Welcome"), Some(SettingsMsg::ToggleWelcome));
+        assert_eq!(toggle_msg_for("Feeds"), Some(SettingsMsg::Feeds));
+        assert_eq!(toggle_msg_for("Voice"), Some(SettingsMsg::Voice));
+        assert_eq!(toggle_msg_for("Welcome"), Some(SettingsMsg::Welcome));
         assert_eq!(toggle_msg_for("nope"), None);
     }
 

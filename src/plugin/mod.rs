@@ -635,6 +635,7 @@ async fn run_stderr(stderr: ChildStderr, name: String) {
 /// or a decode error is the death signal: every in-flight call fails with a
 /// `PluginDied` wire error and the waiter task is notified to reap the child.
 /// The host services and plugin manager serve plugin→host `host.*` calls.
+#[allow(clippy::too_many_arguments)] // private reader loop; parameters mirror the protocol roles
 async fn run_reader(
     mut reader: BufReader<ChildStdout>,
     inflight: Arc<Mutex<HashMap<u64, oneshot::Sender<Msg>>>>,
@@ -696,6 +697,7 @@ async fn run_reader(
 /// plugin's stdin; plugin→host events are logged and, when an event bus is
 /// wired, broadcast on it so host subscribers (e.g. the bot's internal bus)
 /// see them instead of them being dropped.
+#[allow(clippy::too_many_arguments)] // private dispatch; parameters mirror the protocol roles
 async fn dispatch(
     msg: &Msg,
     inflight: &Arc<Mutex<HashMap<u64, oneshot::Sender<Msg>>>>,
