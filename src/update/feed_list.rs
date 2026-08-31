@@ -98,7 +98,7 @@ impl Update for FeedListUpdate {
                 FeedListCmd::None
             }
             Save => {
-                let to_remove: HashSet<String> = model.marked_unsub.drain().collect();
+                let to_remove: HashSet<String> = std::mem::take(&mut model.marked_unsub);
                 model.state = FeedListViewState::View;
                 if to_remove.is_empty() {
                     FeedListCmd::RefetchSubscriptions
