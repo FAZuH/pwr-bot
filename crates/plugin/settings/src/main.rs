@@ -41,6 +41,8 @@ use std::io::BufRead;
 use std::io::Write;
 use std::process::ExitCode;
 
+use pwr_ext::view;
+use pwr_ext::view_support::ButtonStyle;
 use pwr_plugin_protocol::API_VERSION;
 use pwr_plugin_protocol::CommandDef;
 use pwr_plugin_protocol::Manifest;
@@ -333,6 +335,21 @@ fn about_copy() -> String {
 /// button row, and the toggle select whose ✅/⬜ labels mirror the model;
 /// the discovered-plugins nav row follows inside the container, and the 🛈
 /// About button sits outside it.
+///
+/// The composition stays on the `pwr_poise_components` builders rather than a
+/// single `view!` literal: the nav row is runtime data (zero to N buttons
+/// built from `host.list_plugins`, dropped entirely when the list is empty)
+/// inside an otherwise fixed container, and `view!` children are compile-time
+/// literals — the grammar cannot splice a runtime element list, cannot
+/// conditionally include one, and cannot author a standalone component to
+/// embed in a runtime parent. Every child is therefore a runtime `Value`,
+/// which is the reusable-library role the components crate keeps. The
+/// per-feature buttons and toggle options stay derived from [`FEATURES`] so
+/// the feature list dispatch reads is not forked into a literal view.
+/// Pagination has no fit here either: the nav row is the only list-like
+/// piece, and its handful of `Open <plugin>` buttons already fit one action
+/// row (Discord caps a row at five buttons) — smaller than a pagination
+/// control's five-button indicator.
 fn view_data(model: &SettingsModel, nav: &NavTargets) -> Value {
     let header = components::text_display("-# **Settings**");
     let configure_info = components::text_display(CONFIGURE_INFO);
@@ -382,22 +399,33 @@ fn view_data(model: &SettingsModel, nav: &NavTargets) -> Value {
 /// monolith panel need host capabilities no host op exposes yet.
 fn about_view() -> Value {
     let copy = about_copy();
-    let source_section = components::section(
-        [components::text_display(copy)],
-        components::button_link("https://github.com/FAZuH/pwr-bot", "Source Code"),
-    );
-    let license_row = components::action_row([components::button_link(
-        "https://github.com/FAZuH/pwr-bot/blob/main/LICENSE",
-        "License",
-    )]);
-    components::view_data_v2([
-        components::container([source_section, license_row]),
-        components::action_row([components::button_with_style(
-            CUSTOM_ID_ABOUT_BACK,
-            "❮ Back",
-            2,
-        )]),
-    ])
+    let message = view! {
+        components_v2 {
+            container {
+                section {
+                    text_display { content: copy }
+                    button {
+                        url: "https://github.com/FAZuH/pwr-bot",
+                        label: "Source Code"
+                    }
+                }
+                action_row {
+                    button {
+                        url: "https://github.com/FAZuH/pwr-bot/blob/main/LICENSE",
+                        label: "License"
+                    }
+                }
+            }
+            action_row {
+                button {
+                    custom_id: CUSTOM_ID_ABOUT_BACK,
+                    label: "❮ Back",
+                    style: ButtonStyle::Secondary
+                }
+            }
+        }
+    };
+    serde_json::to_value(message).expect("settings about view is serializable")
 }
 
 /// The nav row's buttons, one per declared target: empty when no target is

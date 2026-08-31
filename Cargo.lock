@@ -2394,8 +2394,8 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 name = "hello"
 version = "0.1.0"
 dependencies = [
+ "pwr-ext",
  "pwr-plugin-protocol",
- "pwr-poise-components",
  "serde_json",
  "tokio",
 ]
@@ -4330,6 +4330,7 @@ dependencies = [
 name = "pwr-poise-components"
 version = "0.1.0"
 dependencies = [
+ "pwr-ext",
  "pwr-plugin-protocol",
  "serde",
  "serde_json",
@@ -5347,6 +5348,7 @@ dependencies = [
 name = "settings"
 version = "0.1.0"
 dependencies = [
+ "pwr-ext",
  "pwr-plugin-protocol",
  "pwr-poise-components",
  "serde_json",

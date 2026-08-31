@@ -35,6 +35,9 @@ use std::io::BufRead;
 use std::io::Write;
 use std::process::ExitCode;
 
+use pwr_ext::view;
+use pwr_ext::view_support::ButtonStyle;
+use pwr_ext::view_support::MessageFlags;
 use pwr_plugin_protocol::API_VERSION;
 use pwr_plugin_protocol::BUTTON_CUSTOM_ID;
 use pwr_plugin_protocol::CommandDef;
@@ -43,7 +46,6 @@ use pwr_plugin_protocol::Msg;
 use pwr_plugin_protocol::PLUGIN_NAME;
 use pwr_plugin_protocol::TaskDef;
 use pwr_plugin_protocol::WireError;
-use pwr_poise_components as components;
 use serde_json::Value;
 use serde_json::json;
 
@@ -51,17 +53,26 @@ use serde_json::json;
 /// as a `view.interact` with this custom id.
 const MODAL_CUSTOM_ID: &str = "hello:modal";
 
-/// The view payload the fixture renders: built with the `pwr_poise_components`
-/// builders — one action-row button carrying the [`BUTTON_CUSTOM_ID`] custom
-/// id.
+/// The view payload the fixture renders: authored with `pwr_ext::view!` as a
+/// `CreateMessage`, serialized to JSON — one action-row button carrying the
+/// [`BUTTON_CUSTOM_ID`] custom id. The explicit `tts`/`enforce_nonce` fields
+/// keep the envelope valid for the host's `ViewSpec.data` gate.
 fn view_data(content: &str) -> Value {
-    components::view_data(
-        content,
-        [components::action_row([components::button(
-            BUTTON_CUSTOM_ID,
-            "Click me",
-        )])],
-    )
+    let content = content.to_owned();
+    let message = view! {
+        content: content,
+        flags: MessageFlags::empty(),
+        tts: false,
+        enforce_nonce: false,
+        action_row {
+            button {
+                custom_id: BUTTON_CUSTOM_ID,
+                label: "Click me",
+                style: ButtonStyle::Primary
+            }
+        }
+    };
+    serde_json::to_value(message).expect("hello view is serializable")
 }
 
 /// The fixture's static declaration, matching what its hello announces. The
