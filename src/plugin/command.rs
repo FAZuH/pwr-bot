@@ -55,6 +55,7 @@ use serde_json::Value;
 
 use crate::bot::Data;
 use crate::bot::command::Error;
+use crate::plugin::validate_view_data;
 
 /// A parsed `CreateCommand` blob, before poise mapping.
 #[derive(Debug, Clone, PartialEq)]
@@ -642,6 +643,8 @@ fn plugin_slash_dispatch(
             .plugin_engine
             .invoke(plugin.clone(), command_name, args)
             .await
+            .map_err(|error| poise::FrameworkError::new_command(ctx, error.into()))?;
+        validate_view_data(&spec.data)
             .map_err(|error| poise::FrameworkError::new_command(ctx, error.into()))?;
         let reply = ctx
             .send(

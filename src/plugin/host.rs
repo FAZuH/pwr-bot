@@ -17,7 +17,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use log::debug;
 use log::warn;
 use mockall::automock;
 use poise::serenity_prelude as serenity;
@@ -31,6 +30,7 @@ use crate::plugin::InteractionEngine;
 use crate::plugin::InteractionError;
 use crate::plugin::PluginManager;
 use crate::plugin::RunningPlugin;
+use crate::plugin::validate_view_data;
 
 /// The seam between plugin `host.*` ops and Discord. The real implementation
 /// wraps [`serenity::Http`]; tests use the mockall mock generated from this
@@ -373,6 +373,13 @@ async fn open_view_call(
             msg: format!("target plugin `{plugin_name}` is not running"),
         });
     };
+    let spec = match engine.invoke(target.clone(), &command, call_args).await {
+        Ok(spec) => spec,
+        Err(e) => return Err(open_view_err(e)),
+    };
+    if let Err(error) = validate_view_data(&spec.data) {
+        return Err(error.into());
+    }
     let placeholder = io
         .send_message(channel_id, "Loading…", None)
         .await
@@ -392,25 +399,14 @@ async fn open_view_call(
             });
         }
     };
-    let spec = match engine
-        .open(
+    engine
+        .register(
             serenity::MessageId::new(message_id),
             target,
             &command,
-            call_args,
+            spec.clone(),
         )
-        .await
-    {
-        Ok(spec) => spec,
-        Err(e) => {
-            // No session was opened, so there is nothing to abandon; the
-            // placeholder stays live as a stale message. Stray clicks on it
-            // hit NoSession and are dropped by the router, like any other
-            // dead session.
-            debug!("open_view left placeholder for message {message_id} with no session: {e}");
-            return Err(open_view_err(e));
-        }
-    };
+        .await;
     if let Err(e) = io.edit_message(channel_id, message_id, spec.data).await {
         // The session is live on the placeholder, but the placeholder never
         // resolved to the final payload; abandon the session so it does not
@@ -437,6 +433,7 @@ fn open_view_err(err: InteractionError) -> WireError {
             kind: "UnexpectedReply".into(),
             msg: detail,
         },
+        InteractionError::InvalidView { kind, msg } => WireError { kind, msg },
         InteractionError::NoSession { .. } => WireError {
             kind: "NoSession".into(),
             msg: err.to_string(),

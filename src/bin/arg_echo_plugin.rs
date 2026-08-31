@@ -69,14 +69,23 @@ fn main() -> ExitCode {
         };
         match msg {
             Msg::Bye => break,
-            Msg::Call { id, op, args, .. } if op == "invoke" => {
+            Msg::Call { id, op, cmd, args } if op == "invoke" || op == "view.interact" => {
                 let args = args.unwrap_or(Value::Null);
+                let data = if cmd.as_deref() == Some("malformed") {
+                    Value::Array(vec![])
+                } else {
+                    json!({
+                        "content": args.to_string(),
+                        "tts": false,
+                        "enforce_nonce": false,
+                    })
+                };
                 let resp = Msg::resp_ok(
                     id,
                     Some(json!({
-                        "data": {"content": args.to_string()},
+                        "data": data,
                         "ephemeral": false,
-                        "view": Value::Null,
+                        "view": {"last_args": args},
                     })),
                 );
                 if write_msg(&mut out, &resp).is_err() {

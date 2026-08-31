@@ -23,9 +23,7 @@ use pwr_bot::plugin::RespawnPolicy;
 use pwr_bot::plugin::RunningPlugin;
 use pwr_bot::plugin::host::MockHostIo;
 use pwr_bot::plugin::host::MockKvStore;
-use pwr_plugin_protocol::BUTTON_CUSTOM_ID;
 use pwr_plugin_protocol::Msg;
-use pwr_plugin_protocol::PLUGIN_NAME;
 use serde_json::json;
 
 mod probe;
@@ -236,7 +234,11 @@ async fn host_openview_opens_the_target_plugin_view_end_to_end() {
             mockall::predicate::eq(channel_id),
             mockall::predicate::eq(produced),
             mockall::predicate::function(|data: &serde_json::Value| {
-                data["content"] == "Hello from plugin!"
+                data == &json!({
+                    "content": "{}",
+                    "tts": false,
+                    "enforce_nonce": false,
+                })
             }),
         )
         .times(1)
@@ -246,7 +248,7 @@ async fn host_openview_opens_the_target_plugin_view_end_to_end() {
     let services = view_host_services(Arc::new(mock), engine.clone());
     let manager = Arc::new(PluginManager::new(None, RespawnPolicy::default()));
     manager
-        .spawn("hello", probe_binary("hello"), None, &[], &[])
+        .spawn("arg-echo", probe_binary("arg_echo_plugin"), None, &[], &[])
         .await
         .expect("spawn target plugin");
 
@@ -264,8 +266,8 @@ async fn host_openview_opens_the_target_plugin_view_end_to_end() {
             Some("host.openview"),
             Some(json!({
                 "channel_id": channel_id,
-                "plugin": "hello",
-                "command": PLUGIN_NAME,
+                "plugin": "arg-echo",
+                "command": "arg-echo",
                 "args": {},
             })),
         )
@@ -291,19 +293,76 @@ async fn host_openview_opens_the_target_plugin_view_end_to_end() {
         engine.has_session(message_id).await,
         "the produced message has an open session"
     );
-    let spec = engine
-        .interact(message_id, BUTTON_CUSTOM_ID, json!({}))
+    let follow_up = engine
+        .interact(message_id, "arg-echo", json!({}))
         .await
-        .expect("click routes to the target plugin");
-    assert!(
-        spec.data["content"]
-            .as_str()
-            .expect("content")
-            .contains("count=1")
+        .expect("follow-up interaction routes to the target plugin");
+    assert_eq!(
+        follow_up.data["content"],
+        "{\"custom_id\":\"arg-echo\",\"view\":{\"last_args\":{}}}"
     );
-
+    assert_eq!(follow_up.data["tts"], false);
+    assert_eq!(follow_up.data["enforce_nonce"], false);
     manager
-        .unload("hello", &[])
+        .unload("arg-echo", &[])
+        .await
+        .expect("stop target plugin");
+}
+
+#[tokio::test]
+async fn host_openview_rejects_malformed_view_before_sending_or_registering() {
+    let mut mock = MockHostIo::new();
+    mock.expect_send_message().times(0);
+    mock.expect_edit_message().times(0);
+
+    let engine = InteractionEngine::new();
+    let services = view_host_services(Arc::new(mock), engine.clone());
+    let manager = Arc::new(PluginManager::new(None, RespawnPolicy::default()));
+    manager
+        .spawn("arg-echo", probe_binary("arg_echo_plugin"), None, &[], &[])
+        .await
+        .expect("spawn target plugin");
+    let caller = RunningPlugin::spawn_with(
+        probe_binary("hello"),
+        Some(services),
+        Some(manager.clone()),
+        None,
+    )
+    .await
+    .expect("spawn caller plugin");
+
+    let resp = caller
+        .call(
+            "invoke",
+            Some("host.openview"),
+            Some(json!({
+                "channel_id": 987_654_321_u64,
+                "plugin": "arg-echo",
+                "command": "malformed",
+                "args": {},
+            })),
+        )
+        .await
+        .expect("host.openview invoke answered");
+    caller.stop().await.expect("stop caller");
+
+    let Msg::Resp {
+        ok: false,
+        error: Some(error),
+        ..
+    } = resp
+    else {
+        panic!("expected InvalidView response, got {resp:?}");
+    };
+    assert_eq!(error.kind, "InvalidView");
+    assert_eq!(engine.session_count().await, 0);
+    assert!(
+        !engine
+            .has_session(serenity::MessageId::new(987_654_321))
+            .await
+    );
+    manager
+        .unload("arg-echo", &[])
         .await
         .expect("stop target plugin");
 }

@@ -172,6 +172,10 @@ pub enum InteractionError {
         /// What the plugin sent instead of a resp.
         detail: String,
     },
+
+    /// The host rejected a returned view before committing its state.
+    #[error("plugin returned an invalid view ({kind}): {msg}")]
+    InvalidView { kind: String, msg: String },
 }
 
 /// Routes Discord interactions to plugin view sessions keyed by message id.
@@ -224,6 +228,11 @@ impl<P> InteractionEngine<P> {
             .await
             .get(&message_id)
             .map(|session| session.view.clone())
+    }
+
+    /// Returns the number of active sessions.
+    pub async fn session_count(&self) -> usize {
+        self.inner.sessions.lock().await.len()
     }
 }
 
@@ -333,11 +342,10 @@ impl<P: PluginHandle> InteractionEngine<P> {
         // session run one at a time, so each sees the previous one's
         // committed view.
         let (lock, generation) = {
-            let mut sessions = self.inner.sessions.lock().await;
+            let sessions = self.inner.sessions.lock().await;
             let session = sessions
-                .get_mut(&message_id)
+                .get(&message_id)
                 .ok_or(InteractionError::NoSession { message_id })?;
-            session.last_active = tokio::time::Instant::now();
             (session.lock.clone(), session.generation)
         };
         let _guard = lock.lock().await;
@@ -352,23 +360,85 @@ impl<P: PluginHandle> InteractionEngine<P> {
             return Err(InteractionError::NoSession { message_id });
         }
 
+        // Plain interactions retain the historical activity semantics: a
+        // successfully acquired session lock refreshes the inactivity timer.
+        // The validated path intentionally refreshes only on commit so an
+        // invalid plugin response cannot keep a session alive.
+        if let Some(session) = self.inner.sessions.lock().await.get_mut(&message_id)
+            && session.generation == generation
+        {
+            session.last_active = tokio::time::Instant::now();
+        }
+
         let args = interact_args(&snapshot.view, custom_id, interaction);
         let resp = snapshot
             .plugin
             .call("view.interact", Some(snapshot.command.as_str()), Some(args))
             .await?;
         let spec = view_spec_from_resp(resp, Some(snapshot.view))?;
+        self.commit_interaction_view(message_id, snapshot.generation, &spec)
+            .await;
+        Ok(spec)
+    }
 
+    /// Interacts with a session and validates the returned raw view before its
+    /// state is committed. The validator is supplied by the host boundary;
+    /// the engine remains independent of Discord and message schemas.
+    pub async fn interact_validated(
+        &self,
+        message_id: serenity::MessageId,
+        custom_id: &str,
+        interaction: Value,
+        validate: impl FnOnce(&Value) -> Result<(), WireError>,
+    ) -> Result<ViewSpec, InteractionError> {
+        let (lock, generation) = self.session_lock(message_id).await?;
+        let _guard = lock.lock().await;
+        let snapshot = self.session_snapshot(message_id).await?;
+        if snapshot.generation != generation {
+            return Err(InteractionError::NoSession { message_id });
+        }
+        let args = interact_args(&snapshot.view, custom_id, interaction);
+        let resp = snapshot
+            .plugin
+            .call("view.interact", Some(snapshot.command.as_str()), Some(args))
+            .await?;
+        let spec = view_spec_from_resp(resp, Some(snapshot.view))?;
+        validate(&spec.data).map_err(|error| InteractionError::InvalidView {
+            kind: error.kind,
+            msg: error.msg,
+        })?;
+        self.commit_interaction_view(message_id, generation, &spec)
+            .await;
+        Ok(spec)
+    }
+
+    async fn session_lock(
+        &self,
+        message_id: serenity::MessageId,
+    ) -> Result<(Arc<Mutex<()>>, u64), InteractionError> {
+        let sessions = self.inner.sessions.lock().await;
+        let session = sessions
+            .get(&message_id)
+            .ok_or(InteractionError::NoSession { message_id })?;
+        Ok((session.lock.clone(), session.generation))
+    }
+
+    async fn commit_interaction_view(
+        &self,
+        message_id: serenity::MessageId,
+        generation: u64,
+        spec: &ViewSpec,
+    ) {
         // Write back only to the same session we interacted with: a
         // concurrent open-replace must not be clobbered by a stale in-flight
         // interact. The session lock is still held, so no other interact on
         // this session can commit in between.
         if let Some(session) = self.inner.sessions.lock().await.get_mut(&message_id)
-            && session.generation == snapshot.generation
+            && session.generation == generation
         {
             session.view = spec.view.clone();
+            session.last_active = tokio::time::Instant::now();
         }
-        Ok(spec)
     }
 
     /// Abandons the session for `message_id`: pushes a one-way `view.timeout`
@@ -561,6 +631,7 @@ mod tests {
         events: StdMutex<Vec<(String, Option<Value>)>>,
         last_args: StdMutex<Option<Value>>,
         wrong_reply: AtomicBool,
+        malformed_view: AtomicBool,
         dead_events: AtomicBool,
         /// While `gate_active` is set, each `view.interact` call waits for one
         /// message on `gate` before answering — tests use this to hold a call
@@ -607,6 +678,16 @@ mod tests {
                         ));
                     }
                     let clicks = self.clicks.fetch_add(1, Ordering::SeqCst) + 1;
+                    if self.malformed_view.load(Ordering::SeqCst) {
+                        return Ok(Msg::resp_ok(
+                            0,
+                            Some(json!({
+                                "data": {"content": "malformed"},
+                                "ephemeral": false,
+                                "view": {"clicks": clicks},
+                            })),
+                        ));
+                    }
                     Ok(Msg::resp_ok(
                         0,
                         Some(json!({
@@ -642,6 +723,35 @@ mod tests {
             .await
             .expect("open a session");
         id
+    }
+
+    #[tokio::test]
+    async fn validated_interaction_rejects_invalid_data_without_committing_view() {
+        let plugin = Arc::new(FakePlugin::default());
+        let engine = InteractionEngine::new();
+        let id = opened(&engine, plugin.clone()).await;
+
+        let committed = engine
+            .interact_validated(id, BUTTON_CUSTOM_ID, json!({}), |_| Ok(()))
+            .await
+            .expect("valid interaction commits its view");
+        assert_eq!(committed.data, json!({"content": "count=1"}));
+        let prior_view = json!({"clicks": 1});
+        assert_eq!(engine.view_state(id).await, Some(prior_view.clone()));
+
+        plugin.malformed_view.store(true, Ordering::SeqCst);
+
+        let error = engine
+            .interact_validated(id, BUTTON_CUSTOM_ID, json!({}), |data| {
+                crate::plugin::validate_view_data(data).map_err(Into::into)
+            })
+            .await
+            .unwrap_err();
+
+        assert!(
+            matches!(error, InteractionError::InvalidView { ref kind, .. } if kind == "InvalidView")
+        );
+        assert_eq!(engine.view_state(id).await, Some(prior_view));
     }
 
     /// Parses the click count out of a spec's content string.

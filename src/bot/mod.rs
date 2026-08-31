@@ -62,6 +62,7 @@ use crate::plugin::command::commands_from_manifest;
 use crate::plugin::command::register_in_guild;
 use crate::plugin::command::routes_from_manifests;
 use crate::plugin::interaction::DEFAULT_VIEW_TIMEOUT;
+use crate::plugin::validate_view_data;
 use crate::repo::traits::Repos;
 use crate::service::Services;
 use crate::subscriber::voice_state::VoiceStateSubscriber;
@@ -583,7 +584,9 @@ impl BotEventHandler {
         let result = self
             .data
             .plugin_engine
-            .interact(message_id, custom_id, interaction)
+            .interact_validated(message_id, custom_id, interaction, |data| {
+                validate_view_data(data).map_err(Into::into)
+            })
             .await;
 
         match result {

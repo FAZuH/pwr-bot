@@ -41,7 +41,6 @@ use pwr_bot::plugin::PluginManager;
 use pwr_bot::plugin::RespawnPolicy;
 use pwr_bot::plugin::RunningPlugin;
 use pwr_bot::plugin::host::MockHostIo;
-use pwr_plugin_protocol::BUTTON_CUSTOM_ID;
 use pwr_plugin_protocol::Msg;
 use pwr_poise_components::IS_COMPONENTS_V2;
 use serde_json::Value;
@@ -461,7 +460,11 @@ async fn nav_click_opens_the_target_plugin_panel() {
             mockall::predicate::eq(channel_id),
             mockall::predicate::eq(produced),
             mockall::predicate::function(|data: &serde_json::Value| {
-                data["content"] == "Hello from plugin!"
+                data == &json!({
+                    "content": "{}",
+                    "tts": false,
+                    "enforce_nonce": false,
+                })
             }),
         )
         .times(1)
@@ -472,7 +475,7 @@ async fn nav_click_opens_the_target_plugin_panel() {
     let services = view_host_services(Arc::new(mock), kv.clone(), engine.clone());
     let manager = Arc::new(PluginManager::new(None, RespawnPolicy::default()));
     manager
-        .spawn("hello", probe_binary("hello"), None, &[], &[])
+        .spawn("arg-echo", probe_binary("arg_echo_plugin"), None, &[], &[])
         .await
         .expect("spawn target plugin");
 
@@ -494,7 +497,7 @@ async fn nav_click_opens_the_target_plugin_panel() {
             "view.interact",
             Some("settings"),
             Some(json!({
-                "custom_id": "settings:open:hello",
+                "custom_id": "settings:open:arg-echo",
                 "channel_id": channel_id,
             })),
         )
@@ -511,19 +514,20 @@ async fn nav_click_opens_the_target_plugin_panel() {
         engine.has_session(message_id).await,
         "the produced message has an open session"
     );
-    let spec = engine
-        .interact(message_id, BUTTON_CUSTOM_ID, json!({}))
+    let follow_up = engine
+        .interact_validated(message_id, "arg-echo", json!({}), |data| {
+            pwr_bot::plugin::validate_view_data(data).map_err(Into::into)
+        })
         .await
-        .expect("click routes to the target plugin");
-    assert!(
-        spec.data["content"]
-            .as_str()
-            .expect("content")
-            .contains("count=1")
+        .expect("follow-up interaction routes to the target plugin");
+    assert_eq!(
+        follow_up.data["content"],
+        "{\"custom_id\":\"arg-echo\",\"view\":{\"last_args\":{}}}"
     );
-
+    assert_eq!(follow_up.data["tts"], false);
+    assert_eq!(follow_up.data["enforce_nonce"], false);
     manager
-        .unload("hello", &[])
+        .unload("arg-echo", &[])
         .await
         .expect("stop target plugin");
 }

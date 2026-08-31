@@ -32,6 +32,7 @@ pub mod host;
 pub mod install;
 pub mod interaction;
 pub mod manager;
+pub mod view;
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -84,6 +85,8 @@ use tokio::process::Command;
 use tokio::sync::Mutex;
 use tokio::sync::oneshot;
 use tokio::sync::watch;
+pub use view::ViewValidationError;
+pub use view::validate_view_data;
 
 use crate::event::PluginEvent;
 use crate::event::event_bus::EventBus;
