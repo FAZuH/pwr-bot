@@ -563,9 +563,9 @@ impl ViewRender for VoiceStatsView {
             CreateTextDisplay::new(self.format_stats_summary()),
         )];
 
-        container_components.push(CreateContainerComponent::Separator(CreateSeparator::new(
-            true,
-        )));
+        container_components.push(CreateContainerComponent::Separator(
+            CreateSeparator::new().divider(true),
+        ));
 
         if self.data.user_activity.is_empty() && self.data.guild_stats.is_empty() {
             container_components.push(CreateContainerComponent::TextDisplay(

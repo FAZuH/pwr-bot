@@ -171,7 +171,7 @@ impl AboutStats {
             .filter_map(|guild_id| {
                 Context::cache(*ctx)
                     .guild(*guild_id)
-                    .map(|guild| guild.member_count as usize)
+                    .map(|guild| guild.member_count.get() as usize)
             })
             .sum();
 

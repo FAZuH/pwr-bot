@@ -5,6 +5,8 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
+use poise::serenity_prelude::small_fixed_array::FixedString;
+
 use crate::bot::command::prelude::*;
 use crate::bot::command::welcome::image_generator::WelcomeCardData;
 use crate::bot::command::welcome::image_generator::WelcomeImageGenerator;
@@ -35,7 +37,7 @@ pub struct AddWelcomeMessageModal {
     #[paragraph]
     #[min_length = 1]
     #[max_length = 200]
-    message: String,
+    message: FixedString<u16>,
 }
 
 #[derive(Debug, Modal, Clone, PartialEq, Eq)]
@@ -45,7 +47,7 @@ pub struct SetPrimaryColorModal {
     #[placeholder = "#5865F2"]
     #[min_length = 4]
     #[max_length = 7]
-    color: String,
+    color: FixedString<u16>,
 }
 
 // ── Handler ──────────────────────────────────────────────────────────────────
@@ -132,13 +134,15 @@ impl ViewHandler for SettingsWelcomeHandler {
                 self.update(WelcomeSettingsMsg::MarkRemoval(indices));
             }
             AddMessage(Some(modal)) => {
-                let cmd = self.update(WelcomeSettingsMsg::AddMessage(modal.message.clone()));
+                let cmd = self.update(WelcomeSettingsMsg::AddMessage(
+                    modal.message.as_str().into(),
+                ));
                 if matches!(cmd, WelcomeSettingsCmd::PersistSettings) {
                     self.persist_and_regenerate().await?;
                 }
             }
             SetColor(Some(modal)) => {
-                let cmd = self.update(WelcomeSettingsMsg::SetColor(modal.color.clone()));
+                let cmd = self.update(WelcomeSettingsMsg::SetColor(modal.color.as_str().into()));
                 if matches!(cmd, WelcomeSettingsCmd::PersistSettings) {
                     self.persist_and_regenerate().await?;
                 }

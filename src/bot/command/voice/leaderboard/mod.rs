@@ -361,9 +361,9 @@ impl ViewRender for VoiceLeaderboardView<'_> {
             )),
         ));
 
-        container.push(CreateContainerComponent::Separator(CreateSeparator::new(
-            true,
-        )));
+        container.push(CreateContainerComponent::Separator(
+            CreateSeparator::new().divider(true),
+        ));
 
         if self.model.is_empty() {
             container.push(CreateContainerComponent::TextDisplay(
