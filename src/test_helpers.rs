@@ -1,5 +1,8 @@
 //! Shared test fixtures: plugin manifests and catalog entries.
 
+#[path = "../tests/support/db.rs"]
+pub(crate) mod db;
+
 use pwr_plugin_protocol::API_VERSION;
 use pwr_plugin_protocol::CommandDef;
 use pwr_plugin_protocol::Manifest;

@@ -171,11 +171,14 @@ async fn plugin_event_is_broadcast_on_the_host_event_bus() {
         "the plugin's voice_state.ack never reached the bus"
     );
 
-    let events = seen.lock().unwrap();
-    let ack = events
-        .iter()
-        .find(|event| event.name == "voice_state.ack")
-        .expect("ack present");
+    let ack = {
+        let events = seen.lock().unwrap();
+        events
+            .iter()
+            .find(|event| event.name == "voice_state.ack")
+            .expect("ack present")
+            .clone()
+    };
     assert_eq!(ack.plugin, PLUGIN_NAME);
     assert_eq!(ack.name, "voice_state.ack");
     assert_eq!(ack.data, Some(json!({"user_id": "42"})));

@@ -5,6 +5,7 @@ pub mod postgres;
 pub mod schema;
 pub mod traits;
 
+use anyhow::Context;
 use diesel::Connection;
 use diesel_async::AsyncPgConnection;
 use diesel_async::pooled_connection::AsyncDieselConnectionManager;
@@ -74,13 +75,14 @@ impl PgRepos {
     pub async fn run_migrations(&self) -> anyhow::Result<()> {
         let db_url = self.db_url.clone();
         task::spawn_blocking(move || {
-            let mut conn =
-                diesel::PgConnection::establish(&db_url).expect("failed to connect for migrations");
+            let mut conn = diesel::PgConnection::establish(&db_url)
+                .context("connecting to the database for migrations")?;
             conn.run_pending_migrations(MIGRATIONS)
-                .expect("failed to run migrations");
+                .map_err(anyhow::Error::from_boxed)
+                .context("running pending database migrations")?;
+            Ok(())
         })
-        .await?;
-        Ok(())
+        .await?
     }
 
     pub async fn drop_all_tables(&self) -> anyhow::Result<()> {
