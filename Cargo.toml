@@ -2,6 +2,10 @@
 members = ["crates/pwr-plugin-protocol", "crates/pwr-poise-components", "crates/plugin/hello", "crates/plugin/settings"]
 resolver = "2"
 
+[workspace.dependencies]
+pwr-ext = { path = "../pwr-ext", features = ["macros"] }
+pwr-viewgen = { path = "../pwr-viewgen" }
+
 [package]
 name = "pwr-bot"
 default-run = "pwr-bot"
@@ -22,13 +26,26 @@ keywords = ["discord", "bot", "serenity", "feed-reader", "voice"]
 [lints.clippy]
 uninlined_format_args = "warn"
 new_without_default = "allow"
+# `async_trait` injects `#[must_use]` onto boxed-future returns whose type is
+# already `must_use`; nightly clippy then flags every desugared trait method.
+double_must_use = "allow"
+# `QueryableByName`'s generated struct init re-names every field; the lint
+# attributes each hit to the derive source's field spans.
+redundant_field_names = "allow"
 
 [dependencies]
 anyhow = "1.0.101"
 async-trait = "0.1.89"
 chrono = "0.4.43"
 dotenv = "0.15.0"
+# Floating git branches: the resolved commit is pinned by the committed
+# Cargo.lock, NOT by a [patch] section. Cargo cannot express "branch X, rev Y"
+# (a dependency allows only one of branch/tag/rev) and a [patch."same-url"]
+# entry is rejected outright ("patches must point to different sources",
+# cargo#5478). To move the pin: `cargo update -p serenity` (or -p poise) and
+# commit the lock delta. Never run a bare `cargo update`.
 poise = { git = "https://github.com/serenity-rs/poise", branch = "serenity-next" }
+pwr-ext.workspace = true
 pwr-plugin-protocol = { path = "crates/pwr-plugin-protocol" }
 serde = "1.0.228"
 serde_json = "1.0.149"
@@ -65,3 +82,22 @@ mockall = "0.13.1"
 httpmock = "0.7.0"
 serial_test = "3.3.1"
 pwr-poise-components = { path = "crates/pwr-poise-components" }
+pwr-viewgen.workspace = true
+postgresql_embedded = { version = "=0.20.1", default-features = false, features = ["zonky", "tokio", "rustls"] }
+tokio-postgres = "0.7"
+# TLS for tokio-postgres in the test DB seam: `sslmode=require` URLs must
+# connect with verified TLS, not fall back to the embedded server. rustls
+# 0.23 is already in the lock graph; ring + OS trust store keep this
+# dependency-light and verification always on (no AcceptAll verifiers).
+# tokio-postgres' SslMode only has Disable/Prefer/Require — verify-ca and
+# verify-full are REJECTED at URL parse time by tokio-postgres itself, and
+# our policy layer additionally rejects them with a clear error (see
+# tests/support/db.rs). The diesel connection used by run_migrations has no
+# TLS client support; `sslmode=require` URLs work for probe/scratch
+# provisioning but cannot drive diesel migrations — that combination errors
+# loudly instead of downgrading.
+# NOTE: verification against hostnames with underscores fails (webpki rules).
+tokio-postgres-rustls = { version = "0.14", default-features = false, features = ["ring", "native-certs"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-native-certs = "0.8"
+tokio = { version = "1.49.0", features = ["sync"] }
