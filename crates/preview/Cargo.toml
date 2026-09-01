@@ -1,0 +1,28 @@
+[package]
+name = "pwr-preview"
+version = "0.1.0"
+edition = "2024"
+authors = ["FAZuH <mail@fazuh.com>"]
+description = "Preview feedback loop: render a plugin view to fixture JSON, HTML, and PNG"
+license = "MIT"
+repository = "https://github.com/FAZuH/pwr-bot"
+
+[features]
+# Opt-in PNG rendering: forwards to pwr-viewgen's `png` feature (headless
+# chromiumoxide). Off by default so a plain `cargo build -p pwr-preview`
+# stays light; `./dev.sh preview` adds it automatically when `--png` is
+# requested, and the binary explains the rebuild when it was built without
+# the feature (see `main.rs` docs for the full wiring).
+png = ["pwr-viewgen/png"]
+
+[dependencies]
+anyhow = "1.0.101"
+pwr-plugin-protocol.workspace = true
+# default-features = false keeps pwr-viewgen's `png` (chromiumoxide) and
+# `cli` features out of this crate's normal build graph; the `png` feature
+# above is the only path that turns rendering on.
+pwr-viewgen = { workspace = true, default-features = false }
+serde_json = "1.0.149"
+
+[dev-dependencies]
+tempfile = "3.27.0"

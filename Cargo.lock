@@ -4337,6 +4337,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "pwr-preview"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "pwr-plugin-protocol",
+ "pwr-viewgen",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "pwr-viewgen"
 version = "0.1.0"
 dependencies = [

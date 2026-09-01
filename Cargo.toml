@@ -1,10 +1,17 @@
 [workspace]
-members = ["crates/pwr-plugin-protocol", "crates/pwr-poise-components", "crates/plugin/hello", "crates/plugin/settings"]
+members = [
+    "crates/pwr-plugin-protocol",
+    "crates/pwr-poise-components",
+    "crates/plugin/hello",
+    "crates/plugin/settings",
+    "crates/preview",
+]
 resolver = "2"
 
 [workspace.dependencies]
 pwr-ext = { path = "../pwr-ext", features = ["macros"] }
 pwr-viewgen = { path = "../pwr-viewgen" }
+pwr-plugin-protocol = { path = "crates/pwr-plugin-protocol" }
 
 [package]
 name = "pwr-bot"
@@ -46,7 +53,7 @@ dotenv = "0.15.0"
 # commit the lock delta. Never run a bare `cargo update`.
 poise = { git = "https://github.com/serenity-rs/poise", branch = "serenity-next" }
 pwr-ext.workspace = true
-pwr-plugin-protocol = { path = "crates/pwr-plugin-protocol" }
+pwr-plugin-protocol.workspace = true
 serde = "1.0.228"
 serde_json = "1.0.149"
 tokio = { version = "1.49.0", features = ["rt-multi-thread", "macros", "signal", "process", "time", "io-util"] }
