@@ -193,6 +193,69 @@ Each table struct (`Pg*Repo`) implements a `CrudTable<T, ID>` trait alongside do
 
 ---
 
+## Plugin Subsystem
+
+Plugins are subprocesses that speak JSON-lines over stdio through
+`pwr-plugin-protocol`, with a `"t"` tag on every message. The host (this
+monolith) spawns them via `PluginManager`, routes their Discord
+interactions, and answers their `host.*` ops. The subsystem sits outside
+the Layer Overview because plugins are peer processes of the layered
+core, not a layer of it.
+
+| Location | Role |
+|----------|------|
+| `crates/pwr-plugin-protocol` | Wire types: `Msg`, `Manifest`, `ViewSpec`, `HostCap`, `WireError` |
+| `src/plugin/` | Plugin host: `manager` (spawn, health, respawn, unload), `interaction` (session engine), `host` (`host.*` ops), `command` (slash dispatch), `events` (gateway fan-out), `install` (pinned catalog), `view` (gate) |
+| `crates/plugin/` | Plugins: `hello` (fixture), `settings` (settings core) |
+| `crates/pwr-poise-components` | Reusable components library on pwr-ext (typed builders, pagination) |
+
+### Plugin Data Flow
+
+```
+Slash command
+  → plugin_slash_dispatch (src/plugin/command.rs)
+  → subprocess invoke             correlated call over stdio
+  → ViewSpec.data                 raw Discord message JSON
+  → gate                          validate_view_data
+  → Discord                       edit_original_interaction_response
+
+Component / modal interaction
+  → route_view_interaction (src/bot/mod.rs)
+  → interact_validated            closure-supplied gate
+  → plugin (view.interact)         returns a new ViewSpec
+  → validated data                invalid data leaves prior view + last_active
+  → commit_interaction_view        transactional commit
+  → edit_message
+```
+
+### Validate-Only Gate
+
+`validate_view_data` (`src/plugin/view.rs`) parses a clone of
+`ViewSpec.data` through pwr-ext `CreateMessageDe` at all three raw-send
+boundaries: initial dispatch, component and modal re-render, and
+`host.open_view`. It discards the parsed value and sends the original JSON
+verbatim. A failure is a `WireError` with kind `InvalidView`. The host
+never partially sends, registers, or commits. An invalid re-render keeps
+the prior session view and `last_active` unchanged.
+
+### View Authoring Split
+
+| View kind | Surface | Example |
+|-----------|---------|---------|
+| Fixed view | pwr-ext `view!` → `CreateMessage` → `ViewSpec.data` | `hello` view, settings `about_view` |
+| Runtime-assembled | `crates/pwr-poise-components` builders | Settings hub (0..N nav row — `view!` has no runtime splicing or conditionals yet) |
+
+### Preview Loop
+
+`./dev.sh preview` runs the `crates/preview` bin, an adapter over the
+same protocol port. It spawns a plugin, captures its view, and renders the
+payload to HTML/PNG under `.scratch/preview/` via `pwr-viewgen`.
+
+Glossary terms live in `CONTEXT.md`. The gate and authoring decisions
+live in ADR-0003 and ADR-0004.
+
+---
+
 ## Event Lifecycles
 
 ### User Interaction
