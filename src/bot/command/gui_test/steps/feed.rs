@@ -1,27 +1,18 @@
 //! Test step for the `/feed list` command.
 
-use crate::bot::command::feed::list::FeedListView;
 use crate::bot::command::feed::list::SUBSCRIPTIONS_PER_PAGE;
 use crate::bot::command::prelude::*;
+use crate::bot::gui::feed_list::FeedListFeature;
 use crate::bot::test_framework::GuiTestError;
-use crate::bot::test_framework::assert::assert_eq_cmd;
 use crate::bot::test_framework::assert::assert_has_action;
-use crate::bot::test_framework::helpers::extract_actions;
-use crate::bot::test_framework::helpers::simulate_click;
-use crate::bot::view::ViewCmd;
+use crate::bot::test_framework::helpers::apply_feature_msg;
+use crate::bot::test_framework::helpers::feature_actions;
+use crate::bot::test_framework::helpers::translate_feature_action;
 use crate::entity::FeedEntity;
-use crate::entity::SubscriberEntity;
-use crate::entity::SubscriberType;
 use crate::service::feed_subscription::Subscription;
 use crate::update::feed_list::FeedListModel;
 
-pub async fn feed_list_empty(ctx: Context<'_>) -> Result<(), GuiTestError> {
-    let subscriber = SubscriberEntity {
-        id: 0,
-        r#type: SubscriberType::Dm,
-        target_id: ctx.author().id.to_string(),
-    };
-
+pub async fn feed_list_empty(_ctx: Context<'_>) -> Result<(), GuiTestError> {
     let feed = FeedEntity {
         id: 1,
         name: "Test Feed".to_string(),
@@ -39,32 +30,33 @@ pub async fn feed_list_empty(ctx: Context<'_>) -> Result<(), GuiTestError> {
         feed_latest: None,
     };
 
-    let mut view = FeedListView {
-        subscriptions: vec![subscription],
-        model: FeedListModel::new(SUBSCRIPTIONS_PER_PAGE),
-        service: ctx.data().service.feed_subscription.clone(),
-        subscriber,
-    };
+    let mut model = FeedListModel::new(vec![subscription], SUBSCRIPTIONS_PER_PAGE);
 
     // Initial view mode should have Edit button
-    let registry = extract_actions(&view);
-    assert_has_action(&registry, "✎ Edit Subscriptions")
-        .map_err(|e| GuiTestError::execution_failed("feed_list_empty render", e))?;
-
-    // Click Edit -> should switch to edit mode
+    let registry = feature_actions::<FeedListFeature>(&model);
     let edit_action = assert_has_action(&registry, "✎ Edit Subscriptions")
-        .map_err(|e| GuiTestError::execution_failed("feed_list_empty", e))?;
-    let coordinator = Router::new(ctx);
-    let cmd = simulate_click(ctx, &mut view, edit_action, coordinator.clone())
-        .await
-        .map_err(|e| GuiTestError::execution_failed("feed_list_empty edit", e))?;
-    assert_eq_cmd(cmd, ViewCmd::Render, "feed_list_empty edit")
-        .map_err(|e| GuiTestError::execution_failed("feed_list_empty edit", e))?;
+        .map_err(|e| GuiTestError::execution_failed("feed_list render", e))?;
 
-    // Re-render in edit mode — should have View Mode button
-    let registry2 = extract_actions(&view);
-    assert_has_action(&registry2, "👁 View Mode")
-        .map_err(|e| GuiTestError::execution_failed("feed_list_empty edit render", e))?;
+    // Click Edit → edit mode, no effects
+    let msg =
+        translate_feature_action::<FeedListFeature>(&edit_action, &model).ok_or_else(|| {
+            GuiTestError::execution_failed(
+                "feed_list edit",
+                "action did not translate to a message",
+            )
+        })?;
+    let effects = apply_feature_msg::<FeedListFeature>(msg, &mut model);
+    if !effects.is_empty() {
+        return Err(GuiTestError::execution_failed(
+            "feed_list edit",
+            "expected no effects",
+        ));
+    }
+
+    // Re-render in edit mode should have View Mode button
+    let registry = feature_actions::<FeedListFeature>(&model);
+    assert_has_action(&registry, "👁 View Mode")
+        .map_err(|e| GuiTestError::execution_failed("feed_list edit render", e))?;
 
     Ok(())
 }

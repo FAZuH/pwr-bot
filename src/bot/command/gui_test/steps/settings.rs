@@ -1,19 +1,17 @@
 //! Test steps for settings commands.
 
-use crate::bot::command::feed::settings::SettingsFeedHandler;
 use crate::bot::command::prelude::*;
+use crate::bot::gui::feature::GuiFeature;
+use crate::bot::gui::feed_settings::FeedSettingsFeature;
 use crate::bot::gui::voice_settings::VoiceSettingsFeature;
 use crate::bot::test_framework::GuiTestError;
-use crate::bot::test_framework::assert::assert_eq_cmd;
 use crate::bot::test_framework::assert::assert_has_action;
-use crate::bot::test_framework::assert::assert_navigated_to;
 use crate::bot::test_framework::helpers::apply_feature_msg;
-use crate::bot::test_framework::helpers::extract_actions;
 use crate::bot::test_framework::helpers::feature_actions;
-use crate::bot::test_framework::helpers::simulate_click;
 use crate::bot::test_framework::helpers::translate_feature_action;
-use crate::bot::view::ViewCmd;
+use crate::update::feed_settings::FeedSettingsEffect;
 use crate::update::feed_settings::FeedSettingsModel;
+use crate::update::feed_settings::FeedSettingsMsg;
 use crate::update::voice_settings::VoiceSettingsModel;
 
 pub async fn feed_settings(ctx: Context<'_>) -> Result<(), GuiTestError> {
@@ -23,7 +21,7 @@ pub async fn feed_settings(ctx: Context<'_>) -> Result<(), GuiTestError> {
         "none",
     ))?;
 
-    let mut settings = ctx
+    let settings = ctx
         .data()
         .service
         .feed_subscription
@@ -31,32 +29,30 @@ pub async fn feed_settings(ctx: Context<'_>) -> Result<(), GuiTestError> {
         .await
         .map_err(|e| GuiTestError::setup_failed("feed_settings", e))?;
 
-    let feeds_settings = settings.feeds.clone();
-    let mut handler = SettingsFeedHandler {
-        model: FeedSettingsModel {
-            enabled: feeds_settings.enabled,
-            channel_id: feeds_settings.channel_id,
-            subscribe_role_id: feeds_settings.subscribe_role_id,
-            unsubscribe_role_id: feeds_settings.unsubscribe_role_id,
-        },
-        settings: &mut settings,
-    };
+    let mut model = FeedSettingsModel::new(settings);
 
-    let registry = extract_actions(&handler);
+    let registry = feature_actions::<FeedSettingsFeature>(&model);
     let toggle_action = assert_has_action(&registry, "Enabled")
-        .map_err(|e| GuiTestError::execution_failed("feed_settings render", e))?;
-    assert_has_action(&registry, "❮ Back")
         .map_err(|e| GuiTestError::execution_failed("feed_settings render", e))?;
 
     // Test toggle enabled
-    let initial_enabled = handler.model.is_enabled();
-    let coordinator = Router::new(ctx);
-    let cmd = simulate_click(ctx, &mut handler, toggle_action, coordinator.clone())
-        .await
-        .map_err(|e| GuiTestError::execution_failed("feed_settings toggle", e))?;
-    assert_eq_cmd(cmd, ViewCmd::Render, "feed_settings toggle")
-        .map_err(|e| GuiTestError::execution_failed("feed_settings toggle", e))?;
-    if handler.model.is_enabled() == initial_enabled {
+    let initial_enabled = model.is_enabled();
+    let msg = translate_feature_action::<FeedSettingsFeature>(&toggle_action, &model).ok_or_else(
+        || {
+            GuiTestError::execution_failed(
+                "feed_settings toggle",
+                "action did not translate to a message",
+            )
+        },
+    )?;
+    let effects = apply_feature_msg::<FeedSettingsFeature>(msg, &mut model);
+    if !effects.is_empty() {
+        return Err(GuiTestError::execution_failed(
+            "feed_settings toggle",
+            "expected no effects",
+        ));
+    }
+    if model.is_enabled() == initial_enabled {
         return Err(GuiTestError::assertion_failed(
             "feed_settings toggle",
             !initial_enabled,
@@ -64,18 +60,37 @@ pub async fn feed_settings(ctx: Context<'_>) -> Result<(), GuiTestError> {
         ));
     }
 
-    // Test Back navigation
-    let coordinator2 = Router::new(ctx);
-    let back_action = assert_has_action(&registry, "❮ Back")
+    // Test Back navigation (also triggers persistence)
+    let back = assert_has_action(&registry, "❮ Back")
         .map_err(|e| GuiTestError::execution_failed("feed_settings", e))?;
-    let cmd = simulate_click(ctx, &mut handler, back_action, coordinator2.clone())
-        .await
-        .map_err(|e| GuiTestError::execution_failed("feed_settings back", e))?;
-    assert_eq_cmd(cmd, ViewCmd::Exit, "feed_settings back")
-        .map_err(|e| GuiTestError::execution_failed("feed_settings back", e))?;
-    assert_navigated_to(&coordinator2, Navigation::SettingsMain)
-        .await
-        .map_err(|e| GuiTestError::execution_failed("feed_settings nav", e))?;
+    let msg = translate_feature_action::<FeedSettingsFeature>(&back, &model).ok_or_else(|| {
+        GuiTestError::execution_failed(
+            "feed_settings back",
+            "action did not translate to a message",
+        )
+    })?;
+    let effects = apply_feature_msg::<FeedSettingsFeature>(msg, &mut model);
+    if !effects
+        .iter()
+        .any(|e| matches!(e, FeedSettingsEffect::PersistSettings(_)))
+    {
+        return Err(GuiTestError::execution_failed(
+            "feed_settings back",
+            "expected a PersistSettings effect",
+        ));
+    }
+    if FeedSettingsFeature::exit_navigation(&FeedSettingsMsg::Back)
+        != Some(Navigation::SettingsMain)
+    {
+        return Err(GuiTestError::assertion_failed(
+            "feed_settings back",
+            format!("{:?}", Some(Navigation::SettingsMain)),
+            format!(
+                "{:?}",
+                FeedSettingsFeature::exit_navigation(&FeedSettingsMsg::Back)
+            ),
+        ));
+    }
 
     Ok(())
 }

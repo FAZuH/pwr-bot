@@ -1,73 +1,116 @@
 //! Pure update logic for feed settings.
 //!
-//! Manages notification channel and role-permission toggles.
+//! Holds the single source of truth for the feed settings view
+//! (`FeedSettingsModel`), which absorbs the server's [`ServerSettings`] as
+//! owned state — eliminating the raw `&mut ServerSettings` the old handler
+//! carried alongside a separate `FeedSettingsModel`. Also holds the exhaustive
+//! message vocabulary (`FeedSettingsMsg`) and the data-only effect vocabulary
+//! (`FeedSettingsEffect`).
+//!
+//! Persistence is now an explicit effect, not an implicit save-on-exit: the
+//! terminal messages (`Back`, `About`, `Expired`) return a
+//! [`FeedSettingsEffect::PersistSettings`] snapshot that the shell adapter
+//! executes when the host loop ends — mirroring the voice settings migration.
 
-use crate::update::Update;
+use crate::entity::ServerSettings;
 
-/// Messages that can mutate the feed-settings model.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum FeedSettingsMsg {
-    ToggleEnabled,
-    SetChannel(Option<String>),
-    SetSubRole(Option<String>),
-    SetUnsubRole(Option<String>),
-}
-
-/// Commands returned by the update.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FeedSettingsCmd {
-    None,
-}
-
-/// The feed-settings model.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+/// The feed settings view model — the single source of truth for the view.
+#[derive(Debug, Clone)]
 pub struct FeedSettingsModel {
-    pub enabled: Option<bool>,
-    pub channel_id: Option<String>,
-    pub subscribe_role_id: Option<String>,
-    pub unsubscribe_role_id: Option<String>,
+    /// The server settings, including the feeds section being edited.
+    pub(crate) settings: ServerSettings,
 }
 
 impl FeedSettingsModel {
+    /// Constructs the model from the server settings loaded at boot.
+    pub fn new(settings: ServerSettings) -> Self {
+        Self { settings }
+    }
+
+    /// Whether feed notifications are currently enabled (defaults to enabled).
     pub fn is_enabled(&self) -> bool {
-        self.enabled.unwrap_or(true)
+        self.settings.feeds.enabled.unwrap_or(true)
+    }
+
+    /// The configured notification channel id, if any.
+    pub fn channel_id(&self) -> Option<String> {
+        self.settings.feeds.channel_id.clone()
+    }
+
+    /// The configured subscribe-role id, if any.
+    pub fn subscribe_role_id(&self) -> Option<String> {
+        self.settings.feeds.subscribe_role_id.clone()
+    }
+
+    /// The configured unsubscribe-role id, if any.
+    pub fn unsubscribe_role_id(&self) -> Option<String> {
+        self.settings.feeds.unsubscribe_role_id.clone()
     }
 }
 
-/// The update implementation for feed settings.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct FeedSettingsUpdate;
-
-impl FeedSettingsUpdate {
-    pub fn new() -> Self {
-        Self
-    }
+/// Messages that drive the feed settings view.
+///
+/// Exhaustive: every way the world can change the feed settings model is one
+/// variant.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FeedSettingsMsg {
+    /// Boot handshake — the host dispatches this on start.
+    Start,
+    /// The view loop timed out.
+    Expired,
+    /// Toggle whether feed notifications are enabled.
+    ToggleEnabled,
+    /// Set the notification channel id (or clear it).
+    SetChannel(Option<String>),
+    /// Set the subscribe-permission role id (or clear it).
+    SetSubRole(Option<String>),
+    /// Set the unsubscribe-permission role id (or clear it).
+    SetUnsubRole(Option<String>),
+    /// The back button was pressed.
+    Back,
+    /// The about button was pressed.
+    About,
 }
 
-impl Update for FeedSettingsUpdate {
-    type Model = FeedSettingsModel;
-    type Msg = FeedSettingsMsg;
-    type Cmd = FeedSettingsCmd;
+/// Effects the feed settings view can request.
+///
+/// Data-only: [`FeedSettingsEffect::PersistSettings`] carries a snapshot of the
+/// settings to persist; the adapter performs the write.
+#[derive(Debug, Clone)]
+pub enum FeedSettingsEffect {
+    /// Persist the current server settings (data-only snapshot).
+    PersistSettings(ServerSettings),
+}
 
-    fn update(msg: Self::Msg, model: &mut Self::Model) -> Self::Cmd {
-        use FeedSettingsMsg::*;
-
-        match msg {
-            ToggleEnabled => {
-                let current = model.enabled.unwrap_or(true);
-                model.enabled = Some(!current);
-            }
-            SetChannel(id) => {
-                model.channel_id = id;
-            }
-            SetSubRole(id) => {
-                model.subscribe_role_id = id;
-            }
-            SetUnsubRole(id) => {
-                model.unsubscribe_role_id = id;
-            }
+/// The pure update function — the only writer of the model.
+///
+/// Each mutating message applies to `model.settings.feeds` in place. The
+/// terminal messages (`Expired`, `Back`, `About`) persist the current settings
+/// exactly once, mirroring the old save-on-exit semantics without an implicit
+/// write.
+pub fn update(msg: FeedSettingsMsg, model: &mut FeedSettingsModel) -> Vec<FeedSettingsEffect> {
+    match msg {
+        FeedSettingsMsg::Start => Vec::new(),
+        FeedSettingsMsg::ToggleEnabled => {
+            let current = model.settings.feeds.enabled.unwrap_or(true);
+            model.settings.feeds.enabled = Some(!current);
+            Vec::new()
         }
-        FeedSettingsCmd::None
+        FeedSettingsMsg::SetChannel(id) => {
+            model.settings.feeds.channel_id = id;
+            Vec::new()
+        }
+        FeedSettingsMsg::SetSubRole(id) => {
+            model.settings.feeds.subscribe_role_id = id;
+            Vec::new()
+        }
+        FeedSettingsMsg::SetUnsubRole(id) => {
+            model.settings.feeds.unsubscribe_role_id = id;
+            Vec::new()
+        }
+        FeedSettingsMsg::Expired | FeedSettingsMsg::Back | FeedSettingsMsg::About => {
+            vec![FeedSettingsEffect::PersistSettings(model.settings.clone())]
+        }
     }
 }
 
@@ -75,104 +118,97 @@ impl Update for FeedSettingsUpdate {
 mod tests {
     use super::*;
 
-    // ── ToggleEnabled ───────────────────────────────────────────────────────
-
-    #[test]
-    fn toggle_enabled_from_true() {
-        let mut model = FeedSettingsModel::default();
-        assert!(model.is_enabled());
-
-        let cmd = FeedSettingsUpdate::update(FeedSettingsMsg::ToggleEnabled, &mut model);
-
-        assert_eq!(cmd, FeedSettingsCmd::None);
-        assert!(!model.is_enabled());
+    fn model(enabled: Option<bool>) -> FeedSettingsModel {
+        let mut settings = ServerSettings::default();
+        settings.feeds.enabled = enabled;
+        FeedSettingsModel::new(settings)
     }
 
     #[test]
-    fn toggle_enabled_from_false() {
-        let mut model = FeedSettingsModel {
-            enabled: Some(false),
-            ..Default::default()
-        };
-
-        let cmd = FeedSettingsUpdate::update(FeedSettingsMsg::ToggleEnabled, &mut model);
-
-        assert_eq!(cmd, FeedSettingsCmd::None);
-        assert!(model.is_enabled());
-    }
-
-    // ── SetChannel ──────────────────────────────────────────────────────────
-
-    #[test]
-    fn set_channel() {
-        let mut model = FeedSettingsModel::default();
-
-        let cmd = FeedSettingsUpdate::update(
-            FeedSettingsMsg::SetChannel(Some("123".to_string())),
-            &mut model,
-        );
-
-        assert_eq!(cmd, FeedSettingsCmd::None);
-        assert_eq!(model.channel_id, Some("123".to_string()));
+    fn start_is_a_noop() {
+        let mut m = model(Some(true));
+        let effects = update(FeedSettingsMsg::Start, &mut m);
+        assert!(effects.is_empty());
+        assert!(m.is_enabled());
     }
 
     #[test]
-    fn set_channel_none() {
-        let mut model = FeedSettingsModel {
-            channel_id: Some("123".to_string()),
-            ..Default::default()
-        };
-
-        let cmd = FeedSettingsUpdate::update(FeedSettingsMsg::SetChannel(None), &mut model);
-
-        assert_eq!(cmd, FeedSettingsCmd::None);
-        assert_eq!(model.channel_id, None);
+    fn toggle_flips_enabled() {
+        let mut m = model(Some(true));
+        let effects = update(FeedSettingsMsg::ToggleEnabled, &mut m);
+        assert!(effects.is_empty());
+        assert!(!m.is_enabled());
     }
 
-    // ── SetSubRole ──────────────────────────────────────────────────────────
+    #[test]
+    fn toggle_defaults_to_enabled() {
+        let mut m = model(None);
+        update(FeedSettingsMsg::ToggleEnabled, &mut m);
+        assert!(!m.is_enabled());
+    }
 
     #[test]
-    fn set_sub_role() {
-        let mut model = FeedSettingsModel::default();
+    fn set_channel_updates_id() {
+        let mut m = model(Some(true));
+        update(FeedSettingsMsg::SetChannel(Some("123".to_string())), &mut m);
+        assert_eq!(m.channel_id(), Some("123".to_string()));
+    }
 
-        let cmd = FeedSettingsUpdate::update(
+    #[test]
+    fn set_channel_none_clears_id() {
+        let mut m = model(Some(true));
+        update(FeedSettingsMsg::SetChannel(Some("123".to_string())), &mut m);
+        update(FeedSettingsMsg::SetChannel(None), &mut m);
+        assert_eq!(m.channel_id(), None);
+    }
+
+    #[test]
+    fn set_sub_role_updates_id() {
+        let mut m = model(Some(true));
+        update(
             FeedSettingsMsg::SetSubRole(Some("role1".to_string())),
-            &mut model,
+            &mut m,
         );
-
-        assert_eq!(cmd, FeedSettingsCmd::None);
-        assert_eq!(model.subscribe_role_id, Some("role1".to_string()));
+        assert_eq!(m.subscribe_role_id(), Some("role1".to_string()));
     }
 
-    // ── SetUnsubRole ────────────────────────────────────────────────────────
-
     #[test]
-    fn set_unsub_role() {
-        let mut model = FeedSettingsModel::default();
-
-        let cmd = FeedSettingsUpdate::update(
+    fn set_unsub_role_updates_id() {
+        let mut m = model(Some(true));
+        update(
             FeedSettingsMsg::SetUnsubRole(Some("role2".to_string())),
-            &mut model,
+            &mut m,
         );
-
-        assert_eq!(cmd, FeedSettingsCmd::None);
-        assert_eq!(model.unsubscribe_role_id, Some("role2".to_string()));
-    }
-
-    // ── Model helpers ───────────────────────────────────────────────────────
-
-    #[test]
-    fn is_enabled_defaults_to_true() {
-        let model = FeedSettingsModel::default();
-        assert!(model.is_enabled());
+        assert_eq!(m.unsubscribe_role_id(), Some("role2".to_string()));
     }
 
     #[test]
-    fn model_default() {
-        let model = FeedSettingsModel::default();
-        assert_eq!(model.enabled, None);
-        assert_eq!(model.channel_id, None);
-        assert_eq!(model.subscribe_role_id, None);
-        assert_eq!(model.unsubscribe_role_id, None);
+    fn back_persists_current_settings() {
+        let mut m = model(Some(false));
+        let effects = update(FeedSettingsMsg::Back, &mut m);
+        assert_eq!(effects.len(), 1);
+        match &effects[0] {
+            FeedSettingsEffect::PersistSettings(s) => assert_eq!(s.feeds.enabled, Some(false)),
+        }
+    }
+
+    #[test]
+    fn about_persists_current_settings() {
+        let mut m = model(Some(true));
+        let effects = update(FeedSettingsMsg::About, &mut m);
+        assert_eq!(effects.len(), 1);
+        match &effects[0] {
+            FeedSettingsEffect::PersistSettings(s) => assert_eq!(s.feeds.enabled, Some(true)),
+        }
+    }
+
+    #[test]
+    fn expired_persists_current_settings() {
+        let mut m = model(None);
+        let effects = update(FeedSettingsMsg::Expired, &mut m);
+        assert_eq!(effects.len(), 1);
+        match &effects[0] {
+            FeedSettingsEffect::PersistSettings(s) => assert_eq!(s.feeds.enabled, None),
+        }
     }
 }

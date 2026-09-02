@@ -37,6 +37,8 @@ pub mod about;
 pub mod effects;
 pub mod feature;
 pub mod feed_batch;
+pub mod feed_list;
+pub mod feed_settings;
 pub mod input;
 pub mod register;
 pub mod rt;

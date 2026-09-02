@@ -165,7 +165,11 @@ impl EffectHandler for VoiceSettingsEffectHandler {
     type Effect = VoiceSettingsEffect;
     type Msg = VoiceSettingsMsg;
 
-    fn execute(&mut self, effect: VoiceSettingsEffect) -> Vec<VoiceSettingsMsg> {
+    fn execute(
+        &mut self,
+        effect: VoiceSettingsEffect,
+        _tx: tokio::sync::mpsc::UnboundedSender<VoiceSettingsMsg>,
+    ) -> Vec<VoiceSettingsMsg> {
         match effect {
             VoiceSettingsEffect::PersistSettings(settings) => {
                 let service = self.service.clone();

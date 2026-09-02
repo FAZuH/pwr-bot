@@ -175,11 +175,12 @@ where
     ///
     /// Effects execute synchronously through the handler; the messages the
     /// handler returns are pushed onto the host's message channel so they are
-    /// processed by the next loop iteration.
+    /// processed by the next loop iteration. Async effects deliver their
+    /// follow-up messages directly on the same channel (via the `tx` sender).
     fn apply(&mut self, msg: F::Msg, fx_tx: &mpsc::UnboundedSender<F::Msg>) {
         let effects = F::update(msg, &mut self.model);
         for effect in effects {
-            let followups = self.handler.execute(effect);
+            let followups = self.handler.execute(effect, fx_tx.clone());
             for followup in followups {
                 let _ = fx_tx.send(followup);
             }
