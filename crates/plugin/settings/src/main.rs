@@ -36,19 +36,27 @@
 //! - answers `ping` with `pong`, tolerates the host's hello ack silently,
 //!   and exits 0 on `bye` and on EOF.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::io::BufRead;
 use std::io::Write;
 use std::process::ExitCode;
 
+use pwr_ext::component;
 use pwr_ext::view;
 use pwr_ext::view_support::ButtonStyle;
+use pwr_ext::view_support::CreateActionRow;
+use pwr_ext::view_support::CreateButton;
+use pwr_ext::view_support::CreateContainerComponent;
+use pwr_ext::view_support::CreateSelectMenu;
+use pwr_ext::view_support::CreateSelectMenuKind;
+use pwr_ext::view_support::CreateSelectMenuOption;
+use pwr_ext::view_support::check_select_menu_options;
 use pwr_plugin_protocol::API_VERSION;
 use pwr_plugin_protocol::CommandDef;
 use pwr_plugin_protocol::Manifest;
 use pwr_plugin_protocol::Msg;
 use pwr_plugin_protocol::WireError;
-use pwr_poise_components as components;
 use serde_json::Value;
 use serde_json::json;
 
@@ -332,65 +340,73 @@ fn about_copy() -> String {
 
 /// Renders the settings hub as Components V2, mirroring the original monolith
 /// layout: one container with the header, both info sections, the per-feature
-/// button row, and the toggle select whose ✅/⬜ labels mirror the model;
-/// the discovered-plugins nav row follows inside the container, and the 🛈
-/// About button sits outside it.
+/// button row, and the toggle select whose ✅/⬜ labels mirror the model; the
+/// discovered-plugins nav row follows inside the container, and the 🛈 About
+/// button sits outside it.
 ///
-/// The composition stays on the `pwr_poise_components` builders rather than a
-/// single `view!` literal: the nav row is runtime data (zero to N buttons
-/// built from `host.list_plugins`, dropped entirely when the list is empty)
-/// inside an otherwise fixed container, and `view!` children are compile-time
-/// literals — the grammar cannot splice a runtime element list, cannot
-/// conditionally include one, and cannot author a standalone component to
-/// embed in a runtime parent. Every child is therefore a runtime `Value`,
-/// which is the reusable-library role the components crate keeps. The
-/// per-feature buttons and toggle options stay derived from [`FEATURES`] so
-/// the feature list dispatch reads is not forked into a literal view.
-/// Pagination has no fit here either: the nav row is the only list-like
-/// piece, and its handful of `Open <plugin>` buttons already fit one action
-/// row (Discord caps a row at five buttons) — smaller than a pagination
-/// control's five-button indicator.
+/// The message is one `view!` literal whose runtime pieces are spliced at
+/// their pinned positions: the config buttons, the whole toggle row, and the
+/// Option-gated nav row. [`FEATURES`] stays the single source of truth — the
+/// config buttons and toggle options derive from it rather than being forked
+/// into a literal view. The nav row is `Option`-gated on a non-empty discovery,
+/// so a plugin list with nothing to open drops the row entirely instead of
+/// rendering dead buttons. The toggle select is the one row built at runtime
+/// rather than as a literal: the grammar's select-menu options arm is
+/// literal-only, so the options mirror the model through the typed builders
+/// and pass through [`check_select_menu_options`] to keep the law. Every
+/// spliced parent that carries a child rule (the config and nav button rows)
+/// is guarded by a macro-emitted `check_*` call over its combined children —
+/// a violation panics loudly instead of silently rendering an invalid wire,
+/// the failure mode the old `components::action_row` (no law) had.
 fn view_data(model: &SettingsModel, nav: &NavTargets) -> Value {
-    let header = components::text_display("-# **Settings**");
-    let configure_info = components::text_display(CONFIGURE_INFO);
-    let config_buttons = FEATURES.iter().map(|(label, _)| {
-        components::button_with_style(
-            format!("{CUSTOM_ID_CONFIG_PREFIX}{}", label.to_lowercase()),
-            *label,
-            2,
-        )
-    });
-    let toggle_info = components::text_display(TOGGLE_INFO);
-    let options = FEATURES.iter().map(|(label, msg)| {
-        let emoji = if feature_enabled(model, *msg) {
-            "✅"
-        } else {
-            "⬜"
-        };
-        components::select_option(format!("{emoji} {label}"), *label)
-    });
-    let open = match nav {
-        NavTargets::Fallback => nav_buttons(&[NAV_TARGET_DEFAULT]),
-        NavTargets::Discovered(targets) => {
-            let refs: Vec<&str> = targets.iter().map(String::as_str).collect();
-            nav_buttons(&refs)
+    let config_buttons: Vec<CreateButton<'static>> = FEATURES
+        .iter()
+        .map(|(label, _)| {
+            CreateButton::new(format!("{CUSTOM_ID_CONFIG_PREFIX}{}", label.to_lowercase()))
+                .label(*label)
+                .style(ButtonStyle::Secondary)
+        })
+        .collect();
+    let toggle_options: Vec<CreateSelectMenuOption<'static>> = FEATURES
+        .iter()
+        .map(|(label, msg)| {
+            let emoji = if feature_enabled(model, *msg) {
+                "✅"
+            } else {
+                "⬜"
+            };
+            CreateSelectMenuOption::new(format!("{emoji} {label}"), *label)
+        })
+        .collect();
+    check_select_menu_options(&toggle_options);
+    let toggle_row =
+        CreateContainerComponent::ActionRow(CreateActionRow::select_menu(CreateSelectMenu::new(
+            CUSTOM_ID_TOGGLE,
+            CreateSelectMenuKind::String {
+                options: Cow::Owned(toggle_options),
+            },
+        )));
+    let nav_row = nav_row(nav);
+    let message = view! {
+        components_v2 {
+            container {
+                text_display { content: "-# **Settings**" }
+                text_display { content: CONFIGURE_INFO }
+                action_row { { config_buttons } }
+                text_display { content: TOGGLE_INFO }
+                { Some(toggle_row) }
+                { nav_row }
+            }
+            action_row {
+                button {
+                    custom_id: CUSTOM_ID_ABOUT,
+                    label: "🛈 About",
+                    style: ButtonStyle::Secondary
+                }
+            }
         }
     };
-
-    let mut children = vec![
-        header,
-        configure_info,
-        components::action_row(config_buttons),
-        toggle_info,
-        components::action_row([components::string_select(CUSTOM_ID_TOGGLE, options)]),
-    ];
-    if !open.is_empty() {
-        children.push(components::action_row(open));
-    }
-    components::view_data_v2([
-        components::container(children),
-        components::action_row([components::button_with_style(CUSTOM_ID_ABOUT, "🛈 About", 2)]),
-    ])
+    serde_json::to_value(message).expect("settings hub view is serializable")
 }
 
 /// Renders the plugin-side About panel: a container holding a section with
@@ -428,19 +444,35 @@ fn about_view() -> Value {
     serde_json::to_value(message).expect("settings about view is serializable")
 }
 
-/// The nav row's buttons, one per declared target: empty when no target is
-/// declared, so a plugin the hub cannot open never renders a dead button.
-fn nav_buttons(targets: &[&str]) -> Vec<Value> {
-    targets.iter().map(|target| nav_button(target)).collect()
+/// The nav row as a full container child, Option-gated on the discovery: a
+/// [`NavTargets::Fallback`] renders the single [`NAV_TARGET_DEFAULT`]; an
+/// empty [`NavTargets::Discovered`] renders `None` (the row is dropped, so
+/// the hub never shows a dead button); a non-empty list renders one
+/// `Open <target>` button per target. The row is authored with `component!`
+/// (D2) and wrapped explicitly in [`CreateContainerComponent::ActionRow`];
+/// the button list is spliced in, so the macro-emitted runtime law check
+/// guards the one-action-row button cap.
+fn nav_row(nav: &NavTargets) -> Option<CreateContainerComponent<'static>> {
+    let targets: Vec<&str> = match nav {
+        NavTargets::Fallback => vec![NAV_TARGET_DEFAULT],
+        NavTargets::Discovered(targets) => targets.iter().map(String::as_str).collect(),
+    };
+    if targets.is_empty() {
+        return None;
+    }
+    let buttons: Vec<CreateButton<'static>> =
+        targets.iter().map(|target| nav_button(target)).collect();
+    Some(CreateContainerComponent::ActionRow(component! {
+        action_row {
+            { buttons }
+        }
+    }))
 }
 
 /// The nav button opening another plugin's panel: the target name rides in
 /// the custom id (`settings:open:<target>`), and the label names the target.
-fn nav_button(target: &str) -> Value {
-    components::button(
-        format!("{CUSTOM_ID_OPEN_PREFIX}{target}"),
-        format!("Open {target}"),
-    )
+fn nav_button(target: &str) -> CreateButton<'static> {
+    CreateButton::new(format!("{CUSTOM_ID_OPEN_PREFIX}{target}")).label(format!("Open {target}"))
 }
 
 /// The full envelope a view reply carries: raw message data, visibility, and
@@ -895,6 +927,8 @@ fn main() -> ExitCode {
 
 #[cfg(test)]
 mod tests {
+    use pwr_poise_components as components;
+
     use super::*;
 
     #[test]
@@ -1102,6 +1136,24 @@ mod tests {
             5,
             "the nav row is dropped when no plugin runs"
         );
+    }
+
+    #[test]
+    #[should_panic(expected = "action_row cannot contain more than 5 buttons")]
+    fn a_nav_row_over_five_targets_panics_on_the_action_row_law() {
+        // The runtime law check (`check_action_row_children`) that the
+        // `component!`-authored nav row's button splice triggers makes an
+        // over-five-button row a loud panic instead of the silent invalid
+        // wire the old `components::action_row` (no law) produced.
+        let nav = NavTargets::Discovered(vec![
+            "a".into(),
+            "b".into(),
+            "c".into(),
+            "d".into(),
+            "e".into(),
+            "f".into(),
+        ]);
+        let _ = view_data(&SettingsModel::default(), &nav);
     }
 
     #[test]

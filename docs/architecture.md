@@ -242,8 +242,12 @@ the prior session view and `last_active` unchanged.
 
 | View kind | Surface | Example |
 |-----------|---------|---------|
-| Fixed view | pwr-ext `view!` → `CreateMessage` → `ViewSpec.data` | `hello` view, settings `about_view` |
-| Runtime-assembled | `crates/pwr-poise-components` builders | Settings hub (0..N nav row — `view!` has no runtime splicing or conditionals yet) |
+| Fixed view | pwr-ext `view!` → `CreateMessage` → `ViewSpec.data` | `hello` view, settings `about_view`, settings hub |
+| Runtime-assembled | pwr-ext `component!` + splices inside a `view!` literal | Settings hub nav row (0..N) |
+
+No in-repo view is library-composed any more: `crates/pwr-poise-components`
+no longer assembles a live view, and stays as the reusable library for
+shared pieces the grammar does not fit (pagination, for example).
 
 ### Preview Loop
 

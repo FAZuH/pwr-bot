@@ -29,3 +29,16 @@ envelopes that already match the schema. The cost is the two authoring
 modes. A plugin picks `view!` for fixed views and the components library
 for runtime assembly. The hub keeps library composition until the grammar
 grows.
+
+## Update (2026-09-02)
+
+The pwr-ext `view!` grammar extension landed in pwr-ext `5a5b500`: runtime
+splices, `Option` conditionals, and `component!`. The settings hub migrated
+onto it, so the "grammar gap" narrative above and the "hub keeps library
+composition" line are superseded.
+
+The hub is now a single `view!` literal with runtime splices at their
+pinned positions: the config buttons, the whole toggle row, and the
+`Option`-gated nav row. The components library's runtime-assembly role is
+superseded by `component!`/splices; the crate stays as the reusable library
+for shared pieces the grammar still does not fit (pagination, for example).

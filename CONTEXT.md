@@ -52,11 +52,11 @@ _Avoid_: preview tool, fixture renderer
 
 **Components library**:
 The reusable typed builders in `crates/pwr-poise-components`, rebuilt on
-`pwr-ext`, that plugins attach to compose views at runtime. This is
-distinct from per-plugin `view!` authoring: plugins write fixed views with
-the `pwr-ext` `view!` macro, as `hello` and the settings `about_view` do.
-A view that needs runtime assembly composes this library instead, for
-example the settings hub nav row. The `view!` grammar has no runtime
-children splicing or conditionals yet.
+`pwr-ext`, kept for shared pieces the `view!` grammar does not fit
+(pagination). Runtime assembly now composes `pwr-ext` `component!`/splices
+plus the typed `view_support` builders inside a single `view!` literal:
+plugins author the whole view with `view!` and splice runtime data (such
+as the settings hub nav row) at its pinned positions, `Option`-gated on
+discovery. No in-repo view is library-composed any more.
 See ADR-0004.
 _Avoid_: pwr-ext
