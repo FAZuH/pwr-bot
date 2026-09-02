@@ -2,15 +2,19 @@
 
 use crate::bot::command::feed::settings::SettingsFeedHandler;
 use crate::bot::command::prelude::*;
-use crate::bot::command::voice::settings::SettingsVoiceHandler;
+use crate::bot::gui::voice_settings::VoiceSettingsFeature;
 use crate::bot::test_framework::GuiTestError;
 use crate::bot::test_framework::assert::assert_eq_cmd;
 use crate::bot::test_framework::assert::assert_has_action;
 use crate::bot::test_framework::assert::assert_navigated_to;
+use crate::bot::test_framework::helpers::apply_feature_msg;
 use crate::bot::test_framework::helpers::extract_actions;
+use crate::bot::test_framework::helpers::feature_actions;
 use crate::bot::test_framework::helpers::simulate_click;
+use crate::bot::test_framework::helpers::translate_feature_action;
 use crate::bot::view::ViewCmd;
 use crate::update::feed_settings::FeedSettingsModel;
+use crate::update::voice_settings::VoiceSettingsModel;
 
 pub async fn feed_settings(ctx: Context<'_>) -> Result<(), GuiTestError> {
     let guild_id = ctx.guild_id().ok_or(GuiTestError::assertion_failed(
@@ -89,20 +93,29 @@ pub async fn voice_settings(ctx: Context<'_>) -> Result<(), GuiTestError> {
         .await
         .map_err(|e| GuiTestError::setup_failed("voice_settings", e))?;
 
-    let mut handler = SettingsVoiceHandler { settings };
+    let mut model = VoiceSettingsModel::new(settings);
 
-    let registry = extract_actions(&handler);
+    let registry = feature_actions::<VoiceSettingsFeature>(&model);
     let toggle_action = assert_has_action(&registry, "ToggleEnabled")
         .map_err(|e| GuiTestError::execution_failed("voice_settings render", e))?;
 
-    let initial_enabled = handler.settings.voice.enabled.unwrap_or(true);
-    let coordinator = Router::new(ctx);
-    let cmd = simulate_click(ctx, &mut handler, toggle_action, coordinator.clone())
-        .await
-        .map_err(|e| GuiTestError::execution_failed("voice_settings toggle", e))?;
-    assert_eq_cmd(cmd, ViewCmd::Render, "voice_settings toggle")
-        .map_err(|e| GuiTestError::execution_failed("voice_settings toggle", e))?;
-    if handler.settings.voice.enabled.unwrap_or(true) == initial_enabled {
+    let initial_enabled = model.voice_enabled();
+    let msg = translate_feature_action::<VoiceSettingsFeature>(&toggle_action, &model).ok_or_else(
+        || {
+            GuiTestError::execution_failed(
+                "voice_settings toggle",
+                "action did not translate to a message",
+            )
+        },
+    )?;
+    let effects = apply_feature_msg::<VoiceSettingsFeature>(msg, &mut model);
+    if !effects.is_empty() {
+        return Err(GuiTestError::execution_failed(
+            "voice_settings toggle",
+            "expected no effects",
+        ));
+    }
+    if model.voice_enabled() == initial_enabled {
         return Err(GuiTestError::assertion_failed(
             "voice_settings toggle",
             !initial_enabled,

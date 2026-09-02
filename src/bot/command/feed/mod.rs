@@ -4,15 +4,20 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 
-use pwr_ext::component;
-
 use crate::bot::checks::check_author_roles;
 use crate::bot::command::prelude::*;
+use crate::bot::gui::Host;
+use crate::bot::gui::effects::NoopEffectHandler;
+use crate::bot::gui::feed_batch::FeedBatchFeature;
 use crate::entity::SubscriberEntity;
 use crate::entity::SubscriberType;
 use crate::service::feed_subscription::SubscribeResult;
 use crate::service::feed_subscription::SubscriberTarget;
 use crate::service::feed_subscription::UnsubscribeResult;
+use crate::update::feed_batch::FeedBatchEffect;
+use crate::update::feed_batch::FeedBatchModel;
+use crate::update::feed_batch::FeedBatchMsg;
+use crate::update::feed_batch::FeedBatchPhase;
 
 pub mod list;
 pub mod settings;
@@ -127,9 +132,10 @@ async fn process_subscription_batch(
 ) -> Result<(), Error> {
     let mut states: Vec<String> = vec!["⏳ Processing...".to_string(); urls.len()];
     let mut last_send = Instant::now();
-    let mut handler: Option<FeedSubscriptionBatchHandler> = None;
+    let mut final_model: Option<FeedBatchModel> = None;
     let ctx = coordinator.context();
     let service = ctx.data().service.feed_subscription.clone();
+    let subscriber_type = subscriber.r#type;
 
     for (i, url) in urls.iter().enumerate() {
         let result_str = if is_subscribe {
@@ -148,35 +154,39 @@ async fn process_subscription_batch(
 
         let is_final = i + 1 == urls.len();
         if last_send.elapsed().as_secs() > UPDATE_INTERVAL_SECS || is_final {
-            let batch_handler = FeedSubscriptionBatchHandler {
-                states: states.clone(),
-                is_final,
-                subscriber_type: subscriber.r#type,
-            };
-
-            // To render without waiting for interaction, we could run the engine for 0 seconds
-            let mut engine = ViewEngine::new(
-                *ctx,
-                batch_handler,
-                Duration::from_millis(1),
-                coordinator.clone(),
-            );
-
-            if !is_final {
-                // Just render and exit since it's an intermediate step
-                engine.run().await?;
+            if is_final {
+                final_model = Some(FeedBatchModel::new(
+                    states.clone(),
+                    FeedBatchPhase::Done,
+                    subscriber_type,
+                ));
             } else {
-                handler = Some(engine.handler); // take it back for the final loop
+                // Render the intermediate progress without waiting for an
+                // interaction (matches the old 1 ms engine run).
+                let model =
+                    FeedBatchModel::new(states.clone(), FeedBatchPhase::Confirm, subscriber_type);
+                let mut engine = Host::<FeedBatchFeature, _>::new(
+                    *ctx,
+                    model,
+                    NoopEffectHandler::<FeedBatchEffect, FeedBatchMsg>::new(),
+                    Duration::from_millis(1),
+                    coordinator.clone(),
+                );
+                engine.run().await?;
             }
             last_send = Instant::now();
         }
     }
 
-    // Listen for "View Subscriptions" button click after final message
-    if let Some(handler) = handler {
-        let mut engine =
-            ViewEngine::new(*ctx, handler, Duration::from_secs(120), coordinator.clone());
-
+    // Listen for "View Subscriptions" button click after the final message.
+    if let Some(model) = final_model {
+        let mut engine = Host::<FeedBatchFeature, _>::new(
+            *ctx,
+            model,
+            NoopEffectHandler::<FeedBatchEffect, FeedBatchMsg>::new(),
+            Duration::from_secs(120),
+            coordinator.clone(),
+        );
         engine.run().await?;
     }
     Ok(())
@@ -257,81 +267,6 @@ async fn get_or_create_subscriber(
         .await?)
 }
 
-action_enum! { FeedSubscriptionBatchAction {
-    #[label = "View Subscriptions"]
-    ViewSubscriptions,
-} }
-
-pub struct FeedSubscriptionBatchHandler {
-    pub states: Vec<String>,
-    pub is_final: bool,
-    subscriber_type: SubscriberType,
-}
-
-#[async_trait::async_trait]
-impl ViewHandler for FeedSubscriptionBatchHandler {
-    type Action = FeedSubscriptionBatchAction;
-    async fn handle(
-        &mut self,
-        ctx: ViewContext<'_, FeedSubscriptionBatchAction>,
-    ) -> Result<ViewCmd, Error> {
-        use FeedSubscriptionBatchAction as Action;
-        match ctx.action() {
-            Action::ViewSubscriptions => {
-                // Convert subscriber type back to SendInto
-                let send_into = match self.subscriber_type {
-                    SubscriberType::Guild => SendInto::Server,
-                    SubscriberType::Dm => SendInto::DM,
-                };
-                ctx.coordinator
-                    .navigate(Navigation::FeedList(Some(send_into)))
-                    .await;
-                Ok(ViewCmd::Exit)
-            }
-        }
-    }
-}
-
-impl ViewRender for FeedSubscriptionBatchHandler {
-    type Action = FeedSubscriptionBatchAction;
-    fn render(
-        &self,
-        registry: &mut ActionRegistry<FeedSubscriptionBatchAction>,
-    ) -> ResponseKind<'_> {
-        let text_components: Vec<CreateContainerComponent> = self
-            .states
-            .iter()
-            .map(|s| {
-                CreateContainerComponent::TextDisplay(component! {
-                    text_display { content: s.clone() }
-                })
-            })
-            .collect();
-
-        let mut components = vec![CreateComponent::Container(CreateContainer::new(
-            text_components,
-        ))];
-
-        if self.is_final {
-            let nav_button = registry.register(FeedSubscriptionBatchAction::ViewSubscriptions);
-
-            let nav_row = component! {
-                action_row {
-                    button {
-                        custom_id: nav_button.id,
-                        label: nav_button.label,
-                        style: ButtonStyle::Secondary
-                    }
-                }
-            };
-
-            components.push(CreateComponent::ActionRow(nav_row));
-        }
-
-        components.into()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use poise::serenity_prelude::GuildId;
@@ -384,104 +319,5 @@ mod tests {
             }
             _ => panic!("Expected InvalidCommandArgument error"),
         }
-    }
-
-    /// Rewrites every `custom_id` of the shape `Type:timestamp:counter` to a
-    /// stable sentinel `id:Type`, so the rendered shape is reproducible across
-    /// runs while still pinning kind/label/style/prefix/order.
-    fn normalize_custom_ids(value: &mut serde_json::Value) {
-        match value {
-            serde_json::Value::Object(map) => {
-                if let Some(serde_json::Value::String(cid)) = map.get("custom_id") {
-                    let parts: Vec<&str> = cid.split(':').collect();
-                    if parts.len() == 3
-                        && parts[1].chars().all(|c| c.is_ascii_digit())
-                        && parts[2].chars().all(|c| c.is_ascii_digit())
-                    {
-                        let replacement = serde_json::json!(format!("id:{}", parts[0]));
-                        map.insert("custom_id".to_string(), replacement);
-                    }
-                }
-                for v in map.values_mut() {
-                    normalize_custom_ids(v);
-                }
-            }
-            serde_json::Value::Array(arr) => {
-                for v in arr {
-                    normalize_custom_ids(v);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    #[test]
-    fn batch_handler_non_final_snapshot() {
-        let view = FeedSubscriptionBatchHandler {
-            states: vec!["Subscribed to https://a.com".to_string()],
-            is_final: false,
-            subscriber_type: SubscriberType::Dm,
-        };
-        let mut registry = ActionRegistry::new();
-        let response = view.render(&mut registry);
-        let ResponseKind::Component(components) = response else {
-            panic!("expected a component response");
-        };
-        let mut value = serde_json::to_value(&components).unwrap();
-        normalize_custom_ids(&mut value);
-        assert_eq!(
-            value,
-            serde_json::json!([
-                {
-                    "type": 17,
-                    "components": [
-                        { "type": 10, "content": "Subscribed to https://a.com" }
-                    ]
-                }
-            ])
-        );
-    }
-
-    #[test]
-    fn batch_handler_final_snapshot() {
-        let view = FeedSubscriptionBatchHandler {
-            states: vec![
-                "Subscribed to https://a.com".to_string(),
-                "Subscribed to https://b.com".to_string(),
-            ],
-            is_final: true,
-            subscriber_type: SubscriberType::Dm,
-        };
-        let mut registry = ActionRegistry::new();
-        let response = view.render(&mut registry);
-        let ResponseKind::Component(components) = response else {
-            panic!("expected a component response");
-        };
-        let mut value = serde_json::to_value(&components).unwrap();
-        normalize_custom_ids(&mut value);
-        assert_eq!(
-            value,
-            serde_json::json!([
-                {
-                    "type": 17,
-                    "components": [
-                        { "type": 10, "content": "Subscribed to https://a.com" },
-                        { "type": 10, "content": "Subscribed to https://b.com" }
-                    ]
-                },
-                {
-                    "type": 1,
-                    "components": [
-                        {
-                            "type": 2,
-                            "custom_id": "id:FeedSubscriptionBatchAction",
-                            "disabled": false,
-                            "label": "View Subscriptions",
-                            "style": 2
-                        }
-                    ]
-                }
-            ])
-        );
     }
 }

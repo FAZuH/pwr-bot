@@ -36,8 +36,12 @@
 pub mod about;
 pub mod effects;
 pub mod feature;
+pub mod feed_batch;
 pub mod input;
+pub mod register;
 pub mod rt;
+pub mod unregister;
+pub mod voice_settings;
 
 pub use effects::EffectHandler;
 pub use effects::NoopEffectHandler;
