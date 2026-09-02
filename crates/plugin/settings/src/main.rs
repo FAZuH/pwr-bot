@@ -346,12 +346,13 @@ fn about_copy() -> String {
 ///
 /// The message is one `view!` literal whose runtime pieces are spliced at
 /// their pinned positions: the config buttons, the whole toggle row, and the
-/// Option-gated nav row. [`FEATURES`] stays the single source of truth — the
+/// nav rows. [`FEATURES`] stays the single source of truth — the
 /// config buttons and toggle options derive from it rather than being forked
-/// into a literal view. The nav row is `Option`-gated on a non-empty discovery,
-/// so a plugin list with nothing to open drops the row entirely instead of
-/// rendering dead buttons. The toggle select is the one row built at runtime
-/// rather than as a literal: the grammar's select-menu options arm is
+/// into a literal view. The nav rows are spliced from a [`Vec`], so a plugin
+/// list with nothing to open drops the row entirely instead of rendering dead
+/// buttons; more than five discovered targets spill into further rows. The
+/// toggle select is the one row built at runtime rather than as a literal:
+/// the grammar's select-menu options arm is
 /// literal-only, so the options mirror the model through the typed builders
 /// and pass through [`check_select_menu_options`] to keep the law. Every
 /// spliced parent that carries a child rule (the config and nav button rows)
@@ -386,7 +387,7 @@ fn view_data(model: &SettingsModel, nav: &NavTargets) -> Value {
                 options: Cow::Owned(toggle_options),
             },
         )));
-    let nav_row = nav_row(nav);
+    let nav_rows = nav_rows(nav);
     let message = view! {
         components_v2 {
             container {
@@ -395,7 +396,7 @@ fn view_data(model: &SettingsModel, nav: &NavTargets) -> Value {
                 action_row { { config_buttons } }
                 text_display { content: TOGGLE_INFO }
                 { Some(toggle_row) }
-                { nav_row }
+                { nav_rows }
             }
             action_row {
                 button {
@@ -444,29 +445,36 @@ fn about_view() -> Value {
     serde_json::to_value(message).expect("settings about view is serializable")
 }
 
-/// The nav row as a full container child, Option-gated on the discovery: a
-/// [`NavTargets::Fallback`] renders the single [`NAV_TARGET_DEFAULT`]; an
-/// empty [`NavTargets::Discovered`] renders `None` (the row is dropped, so
-/// the hub never shows a dead button); a non-empty list renders one
-/// `Open <target>` button per target. The row is authored with `component!`
-/// (D2) and wrapped explicitly in [`CreateContainerComponent::ActionRow`];
-/// the button list is spliced in, so the macro-emitted runtime law check
-/// guards the one-action-row button cap.
-fn nav_row(nav: &NavTargets) -> Option<CreateContainerComponent<'static>> {
+/// The nav rows as full container children, one `action_row` per chunk of at
+/// most five targets: a [`NavTargets::Fallback`] renders a single row holding
+/// the one [`NAV_TARGET_DEFAULT`]; an empty [`NavTargets::Discovered`] renders
+/// no row at all (the hub never shows a dead button); a non-empty list renders
+/// one `Open <target>` button per target, chunked so the one-action-row
+/// five-button law is never violated — [`Vec::chunks`] never yields an empty
+/// chunk, so no row is drawn without a button. The container law caps a
+/// container at 40 children, so the edge is roughly 175 targets (5 literal
+/// children + `ceil(n/5)` rows); past that it fails loudly rather than
+/// silently, by design. Each row is authored with `component!` (D2) and
+/// wrapped explicitly in [`CreateContainerComponent::ActionRow`]; the button
+/// list is spliced in, so the macro-emitted runtime law check guards the
+/// one-action-row button cap (which `chunks(5)` makes unfireable).
+fn nav_rows(nav: &NavTargets) -> Vec<CreateContainerComponent<'static>> {
     let targets: Vec<&str> = match nav {
         NavTargets::Fallback => vec![NAV_TARGET_DEFAULT],
         NavTargets::Discovered(targets) => targets.iter().map(String::as_str).collect(),
     };
-    if targets.is_empty() {
-        return None;
-    }
-    let buttons: Vec<CreateButton<'static>> =
-        targets.iter().map(|target| nav_button(target)).collect();
-    Some(CreateContainerComponent::ActionRow(component! {
-        action_row {
-            { buttons }
-        }
-    }))
+    targets
+        .chunks(5)
+        .map(|chunk| {
+            let buttons: Vec<CreateButton<'static>> =
+                chunk.iter().map(|&target| nav_button(target)).collect();
+            CreateContainerComponent::ActionRow(component! {
+                action_row {
+                    { buttons }
+                }
+            })
+        })
+        .collect()
 }
 
 /// The nav button opening another plugin's panel: the target name rides in
@@ -1139,12 +1147,10 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "action_row cannot contain more than 5 buttons")]
-    fn a_nav_row_over_five_targets_panics_on_the_action_row_law() {
-        // The runtime law check (`check_action_row_children`) that the
-        // `component!`-authored nav row's button splice triggers makes an
-        // over-five-button row a loud panic instead of the silent invalid
-        // wire the old `components::action_row` (no law) produced.
+    fn nav_rows_chunk_six_targets_into_a_five_and_one_row() {
+        // Six discovered targets spill into two rows: the first holds the
+        // first five, the second the sixth — the one-action-row five-button
+        // law is honored by chunking rather than panicking.
         let nav = NavTargets::Discovered(vec![
             "a".into(),
             "b".into(),
@@ -1153,7 +1159,51 @@ mod tests {
             "e".into(),
             "f".into(),
         ]);
-        let _ = view_data(&SettingsModel::default(), &nav);
+        let data = view_data(&SettingsModel::default(), &nav);
+        let children = data["components"][0]["components"].as_array().unwrap();
+        assert_eq!(
+            children.len(),
+            7,
+            "the container is the five literals plus two nav rows"
+        );
+        let first = children[5]["components"].as_array().unwrap();
+        assert_eq!(first.len(), 5, "the first row holds the first five targets");
+        for (button, target) in first.iter().zip(["a", "b", "c", "d", "e"]) {
+            assert_eq!(
+                button["custom_id"],
+                json!(format!("{CUSTOM_ID_OPEN_PREFIX}{target}"))
+            );
+            assert_eq!(button["label"], json!(format!("Open {target}")));
+        }
+        let second = children[6]["components"].as_array().unwrap();
+        assert_eq!(second.len(), 1, "the second row holds the remaining target");
+        assert_eq!(second[0]["custom_id"], json!("settings:open:f"));
+        assert_eq!(second[0]["label"], json!("Open f"));
+    }
+
+    #[test]
+    fn nav_rows_chunk_eleven_targets_into_three_rows() {
+        // Eleven targets spill into three rows of 5/5/1, preserving order and
+        // the per-button ids and labels throughout.
+        let targets: Vec<String> = (0..11).map(|i| format!("t{i}")).collect();
+        let nav = NavTargets::Discovered(targets);
+        let data = view_data(&SettingsModel::default(), &nav);
+        let children = data["components"][0]["components"].as_array().unwrap();
+        assert_eq!(
+            children.len(),
+            8,
+            "the container is the five literals plus three nav rows"
+        );
+        for (row_index, (expected, start)) in [(5, 0), (5, 5), (1, 10)].iter().enumerate() {
+            let buttons = children[5 + row_index]["components"].as_array().unwrap();
+            assert_eq!(buttons.len(), *expected);
+            for (button_index, button) in buttons.iter().enumerate() {
+                assert_eq!(
+                    button["custom_id"],
+                    json!(format!("{CUSTOM_ID_OPEN_PREFIX}t{}", start + button_index))
+                );
+            }
+        }
     }
 
     #[test]
