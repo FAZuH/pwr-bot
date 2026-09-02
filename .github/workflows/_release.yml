@@ -8,6 +8,11 @@ on:
         required: false
         type: string
         default: ''
+      artifact-pattern:
+        description: 'Glob selecting uploaded artifacts to download as release assets; defaults to <binary-name>-*'
+        required: false
+        type: string
+        default: ''
       platforms:
         description: 'Build targets: multi (all 4) or linux (x64 only)'
         required: false
@@ -261,18 +266,15 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-          pattern: ${{ inputs.binary-name }}-*
+          pattern: ${{ inputs.artifact-pattern || format('{0}-*', inputs.binary-name) }}
 
       - name: Prepare Release Files
         if: ${{ inputs.build-binaries }}
+        # Copy every downloaded binary artifact into the release folder.
+        # Supports any number of binaries; single-binary projects are unaffected.
         run: |
           mkdir -p release
-          cp artifacts/${{ inputs.binary-name }}-linux-x64/${{ inputs.binary-name }}-linux-x64 release/
-          if [[ "${{ inputs.platforms }}" != "linux" ]]; then
-            cp artifacts/${{ inputs.binary-name }}-windows-x64.exe/${{ inputs.binary-name }}-windows-x64.exe release/
-            cp artifacts/${{ inputs.binary-name }}-macos-x64/${{ inputs.binary-name }}-macos-x64 release/
-            cp artifacts/${{ inputs.binary-name }}-macos-arm64/${{ inputs.binary-name }}-macos-arm64 release/
-          fi
+          find artifacts -mindepth 2 -maxdepth 2 -type f -exec cp {} release/ \;
 
       - name: Create Release
         id: release
@@ -287,7 +289,7 @@ jobs:
         with:
           webhook-url: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
           embed-color: "9498256"
-          embed-title: "${{ inputs.binary-name }} ${{ needs.publish-changelog.outputs.tag }}"
+          embed-title: "${{ github.event.repository.name }} ${{ needs.publish-changelog.outputs.tag }}"
           embed-description: ${{ env.RELEASE_BODY }}
           embed-url: ${{ steps.release.outputs.url }}
           embed-timestamp: ${{ github.event.head_commit.timestamp }}

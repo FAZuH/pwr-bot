@@ -31,6 +31,7 @@ jobs:
     outputs:
       version: ${{ steps.set-version.outputs.version }}
       packages: ${{ steps.workspace.outputs.packages }}
+      manifests_b64: ${{ steps.encode-manifests.outputs.manifests_b64 }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4

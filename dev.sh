@@ -1,12 +1,10 @@
 #!/bin/bash
 
 # Development helper script
-# Usage: ./dev.sh [command1] [command2] ... [-- args-for-the-last-command]
+# Usage: ./dev.sh [command1] [command2] ...
 #   commands: format | lint | test | docs | demo | all | help
 #   plus any commands provided by modules (scripts/dev-*.sh, dev/*.sh, dev-*.sh)
 #   Multiple commands can be specified and will execute left to right
-#   A `--` separator ends the command list; everything after it is forwarded
-#   as arguments to the LAST command before it (e.g. `./dev.sh preview -- --png`)
 
 set -e
 
@@ -165,7 +163,7 @@ show_help() {
     cat << EOF
 Development Helper Script
 
-Usage: ./dev.sh [command1] [command2] ... [-- args-for-the-last-command]
+Usage: ./dev.sh [command1] [command2] ...
 
 Commands:
 EOF
@@ -185,17 +183,13 @@ Examples:
   ./dev.sh demo                    # Build release, alias, and run demo tape
   ./dev.sh format lint             # Format then lint
   ./dev.sh all                     # Run format, lint, and test
-  ./dev.sh preview -- --png        # Forward --png to the last command's tool
 
 EOF
 }
 
-# Execute a single command. Arguments beyond the command name (present when
-# the main loop forwards trailing arguments after `--`) are passed through
-# to the command's function; the core commands ignore them.
+# Execute a single command
 execute_command() {
     local command="$1"
-    shift
     local fn="cmd_${command//-/_}"
 
     case "$command" in
@@ -207,7 +201,7 @@ execute_command() {
             ;;
         *)
             if declare -F "$fn" &>/dev/null; then
-                "$fn" "$@"
+                "$fn"
             else
                 err "Unknown command: $command"
                 show_help
@@ -223,37 +217,7 @@ if [ $# -eq 0 ]; then
     exit 0
 fi
 
-# Split the invocation at a `--` separator: everything before it is a
-# command list, everything after it is forwarded as arguments to the LAST
-# command before the separator (module passthrough, e.g.
-# `./dev.sh preview -- --png` hands `--png` to cmd_preview). Without `--`
-# the behavior is unchanged: every argument is a command.
-dev_commands=()
-dev_trailing_args=()
-dev_past_separator=0
-for arg in "$@"; do
-    if [[ $dev_past_separator -eq 0 && "$arg" == "--" ]]; then
-        dev_past_separator=1
-    elif [[ $dev_past_separator -eq 1 ]]; then
-        dev_trailing_args+=("$arg")
-    else
-        dev_commands+=("$arg")
-    fi
-done
-
-if [ ${#dev_commands[@]} -eq 0 ]; then
-    err "No command given before \`--\`"
-    show_help
-    exit 1
-fi
-
-# Execute each command sequentially; trailing arguments (if any) go to the
-# last command only.
-dev_last=$(( ${#dev_commands[@]} - 1 ))
-for dev_index in "${!dev_commands[@]}"; do
-    if [[ $dev_index -eq $dev_last ]]; then
-        execute_command "${dev_commands[$dev_index]}" "${dev_trailing_args[@]}"
-    else
-        execute_command "${dev_commands[$dev_index]}"
-    fi
+# Execute each command sequentially
+for command in "$@"; do
+    execute_command "$command"
 done
