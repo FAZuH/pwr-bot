@@ -37,4 +37,6 @@ pub use msg::CallIdSeq;
 pub use msg::Msg;
 pub use msg::PLUGIN_NAME;
 pub use msg::WireError;
+pub use view::ViewPayload;
 pub use view::ViewSpec;
+pub use view::view_payload;

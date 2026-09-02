@@ -45,8 +45,10 @@ use async_trait::async_trait;
 use log::warn;
 use poise::serenity_prelude as serenity;
 use pwr_plugin_protocol::Msg;
+use pwr_plugin_protocol::ViewPayload;
 use pwr_plugin_protocol::ViewSpec;
 use pwr_plugin_protocol::WireError;
+use pwr_plugin_protocol::view_payload;
 use serde_json::Map;
 use serde_json::Value;
 use tokio::sync::Mutex;
@@ -571,21 +573,20 @@ pub(crate) fn view_spec_from_resp(
 /// is the v1 raw shape (Discord message JSON) and is wrapped with defaults,
 /// carrying the session's stored `view` through unchanged. `data` is not a
 /// top-level Discord message field, so the `data`-key check is unambiguous.
+/// The envelope/raw split is [`view_payload`]'s contract; this projection
+/// only adds the session's `current_view` fallback for the `view` field.
 fn view_spec_from_data(data: Value, current_view: Option<Value>) -> ViewSpec {
-    match data {
-        Value::Object(map) if map.contains_key("data") => ViewSpec {
-            data: map.get("data").cloned().unwrap_or_default(),
-            ephemeral: map
-                .get("ephemeral")
-                .and_then(Value::as_bool)
-                .unwrap_or(false),
-            view: map
-                .get("view")
-                .cloned()
-                .or_else(|| current_view.clone())
-                .unwrap_or_default(),
+    match view_payload(&data) {
+        ViewPayload::Envelope {
+            data,
+            ephemeral,
+            view,
+        } => ViewSpec {
+            data,
+            ephemeral,
+            view: view.or(current_view).unwrap_or_default(),
         },
-        data => ViewSpec {
+        ViewPayload::Raw { data } => ViewSpec {
             data,
             ephemeral: false,
             view: current_view.unwrap_or_default(),

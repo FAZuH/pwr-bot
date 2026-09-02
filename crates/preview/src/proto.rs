@@ -21,8 +21,10 @@ use anyhow::Result;
 use pwr_plugin_protocol::API_VERSION;
 use pwr_plugin_protocol::Manifest;
 use pwr_plugin_protocol::Msg;
+use pwr_plugin_protocol::ViewPayload;
 use pwr_plugin_protocol::WireError;
 use pwr_plugin_protocol::validate_caps;
+use pwr_plugin_protocol::view_payload;
 use serde_json::Value;
 
 /// A plugin subprocess speaking the wire protocol over stdio, from the
@@ -290,20 +292,16 @@ impl Drop for PluginSession {
 }
 
 /// Extracts the Discord message JSON from an invoke resp payload. Plugins
-/// answer in two shapes, both accepted (mirroring the host's
-/// `view_spec_from_data` in `src/plugin/interaction.rs`, which is host code
-/// and not importable here):
-///
-/// - the full envelope `{"data": …, "ephemeral": …, "view": …}` — its
-///   `data` field is the message (Discord messages have no top-level `data`
-///   field, so the key check is unambiguous);
-/// - the v1 raw shape: the Discord message JSON itself.
+/// answer in two shapes, both accepted: the full envelope
+/// `{"data": …, "ephemeral": …, "view": …}` (its `data` field is the message)
+/// and the v1 raw shape (the Discord message JSON itself). The
+/// envelope/raw split is [`view_payload`]'s shared contract — the host
+/// applies the same classification in `view_spec_from_data` — and this
+/// projection keeps only the message (`data`).
 pub fn message_from_resp_data(data: &Value) -> Value {
-    match data {
-        Value::Object(map) if map.contains_key("data") => {
-            map.get("data").cloned().unwrap_or_default()
-        }
-        _ => data.clone(),
+    match view_payload(data) {
+        ViewPayload::Envelope { data, .. } => data,
+        ViewPayload::Raw { data } => data,
     }
 }
 
