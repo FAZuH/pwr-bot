@@ -4,6 +4,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 
+use pwr_ext::component;
+
 use crate::bot::checks::check_author_roles;
 use crate::bot::command::prelude::*;
 use crate::entity::SubscriberEntity;
@@ -299,7 +301,11 @@ impl ViewRender for FeedSubscriptionBatchHandler {
         let text_components: Vec<CreateContainerComponent> = self
             .states
             .iter()
-            .map(|s| CreateContainerComponent::TextDisplay(CreateTextDisplay::new(s.clone())))
+            .map(|s| {
+                CreateContainerComponent::TextDisplay(component! {
+                    text_display { content: s.clone() }
+                })
+            })
             .collect();
 
         let mut components = vec![CreateComponent::Container(CreateContainer::new(
@@ -307,14 +313,19 @@ impl ViewRender for FeedSubscriptionBatchHandler {
         ))];
 
         if self.is_final {
-            let nav_button = registry
-                .register(FeedSubscriptionBatchAction::ViewSubscriptions)
-                .as_button()
-                .style(ButtonStyle::Secondary);
+            let nav_button = registry.register(FeedSubscriptionBatchAction::ViewSubscriptions);
 
-            components.push(CreateComponent::ActionRow(CreateActionRow::Buttons(
-                vec![nav_button].into(),
-            )));
+            let nav_row = component! {
+                action_row {
+                    button {
+                        custom_id: nav_button.id,
+                        label: nav_button.label,
+                        style: ButtonStyle::Secondary
+                    }
+                }
+            };
+
+            components.push(CreateComponent::ActionRow(nav_row));
         }
 
         components.into()
@@ -373,5 +384,104 @@ mod tests {
             }
             _ => panic!("Expected InvalidCommandArgument error"),
         }
+    }
+
+    /// Rewrites every `custom_id` of the shape `Type:timestamp:counter` to a
+    /// stable sentinel `id:Type`, so the rendered shape is reproducible across
+    /// runs while still pinning kind/label/style/prefix/order.
+    fn normalize_custom_ids(value: &mut serde_json::Value) {
+        match value {
+            serde_json::Value::Object(map) => {
+                if let Some(serde_json::Value::String(cid)) = map.get("custom_id") {
+                    let parts: Vec<&str> = cid.split(':').collect();
+                    if parts.len() == 3
+                        && parts[1].chars().all(|c| c.is_ascii_digit())
+                        && parts[2].chars().all(|c| c.is_ascii_digit())
+                    {
+                        let replacement = serde_json::json!(format!("id:{}", parts[0]));
+                        map.insert("custom_id".to_string(), replacement);
+                    }
+                }
+                for v in map.values_mut() {
+                    normalize_custom_ids(v);
+                }
+            }
+            serde_json::Value::Array(arr) => {
+                for v in arr {
+                    normalize_custom_ids(v);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    #[test]
+    fn batch_handler_non_final_snapshot() {
+        let view = FeedSubscriptionBatchHandler {
+            states: vec!["Subscribed to https://a.com".to_string()],
+            is_final: false,
+            subscriber_type: SubscriberType::Dm,
+        };
+        let mut registry = ActionRegistry::new();
+        let response = view.render(&mut registry);
+        let ResponseKind::Component(components) = response else {
+            panic!("expected a component response");
+        };
+        let mut value = serde_json::to_value(&components).unwrap();
+        normalize_custom_ids(&mut value);
+        assert_eq!(
+            value,
+            serde_json::json!([
+                {
+                    "type": 17,
+                    "components": [
+                        { "type": 10, "content": "Subscribed to https://a.com" }
+                    ]
+                }
+            ])
+        );
+    }
+
+    #[test]
+    fn batch_handler_final_snapshot() {
+        let view = FeedSubscriptionBatchHandler {
+            states: vec![
+                "Subscribed to https://a.com".to_string(),
+                "Subscribed to https://b.com".to_string(),
+            ],
+            is_final: true,
+            subscriber_type: SubscriberType::Dm,
+        };
+        let mut registry = ActionRegistry::new();
+        let response = view.render(&mut registry);
+        let ResponseKind::Component(components) = response else {
+            panic!("expected a component response");
+        };
+        let mut value = serde_json::to_value(&components).unwrap();
+        normalize_custom_ids(&mut value);
+        assert_eq!(
+            value,
+            serde_json::json!([
+                {
+                    "type": 17,
+                    "components": [
+                        { "type": 10, "content": "Subscribed to https://a.com" },
+                        { "type": 10, "content": "Subscribed to https://b.com" }
+                    ]
+                },
+                {
+                    "type": 1,
+                    "components": [
+                        {
+                            "type": 2,
+                            "custom_id": "id:FeedSubscriptionBatchAction",
+                            "disabled": false,
+                            "label": "View Subscriptions",
+                            "style": 2
+                        }
+                    ]
+                }
+            ])
+        );
     }
 }

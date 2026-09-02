@@ -3,6 +3,8 @@
 use std::str::FromStr;
 use std::time::Duration;
 
+use pwr_ext::component;
+
 use crate::bot::command::prelude::*;
 use crate::entity::ServerSettings;
 use crate::update::Update;
@@ -159,89 +161,267 @@ impl<'a> ViewRender for SettingsFeedHandler<'a> {
             }
         );
 
-        let enabled_button = registry
-            .register(SettingsFeedAction::Enabled)
-            .as_button()
-            .label(if is_enabled { "Disable" } else { "Enable" })
-            .style(if is_enabled {
-                ButtonStyle::Danger
-            } else {
-                ButtonStyle::Success
-            });
+        let enabled_action = registry.register(SettingsFeedAction::Enabled);
+        let enabled_label = if is_enabled { "Disable" } else { "Enable" };
+        let enabled_style = if is_enabled {
+            ButtonStyle::Danger
+        } else {
+            ButtonStyle::Success
+        };
 
         let channel_text =
             "### Notification Channel\n\n> 🛈  Choose where feed updates will be posted.";
 
-        let channel_select = registry
-            .register(SettingsFeedAction::Channel)
-            .as_select(CreateSelectMenuKind::Channel {
-                channel_types: Some(vec![ChannelType::Text, ChannelType::News].into()),
-                default_channels: Some(
-                    Self::parse_channel_id(self.model.channel_id.as_ref()).into(),
-                ),
-            })
-            .placeholder(if self.model.channel_id.is_some() {
-                "Change notification channel"
-            } else {
-                "⚠️ Required: Select a notification channel"
-            });
+        let channel_action = registry.register(SettingsFeedAction::Channel);
+        let channel_kind = CreateSelectMenuKind::Channel {
+            channel_types: Some(vec![ChannelType::Text, ChannelType::News].into()),
+            default_channels: Some(Self::parse_channel_id(self.model.channel_id.as_ref()).into()),
+        };
+        let channel_placeholder = if self.model.channel_id.is_some() {
+            "Change notification channel"
+        } else {
+            "⚠️ Required: Select a notification channel"
+        };
 
         let sub_role_text = "### Subscribe Permission\n\n> 🛈  Who can add new feeds to this server. Leave empty to allow users with \"Manage Server\" permission.";
-        let sub_role_select = registry
-            .register(SettingsFeedAction::SubRole)
-            .as_select(CreateSelectMenuKind::Role {
-                default_roles: Some(
-                    Self::parse_role_id(self.model.subscribe_role_id.as_ref()).into(),
-                ),
-            })
-            .min_values(0)
-            .placeholder(if self.model.subscribe_role_id.is_some() {
-                "Change subscribe role"
-            } else {
-                "Optional: Select role for subscribe permission"
-            });
+        let sub_role_action = registry.register(SettingsFeedAction::SubRole);
+        let sub_role_kind = CreateSelectMenuKind::Role {
+            default_roles: Some(Self::parse_role_id(self.model.subscribe_role_id.as_ref()).into()),
+        };
+        let sub_role_placeholder = if self.model.subscribe_role_id.is_some() {
+            "Change subscribe role"
+        } else {
+            "Optional: Select role for subscribe permission"
+        };
 
         let unsub_role_text = "### Unsubscribe Permission\n\n> 🛈  Who can remove feeds from this server. Leave empty to allow users with \"Manage Server\" permission.";
-        let unsub_role_select = registry
-            .register(SettingsFeedAction::UnsubRole)
-            .as_select(CreateSelectMenuKind::Role {
-                default_roles: Some(
-                    Self::parse_role_id(self.model.unsubscribe_role_id.as_ref()).into(),
-                ),
-            })
-            .min_values(0)
-            .placeholder(if self.model.unsubscribe_role_id.is_some() {
-                "Change unsubscribe role"
-            } else {
-                "Optional: Select role for unsubscribe permission"
-            });
+        let unsub_role_action = registry.register(SettingsFeedAction::UnsubRole);
+        let unsub_role_kind = CreateSelectMenuKind::Role {
+            default_roles: Some(
+                Self::parse_role_id(self.model.unsubscribe_role_id.as_ref()).into(),
+            ),
+        };
+        let unsub_role_placeholder = if self.model.unsubscribe_role_id.is_some() {
+            "Change unsubscribe role"
+        } else {
+            "Optional: Select role for unsubscribe permission"
+        };
 
-        let container = CreateComponent::Container(CreateContainer::new(vec![
-            CreateContainerComponent::TextDisplay(CreateTextDisplay::new(status_text)),
-            CreateContainerComponent::ActionRow(CreateActionRow::Buttons(
-                vec![enabled_button].into(),
-            )),
-            CreateContainerComponent::TextDisplay(CreateTextDisplay::new(channel_text)),
-            CreateContainerComponent::ActionRow(CreateActionRow::SelectMenu(channel_select)),
-            CreateContainerComponent::TextDisplay(CreateTextDisplay::new(sub_role_text)),
-            CreateContainerComponent::ActionRow(CreateActionRow::SelectMenu(sub_role_select)),
-            CreateContainerComponent::TextDisplay(CreateTextDisplay::new(unsub_role_text)),
-            CreateContainerComponent::ActionRow(CreateActionRow::SelectMenu(unsub_role_select)),
-        ]));
+        let container = component! {
+            container {
+                text_display { content: status_text }
+                action_row {
+                    button {
+                        custom_id: enabled_action.id,
+                        label: enabled_label,
+                        style: enabled_style
+                    }
+                }
+                text_display { content: channel_text }
+                action_row {
+                    select_menu {
+                        custom_id: channel_action.id,
+                        kind: channel_kind,
+                        placeholder: channel_placeholder
+                    }
+                }
+                text_display { content: sub_role_text }
+                action_row {
+                    select_menu {
+                        custom_id: sub_role_action.id,
+                        kind: sub_role_kind,
+                        min_values: 0,
+                        placeholder: sub_role_placeholder
+                    }
+                }
+                text_display { content: unsub_role_text }
+                action_row {
+                    select_menu {
+                        custom_id: unsub_role_action.id,
+                        kind: unsub_role_kind,
+                        min_values: 0,
+                        placeholder: unsub_role_placeholder
+                    }
+                }
+            }
+        };
 
-        let back_button = registry
-            .register(SettingsFeedAction::Back)
-            .as_button()
-            .style(ButtonStyle::Secondary);
-        let about_button = registry
-            .register(SettingsFeedAction::About)
-            .as_button()
-            .style(ButtonStyle::Secondary);
+        let back_action = registry.register(SettingsFeedAction::Back);
+        let about_action = registry.register(SettingsFeedAction::About);
 
-        let nav_buttons = CreateComponent::ActionRow(CreateActionRow::Buttons(
-            vec![back_button, about_button].into(),
-        ));
+        let nav_buttons = component! {
+            action_row {
+                button {
+                    custom_id: back_action.id,
+                    label: back_action.label,
+                    style: ButtonStyle::Secondary
+                }
+                button {
+                    custom_id: about_action.id,
+                    label: about_action.label,
+                    style: ButtonStyle::Secondary
+                }
+            }
+        };
 
-        vec![container, nav_buttons].into()
+        vec![
+            CreateComponent::Container(container),
+            CreateComponent::ActionRow(nav_buttons),
+        ]
+        .into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bot::view::ActionRegistry;
+    use crate::bot::view::ResponseKind;
+
+    fn normalize_custom_ids(value: &mut serde_json::Value) {
+        match value {
+            serde_json::Value::Object(map) => {
+                if let Some(serde_json::Value::String(cid)) = map.get("custom_id") {
+                    let parts: Vec<&str> = cid.split(':').collect();
+                    if parts.len() == 3
+                        && parts[1].chars().all(|c| c.is_ascii_digit())
+                        && parts[2].chars().all(|c| c.is_ascii_digit())
+                    {
+                        let replacement = serde_json::json!(format!("id:{}", parts[0]));
+                        map.insert("custom_id".to_string(), replacement);
+                    }
+                }
+                for v in map.values_mut() {
+                    normalize_custom_ids(v);
+                }
+            }
+            serde_json::Value::Array(arr) => {
+                for v in arr {
+                    normalize_custom_ids(v);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    #[test]
+    fn feed_settings_render_snapshot() {
+        let model = FeedSettingsModel {
+            enabled: Some(true),
+            channel_id: Some("123456789".to_string()),
+            subscribe_role_id: Some("987654321".to_string()),
+            unsubscribe_role_id: Some("987654322".to_string()),
+        };
+        let mut settings = ServerSettings::default();
+        let view = SettingsFeedHandler {
+            model,
+            settings: &mut settings,
+        };
+        let mut registry = ActionRegistry::new();
+        let response = view.render(&mut registry);
+        let ResponseKind::Component(components) = response else {
+            panic!("expected a component response");
+        };
+        let mut value = serde_json::to_value(&components).unwrap();
+        normalize_custom_ids(&mut value);
+        assert_eq!(
+            value,
+            serde_json::json!([
+                {
+                    "type": 17,
+                    "components": [
+                        {
+                            "type": 10,
+                            "content": "-# **Settings > Feeds**\n## Feed Subscription Settings\n\n> 🛈  Feed notifications are currently **active**. Notifications will be sent to <#123456789>"
+                        },
+                        {
+                            "type": 1,
+                            "components": [
+                                {
+                                    "type": 2,
+                                    "custom_id": "id:SettingsFeedAction",
+                                    "disabled": false,
+                                    "label": "Disable",
+                                    "style": 4
+                                }
+                            ]
+                        },
+                        {
+                            "type": 10,
+                            "content": "### Notification Channel\n\n> 🛈  Choose where feed updates will be posted."
+                        },
+                        {
+                            "type": 1,
+                            "components": [
+                                {
+                                    "type": 8,
+                                    "custom_id": "id:SettingsFeedAction",
+                                    "channel_types": [0, 5],
+                                    "placeholder": "Change notification channel",
+                                    "default_values": [
+                                        { "id": 123456789, "type": "channel" }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "type": 10,
+                            "content": "### Subscribe Permission\n\n> 🛈  Who can add new feeds to this server. Leave empty to allow users with \"Manage Server\" permission."
+                        },
+                        {
+                            "type": 1,
+                            "components": [
+                                {
+                                    "type": 6,
+                                    "custom_id": "id:SettingsFeedAction",
+                                    "min_values": 0,
+                                    "placeholder": "Change subscribe role",
+                                    "default_values": [
+                                        { "id": 987654321, "type": "role" }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "type": 10,
+                            "content": "### Unsubscribe Permission\n\n> 🛈  Who can remove feeds from this server. Leave empty to allow users with \"Manage Server\" permission."
+                        },
+                        {
+                            "type": 1,
+                            "components": [
+                                {
+                                    "type": 6,
+                                    "custom_id": "id:SettingsFeedAction",
+                                    "min_values": 0,
+                                    "placeholder": "Change unsubscribe role",
+                                    "default_values": [
+                                        { "id": 987654322, "type": "role" }
+                                    ]
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "type": 1,
+                    "components": [
+                        {
+                            "type": 2,
+                            "custom_id": "id:SettingsFeedAction",
+                            "disabled": false,
+                            "label": "❮ Back",
+                            "style": 2
+                        },
+                        {
+                            "type": 2,
+                            "custom_id": "id:SettingsFeedAction",
+                            "disabled": false,
+                            "label": "🛈 About",
+                            "style": 2
+                        }
+                    ]
+                }
+            ])
+        );
     }
 }

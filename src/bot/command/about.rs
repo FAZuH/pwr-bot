@@ -5,6 +5,7 @@ use std::time::Duration;
 use chrono::Datelike;
 use chrono::Utc;
 use poise::Command;
+use pwr_ext::component;
 
 use crate::bot::command::prelude::*;
 
@@ -96,37 +97,36 @@ impl ViewRender for AboutView {
             self.stats.version,
         );
 
-        let avatar_url: String = self.avatar_url.clone();
-        let avatar = CreateThumbnail::new(CreateUnfurledMediaItem::new(avatar_url));
-
-        let content_section = CreateSection::new(
-            vec![CreateSectionComponent::TextDisplay(CreateTextDisplay::new(
-                content_text,
-            ))],
-            CreateSectionAccessory::Thumbnail(avatar),
-        );
-
-        let github_button =
-            CreateButton::new_link("https://github.com/FAZuH/pwr-bot").label("Source Code");
-
-        let license_button =
-            CreateButton::new_link("https://github.com/FAZuH/pwr-bot/blob/main/LICENSE")
-                .label("License");
-
         let back_action = registry.register(AboutAction::Back);
 
-        let back_button = CreateComponent::ActionRow(CreateActionRow::Buttons(
-            vec![back_action.as_button().style(ButtonStyle::Secondary)].into(),
-        ));
+        let container = component! {
+            container {
+                section {
+                    text_display { content: content_text }
+                    thumbnail { media: self.avatar_url.clone() }
+                }
+                action_row {
+                    button { url: "https://github.com/FAZuH/pwr-bot", label: "Source Code" }
+                    button { url: "https://github.com/FAZuH/pwr-bot/blob/main/LICENSE", label: "License" }
+                }
+            }
+        };
 
-        let container = CreateComponent::Container(CreateContainer::new(vec![
-            CreateContainerComponent::Section(content_section),
-            CreateContainerComponent::ActionRow(CreateActionRow::Buttons(
-                vec![github_button, license_button].into(),
-            )),
-        ]));
+        let back_button = component! {
+            action_row {
+                button {
+                    custom_id: back_action.id,
+                    label: back_action.label,
+                    style: ButtonStyle::Secondary
+                }
+            }
+        };
 
-        vec![container, back_button].into()
+        vec![
+            CreateComponent::Container(container),
+            CreateComponent::ActionRow(back_button),
+        ]
+        .into()
     }
 }
 
@@ -220,5 +220,125 @@ impl AboutStats {
         }
 
         0.0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use serde_json::json;
+
+    use super::*;
+    use crate::bot::view::ActionRegistry;
+    use crate::bot::view::ResponseKind;
+
+    /// Rewrites every `custom_id` of the shape `Type:timestamp:counter` to a
+    /// stable sentinel `id:Type`, so the rendered shape is reproducible across
+    /// runs while still pinning kind/label/style/prefix/order.
+    fn normalize_custom_ids(value: &mut serde_json::Value) {
+        match value {
+            serde_json::Value::Object(map) => {
+                if let Some(serde_json::Value::String(cid)) = map.get("custom_id") {
+                    let parts: Vec<&str> = cid.split(':').collect();
+                    if parts.len() == 3
+                        && parts[1].chars().all(|c| c.is_ascii_digit())
+                        && parts[2].chars().all(|c| c.is_ascii_digit())
+                    {
+                        let replacement = json!(format!("id:{}", parts[0]));
+                        map.insert("custom_id".to_string(), replacement);
+                    }
+                }
+                for v in map.values_mut() {
+                    normalize_custom_ids(v);
+                }
+            }
+            serde_json::Value::Array(arr) => {
+                for v in arr {
+                    normalize_custom_ids(v);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    #[test]
+    fn about_view_render_snapshot() {
+        let stats = AboutStats {
+            version: "0.1.0".to_string(),
+            uptime: Duration::from_secs(90_000),
+            guild_count: 2,
+            user_count: 150,
+            latency_ms: 42,
+            command_count: 12,
+            memory_mb: 320.0,
+            current_year: 2026,
+        };
+        let view = AboutView {
+            stats,
+            avatar_url: "https://example.com/avatar.png".to_string(),
+        };
+
+        let mut registry = ActionRegistry::new();
+        let response = view.render(&mut registry);
+        let ResponseKind::Component(components) = response else {
+            panic!("expected a component response");
+        };
+        let mut value = serde_json::to_value(&components).unwrap();
+        normalize_custom_ids(&mut value);
+
+        let expected = json!([
+            {
+                "type": 17,
+                "components": [
+                    {
+                        "type": 9,
+                        "components": [
+                            {
+                                "type": 10,
+                                "content": "-# **Settings > About**\n## pwr-bot\n### Stats\n- **Uptime**: 1 days, 1 hours, 0 minutes\n- **Servers**: 2\n- **Users**: 150\n- **Commands**: 12\n- **Latency**: 42ms\n- **Memory**: 320.0 MB\n### Info\n- **Author**: [FAZuH](https://github.com/FAZuH)\n- **Source**: [GitHub](https://github.com/FAZuH/pwr-bot)\n- **License**: [MIT](https://github.com/FAZuH/pwr-bot/blob/main/LICENSE)\nCopyright © 2025-2026 FAZuH  —  v0.1.0"
+                            }
+                        ],
+                        "accessory": {
+                            "type": 11,
+                            "media": { "url": "https://example.com/avatar.png" }
+                        }
+                    },
+                    {
+                        "type": 1,
+                        "components": [
+                            {
+                                "type": 2,
+                                "disabled": false,
+                                "label": "Source Code",
+                                "style": 5,
+                                "url": "https://github.com/FAZuH/pwr-bot"
+                            },
+                            {
+                                "type": 2,
+                                "disabled": false,
+                                "label": "License",
+                                "style": 5,
+                                "url": "https://github.com/FAZuH/pwr-bot/blob/main/LICENSE"
+                            }
+                        ]
+                    }
+                ]
+            },
+            {
+                "type": 1,
+                "components": [
+                    {
+                        "type": 2,
+                        "custom_id": "id:AboutAction",
+                        "disabled": false,
+                        "label": "❮ Back",
+                        "style": 2
+                    }
+                ]
+            }
+        ]);
+
+        assert_eq!(value, expected);
     }
 }

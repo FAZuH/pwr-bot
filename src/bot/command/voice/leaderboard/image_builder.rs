@@ -1,10 +1,11 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Instant;
 
 use log::trace;
+use poise::serenity_prelude::Http;
 use poise::serenity_prelude::UserId;
 
-use crate::bot::command::Context;
 use crate::bot::command::Error;
 use crate::bot::command::voice::leaderboard::image_generator::LeaderboardImageGenerator;
 use crate::entity::VoiceLeaderboardEntry;
@@ -29,18 +30,18 @@ pub struct ImageGenerationResult {
 }
 
 /// Builder for creating leaderboard pages with image generation.
-pub struct LeaderboardImageBuilder<'a> {
-    ctx: &'a Context<'a>,
+pub struct LeaderboardImageBuilder {
+    http: Arc<Http>,
     image_gen: LeaderboardImageGenerator,
     user_cache: HashMap<u64, poise::serenity_prelude::User>,
 }
 
-impl<'a> LeaderboardImageBuilder<'a> {
+impl LeaderboardImageBuilder {
     /// Creates a new page builder with initialized image generator.
-    pub fn new(ctx: &'a Context<'a>) -> Self {
+    pub fn new(http: Arc<Http>) -> Self {
         let image_gen = LeaderboardImageGenerator::new();
         Self {
-            ctx,
+            http,
             image_gen,
             user_cache: HashMap::new(),
         }
@@ -102,7 +103,7 @@ impl<'a> LeaderboardImageBuilder<'a> {
             .iter()
             .map(|entry| {
                 let user_id = UserId::new(entry.user_id);
-                let http = self.ctx.http();
+                let http = self.http.clone();
                 async move {
                     user_id
                         .to_user(&http)

@@ -199,3 +199,129 @@ impl From<VoiceStatsTimeRange> for CreateSelectMenuOption<'static> {
         CreateSelectMenuOption::new(name, name)
     }
 }
+
+/// Test-only stubs for voice service traits.
+#[cfg(test)]
+pub(crate) mod test_support {
+    use chrono::DateTime;
+    use chrono::Utc;
+
+    use crate::bot::command::voice::GuildStatType;
+    use crate::entity::GuildDailyStats;
+    use crate::entity::ServerSettings;
+    use crate::entity::VoiceDailyActivity;
+    use crate::entity::VoiceLeaderboardEntry;
+    use crate::entity::VoiceLeaderboardOpt;
+    use crate::entity::VoiceSessionsEntity;
+    use crate::service::traits::VoiceTracker;
+
+    /// A `VoiceTracker` whose methods all diverge. Purely to satisfy the
+    /// `Arc<dyn VoiceTracker>` field on views; rendering never consults it.
+    pub(crate) struct StubVoiceTracker;
+
+    #[async_trait::async_trait]
+    impl VoiceTracker for StubVoiceTracker {
+        async fn is_enabled(&self, _guild_id: u64) -> bool {
+            todo!()
+        }
+        async fn insert(&self, _model: &VoiceSessionsEntity) -> anyhow::Result<()> {
+            todo!()
+        }
+        async fn replace(&self, _model: &VoiceSessionsEntity) -> anyhow::Result<()> {
+            todo!()
+        }
+        async fn get_server_settings(&self, _guild_id: u64) -> anyhow::Result<ServerSettings> {
+            todo!()
+        }
+        async fn update_server_settings(
+            &self,
+            _guild_id: u64,
+            _settings: ServerSettings,
+        ) -> anyhow::Result<()> {
+            todo!()
+        }
+        async fn get_leaderboard_withopt(
+            &self,
+            _options: &VoiceLeaderboardOpt,
+        ) -> anyhow::Result<Vec<VoiceLeaderboardEntry>> {
+            todo!()
+        }
+        async fn get_partner_leaderboard(
+            &self,
+            _options: &VoiceLeaderboardOpt,
+            _target_user_id: u64,
+        ) -> anyhow::Result<Vec<VoiceLeaderboardEntry>> {
+            todo!()
+        }
+        async fn get_leaderboard(
+            &self,
+            _guild_id: u64,
+            _limit: u32,
+        ) -> anyhow::Result<Vec<VoiceLeaderboardEntry>> {
+            todo!()
+        }
+        async fn get_leaderboard_with_offset(
+            &self,
+            _guild_id: u64,
+            _offset: u32,
+            _limit: u32,
+        ) -> anyhow::Result<Vec<VoiceLeaderboardEntry>> {
+            todo!()
+        }
+        async fn update_session_leave_time(
+            &self,
+            _user_id: u64,
+            _channel_id: u64,
+            _join_time: &DateTime<Utc>,
+            _leave_time: &DateTime<Utc>,
+        ) -> anyhow::Result<()> {
+            todo!()
+        }
+        async fn close_session(
+            &self,
+            _user_id: u64,
+            _channel_id: u64,
+            _join_time: &DateTime<Utc>,
+            _leave_time: &DateTime<Utc>,
+        ) -> anyhow::Result<()> {
+            todo!()
+        }
+        async fn find_active_sessions(&self) -> anyhow::Result<Vec<VoiceSessionsEntity>> {
+            todo!()
+        }
+        async fn find_active_sessions_by_user(
+            &self,
+            _user_id: u64,
+            _guild_id: u64,
+        ) -> anyhow::Result<Vec<VoiceSessionsEntity>> {
+            todo!()
+        }
+        async fn get_sessions_in_range(
+            &self,
+            _guild_id: u64,
+            _user_id: Option<u64>,
+            _since: &DateTime<Utc>,
+            _until: &DateTime<Utc>,
+        ) -> anyhow::Result<Vec<VoiceSessionsEntity>> {
+            todo!()
+        }
+        async fn get_user_daily_activity(
+            &self,
+            _user_id: u64,
+            _guild_id: u64,
+            _since: &DateTime<Utc>,
+            _until: &DateTime<Utc>,
+        ) -> anyhow::Result<Vec<VoiceDailyActivity>> {
+            todo!()
+        }
+        async fn get_guild_daily_stats(
+            &self,
+            _guild_id: u64,
+            _since: &DateTime<Utc>,
+            _until: &DateTime<Utc>,
+            _stat_type: GuildStatType,
+        ) -> anyhow::Result<Vec<GuildDailyStats>> {
+            todo!()
+        }
+    }
+}

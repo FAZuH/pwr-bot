@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use poise::serenity_prelude::small_fixed_array::FixedString;
+use pwr_ext::component;
 
 use crate::bot::command::prelude::*;
 use crate::bot::command::welcome::image_generator::WelcomeCardData;
@@ -59,7 +60,6 @@ pub struct SettingsWelcomeHandler {
     pub service: Arc<dyn FeedSubscriptionProvider>,
     pub generator: Arc<WelcomeImageGenerator>,
     pub guild_id: u64,
-    pub ctx_serenity: poise::serenity_prelude::Context,
 }
 
 impl SettingsWelcomeHandler {
@@ -188,22 +188,12 @@ impl ViewRender for SettingsWelcomeHandler {
         );
 
         let enabled_label = if is_enabled { "Disable" } else { "Enable" };
-        let enabled_button = registry
-            .register(SettingsWelcomeAction::ToggleEnabled)
-            .as_button()
-            .label(enabled_label)
-            .style(if is_enabled {
-                ButtonStyle::Danger
-            } else {
-                ButtonStyle::Success
-            });
-
-        let mut components = vec![
-            CreateContainerComponent::TextDisplay(CreateTextDisplay::new(status_text)),
-            CreateContainerComponent::ActionRow(CreateActionRow::Buttons(
-                vec![enabled_button].into(),
-            )),
-        ];
+        let enabled_style = if is_enabled {
+            ButtonStyle::Danger
+        } else {
+            ButtonStyle::Success
+        };
+        let toggle_action = registry.register(SettingsWelcomeAction::ToggleEnabled);
 
         let default_channels = self
             .model
@@ -212,16 +202,11 @@ impl ViewRender for SettingsWelcomeHandler {
             .as_deref()
             .and_then(|id| GenericChannelId::from_str(id).ok())
             .map(|id| Cow::Owned(vec![id]));
-        let channel_select = registry
-            .register(SettingsWelcomeAction::ChannelSelect)
-            .as_select(CreateSelectMenuKind::Channel {
-                channel_types: Some(Cow::Owned(vec![ChannelType::Text])),
-                default_channels,
-            })
-            .placeholder("Select Welcome Channel");
-        components.push(CreateContainerComponent::ActionRow(
-            CreateActionRow::SelectMenu(channel_select),
-        ));
+        let channel_action = registry.register(SettingsWelcomeAction::ChannelSelect);
+        let channel_kind = CreateSelectMenuKind::Channel {
+            channel_types: Some(Cow::Owned(vec![ChannelType::Text])),
+            default_channels,
+        };
 
         let templates: Vec<_> = (1..=12)
             .map(|i| {
@@ -231,53 +216,30 @@ impl ViewRender for SettingsWelcomeHandler {
                 )
             })
             .collect();
-        let template_select = registry
-            .register(SettingsWelcomeAction::TemplateSelect)
-            .as_select(CreateSelectMenuKind::String {
-                options: templates.into(),
-            })
-            .placeholder(format!(
-                "Select Template (Current: {})",
-                self.model
-                    .settings
-                    .template_id
-                    .clone()
-                    .unwrap_or_else(|| "1".to_string())
-            ));
-        components.push(CreateContainerComponent::ActionRow(
-            CreateActionRow::SelectMenu(template_select),
-        ));
-
-        let mut button_row = vec![
-            registry
-                .register(SettingsWelcomeAction::SetColor(None))
-                .as_button()
-                .style(ButtonStyle::Primary),
-        ];
-        if msgs < 25 {
-            button_row.push(
-                registry
-                    .register(SettingsWelcomeAction::AddMessage(None))
-                    .as_button()
-                    .style(ButtonStyle::Primary),
-            );
-        }
-        button_row.push(
-            CreateButton::new_link(
-                "https://github.com/FAZuH/pwr-bot/blob/main/docs/welcome_templates_preview.png",
-            )
-            .label("Preview Templates"),
+        let template_action = registry.register(SettingsWelcomeAction::TemplateSelect);
+        let template_kind = CreateSelectMenuKind::String {
+            options: templates.into(),
+        };
+        let template_placeholder = format!(
+            "Select Template (Current: {})",
+            self.model
+                .settings
+                .template_id
+                .clone()
+                .unwrap_or_else(|| "1".to_string())
         );
-        components.push(CreateContainerComponent::ActionRow(
-            CreateActionRow::Buttons(button_row.into()),
-        ));
+
+        let set_color_action = registry.register(SettingsWelcomeAction::SetColor(None));
+        let add_message_action = if msgs < 25 {
+            Some(registry.register(SettingsWelcomeAction::AddMessage(None)))
+        } else {
+            None
+        };
 
         let variables_text = "### Template Variables\n> `{{ username }}` - User's display name\n> `{{ user_tag }}` - User's handle (@username)\n> `{{ server_name }}` - Server name\n> `{{ member_count }}` - Total member count\n> `{{ member_number }}` - Member join number\n> `{{ primary_color }}` - Accent color\n> `{{ welcome_message }}` - Your greetings";
-        components.push(CreateContainerComponent::TextDisplay(
-            CreateTextDisplay::new(variables_text),
-        ));
 
-        if msgs > 0 {
+        // Conditional message-removal select (only when messages exist).
+        let mark_removal = if msgs > 0 {
             let options: Vec<_> = self
                 .model
                 .settings
@@ -307,51 +269,128 @@ impl ViewRender for SettingsWelcomeHandler {
                 })
                 .collect();
 
-            let select = registry
-                .register(SettingsWelcomeAction::MarkRemoval)
-                .as_select(CreateSelectMenuKind::String {
-                    options: options.into(),
-                })
-                .min_values(0)
-                .max_values(msgs as u8)
-                .placeholder("Select messages to remove");
-            components.push(CreateContainerComponent::ActionRow(
-                CreateActionRow::SelectMenu(select),
-            ));
+            let action = registry.register(SettingsWelcomeAction::MarkRemoval);
+            Some((action, options))
+        } else {
+            None
+        };
 
-            if !self.model.marked_removal.is_empty() {
-                components.push(CreateContainerComponent::ActionRow(
-                    CreateActionRow::Buttons(
-                        vec![
-                            registry
-                                .register(SettingsWelcomeAction::SaveRemoval)
-                                .as_button()
-                                .style(ButtonStyle::Danger),
-                            registry
-                                .register(SettingsWelcomeAction::CancelRemoval)
-                                .as_button()
-                                .style(ButtonStyle::Secondary),
-                        ]
-                        .into(),
-                    ),
-                ));
+        let save_removal_action = if msgs > 0 && !self.model.marked_removal.is_empty() {
+            Some(registry.register(SettingsWelcomeAction::SaveRemoval))
+        } else {
+            None
+        };
+        let cancel_removal_action = if msgs > 0 && !self.model.marked_removal.is_empty() {
+            Some(registry.register(SettingsWelcomeAction::CancelRemoval))
+        } else {
+            None
+        };
+
+        let back_action = registry.register(SettingsWelcomeAction::Back);
+        let about_action = registry.register(SettingsWelcomeAction::About);
+
+        let mut components: Vec<CreateContainerComponent<'_>> = vec![
+            CreateContainerComponent::TextDisplay(component! {
+                text_display { content: status_text }
+            }),
+            CreateContainerComponent::ActionRow(component! {
+                action_row {
+                    button {
+                        custom_id: toggle_action.id,
+                        label: enabled_label,
+                        style: enabled_style
+                    }
+                }
+            }),
+            CreateContainerComponent::ActionRow(component! {
+                action_row {
+                    select_menu {
+                        custom_id: channel_action.id,
+                        kind: channel_kind,
+                        placeholder: "Select Welcome Channel"
+                    }
+                }
+            }),
+            CreateContainerComponent::ActionRow(component! {
+                action_row {
+                    select_menu {
+                        custom_id: template_action.id,
+                        kind: template_kind,
+                        placeholder: template_placeholder
+                    }
+                }
+            }),
+        ];
+
+        // Action row: Set Color + [Add Welcome Message] + Preview Templates link.
+        let mut button_row: Vec<CreateButton<'_>> =
+            vec![set_color_action.as_button().style(ButtonStyle::Primary)];
+        if let Some(add) = &add_message_action {
+            button_row.push(add.clone().as_button().style(ButtonStyle::Primary));
+        }
+        button_row.push(
+            CreateButton::new_link(
+                "https://github.com/FAZuH/pwr-bot/blob/main/docs/welcome_templates_preview.png",
+            )
+            .label("Preview Templates"),
+        );
+        components.push(CreateContainerComponent::ActionRow(
+            CreateActionRow::Buttons(button_row.into()),
+        ));
+
+        components.push(CreateContainerComponent::TextDisplay(component! {
+            text_display { content: variables_text }
+        }));
+
+        if let Some((action, options)) = mark_removal {
+            let kind = CreateSelectMenuKind::String {
+                options: options.into(),
+            };
+            components.push(CreateContainerComponent::ActionRow(component! {
+                action_row {
+                    select_menu {
+                        custom_id: action.id,
+                        kind: kind,
+                        min_values: 0,
+                        max_values: msgs as u8,
+                        placeholder: "Select messages to remove"
+                    }
+                }
+            }));
+
+            if let (Some(save), Some(cancel)) = (save_removal_action, cancel_removal_action) {
+                components.push(CreateContainerComponent::ActionRow(component! {
+                    action_row {
+                        button {
+                            custom_id: save.id,
+                            label: save.label,
+                            style: ButtonStyle::Danger
+                        }
+                        button {
+                            custom_id: cancel.id,
+                            label: cancel.label,
+                            style: ButtonStyle::Secondary
+                        }
+                    }
+                }));
             }
         }
 
         let container = CreateComponent::Container(CreateContainer::new(components));
-        let nav_buttons = CreateComponent::ActionRow(CreateActionRow::Buttons(
-            vec![
-                registry
-                    .register(SettingsWelcomeAction::Back)
-                    .as_button()
-                    .style(ButtonStyle::Secondary),
-                registry
-                    .register(SettingsWelcomeAction::About)
-                    .as_button()
-                    .style(ButtonStyle::Secondary),
-            ]
-            .into(),
-        ));
+        let nav_buttons = CreateComponent::ActionRow(component! {
+            action_row {
+                button {
+                    custom_id: back_action.id,
+                    label: back_action.label,
+                    style: ButtonStyle::Secondary
+                }
+                button {
+                    custom_id: about_action.id,
+                    label: about_action.label,
+                    style: ButtonStyle::Secondary
+                }
+            }
+        });
 
         vec![container, nav_buttons].into()
     }
@@ -438,7 +477,6 @@ impl CommandHandler for WelcomeSettingsHandler<'_> {
             service,
             generator: generator.clone(),
             guild_id,
-            ctx_serenity: ctx.serenity_context().clone(),
         };
 
         view.current_image_bytes = Self::generate_preview_from(&view.settings, &generator).await;
@@ -469,5 +507,469 @@ action_enum! {
         Back,
         #[label = "🛈 About"]
         About,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::bot::view::ActionRegistry;
+    use crate::bot::view::ResponseKind;
+    use crate::entity::ServerSettings;
+    use crate::entity::WelcomeSettings;
+    use crate::service::error::ServiceError;
+    use crate::service::feed_subscription::FeedUpdateResult;
+    use crate::service::feed_subscription::SubscribeResult;
+    use crate::service::feed_subscription::SubscriberTarget;
+    use crate::service::feed_subscription::UnsubscribeResult;
+    use crate::service::traits::FeedSubscriptionProvider;
+
+    /// A `FeedSubscriptionProvider` whose methods all diverge. Purely to
+    /// satisfy the `service` field of `SettingsWelcomeHandler`; rendering and
+    /// the handlers under test never consult it.
+    struct StubFeedProvider;
+
+    #[async_trait::async_trait]
+    impl FeedSubscriptionProvider for StubFeedProvider {
+        async fn subscribe(
+            &self,
+            _: &str,
+            _: &crate::entity::SubscriberEntity,
+        ) -> Result<SubscribeResult, ServiceError> {
+            todo!()
+        }
+        async fn get_feeds_by_tag(
+            &self,
+            _: &str,
+        ) -> Result<Vec<crate::entity::FeedEntity>, ServiceError> {
+            todo!()
+        }
+        async fn get_both_subscribers(
+            &self,
+            _: String,
+            _: Option<String>,
+        ) -> (
+            Option<crate::entity::SubscriberEntity>,
+            Option<crate::entity::SubscriberEntity>,
+        ) {
+            todo!()
+        }
+        async fn search_and_combine_feeds(
+            &self,
+            _: &str,
+            _: Option<crate::entity::SubscriberEntity>,
+            _: Option<crate::entity::SubscriberEntity>,
+        ) -> Vec<crate::entity::FeedEntity> {
+            todo!()
+        }
+        async fn check_feed_update(
+            &self,
+            _: &crate::entity::FeedEntity,
+        ) -> Result<FeedUpdateResult, ServiceError> {
+            todo!()
+        }
+        async fn unsubscribe(
+            &self,
+            _: &str,
+            _: &crate::entity::SubscriberEntity,
+        ) -> Result<UnsubscribeResult, ServiceError> {
+            todo!()
+        }
+        async fn list_paginated_subscriptions(
+            &self,
+            _: &crate::entity::SubscriberEntity,
+            _: u32,
+            _: u32,
+        ) -> Result<Vec<crate::service::feed_subscription::Subscription>, ServiceError> {
+            todo!()
+        }
+        async fn get_subscription_count(
+            &self,
+            _: &crate::entity::SubscriberEntity,
+        ) -> Result<u32, ServiceError> {
+            todo!()
+        }
+        async fn search_subcriptions(
+            &self,
+            _: &crate::entity::SubscriberEntity,
+            _: &str,
+        ) -> Result<Vec<crate::entity::FeedEntity>, ServiceError> {
+            todo!()
+        }
+        async fn get_or_create_feed(
+            &self,
+            _: &str,
+        ) -> Result<crate::entity::FeedEntity, ServiceError> {
+            todo!()
+        }
+        async fn get_or_create_subscriber(
+            &self,
+            _: &SubscriberTarget,
+        ) -> Result<crate::entity::SubscriberEntity, ServiceError> {
+            todo!()
+        }
+        async fn get_feed_by_source_url(
+            &self,
+            _: &str,
+        ) -> Result<Option<crate::entity::FeedEntity>, ServiceError> {
+            todo!()
+        }
+        async fn get_server_settings(&self, _: u64) -> Result<ServerSettings, ServiceError> {
+            todo!()
+        }
+        async fn get_subscribers_by_type_and_feed(
+            &self,
+            _: crate::entity::SubscriberType,
+            _: i32,
+        ) -> Result<Vec<crate::entity::SubscriberEntity>, ServiceError> {
+            todo!()
+        }
+        async fn update_server_settings(
+            &self,
+            _: u64,
+            _: ServerSettings,
+        ) -> Result<(), ServiceError> {
+            todo!()
+        }
+    }
+
+    /// Rewrites every `custom_id` of the shape `Type:timestamp:counter` to a
+    /// stable sentinel `id:Type`, so the rendered shape is reproducible across
+    /// runs while still pinning kind/label/style/prefix/order.
+    fn normalize_custom_ids(value: &mut serde_json::Value) {
+        match value {
+            serde_json::Value::Object(map) => {
+                if let Some(serde_json::Value::String(cid)) = map.get("custom_id") {
+                    let parts: Vec<&str> = cid.split(':').collect();
+                    if parts.len() == 3
+                        && parts[1].chars().all(|c| c.is_ascii_digit())
+                        && parts[2].chars().all(|c| c.is_ascii_digit())
+                    {
+                        let replacement = serde_json::json!(format!("id:{}", parts[0]));
+                        map.insert("custom_id".to_string(), replacement);
+                    }
+                }
+                for v in map.values_mut() {
+                    normalize_custom_ids(v);
+                }
+            }
+            serde_json::Value::Array(arr) => {
+                for v in arr {
+                    normalize_custom_ids(v);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn make_handler(welcome: WelcomeSettings, marked: &[usize]) -> SettingsWelcomeHandler {
+        let mut model = WelcomeSettingsModel::new(welcome);
+        for &i in marked {
+            model.marked_removal.insert(i);
+        }
+        SettingsWelcomeHandler {
+            model,
+            settings: ServerSettings::default(),
+            current_image_bytes: None,
+            service: Arc::new(StubFeedProvider),
+            generator: Arc::new(WelcomeImageGenerator::new()),
+            guild_id: 1,
+        }
+    }
+
+    fn capture(handler: &SettingsWelcomeHandler) -> serde_json::Value {
+        let mut registry = ActionRegistry::new();
+        let response = handler.render(&mut registry);
+        let ResponseKind::Component(components) = response else {
+            panic!("expected a component response");
+        };
+        let mut value = serde_json::to_value(&components).unwrap();
+        normalize_custom_ids(&mut value);
+        value
+    }
+
+    #[test]
+    fn welcome_render_with_msgs_snapshot() {
+        let welcome = WelcomeSettings {
+            enabled: Some(true),
+            channel_id: Some("123456789".to_string()),
+            primary_color: None,
+            template_id: Some("1".to_string()),
+            messages: Some(vec!["Hello!".to_string(), "Welcome!!".to_string()]),
+        };
+        let handler = make_handler(welcome, &[1]);
+        let value = capture(&handler);
+        assert_eq!(
+            value,
+            serde_json::json!([
+                {
+                    "type": 17,
+                    "components": [
+                        {
+                            "type": 10,
+                            "content": "-# **Settings > Welcome**\n## Welcome Settings\n\n> 🛈  Welcome cards are **active**."
+                        },
+                        {
+                            "type": 1,
+                            "components": [
+                                {
+                                    "type": 2,
+                                    "custom_id": "id:SettingsWelcomeAction",
+                                    "disabled": false,
+                                    "label": "Disable",
+                                    "style": 4
+                                }
+                            ]
+                        },
+                        {
+                            "type": 1,
+                            "components": [
+                                {
+                                    "type": 8,
+                                    "custom_id": "id:SettingsWelcomeAction",
+                                    "channel_types": [0],
+                                    "default_values": [ { "id": 123456789, "type": "channel" } ],
+                                    "placeholder": "Select Welcome Channel"
+                                }
+                            ]
+                        },
+                        {
+                            "type": 1,
+                            "components": [
+                                {
+                                    "type": 3,
+                                    "custom_id": "id:SettingsWelcomeAction",
+                                    "options": [
+                                        { "label": "Template 1", "value": "1" },
+                                        { "label": "Template 2", "value": "2" },
+                                        { "label": "Template 3", "value": "3" },
+                                        { "label": "Template 4", "value": "4" },
+                                        { "label": "Template 5", "value": "5" },
+                                        { "label": "Template 6", "value": "6" },
+                                        { "label": "Template 7", "value": "7" },
+                                        { "label": "Template 8", "value": "8" },
+                                        { "label": "Template 9", "value": "9" },
+                                        { "label": "Template 10", "value": "10" },
+                                        { "label": "Template 11", "value": "11" },
+                                        { "label": "Template 12", "value": "12" }
+                                    ],
+                                    "placeholder": "Select Template (Current: 1)"
+                                }
+                            ]
+                        },
+                        {
+                            "type": 1,
+                            "components": [
+                                {
+                                    "type": 2,
+                                    "custom_id": "id:SettingsWelcomeAction",
+                                    "disabled": false,
+                                    "label": "Set Color",
+                                    "style": 1
+                                },
+                                {
+                                    "type": 2,
+                                    "custom_id": "id:SettingsWelcomeAction",
+                                    "disabled": false,
+                                    "label": "Add Welcome Message",
+                                    "style": 1
+                                },
+                                {
+                                    "type": 2,
+                                    "disabled": false,
+                                    "label": "Preview Templates",
+                                    "style": 5,
+                                    "url": "https://github.com/FAZuH/pwr-bot/blob/main/docs/welcome_templates_preview.png"
+                                }
+                            ]
+                        },
+                        {
+                            "type": 10,
+                            "content": "### Template Variables\n> `{{ username }}` - User's display name\n> `{{ user_tag }}` - User's handle (@username)\n> `{{ server_name }}` - Server name\n> `{{ member_count }}` - Total member count\n> `{{ member_number }}` - Member join number\n> `{{ primary_color }}` - Accent color\n> `{{ welcome_message }}` - Your greetings"
+                        },
+                        {
+                            "type": 1,
+                            "components": [
+                                {
+                                    "type": 3,
+                                    "custom_id": "id:SettingsWelcomeAction",
+                                    "max_values": 2,
+                                    "min_values": 0,
+                                    "options": [
+                                        { "label": "Hello!", "value": "0" },
+                                        { "default": true, "label": "❌ Welcome!!", "value": "1" }
+                                    ],
+                                    "placeholder": "Select messages to remove"
+                                }
+                            ]
+                        },
+                        {
+                            "type": 1,
+                            "components": [
+                                {
+                                    "type": 2,
+                                    "custom_id": "id:SettingsWelcomeAction",
+                                    "disabled": false,
+                                    "label": "Save Removals",
+                                    "style": 4
+                                },
+                                {
+                                    "type": 2,
+                                    "custom_id": "id:SettingsWelcomeAction",
+                                    "disabled": false,
+                                    "label": "Cancel",
+                                    "style": 2
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "type": 1,
+                    "components": [
+                        {
+                            "type": 2,
+                            "custom_id": "id:SettingsWelcomeAction",
+                            "disabled": false,
+                            "label": "❮ Back",
+                            "style": 2
+                        },
+                        {
+                            "type": 2,
+                            "custom_id": "id:SettingsWelcomeAction",
+                            "disabled": false,
+                            "label": "🛈 About",
+                            "style": 2
+                        }
+                    ]
+                }
+            ])
+        );
+    }
+
+    #[test]
+    fn welcome_render_no_msgs_snapshot() {
+        let welcome = WelcomeSettings {
+            enabled: Some(true),
+            channel_id: Some("123456789".to_string()),
+            primary_color: None,
+            template_id: Some("1".to_string()),
+            messages: None,
+        };
+        let handler = make_handler(welcome, &[]);
+        let value = capture(&handler);
+        assert_eq!(
+            value,
+            serde_json::json!([
+                {
+                    "type": 17,
+                    "components": [
+                        {
+                            "type": 10,
+                            "content": "-# **Settings > Welcome**\n## Welcome Settings\n\n> 🛈  Welcome cards are **active**."
+                        },
+                        {
+                            "type": 1,
+                            "components": [
+                                {
+                                    "type": 2,
+                                    "custom_id": "id:SettingsWelcomeAction",
+                                    "disabled": false,
+                                    "label": "Disable",
+                                    "style": 4
+                                }
+                            ]
+                        },
+                        {
+                            "type": 1,
+                            "components": [
+                                {
+                                    "type": 8,
+                                    "custom_id": "id:SettingsWelcomeAction",
+                                    "channel_types": [0],
+                                    "default_values": [ { "id": 123456789, "type": "channel" } ],
+                                    "placeholder": "Select Welcome Channel"
+                                }
+                            ]
+                        },
+                        {
+                            "type": 1,
+                            "components": [
+                                {
+                                    "type": 3,
+                                    "custom_id": "id:SettingsWelcomeAction",
+                                    "options": [
+                                        { "label": "Template 1", "value": "1" },
+                                        { "label": "Template 2", "value": "2" },
+                                        { "label": "Template 3", "value": "3" },
+                                        { "label": "Template 4", "value": "4" },
+                                        { "label": "Template 5", "value": "5" },
+                                        { "label": "Template 6", "value": "6" },
+                                        { "label": "Template 7", "value": "7" },
+                                        { "label": "Template 8", "value": "8" },
+                                        { "label": "Template 9", "value": "9" },
+                                        { "label": "Template 10", "value": "10" },
+                                        { "label": "Template 11", "value": "11" },
+                                        { "label": "Template 12", "value": "12" }
+                                    ],
+                                    "placeholder": "Select Template (Current: 1)"
+                                }
+                            ]
+                        },
+                        {
+                            "type": 1,
+                            "components": [
+                                {
+                                    "type": 2,
+                                    "custom_id": "id:SettingsWelcomeAction",
+                                    "disabled": false,
+                                    "label": "Set Color",
+                                    "style": 1
+                                },
+                                {
+                                    "type": 2,
+                                    "custom_id": "id:SettingsWelcomeAction",
+                                    "disabled": false,
+                                    "label": "Add Welcome Message",
+                                    "style": 1
+                                },
+                                {
+                                    "type": 2,
+                                    "disabled": false,
+                                    "label": "Preview Templates",
+                                    "style": 5,
+                                    "url": "https://github.com/FAZuH/pwr-bot/blob/main/docs/welcome_templates_preview.png"
+                                }
+                            ]
+                        },
+                        {
+                            "type": 10,
+                            "content": "### Template Variables\n> `{{ username }}` - User's display name\n> `{{ user_tag }}` - User's handle (@username)\n> `{{ server_name }}` - Server name\n> `{{ member_count }}` - Total member count\n> `{{ member_number }}` - Member join number\n> `{{ primary_color }}` - Accent color\n> `{{ welcome_message }}` - Your greetings"
+                        }
+                    ]
+                },
+                {
+                    "type": 1,
+                    "components": [
+                        {
+                            "type": 2,
+                            "custom_id": "id:SettingsWelcomeAction",
+                            "disabled": false,
+                            "label": "❮ Back",
+                            "style": 2
+                        },
+                        {
+                            "type": 2,
+                            "custom_id": "id:SettingsWelcomeAction",
+                            "disabled": false,
+                            "label": "🛈 About",
+                            "style": 2
+                        }
+                    ]
+                }
+            ])
+        );
     }
 }

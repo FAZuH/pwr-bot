@@ -8,6 +8,7 @@ use contribution_grid::ContributionGraph;
 use contribution_grid::builtins::Strategy;
 use contribution_grid::builtins::Theme;
 use log::trace;
+use pwr_ext::component;
 
 use crate::bot::command::prelude::*;
 use crate::bot::command::voice::GuildStatType;
@@ -559,90 +560,117 @@ impl ViewRender for VoiceStatsView {
     fn render(&self, registry: &mut ActionRegistry<VoiceStatsAction>) -> ResponseKind<'_> {
         use VoiceStatsAction::*;
 
-        let mut container_components = vec![CreateContainerComponent::TextDisplay(
-            CreateTextDisplay::new(self.format_stats_summary()),
-        )];
-
-        container_components.push(CreateContainerComponent::Separator(
-            CreateSeparator::new().divider(true),
-        ));
-
-        if self.data.user_activity.is_empty() && self.data.guild_stats.is_empty() {
-            container_components.push(CreateContainerComponent::TextDisplay(
-                CreateTextDisplay::new(
-                    "No voice activity recorded for this time range.\n\nJoin a **voice channel** to start tracking!",
-                ),
-            ));
+        // Keep the original registration order so the custom_id counter
+        // assignment (pinned by the GUI tests) stays byte-identical.
+        let toggle = registry.register(ToggleDataMode);
+        let time_yearly = registry.register(TimeYearly);
+        let time_monthly = registry.register(TimeMonthly);
+        let time_weekly = registry.register(TimeWeekly);
+        let time_hourly = registry.register(TimeHourly);
+        let stat_unique = if !self.model.is_user_stats() {
+            Some(registry.register(StatUniqueUsers))
         } else {
-            container_components.push(CreateContainerComponent::MediaGallery(
-                CreateMediaGallery::new(vec![CreateMediaGalleryItem::new(
-                    CreateUnfurledMediaItem::new(format!(
-                        "attachment://{VOICE_STATS_IMAGE_FILENAME}"
-                    )),
-                )]),
-            ));
-        }
+            None
+        };
+        let stat_total = registry.register(StatTotalTime);
+        let stat_avg = registry.register(StatAverageTime);
+        let user_select = if self.model.is_user_stats() {
+            Some(registry.register(SelectUser))
+        } else {
+            None
+        };
 
-        // Add Data Mode Toggle to bottom of Container
         let toggle_label = if self.model.is_user_stats() {
             "Show server stats"
         } else {
             "Show user stats"
         };
 
-        let toggle_button = registry
-            .register(ToggleDataMode)
-            .as_button()
-            .label(toggle_label)
-            .style(ButtonStyle::Primary);
+        // Media gallery when there is data, otherwise a "no activity" notice.
+        let focus_component = if self.data.user_activity.is_empty()
+            && self.data.guild_stats.is_empty()
+        {
+            CreateContainerComponent::TextDisplay(component! {
+                text_display {
+                    content: "No voice activity recorded for this time range.\n\nJoin a **voice channel** to start tracking!"
+                }
+            })
+        } else {
+            CreateContainerComponent::MediaGallery(component! {
+                media_gallery {
+                    media_gallery_item {
+                        media: format!("attachment://{VOICE_STATS_IMAGE_FILENAME}")
+                    }
+                }
+            })
+        };
 
-        container_components.push(CreateContainerComponent::ActionRow(
-            CreateActionRow::Buttons(vec![toggle_button].into()),
-        ));
+        let container = CreateContainer::new(vec![
+            CreateContainerComponent::TextDisplay(component! {
+                text_display { content: self.format_stats_summary() }
+            }),
+            CreateContainerComponent::Separator(component! {
+                separator { divider: true }
+            }),
+            focus_component,
+            CreateContainerComponent::ActionRow(component! {
+                action_row {
+                    button {
+                        custom_id: toggle.id,
+                        label: toggle_label,
+                        style: ButtonStyle::Primary
+                    }
+                }
+            }),
+        ]);
 
-        let mut components = vec![CreateComponent::Container(CreateContainer::new(
-            container_components,
-        ))];
+        let mut components = vec![CreateComponent::Container(container)];
 
-        // 1. Time Range Row
-        let time_buttons = vec![
-            registry.register(TimeYearly).as_button().style(
-                if self.model.time_range == VoiceStatsTimeRange::Yearly {
-                    ButtonStyle::Primary
-                } else {
-                    ButtonStyle::Secondary
-                },
-            ),
-            registry.register(TimeMonthly).as_button().style(
-                if self.model.time_range == VoiceStatsTimeRange::Monthly {
-                    ButtonStyle::Primary
-                } else {
-                    ButtonStyle::Secondary
-                },
-            ),
-            registry.register(TimeWeekly).as_button().style(
-                if self.model.time_range == VoiceStatsTimeRange::Weekly {
-                    ButtonStyle::Primary
-                } else {
-                    ButtonStyle::Secondary
-                },
-            ),
-            registry.register(TimeHourly).as_button().style(
-                if self.model.time_range == VoiceStatsTimeRange::Hourly {
-                    ButtonStyle::Primary
-                } else {
-                    ButtonStyle::Secondary
-                },
-            ),
-        ];
-        components.push(CreateComponent::ActionRow(CreateActionRow::Buttons(
-            time_buttons.into(),
-        )));
+        components.push(CreateComponent::ActionRow(component! {
+            action_row {
+                button {
+                    custom_id: time_yearly.id,
+                    label: time_yearly.label,
+                    style: if self.model.time_range == VoiceStatsTimeRange::Yearly {
+                        ButtonStyle::Primary
+                    } else {
+                        ButtonStyle::Secondary
+                    }
+                }
+                button {
+                    custom_id: time_monthly.id,
+                    label: time_monthly.label,
+                    style: if self.model.time_range == VoiceStatsTimeRange::Monthly {
+                        ButtonStyle::Primary
+                    } else {
+                        ButtonStyle::Secondary
+                    }
+                }
+                button {
+                    custom_id: time_weekly.id,
+                    label: time_weekly.label,
+                    style: if self.model.time_range == VoiceStatsTimeRange::Weekly {
+                        ButtonStyle::Primary
+                    } else {
+                        ButtonStyle::Secondary
+                    }
+                }
+                button {
+                    custom_id: time_hourly.id,
+                    label: time_hourly.label,
+                    style: if self.model.time_range == VoiceStatsTimeRange::Hourly {
+                        ButtonStyle::Primary
+                    } else {
+                        ButtonStyle::Secondary
+                    }
+                }
+            }
+        }));
 
-        // 2. Aggregation Row (Only for Guild)
+        // Aggregation buttons (Unique Users only for the guild view).
         let mut stat_buttons = vec![];
-        if !self.model.is_user_stats() {
-            stat_buttons.push(registry.register(StatUniqueUsers).as_button().style(
+        if let Some(unique) = &stat_unique {
+            stat_buttons.push(unique.clone().as_button().style(
                 if self.model.stat_type == GuildStatType::ActiveUserCount {
                     ButtonStyle::Primary
                 } else {
@@ -650,14 +678,14 @@ impl ViewRender for VoiceStatsView {
                 },
             ));
         }
-        stat_buttons.push(registry.register(StatTotalTime).as_button().style(
+        stat_buttons.push(stat_total.clone().as_button().style(
             if self.model.stat_type == GuildStatType::TotalTime {
                 ButtonStyle::Primary
             } else {
                 ButtonStyle::Secondary
             },
         ));
-        stat_buttons.push(registry.register(StatAverageTime).as_button().style(
+        stat_buttons.push(stat_avg.clone().as_button().style(
             if self.model.stat_type == GuildStatType::AverageTime {
                 ButtonStyle::Primary
             } else {
@@ -668,15 +696,20 @@ impl ViewRender for VoiceStatsView {
             stat_buttons.into(),
         )));
 
-        // 3. User Select Menu (Only for User)
+        // User select menu (only for the user view).
         if self.model.is_user_stats() {
-            let default_users = Some(std::borrow::Cow::Owned(vec![self.user.id]));
-            let user_select = registry
-                .register(SelectUser)
-                .as_select(CreateSelectMenuKind::User { default_users });
-            components.push(CreateComponent::ActionRow(CreateActionRow::SelectMenu(
-                user_select,
-            )));
+            let select = user_select.as_ref().expect("user select registered");
+            let user_kind = CreateSelectMenuKind::User {
+                default_users: Some(std::borrow::Cow::Owned(vec![self.user.id])),
+            };
+            components.push(CreateComponent::ActionRow(component! {
+                action_row {
+                    select_menu {
+                        custom_id: select.id.clone(),
+                        kind: user_kind
+                    }
+                }
+            }));
         }
 
         components.into()
@@ -830,5 +863,273 @@ impl CommandHandler for VoiceStatsHandler<'_> {
         engine.run().await?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use chrono::NaiveDate;
+
+    use super::*;
+    use crate::bot::command::voice::test_support::StubVoiceTracker;
+    use crate::bot::view::ActionRegistry;
+    use crate::bot::view::ResponseKind;
+
+    /// Rewrites every `custom_id` of the shape `Type:timestamp:counter` to a
+    /// stable sentinel `id:Type`, and redacts now-dependent Discord timestamps
+    /// (`<t:digits:f>` → `<t:TS:f>`) from text content, so the rendered shape is
+    /// reproducible across runs while still pinning kind/label/style/order.
+    fn normalize(value: &mut serde_json::Value) {
+        match value {
+            serde_json::Value::Object(map) => {
+                if let Some(serde_json::Value::String(cid)) = map.get("custom_id") {
+                    let parts: Vec<&str> = cid.split(':').collect();
+                    if parts.len() == 3
+                        && parts[1].chars().all(|c| c.is_ascii_digit())
+                        && parts[2].chars().all(|c| c.is_ascii_digit())
+                    {
+                        map.insert(
+                            "custom_id".to_string(),
+                            serde_json::json!(format!("id:{}", parts[0])),
+                        );
+                    }
+                }
+                for v in map.values_mut() {
+                    normalize(v);
+                }
+            }
+            serde_json::Value::Array(arr) => {
+                for v in arr {
+                    normalize(v);
+                }
+            }
+            serde_json::Value::String(s) => {
+                let redacted = redact_timestamps(s);
+                if redacted != *s {
+                    *s = redacted;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Redacts the numeric unix timestamp in a Discord `<t:...>` tag.
+    fn redact_timestamps(s: &str) -> String {
+        let mut out = String::with_capacity(s.len());
+        let mut rest = s;
+        while let Some(idx) = rest.find("<t:") {
+            let (before, after) = rest.split_at(idx);
+            out.push_str(before);
+            // after begins with "<t:...>"; find the closing '>'.
+            let close = after.find('>').expect("unclosed <t: tag");
+            let (tag, remaining) = after.split_at(close + 1);
+            let parts: Vec<&str> = tag.split(':').collect();
+            out.push_str("<t:TS");
+            for p in &parts[2..] {
+                out.push(':');
+                out.push_str(p);
+            }
+            rest = remaining;
+        }
+        out.push_str(rest);
+        out
+    }
+
+    #[test]
+    fn voice_stats_render_snapshot_guild_state() {
+        let user: User = serde_json::from_value(serde_json::json!({
+            "id": "123456789",
+            "username": "tester"
+        }))
+        .unwrap();
+
+        let data = VoiceStatsData {
+            user: None,
+            guild_name: "Test Server".to_string(),
+            user_activity: vec![],
+            guild_stats: vec![
+                GuildDailyStats {
+                    day: NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(),
+                    value: 3600,
+                },
+                GuildDailyStats {
+                    day: NaiveDate::from_ymd_opt(2024, 1, 2).unwrap(),
+                    value: 7200,
+                },
+            ],
+            stat_type: GuildStatType::TotalTime,
+            time_range: VoiceStatsTimeRange::Monthly,
+            raw_sessions: vec![],
+        };
+
+        let view = VoiceStatsView {
+            model: VoiceStatsModel {
+                time_range: VoiceStatsTimeRange::Monthly,
+                stat_type: GuildStatType::TotalTime,
+                user_id: None,
+                fallback_user_id: 1,
+            },
+            data,
+            image_bytes: None,
+            service: Arc::new(StubVoiceTracker),
+            guild_id: 1,
+            user,
+        };
+
+        let mut registry = ActionRegistry::new();
+        let response = view.render(&mut registry);
+        let ResponseKind::Component(components) = response else {
+            panic!("expected a component response");
+        };
+        let mut value = serde_json::to_value(&components).unwrap();
+        normalize(&mut value);
+        assert_eq!(
+            value,
+            serde_json::json!([
+                {
+                    "type": 17,
+                    "components": [
+                        {
+                            "type": 10,
+                            "content": "### Voice Stats\n-# Time Range: **Monthly** — <t:TS:f> to <t:TS:R>\n\n**Server:** Test Server\n**Peak Total Time:** 2h\n**Most Active:** 2h on <t:TS:d>"
+                        },
+                        { "type": 14, "divider": true },
+                        {
+                            "type": 12,
+                            "items": [ { "media": { "url": "attachment://voice_stats.png" } } ]
+                        },
+                        {
+                            "type": 1,
+                            "components": [
+                                {
+                                    "type": 2,
+                                    "custom_id": "id:VoiceStatsAction",
+                                    "disabled": false,
+                                    "label": "Show user stats",
+                                    "style": 1
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "type": 1,
+                    "components": [
+                        { "type": 2, "custom_id": "id:VoiceStatsAction", "disabled": false, "label": "Yearly", "style": 2 },
+                        { "type": 2, "custom_id": "id:VoiceStatsAction", "disabled": false, "label": "Monthly", "style": 1 },
+                        { "type": 2, "custom_id": "id:VoiceStatsAction", "disabled": false, "label": "Weekly", "style": 2 },
+                        { "type": 2, "custom_id": "id:VoiceStatsAction", "disabled": false, "label": "Hourly", "style": 2 }
+                    ]
+                },
+                {
+                    "type": 1,
+                    "components": [
+                        { "type": 2, "custom_id": "id:VoiceStatsAction", "disabled": false, "label": "Unique Users", "style": 2 },
+                        { "type": 2, "custom_id": "id:VoiceStatsAction", "disabled": false, "label": "Total Time", "style": 1 },
+                        { "type": 2, "custom_id": "id:VoiceStatsAction", "disabled": false, "label": "Average Time", "style": 2 }
+                    ]
+                }
+            ])
+        );
+    }
+
+    #[test]
+    fn voice_stats_render_snapshot_user_state() {
+        let user: User = serde_json::from_value(serde_json::json!({
+            "id": "123456789",
+            "username": "tester"
+        }))
+        .unwrap();
+
+        let data = VoiceStatsData {
+            user: Some(user.clone()),
+            guild_name: "Test Server".to_string(),
+            user_activity: vec![],
+            guild_stats: vec![],
+            stat_type: GuildStatType::TotalTime,
+            time_range: VoiceStatsTimeRange::Monthly,
+            raw_sessions: vec![],
+        };
+
+        let view = VoiceStatsView {
+            model: VoiceStatsModel {
+                time_range: VoiceStatsTimeRange::Monthly,
+                stat_type: GuildStatType::TotalTime,
+                user_id: Some(user.id.get()),
+                fallback_user_id: 1,
+            },
+            data,
+            image_bytes: None,
+            service: Arc::new(StubVoiceTracker),
+            guild_id: 1,
+            user,
+        };
+
+        let mut registry = ActionRegistry::new();
+        let response = view.render(&mut registry);
+        let ResponseKind::Component(components) = response else {
+            panic!("expected a component response");
+        };
+        let mut value = serde_json::to_value(&components).unwrap();
+        normalize(&mut value);
+        assert_eq!(
+            value,
+            serde_json::json!([
+                {
+                    "type": 17,
+                    "components": [
+                        {
+                            "type": 10,
+                            "content": "### Voice Stats\n-# Time Range: **Monthly** — <t:TS:f> to <t:TS:R>\n\n**User:** tester\n**Total Time:** 0s\n**Average Daily:** 0s\n**Current Streak:** 0 day(s)"
+                        },
+                        { "type": 14, "divider": true },
+                        {
+                            "type": 10,
+                            "content": "No voice activity recorded for this time range.\n\nJoin a **voice channel** to start tracking!"
+                        },
+                        {
+                            "type": 1,
+                            "components": [
+                                {
+                                    "type": 2,
+                                    "custom_id": "id:VoiceStatsAction",
+                                    "disabled": false,
+                                    "label": "Show server stats",
+                                    "style": 1
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "type": 1,
+                    "components": [
+                        { "type": 2, "custom_id": "id:VoiceStatsAction", "disabled": false, "label": "Yearly", "style": 2 },
+                        { "type": 2, "custom_id": "id:VoiceStatsAction", "disabled": false, "label": "Monthly", "style": 1 },
+                        { "type": 2, "custom_id": "id:VoiceStatsAction", "disabled": false, "label": "Weekly", "style": 2 },
+                        { "type": 2, "custom_id": "id:VoiceStatsAction", "disabled": false, "label": "Hourly", "style": 2 }
+                    ]
+                },
+                {
+                    "type": 1,
+                    "components": [
+                        { "type": 2, "custom_id": "id:VoiceStatsAction", "disabled": false, "label": "Total Time", "style": 1 },
+                        { "type": 2, "custom_id": "id:VoiceStatsAction", "disabled": false, "label": "Average Time", "style": 2 }
+                    ]
+                },
+                {
+                    "type": 1,
+                    "components": [
+                        {
+                            "type": 5,
+                            "custom_id": "id:VoiceStatsAction",
+                            "default_values": [ { "id": 123456789, "type": "user" } ]
+                        }
+                    ]
+                }
+            ])
+        );
     }
 }

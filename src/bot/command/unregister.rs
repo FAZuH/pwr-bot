@@ -1,5 +1,7 @@
 //! Admin unregister command.
 
+use pwr_ext::component;
+
 use crate::bot::command::prelude::*;
 
 /// Unregisters server slash commands
@@ -70,14 +72,72 @@ impl CommandUnregistrationView {
             format!("### {title}\nUnregistering all server commands...")
         };
 
-        let container = CreateComponent::Container(CreateContainer::new(vec![
-            CreateContainerComponent::TextDisplay(CreateTextDisplay::new(status_text)),
-        ]));
+        let container = component! {
+            container {
+                text_display { content: status_text }
+            }
+        };
 
-        vec![container].into()
+        vec![CreateComponent::Container(container)].into()
     }
 
     pub fn create_reply(&mut self) -> poise::CreateReply<'_> {
         self.create_response().into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+    use crate::bot::view::ResponseKind;
+
+    #[test]
+    fn unregistration_view_incomplete_snapshot() {
+        let mut view = CommandUnregistrationView::new();
+        let response = view.create_response();
+        let ResponseKind::Component(components) = response else {
+            panic!("expected a component response");
+        };
+        let value = serde_json::to_value(&components).unwrap();
+        assert_eq!(
+            value,
+            json!([
+                {
+                    "type": 17,
+                    "components": [
+                        {
+                            "type": 10,
+                            "content": "### Unregistering Commands\nUnregistering all server commands..."
+                        }
+                    ]
+                }
+            ])
+        );
+    }
+
+    #[test]
+    fn unregistration_view_complete_snapshot() {
+        let mut view = CommandUnregistrationView::new().complete(456);
+        let response = view.create_response();
+        let ResponseKind::Component(components) = response else {
+            panic!("expected a component response");
+        };
+        let value = serde_json::to_value(&components).unwrap();
+        assert_eq!(
+            value,
+            json!([
+                {
+                    "type": 17,
+                    "components": [
+                        {
+                            "type": 10,
+                            "content": "### Command Unregistration Complete\nSuccessfully unregistered all commands in 456ms"
+                        }
+                    ]
+                }
+            ])
+        );
     }
 }

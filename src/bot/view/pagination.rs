@@ -1,5 +1,6 @@
 //! Pagination component for Discord views.
 use poise::serenity_prelude::*;
+use pwr_ext::component;
 
 use crate::action_enum;
 use crate::bot::Error;
@@ -108,43 +109,52 @@ impl PaginationView {
         registry: &mut ActionRegistry<T>,
         wrap: fn(PaginationAction) -> T,
     ) -> CreateComponent<'b> {
-        let mut first = registry
-            .register(wrap(PaginationAction::First))
-            .as_button()
-            .style(ButtonStyle::Primary);
+        let first = registry.register(wrap(PaginationAction::First));
+        let prev = registry.register(wrap(PaginationAction::Prev));
 
-        let mut prev = registry
-            .register(wrap(PaginationAction::Prev))
-            .as_button()
-            .style(ButtonStyle::Primary);
+        let current_page = self.state.current_page;
+        let pages = self.state.pages;
+        let disabled = self.disabled;
 
-        let current = CreateButton::new("current")
-            .label(format!("{}/{}", self.state.current_page, self.state.pages))
-            .style(ButtonStyle::Secondary)
-            .disabled(true);
+        let next = registry.register(wrap(PaginationAction::Next));
+        let last = registry.register(wrap(PaginationAction::Last));
 
-        let mut next = registry
-            .register(wrap(PaginationAction::Next))
-            .as_button()
-            .style(ButtonStyle::Primary);
+        let row = component! {
+            action_row {
+                button {
+                    custom_id: first.id,
+                    label: first.label,
+                    style: ButtonStyle::Primary,
+                    disabled: current_page == 1 || disabled
+                }
+                button {
+                    custom_id: prev.id,
+                    label: prev.label,
+                    style: ButtonStyle::Primary,
+                    disabled: current_page == 1 || disabled
+                }
+                button {
+                    custom_id: "current",
+                    label: format!("{current_page}/{pages}"),
+                    style: ButtonStyle::Secondary,
+                    disabled: true
+                }
+                button {
+                    custom_id: next.id,
+                    label: next.label,
+                    style: ButtonStyle::Primary,
+                    disabled: current_page == pages || disabled
+                }
+                button {
+                    custom_id: last.id,
+                    label: last.label,
+                    style: ButtonStyle::Primary,
+                    disabled: current_page == pages || disabled
+                }
+            }
+        };
 
-        let mut last = registry
-            .register(wrap(PaginationAction::Last))
-            .as_button()
-            .style(ButtonStyle::Primary);
-
-        if self.state.current_page == 1 || self.disabled {
-            first = first.disabled(true);
-            prev = prev.disabled(true);
-        }
-        if self.state.current_page == self.state.pages || self.disabled {
-            next = next.disabled(true);
-            last = last.disabled(true);
-        }
-
-        CreateComponent::ActionRow(CreateActionRow::Buttons(
-            vec![first, prev, current, next, last].into(),
-        ))
+        CreateComponent::ActionRow(row)
     }
 }
 
@@ -175,6 +185,86 @@ impl ViewHandler for PaginationView {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bot::view::ActionRegistry;
+
+    /// Rewrites every `custom_id` of the shape `Type:timestamp:counter` to a
+    /// stable sentinel `id:Type`, so the rendered shape is reproducible across
+    /// runs while still pinning kind/label/style/prefix/order.
+    fn normalize_custom_ids(value: &mut serde_json::Value) {
+        match value {
+            serde_json::Value::Object(map) => {
+                if let Some(serde_json::Value::String(cid)) = map.get("custom_id") {
+                    let parts: Vec<&str> = cid.split(':').collect();
+                    if parts.len() == 3
+                        && parts[1].chars().all(|c| c.is_ascii_digit())
+                        && parts[2].chars().all(|c| c.is_ascii_digit())
+                    {
+                        let replacement = serde_json::json!(format!("id:{}", parts[0]));
+                        map.insert("custom_id".to_string(), replacement);
+                    }
+                }
+                for v in map.values_mut() {
+                    normalize_custom_ids(v);
+                }
+            }
+            serde_json::Value::Array(arr) => {
+                for v in arr {
+                    normalize_custom_ids(v);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    #[test]
+    fn pagination_component_middle_page_snapshot() {
+        let view = PaginationView {
+            state: PaginationModel::new(5, 10, 2),
+            disabled: false,
+        };
+        let mut registry = ActionRegistry::<PaginationAction>::new();
+        let component = view.create_component(&mut registry, |a| a);
+        let mut value = serde_json::to_value(&component).unwrap();
+        normalize_custom_ids(&mut value);
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "type": 1,
+                "components": [
+                    { "type": 2, "custom_id": "id:PaginationAction", "disabled": false, "label": "⏮", "style": 1 },
+                    { "type": 2, "custom_id": "id:PaginationAction", "disabled": false, "label": "◀", "style": 1 },
+                    { "type": 2, "custom_id": "current", "disabled": true, "label": "2/5", "style": 2 },
+                    { "type": 2, "custom_id": "id:PaginationAction", "disabled": false, "label": "▶", "style": 1 },
+                    { "type": 2, "custom_id": "id:PaginationAction", "disabled": false, "label": "⏭", "style": 1 }
+                ]
+            })
+        );
+    }
+
+    #[test]
+    fn pagination_component_first_page_snapshot() {
+        let view = PaginationView {
+            state: PaginationModel::new(5, 10, 1),
+            disabled: false,
+        };
+        let mut registry = ActionRegistry::<PaginationAction>::new();
+        let component = view.create_component(&mut registry, |a| a);
+        let mut value = serde_json::to_value(&component).unwrap();
+        normalize_custom_ids(&mut value);
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "type": 1,
+                "components": [
+                    { "type": 2, "custom_id": "id:PaginationAction", "disabled": true, "label": "⏮", "style": 1 },
+                    { "type": 2, "custom_id": "id:PaginationAction", "disabled": true, "label": "◀", "style": 1 },
+                    { "type": 2, "custom_id": "current", "disabled": true, "label": "1/5", "style": 2 },
+                    { "type": 2, "custom_id": "id:PaginationAction", "disabled": false, "label": "▶", "style": 1 },
+                    { "type": 2, "custom_id": "id:PaginationAction", "disabled": false, "label": "⏭", "style": 1 }
+                ]
+            })
+        );
+    }
 
     #[test]
     fn pagination_new() {

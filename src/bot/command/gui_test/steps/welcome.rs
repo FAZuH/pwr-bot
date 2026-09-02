@@ -35,7 +35,6 @@ pub async fn welcome_settings(ctx: Context<'_>) -> Result<(), GuiTestError> {
         service,
         generator,
         guild_id: guild_id.into(),
-        ctx_serenity: ctx.serenity_context().clone(),
     };
 
     let registry = extract_actions(&handler);

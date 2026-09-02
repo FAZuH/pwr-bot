@@ -4,6 +4,7 @@ use std::time::Duration;
 use std::time::Instant;
 
 use log::trace;
+use pwr_ext::component;
 
 use crate::bot::command::prelude::*;
 use crate::bot::command::voice::TimeRange;
@@ -160,9 +161,9 @@ impl CommandHandler for VoiceLeaderboardHandler<'_> {
     }
 }
 
-pub struct VoiceLeaderboardView<'a> {
+pub struct VoiceLeaderboardView {
     pub model: VoiceLeaderboardModel,
-    pub img_builder: LeaderboardImageBuilder<'a>,
+    pub img_builder: LeaderboardImageBuilder,
     pub lb_img: Option<Vec<u8>>,
     pub target_user: Option<poise::serenity_prelude::User>,
     pub service: std::sync::Arc<dyn VoiceTracker>,
@@ -172,10 +173,10 @@ pub struct VoiceLeaderboardView<'a> {
     pub pagination: bool,
 }
 
-impl<'a> VoiceLeaderboardView<'a> {
+impl VoiceLeaderboardView {
     pub fn new(
         model: VoiceLeaderboardModel,
-        ctx: &'a Context<'a>,
+        ctx: &Context<'_>,
         guild_id: u64,
         author_id: u64,
     ) -> Self {
@@ -188,7 +189,7 @@ impl<'a> VoiceLeaderboardView<'a> {
             guild_id,
             author_id,
             http: ctx.serenity_context().http.clone(),
-            img_builder: LeaderboardImageBuilder::new(ctx),
+            img_builder: LeaderboardImageBuilder::new(ctx.serenity_context().http.clone()),
         }
     }
 
@@ -241,7 +242,7 @@ impl<'a> VoiceLeaderboardView<'a> {
 }
 
 #[async_trait::async_trait]
-impl ViewHandler for VoiceLeaderboardView<'_> {
+impl ViewHandler for VoiceLeaderboardView {
     type Action = VoiceLeaderboardAction;
     async fn handle(
         &mut self,
@@ -314,24 +315,27 @@ impl ViewHandler for VoiceLeaderboardView<'_> {
     }
 }
 
-impl ViewRender for VoiceLeaderboardView<'_> {
+impl ViewRender for VoiceLeaderboardView {
     type Action = VoiceLeaderboardAction;
     fn render(&self, registry: &mut ActionRegistry<VoiceLeaderboardAction>) -> ResponseKind<'_> {
         use VoiceLeaderboardAction::*;
         use VoiceLeaderboardTimeRange::*;
 
-        let mut container = vec![CreateContainerComponent::TextDisplay(
-            CreateTextDisplay::new(if self.model.is_partner_mode {
-                let display_name = self
-                    .target_user
-                    .as_ref()
-                    .map(|u| u.name.to_string())
-                    .unwrap_or_else(|| "Your".to_string());
-                format!("### {display_name} Voice Partners")
-            } else {
-                "### Voice Leaderboard".to_string()
-            }),
-        )];
+        let title = if self.model.is_partner_mode {
+            let display_name = self
+                .target_user
+                .as_ref()
+                .map(|u| u.name.to_string())
+                .unwrap_or_else(|| "Your".to_string());
+            format!("### {display_name} Voice Partners")
+        } else {
+            "### Voice Leaderboard".to_string()
+        };
+
+        let mut container: Vec<CreateContainerComponent<'_>> =
+            vec![CreateContainerComponent::TextDisplay(component! {
+                text_display { content: title }
+            })];
 
         if let Some(rank) = self.model.user_rank {
             let duration_text = self
@@ -340,43 +344,47 @@ impl ViewRender for VoiceLeaderboardView<'_> {
                 .map(format_duration)
                 .unwrap_or_else(|| "unknown".to_string());
 
-            container.push(CreateContainerComponent::TextDisplay(
-                CreateTextDisplay::new(format!(
-                    "\nYou are ranked **#{rank}** on this server with **{duration_text}** of voice activity."
-                )),
-            ));
+            container.push(CreateContainerComponent::TextDisplay(component! {
+                text_display {
+                    content: format!(
+                        "\nYou are ranked **#{rank}** on this server with **{duration_text}** of voice activity."
+                    )
+                }
+            }));
         } else if !self.model.target_is_author() {
-            container.push(CreateContainerComponent::TextDisplay(
-                CreateTextDisplay::new("\nYou are not on the leaderboard for this time range."),
-            ));
+            container.push(CreateContainerComponent::TextDisplay(component! {
+                text_display { content: "\nYou are not on the leaderboard for this time range." }
+            }));
         }
 
         let (since, until) = self.model.time_range.to_range();
-        container.push(CreateContainerComponent::TextDisplay(
-            CreateTextDisplay::new(format!(
-                "\n-# Time Range: **{}** — <t:{}:f> to <t:{}:R>",
-                self.model.time_range.name(),
-                since.timestamp(),
-                until.timestamp(),
-            )),
-        ));
+        container.push(CreateContainerComponent::TextDisplay(component! {
+            text_display {
+                content: format!(
+                    "\n-# Time Range: **{}** — <t:{}:f> to <t:{}:R>",
+                    self.model.time_range.name(),
+                    since.timestamp(),
+                    until.timestamp(),
+                )
+            }
+        }));
 
-        container.push(CreateContainerComponent::Separator(
-            CreateSeparator::new().divider(true),
-        ));
+        container.push(CreateContainerComponent::Separator(component! {
+            separator { divider: true }
+        }));
 
         if self.model.is_empty() {
-            container.push(CreateContainerComponent::TextDisplay(
-                CreateTextDisplay::new(
-                    "No voice activity recorded yet at this time range.\n\nJoin a **voice channel** to start tracking!",
-                ),
-            ));
+            container.push(CreateContainerComponent::TextDisplay(component! {
+                text_display {
+                    content: "No voice activity recorded yet at this time range.\n\nJoin a **voice channel** to start tracking!"
+                }
+            }));
         } else {
-            container.push(CreateContainerComponent::MediaGallery(
-                CreateMediaGallery::new(vec![CreateMediaGalleryItem::new(
-                    CreateUnfurledMediaItem::new(format!("attachment://{IMAGE_FILENAME}")),
-                )]),
-            ));
+            container.push(CreateContainerComponent::MediaGallery(component! {
+                media_gallery {
+                    media_gallery_item { media: format!("attachment://{IMAGE_FILENAME}") }
+                }
+            }));
         }
 
         let toggle_label = if self.model.is_partner_mode {
@@ -384,37 +392,43 @@ impl ViewRender for VoiceLeaderboardView<'_> {
         } else {
             "Show Voice Partners"
         };
-        let toggle_button = registry
-            .register(ToggleMode)
-            .as_button()
-            .label(toggle_label)
-            .style(poise::serenity_prelude::ButtonStyle::Primary);
+        let toggle_action = registry.register(ToggleMode);
 
-        container.push(CreateContainerComponent::ActionRow(
-            CreateActionRow::Buttons(vec![toggle_button].into()),
-        ));
+        container.push(CreateContainerComponent::ActionRow(component! {
+            action_row {
+                button {
+                    custom_id: toggle_action.id,
+                    label: toggle_label,
+                    style: ButtonStyle::Primary
+                }
+            }
+        }));
 
-        let time_range_menu = registry
-            .register(TimeRange)
-            .as_select(CreateSelectMenuKind::String {
-                options: vec![
-                    Past24Hours.into(),
-                    Past72Hours.into(),
-                    Past7Days.into(),
-                    Past14Days.into(),
-                    ThisMonth.into(),
-                    ThisYear.into(),
-                    AllTime.into(),
-                ]
-                .into(),
-            })
-            .placeholder("Select time range");
-
-        let action_row = CreateActionRow::SelectMenu(time_range_menu);
+        let time_range_action = registry.register(TimeRange);
+        let time_range_kind = CreateSelectMenuKind::String {
+            options: vec![
+                Past24Hours.into(),
+                Past72Hours.into(),
+                Past7Days.into(),
+                Past14Days.into(),
+                ThisMonth.into(),
+                ThisYear.into(),
+                AllTime.into(),
+            ]
+            .into(),
+        };
 
         let mut components = vec![
             CreateComponent::Container(CreateContainer::new(container)),
-            CreateComponent::ActionRow(action_row),
+            CreateComponent::ActionRow(component! {
+                action_row {
+                    select_menu {
+                        custom_id: time_range_action.id,
+                        kind: time_range_kind,
+                        placeholder: "Select time range"
+                    }
+                }
+            }),
         ];
 
         if self.model.is_partner_mode {
@@ -422,13 +436,17 @@ impl ViewRender for VoiceLeaderboardView<'_> {
                 .target_user
                 .clone()
                 .map(|u| std::borrow::Cow::Owned(vec![u.id]));
-            let user_select = registry
-                .register(SelectUser)
-                .as_select(CreateSelectMenuKind::User { default_users })
-                .placeholder("Select an user to view their voice partners");
-            components.push(CreateComponent::ActionRow(CreateActionRow::SelectMenu(
-                user_select,
-            )));
+            let user_action = registry.register(SelectUser);
+            let user_kind = CreateSelectMenuKind::User { default_users };
+            components.push(CreateComponent::ActionRow(component! {
+                action_row {
+                    select_menu {
+                        custom_id: user_action.id,
+                        kind: user_kind,
+                        placeholder: "Select an user to view their voice partners"
+                    }
+                }
+            }));
         }
 
         let mut pagination =
@@ -474,12 +492,17 @@ action_extends! {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use chrono::DateTime;
     use chrono::Datelike;
     use chrono::Utc;
 
     use super::*;
     use crate::bot::command::voice::leaderboard::image_builder::LeaderboardEntry;
+    use crate::bot::command::voice::test_support::StubVoiceTracker;
+    use crate::bot::view::ActionRegistry;
+    use crate::bot::view::ResponseKind;
 
     #[test]
     fn leaderboard_session_data_from_entries() {
@@ -692,5 +715,251 @@ mod tests {
         assert_eq!(cloned.avatar_url, entry.avatar_url);
         assert_eq!(cloned.duration_seconds, entry.duration_seconds);
         assert!(cloned.avatar_image.is_none());
+    }
+
+    /// Rewrites every `custom_id` of the shape `Type:timestamp:counter` to a
+    /// stable sentinel `id:Type`, and redacts now-dependent Discord timestamps
+    /// (`<t:digits:f>` → `<t:TS:f>`) from text content, so the rendered shape is
+    /// reproducible across runs while still pinning kind/label/style/order.
+    fn normalize(value: &mut serde_json::Value) {
+        match value {
+            serde_json::Value::Object(map) => {
+                if let Some(serde_json::Value::String(cid)) = map.get("custom_id") {
+                    let parts: Vec<&str> = cid.split(':').collect();
+                    if parts.len() == 3
+                        && parts[1].chars().all(|c| c.is_ascii_digit())
+                        && parts[2].chars().all(|c| c.is_ascii_digit())
+                    {
+                        map.insert(
+                            "custom_id".to_string(),
+                            serde_json::json!(format!("id:{}", parts[0])),
+                        );
+                    }
+                }
+                for v in map.values_mut() {
+                    normalize(v);
+                }
+            }
+            serde_json::Value::Array(arr) => {
+                for v in arr {
+                    normalize(v);
+                }
+            }
+            serde_json::Value::String(s) => {
+                let redacted = redact_timestamps(s);
+                if redacted != *s {
+                    *s = redacted;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Redacts the numeric unix timestamp in a Discord `<t:...>` tag.
+    fn redact_timestamps(s: &str) -> String {
+        let mut out = String::with_capacity(s.len());
+        let mut rest = s;
+        while let Some(idx) = rest.find("<t:") {
+            let (before, after) = rest.split_at(idx);
+            out.push_str(before);
+            let close = after.find('>').expect("unclosed <t: tag");
+            let (tag, remaining) = after.split_at(close + 1);
+            let parts: Vec<&str> = tag.split(':').collect();
+            out.push_str("<t:TS");
+            for p in &parts[2..] {
+                out.push(':');
+                out.push_str(p);
+            }
+            rest = remaining;
+        }
+        out.push_str(rest);
+        out
+    }
+
+    fn dummy_http() -> Arc<poise::serenity_prelude::Http> {
+        use std::str::FromStr;
+        let token = poise::serenity_prelude::Token::from_str("a.b.c").unwrap();
+        Arc::new(poise::serenity_prelude::Http::new(token))
+    }
+
+    fn make_view(model: VoiceLeaderboardModel, target_user: Option<User>) -> VoiceLeaderboardView {
+        VoiceLeaderboardView {
+            model,
+            img_builder: LeaderboardImageBuilder::new(dummy_http()),
+            lb_img: None,
+            target_user,
+            service: Arc::new(StubVoiceTracker),
+            guild_id: 1,
+            author_id: 100,
+            http: dummy_http(),
+            pagination: false,
+        }
+    }
+
+    fn capture(view: &VoiceLeaderboardView) -> serde_json::Value {
+        let mut registry = ActionRegistry::new();
+        let response = view.render(&mut registry);
+        let ResponseKind::Component(components) = response else {
+            panic!("expected a component response");
+        };
+        let mut value = serde_json::to_value(&components).unwrap();
+        normalize(&mut value);
+        value
+    }
+
+    #[test]
+    fn voice_leaderboard_render_server_snapshot() {
+        let entries = vec![
+            VoiceLeaderboardEntry {
+                user_id: 100,
+                total_duration: 3600,
+            },
+            VoiceLeaderboardEntry {
+                user_id: 200,
+                total_duration: 7200,
+            },
+        ];
+        let model = VoiceLeaderboardModel::from_entries(entries, 100, LEADERBOARD_PER_PAGE);
+        let value = capture(&make_view(model, None));
+        assert_eq!(
+            value,
+            serde_json::json!([
+                {
+                    "type": 17,
+                    "components": [
+                        { "type": 10, "content": "### Voice Leaderboard" },
+                        { "type": 10, "content": "\nYou are ranked **#1** on this server with **1h** of voice activity." },
+                        { "type": 10, "content": "\n-# Time Range: **This month** — <t:TS:f> to <t:TS:R>" },
+                        { "type": 14, "divider": true },
+                        {
+                            "type": 12,
+                            "items": [ { "media": { "url": "attachment://voice_leaderboard.jpg" } } ]
+                        },
+                        {
+                            "type": 1,
+                            "components": [
+                                {
+                                    "type": 2,
+                                    "custom_id": "id:VoiceLeaderboardAction",
+                                    "disabled": false,
+                                    "label": "Show Voice Partners",
+                                    "style": 1
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "type": 1,
+                    "components": [
+                        {
+                            "type": 3,
+                            "custom_id": "id:VoiceLeaderboardAction",
+                            "options": [
+                                { "label": "Past 24 hours", "value": "Past 24 hours" },
+                                { "label": "Past 72 hours", "value": "Past 72 hours" },
+                                { "label": "Past 7 days", "value": "Past 7 days" },
+                                { "label": "Past 14 days", "value": "Past 14 days" },
+                                { "label": "This month", "value": "This month" },
+                                { "label": "This year", "value": "This year" },
+                                { "label": "All time", "value": "All time" }
+                            ],
+                            "placeholder": "Select time range"
+                        }
+                    ]
+                }
+            ])
+        );
+    }
+
+    #[test]
+    fn voice_leaderboard_render_partner_snapshot() {
+        let entries = vec![
+            VoiceLeaderboardEntry {
+                user_id: 100,
+                total_duration: 3600,
+            },
+            VoiceLeaderboardEntry {
+                user_id: 200,
+                total_duration: 7200,
+            },
+        ];
+        let model = VoiceLeaderboardModel {
+            entries,
+            user_rank: None,
+            user_duration: None,
+            time_range: VoiceLeaderboardTimeRange::ThisMonth,
+            is_partner_mode: true,
+            target_user_id: Some(200),
+            author_id: 100,
+            current_page: 1,
+            per_page: LEADERBOARD_PER_PAGE,
+        };
+        let partner_user: User = serde_json::from_value(serde_json::json!({
+            "id": "200",
+            "username": "partner"
+        }))
+        .unwrap();
+        let value = capture(&make_view(model, Some(partner_user)));
+        assert_eq!(
+            value,
+            serde_json::json!([
+                {
+                    "type": 17,
+                    "components": [
+                        { "type": 10, "content": "### partner Voice Partners" },
+                        { "type": 10, "content": "\nYou are not on the leaderboard for this time range." },
+                        { "type": 10, "content": "\n-# Time Range: **This month** — <t:TS:f> to <t:TS:R>" },
+                        { "type": 14, "divider": true },
+                        {
+                            "type": 12,
+                            "items": [ { "media": { "url": "attachment://voice_leaderboard.jpg" } } ]
+                        },
+                        {
+                            "type": 1,
+                            "components": [
+                                {
+                                    "type": 2,
+                                    "custom_id": "id:VoiceLeaderboardAction",
+                                    "disabled": false,
+                                    "label": "Show Server Leaderboard",
+                                    "style": 1
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "type": 1,
+                    "components": [
+                        {
+                            "type": 3,
+                            "custom_id": "id:VoiceLeaderboardAction",
+                            "options": [
+                                { "label": "Past 24 hours", "value": "Past 24 hours" },
+                                { "label": "Past 72 hours", "value": "Past 72 hours" },
+                                { "label": "Past 7 days", "value": "Past 7 days" },
+                                { "label": "Past 14 days", "value": "Past 14 days" },
+                                { "label": "This month", "value": "This month" },
+                                { "label": "This year", "value": "This year" },
+                                { "label": "All time", "value": "All time" }
+                            ],
+                            "placeholder": "Select time range"
+                        }
+                    ]
+                },
+                {
+                    "type": 1,
+                    "components": [
+                        {
+                            "type": 5,
+                            "custom_id": "id:VoiceLeaderboardAction",
+                            "default_values": [ { "id": 200, "type": "user" } ],
+                            "placeholder": "Select an user to view their voice partners"
+                        }
+                    ]
+                }
+            ])
+        );
     }
 }

@@ -1,6 +1,7 @@
 //! Admin register command.
 
 use poise::samples::create_application_commands;
+use pwr_ext::component;
 
 use crate::bot::command::prelude::*;
 
@@ -82,14 +83,72 @@ impl CommandRegistrationView {
             )
         };
 
-        let container = CreateComponent::Container(CreateContainer::new(vec![
-            CreateContainerComponent::TextDisplay(CreateTextDisplay::new(status_text)),
-        ]));
+        let container = component! {
+            container {
+                text_display { content: status_text }
+            }
+        };
 
-        vec![container].into()
+        vec![CreateComponent::Container(container)].into()
     }
 
     pub fn create_reply(&mut self) -> poise::CreateReply<'_> {
         self.create_response().into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+    use crate::bot::view::ResponseKind;
+
+    #[test]
+    fn registration_view_incomplete_snapshot() {
+        let mut view = CommandRegistrationView::new(5);
+        let response = view.create_response();
+        let ResponseKind::Component(components) = response else {
+            panic!("expected a component response");
+        };
+        let value = serde_json::to_value(&components).unwrap();
+        assert_eq!(
+            value,
+            json!([
+                {
+                    "type": 17,
+                    "components": [
+                        {
+                            "type": 10,
+                            "content": "### Registering Commands\nRegistering 5 server commands..."
+                        }
+                    ]
+                }
+            ])
+        );
+    }
+
+    #[test]
+    fn registration_view_complete_snapshot() {
+        let mut view = CommandRegistrationView::new(5).complete(1234);
+        let response = view.create_response();
+        let ResponseKind::Component(components) = response else {
+            panic!("expected a component response");
+        };
+        let value = serde_json::to_value(&components).unwrap();
+        assert_eq!(
+            value,
+            json!([
+                {
+                    "type": 17,
+                    "components": [
+                        {
+                            "type": 10,
+                            "content": "### Command Registration Complete\nSuccessfully registered 5 commands in 1234ms"
+                        }
+                    ]
+                }
+            ])
+        );
     }
 }
