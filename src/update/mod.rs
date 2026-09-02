@@ -15,6 +15,7 @@ pub trait Update {
     fn update(msg: Self::Msg, model: &mut Self::Model) -> Self::Cmd;
 }
 
+pub mod about;
 pub mod feed_list;
 pub mod feed_settings;
 pub mod plugins;
@@ -22,6 +23,11 @@ pub mod voice_leaderboard;
 pub mod voice_stats;
 pub mod welcome_settings;
 
+pub use about::AboutEffect;
+pub use about::AboutModel;
+pub use about::AboutMsg;
+pub use about::AboutStats;
+pub use about::update as about_update;
 pub use feed_list::FeedListCmd;
 pub use feed_list::FeedListModel;
 pub use feed_list::FeedListMsg;

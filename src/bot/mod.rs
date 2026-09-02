@@ -8,6 +8,7 @@ pub mod checks;
 pub mod command;
 pub mod error;
 pub mod error_handler;
+pub mod gui;
 pub mod navigation;
 pub mod test_framework;
 pub mod utils;
