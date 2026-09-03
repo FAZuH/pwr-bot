@@ -414,7 +414,7 @@ pub struct VoiceLeaderboardOpt {
 }
 
 /// Daily voice activity aggregation for a specific user.
-#[derive(QueryableByName, Serialize, Deserialize, Default, Clone, Debug)]
+#[derive(QueryableByName, Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
 pub struct VoiceDailyActivity {
     #[diesel(sql_type = diesel::sql_types::Date)]
     pub day: chrono::NaiveDate,
@@ -423,7 +423,7 @@ pub struct VoiceDailyActivity {
 }
 
 /// Guild daily statistics aggregation.
-#[derive(QueryableByName, Serialize, Deserialize, Default, Clone, Debug)]
+#[derive(QueryableByName, Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
 pub struct GuildDailyStats {
     #[diesel(sql_type = diesel::sql_types::Date)]
     pub day: chrono::NaiveDate,

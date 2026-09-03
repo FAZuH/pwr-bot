@@ -1,5 +1,6 @@
 //! The sealed [`GuiFeature`] trait — the shell contract for a TEA command view.
 
+use poise::serenity_prelude::CreateAttachment;
 use poise::serenity_prelude::CreateComponent;
 
 use crate::bot::navigation::Navigation;
@@ -77,6 +78,13 @@ pub trait GuiFeature: sealed::Sealed + Sized + Send + Sync + 'static {
     /// Which collectors the host starts for this feature.
     fn channel_config() -> ViewChannelConfig {
         ViewChannelConfig::default()
+    }
+
+    /// Extra message attachments to include on the reply (e.g. rendered image
+    /// bytes held in the model). Bytes are moved out by the feature; nothing
+    /// borrows the model, so the default is empty.
+    fn attachments(_model: &Self::Model) -> Vec<CreateAttachment<'static>> {
+        Vec::new()
     }
 
     /// When the host finishes processing `msg`, the navigation target it

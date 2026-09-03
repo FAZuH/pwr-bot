@@ -193,9 +193,13 @@ where
         let mut reg = registry.write().await;
         reg.clear();
         let components = F::view(&self.model, &mut reg);
-        let reply = CreateReply::new()
+        let attachments = F::attachments(&self.model);
+        let mut reply = CreateReply::new()
             .flags(MessageFlags::IS_COMPONENTS_V2)
             .components(components);
+        for attachment in attachments {
+            reply = reply.attachment(attachment);
+        }
 
         let existing = { self.coordinator.reply_handle().await.as_ref().cloned() };
 
