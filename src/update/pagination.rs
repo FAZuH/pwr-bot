@@ -1,14 +1,16 @@
 //! Pure pagination vocabulary for the core.
 //!
-//! [`PaginationAction`] is the data-only "user pressed a pagination button"
-//! message payload. It carries no labels or UI concerns — those live in the
-//! shell's [`crate::bot::view::pagination::PaginationAction`], which the
-//! feature's `translate` maps into this pure intent before handing it to
-//! `update`.
+//! [`PaginationAction`] is the single "user pressed a pagination button"
+//! message payload, shared by the core and the shell: the shell re-exports
+//! this type through [`crate::bot::view::pagination`] and adds the UI
+//! [`Action`](crate::bot::view::Action) labels plus the
+//! [`PaginationView`](crate::bot::view::pagination::PaginationView) row
+//! renderer there, while a feature's `translate` maps the fired action
+//! straight into this intent before handing it to `update`.
 //!
-//! Keeping the pagination *intent* in the core (rather than importing the
-//! shell's labelled action enum) preserves the layering rule that
-//! `src/update/**` imports no serenity/tokio/diesel/poise and no shell types.
+//! Keeping the pagination *intent* in the core (rather than defining it in
+//! the shell) preserves the layering rule that `src/update/**` imports no
+//! serenity/tokio/diesel/poise and no shell types.
 
 /// Which pagination navigation the user requested.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,10 +29,12 @@ pub enum PaginationAction {
 
 /// Pure pagination state — the single source of truth for a paged view.
 ///
-/// Ported from the shell's `PaginationModel` (in `crate::bot::view::pagination`)
-/// so a feature's page math can live in the core and be unit-tested without
-/// the shell. The shell's `PaginationView` is fed from this state when it
-/// renders the row, keeping the rendered buttons byte-identical.
+/// Shared by the core and the shell (re-exported through
+/// [`crate::bot::view::pagination`]) so a feature's page math can live in the
+/// core and be unit-tested without the shell. The shell's
+/// [`PaginationView`](crate::bot::view::pagination::PaginationView) is fed
+/// from this state when it renders the row, keeping the rendered buttons
+/// byte-identical.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PaginationModel {
     /// The currently displayed page (1-based).

@@ -2,7 +2,7 @@
 //!
 //! Runs through every interactive slash command, auto-simulating button clicks
 //! and select-menu choices to assert view state transitions without blocking on
-//! a live [`ViewEngine`] loop.
+//! a live event loop.
 
 use std::time::Duration;
 

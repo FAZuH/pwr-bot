@@ -397,17 +397,17 @@ impl GuiFeature for WelcomeFeature {
 
     /// Opens the add-message / set-color modals.
     ///
-    /// Modal mapping choice: the old view called `spawn_modal_component` on the
-    /// button interaction and returned `ViewCmd::AlreadyResponded`, which told
-    /// the engine to skip its auto-acknowledge (the modal response already
-    /// answers the interaction) and to skip re-rendering. The host cannot do
-    /// this through `translate`/`update` — those are pure and never see the
+    /// Modal mapping choice: the old view answered the button interaction by
+    /// opening the modal directly, which told the engine to skip its
+    /// auto-acknowledge (the modal response already answers the interaction)
+    /// and to skip re-rendering. The host cannot do this through
+    /// `translate`/`update` — those are pure and never see the
     /// interaction — so the modal trigger is instead an [`GuiFeature`] seam:
     /// the host consults `open_modal` before translating, and on `true` skips
-    /// both the acknowledge and the render (the `AlreadyResponded` equivalent).
+    /// both the acknowledge and the render (the already-responded equivalent).
     /// The spawned task awaits the modal submission via
     /// `poise::execute_modal_on_component_interaction` (exactly as the old
-    /// `spawn_modal_component` did) and delivers the result as a plain
+    /// view did) and delivers the result as a plain
     /// `AddMessage(String)` / `SetColor(String)` message on the host channel.
     /// A dismissed modal yields no message, so the view simply stays as-is —
     /// same as before.

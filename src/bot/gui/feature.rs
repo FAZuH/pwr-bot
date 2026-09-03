@@ -110,7 +110,7 @@ pub trait GuiFeature: sealed::Sealed + Sized + Send + Sync + 'static {
     /// `true` means the feature spawned the modal flow (via
     /// `poise::execute_modal_on_component_interaction`, whose submission is
     /// delivered back as a `Msg` on `tx`): the host must then skip both the
-    /// auto-acknowledge and the re-render — the `ViewCmd::AlreadyResponded`
+    /// auto-acknowledge and the re-render — the already-responded
     /// equivalent, since opening the modal already responds to the
     /// interaction. The default is `false` (no modal; normal handling).
     fn open_modal(

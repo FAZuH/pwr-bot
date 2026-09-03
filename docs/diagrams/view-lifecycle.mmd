@@ -13,111 +13,119 @@
   }
 }}%%
 graph TB
-    subgraph ViewEngineLoop["View Engine Event Loop"]
+    subgraph HostLoop["TEA Host Event Loop (rt.rs)"]
         direction TB
-        
-        Start["Start ViewEngine"]
-        CreateChannel["Create ViewChannel<br/>(from channel_config)"]
-        Render["Render View<br/>(handler.create_reply)"]
+
+        Start["Start Host"]
+        BuildModel["Build Model<br/>(Feature::initial)"]
+        BootUpdate["Apply start_msg<br/>(Feature::update)"]
+        Render["Render View<br/>(Feature::view + attachments)"]
         StartCollectors["ViewChannel::start()<br/>(spawn background collectors)"]
-        Recv["ViewChannel::recv()"]
-        
+        Recv["Loop: select on<br/>ViewChannel::recv() + fx channel"]
+
         Component["Component Interaction<br/>(Discord UI)"]
-        Async["Async Event<br/>(ctx.spawn / tx.send)"]
-        Modal["Modal Submission"]
-        Synthetic["Synthetic Event<br/>(test framework)"]
+        FxMsg["Effect Follow-up Msg<br/>(fx channel)"]
+        OtherEvt["Modal / Message / Reaction"]
         Timeout["Timeout Event"]
 
         Unknown["Unknown custom_id?"]
         Skip["Acknowledge & Skip"]
+        ModalHook["open_modal?"]
+        SkipModal["Skip ack + render<br/>(modal owns the interaction)"]
 
-        EventMsg["EventMessage<br/>(Option~Action~, ViewEvent)"]
-        Handle["ViewHandler::handle"]
-        HandleTimeout["ViewHandler::on_timeout"]
+        Translate["Feature::translate<br/>(action + select values → Msg)"]
+        OnEvent["Feature::on_event<br/>(non-component → Msg)"]
+        Apply["Feature::update<br/>(pure → effects)"]
+        ExecEffects["EffectHandler::execute<br/>(only IO)"]
+        ExitNav["exit_navigation?"]
 
-        CmdRender["ViewCmd::Render / RenderOnce"]
-        CmdContinue["ViewCmd::Continue / AlreadyResponded"]
-        CmdExit["ViewCmd::Exit"]
-
-        Start -->|engine.run| CreateChannel
-        CreateChannel --> Render
+        Start --> BuildModel
+        BuildModel --> BootUpdate
+        BootUpdate --> Render
         Render -->|msg_id known| StartCollectors
         StartCollectors -->|loop| Recv
 
         Recv -->|ComponentInteraction| Component
-        Recv -->|Async| Async
-        Recv -->|ModalSubmit| Modal
-        Recv -->|Synthetic| Synthetic
+        Recv -->|fx message| FxMsg
+        Recv -->|Modal/Message/Reaction| OtherEvt
         Recv -->|Timeout| Timeout
 
         Component --> Unknown
         Unknown -->|yes| Skip
-        Unknown -->|no| EventMsg
-        Async & Modal & Synthetic --> EventMsg
-        Timeout --> HandleTimeout
-
-        EventMsg -->|"handler.handle(ctx)"| Handle
-
-        Handle & HandleTimeout -->|return| CmdRender
-        Handle & HandleTimeout -->|return| CmdContinue
-        Handle & HandleTimeout -->|return| CmdExit
+        Unknown -->|no| ModalHook
+        ModalHook -->|yes| SkipModal
+        ModalHook -->|no| Translate
+        Translate -->|None| Skip
+        Translate -->|Some| Apply
+        OtherEvt --> OnEvent
+        OnEvent -->|None| Recv
+        OnEvent -->|Some| Apply
+        FxMsg --> Apply
+        Apply --> ExecEffects
+        ExecEffects --> ExitNav
+        ExitNav -->|navigate| Stop[Stop Host]
+        ExitNav -->|none| Render
+        Timeout -->|timeout_msg → apply| TimeoutNav["exit_navigation?"]
+        TimeoutNav -->|navigate| Stop
+        TimeoutNav -->|none| Stop
 
         Skip -->|next event| Recv
-        CmdContinue -->|next event| Recv
-        CmdRender -->|re-render| Render
-        CmdExit -->|break| Stop[Stop Engine]
+        SkipModal -->|next event| Recv
+        Render -->|edited live message| Recv
     end
-    
+
     subgraph Collectors["Background Collectors (spawned by ViewChannel)"]
         direction TB
         CompCollector["ComponentInteractionCollector"]
         ModalCollector["ModalInteractionCollector"]
         MsgCollector["MessageCollector"]
         ReactCollector["ReactionCollector"]
-        
+
         CompCollector -->|lookup registry| CompSend["send (Some(action), Component)"]
         ModalCollector -->|lookup registry| ModalSend["send (Some(action), Modal)"]
         MsgCollector --> MsgSend["send (None, Message)"]
         ReactCollector --> ReactSend["send (None, Reaction)"]
-        
+
         CompCollector -->|timeout| TimeoutSend["send (None, Timeout)"]
     end
-    
+
     Collectors -.->|feed into| Recv
-    
-    subgraph TEAPattern["TEA Update Pattern (inside ViewHandler::handle)"]
+
+    subgraph TEAPattern["TEA Update Pattern (inside Host::apply)"]
         direction TB
-        Parse["Parse Discord interaction<br/>into Msg"]
-        Update["Update::update(msg, model)<br/>→ Cmd"]
+        Parse["Feature::translate / on_event<br/>action + values into Msg"]
+        Update["Feature::update(msg, model)<br/>→ effects (data)"]
         Model[(Model)]
-        Cmd[(Cmd)]
-        SideEffects["Perform side effects<br/>(db fetch, persist, render)"]
-        
+        Effects[(Effects)]
+        SideEffects["EffectHandler::execute<br/>(db fetch, persist, render)"]
+
         Parse --> Update
         Model --> Update
-        Update --> Cmd
-        Cmd --> SideEffects
+        Update --> Effects
+        Effects --> SideEffects
     end
-    
-    TEAPattern -.->|executed by| Handle
-    
-    subgraph Mapping["Context & Delegation"]
+
+    TEAPattern -.->|executed by| Apply
+
+    subgraph FeatureContract["GuiFeature Contract"]
         direction TB
-        ParentCtx["Parent ViewContext"]
-        Map["ctx.map(wrap: fn(Option~C~) -> Option~T~)"]
-        ChildCtx["Child ViewContext"]
-        
-        ParentCtx --> Map
-        Map --> ChildCtx
+        Initial["initial(config) → Model"]
+        ViewFn["view(&Model) → components<br/>(pure, no IO)"]
+        TranslateFn["translate(action, values) → Msg"]
+        ExitFn["exit_navigation(msg) → Navigation?"]
+
+        Initial --> ViewFn
+        ViewFn --> TranslateFn
+        TranslateFn --> ExitFn
     end
-    
-    Mapping -.->|provides| Handle
-    
+
+    FeatureContract -.->|implemented by| Apply
+
     style Start fill:#2d2d2d,stroke:#ffffff,stroke-width:2px
     style Stop fill:#2d2d2d,stroke:#ffffff,stroke-width:2px
     style Render fill:#1e1e1e,stroke:#ffffff
     style Recv fill:#1e1e1e,stroke:#ffffff
-    style CreateChannel fill:#1e1e1e,stroke:#ffffff
+    style BuildModel fill:#1e1e1e,stroke:#ffffff
     style StartCollectors fill:#1e1e1e,stroke:#ffffff
     style TEAPattern fill:#1a3a1a,stroke:#4ade80,stroke-width:2px
     style Parse fill:#2d2d2d,stroke:#4ade80

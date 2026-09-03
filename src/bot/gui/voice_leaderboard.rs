@@ -25,7 +25,6 @@ use crate::bot::view::pagination::PaginationView;
 use crate::entity::VoiceLeaderboardEntry;
 use crate::entity::VoiceLeaderboardOptBuilder;
 use crate::service::traits::VoiceTracker;
-use crate::update::pagination::PaginationAction as CorePaginationAction;
 use crate::update::voice_leaderboard::LeaderboardData;
 use crate::update::voice_leaderboard::VoiceLeaderboardEffect;
 use crate::update::voice_leaderboard::VoiceLeaderboardModel;
@@ -230,15 +229,7 @@ impl GuiFeature for VoiceLeaderboardFeature {
         _model: &Self::Model,
     ) -> Option<Self::Msg> {
         match action {
-            VoiceLeaderboardAction::Base(inner) => {
-                Some(VoiceLeaderboardMsg::Pagination(match *inner {
-                    PaginationAction::First => CorePaginationAction::First,
-                    PaginationAction::Prev => CorePaginationAction::Prev,
-                    PaginationAction::Next => CorePaginationAction::Next,
-                    PaginationAction::Last => CorePaginationAction::Last,
-                    PaginationAction::Page => CorePaginationAction::Page,
-                }))
-            }
+            VoiceLeaderboardAction::Base(inner) => Some(VoiceLeaderboardMsg::Pagination(*inner)),
             VoiceLeaderboardAction::TimeRange => {
                 let range = match values {
                     SelectValues::String(v) => v

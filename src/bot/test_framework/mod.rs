@@ -1,7 +1,8 @@
 //! Test framework for automated GUI testing of Discord bot views.
 //!
 //! Provides synthetic events, assertion helpers, and test-step abstractions
-//! that drive [`crate::bot::view::ViewHandler`]s directly without a blocking [`crate::bot::view::ViewEngine`] loop.
+//! that drive [`crate::bot::gui::feature::GuiFeature`]s directly without
+//! blocking on a live [`crate::bot::gui::rt::Host`] loop.
 
 pub mod assert;
 pub mod helpers;

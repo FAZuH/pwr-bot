@@ -1,76 +1,30 @@
-//! Pagination component for Discord views.
-use poise::serenity_prelude::*;
-use pwr_ext::component;
+//! Pagination row for Discord views.
+//!
+//! The pagination *intent* and *state* live in the pure core
+//! ([`crate::update::pagination`]) and are re-exported here so shells have a
+//! single definition of each. This module adds the shell half: the [`Action`]
+//! labels and the [`PaginationView`] row renderer, which builds the same five
+//! buttons (first/prev/page/next/last) during a feature's `view()` build.
 
-use crate::action_enum;
-use crate::bot::Error;
+use poise::serenity_prelude::*;
+
 use crate::bot::view::Action;
 use crate::bot::view::ActionRegistry;
-use crate::bot::view::ViewCmd;
-use crate::bot::view::ViewContext;
-use crate::bot::view::ViewHandler;
+pub use crate::update::pagination::PaginationAction;
+pub use crate::update::pagination::PaginationModel;
 
-/// Model for tracking pagination state.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct PaginationModel {
-    pub current_page: u32,
-    pub pages: u32,
-    #[allow(dead_code)]
-    pub per_page: u32,
-}
-
-impl PaginationModel {
-    /// Creates a new pagination model with the given parameters.
-    pub fn new(pages: u32, per_page: u32, current_page: u32) -> Self {
-        let pages = pages.max(1);
-        let per_page = per_page.max(1);
-        let current_page = current_page.clamp(1, pages.max(1));
-        Self {
-            pages,
-            per_page,
-            current_page,
+impl Action for PaginationAction {
+    /// Returns the UI label associated with this action.
+    fn label(&self) -> &'static str {
+        match self {
+            PaginationAction::First => "⏮",
+            PaginationAction::Prev => "◀",
+            PaginationAction::Page => "Page",
+            PaginationAction::Next => "▶",
+            PaginationAction::Last => "⏭",
         }
-    }
-
-    /// Navigates to the first page.
-    pub fn first_page(&mut self) {
-        self.current_page = 1;
-    }
-
-    /// Navigates to the previous page if not on the first page.
-    pub fn prev_page(&mut self) {
-        if self.current_page > 1 {
-            self.current_page -= 1;
-        }
-    }
-
-    /// Navigates to the next page if not on the last page.
-    pub fn next_page(&mut self) {
-        if self.current_page < self.pages {
-            self.current_page += 1;
-        }
-    }
-
-    /// Navigates to the last page.
-    pub fn last_page(&mut self) {
-        self.current_page = self.pages;
     }
 }
-
-action_enum!(
-    #[derive(Copy)]
-    PaginationAction {
-        #[label = "⏮"]
-        First,
-        #[label = "◀"]
-        Prev,
-        Page,
-        #[label = "▶"]
-        Next,
-        #[label = "⏭"]
-        Last,
-    }
-);
 
 #[derive(Clone)]
 pub struct PaginationView {
@@ -109,6 +63,8 @@ impl PaginationView {
         registry: &mut ActionRegistry<T>,
         wrap: fn(PaginationAction) -> T,
     ) -> CreateComponent<'b> {
+        use pwr_ext::component;
+
         let first = registry.register(wrap(PaginationAction::First));
         let prev = registry.register(wrap(PaginationAction::Prev));
 
@@ -155,30 +111,6 @@ impl PaginationView {
         };
 
         CreateComponent::ActionRow(row)
-    }
-}
-
-#[async_trait::async_trait]
-impl ViewHandler for PaginationView {
-    type Action = PaginationAction;
-    async fn handle(&mut self, ctx: ViewContext<'_, PaginationAction>) -> Result<ViewCmd, Error> {
-        match ctx.action() {
-            PaginationAction::First => self.state.first_page(),
-            PaginationAction::Prev => self.state.prev_page(),
-            PaginationAction::Next => self.state.next_page(),
-            PaginationAction::Last => self.state.last_page(),
-            _ => return Ok(ViewCmd::Continue),
-        }
-        Ok(ViewCmd::Render)
-    }
-
-    async fn on_timeout(&mut self) -> Result<ViewCmd, Error> {
-        self.disabled = true;
-        if self.state.pages > 1 {
-            Ok(ViewCmd::RenderOnce)
-        } else {
-            Ok(ViewCmd::Exit)
-        }
     }
 }
 
@@ -264,53 +196,5 @@ mod tests {
                 ]
             })
         );
-    }
-
-    #[test]
-    fn pagination_new() {
-        // Normal case
-        let p = PaginationModel::new(10, 5, 1);
-        assert_eq!(p.pages, 10);
-        assert_eq!(p.per_page, 5);
-        assert_eq!(p.current_page, 1);
-
-        // Clamping current_page
-        let p = PaginationModel::new(10, 5, 0);
-        assert_eq!(p.current_page, 1);
-
-        let p = PaginationModel::new(10, 5, 11);
-        assert_eq!(p.current_page, 10);
-
-        // Minimal values
-        let p = PaginationModel::new(0, 0, 0);
-        assert_eq!(p.pages, 1);
-        assert_eq!(p.per_page, 1);
-        assert_eq!(p.current_page, 1);
-    }
-
-    #[test]
-    fn pagination_navigation() {
-        let mut p = PaginationModel::new(5, 10, 3);
-
-        p.prev_page();
-        assert_eq!(p.current_page, 2);
-
-        p.prev_page();
-        assert_eq!(p.current_page, 1);
-
-        p.prev_page();
-        assert_eq!(p.current_page, 1); // Should not go below 1
-
-        p.next_page();
-        assert_eq!(p.current_page, 2);
-
-        p.last_page();
-        assert_eq!(p.current_page, 5);
-
-        p.next_page();
-        assert_eq!(p.current_page, 5); // Should not go above pages
-
-        p.first_page();
-        assert_eq!(p.current_page, 1);
     }
 }

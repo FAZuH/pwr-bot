@@ -47,7 +47,6 @@ pub use feed_settings::FeedSettingsEffect;
 pub use feed_settings::FeedSettingsModel;
 pub use feed_settings::FeedSettingsMsg;
 pub use feed_settings::update as feed_settings_update;
-pub use pagination::PaginationAction as CorePaginationAction;
 pub use plugins::PluginsCmd;
 pub use plugins::PluginsModel;
 pub use plugins::PluginsMsg;

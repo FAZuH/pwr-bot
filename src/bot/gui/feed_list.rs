@@ -19,7 +19,6 @@ use crate::bot::gui::feature::GuiFeature;
 use crate::bot::gui::feature::sealed;
 use crate::bot::navigation::Navigation;
 use crate::bot::view::SelectValues;
-use crate::bot::view::pagination::PaginationAction;
 use crate::bot::view::pagination::PaginationView;
 use crate::entity::SubscriberEntity;
 use crate::service::feed_subscription::Subscription;
@@ -29,7 +28,7 @@ use crate::update::feed_list::FeedListModel;
 use crate::update::feed_list::FeedListMsg;
 use crate::update::feed_list::FeedListViewState;
 use crate::update::feed_list::update as feed_list_update;
-use crate::update::pagination::PaginationAction as CorePaginationAction;
+use crate::update::pagination::PaginationAction;
 
 /// Data-in for the feed list feature: the first page of subscriptions.
 pub struct FeedListConfig {
@@ -109,13 +108,7 @@ impl GuiFeature for FeedListFeature {
         _model: &Self::Model,
     ) -> Option<Self::Msg> {
         match action {
-            FeedListAction::Base(inner) => Some(FeedListMsg::Pagination(match *inner {
-                PaginationAction::First => CorePaginationAction::First,
-                PaginationAction::Prev => CorePaginationAction::Prev,
-                PaginationAction::Next => CorePaginationAction::Next,
-                PaginationAction::Last => CorePaginationAction::Last,
-                PaginationAction::Page => CorePaginationAction::Page,
-            })),
+            FeedListAction::Base(inner) => Some(FeedListMsg::Pagination(*inner)),
             FeedListAction::Edit => Some(FeedListMsg::Edit),
             FeedListAction::View => Some(FeedListMsg::View),
             FeedListAction::Unsubscribe { source_url } => Some(FeedListMsg::ToggleUnsub {

@@ -1,5 +1,4 @@
-//! The TEA host runtime — replaces [`crate::bot::view::ViewEngine`] for
-//! migrated features.
+//! The TEA host runtime driving one [`GuiFeature`] at a time.
 //!
 //! [`Host`] owns the event loop: it builds the model, drives the first update
 //! via the feature's start message, starts the collectors, and then loops on
@@ -124,7 +123,7 @@ where
                                 continue;
                             };
                             // Modal triggers consume the interaction (the
-                            // `ViewCmd::AlreadyResponded` equivalent): opening
+                            // already-responded equivalent): opening
                             // the modal already responds to it, so the host
                             // skips the acknowledge and the re-render. The
                             // modal submission arrives later as a `Msg`.
@@ -150,7 +149,7 @@ where
                             };
                             let nav = F::exit_navigation(&msg);
                             self.apply(msg, &fx_tx);
-                            // Acknowledge after handling, mirroring ViewEngine.
+                            // Acknowledge after handling, mirroring the old engine.
                             let raw = interaction.clone();
                             raw.create_response(
                                 self.ctx.http(),

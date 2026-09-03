@@ -1,5 +1,4 @@
-//! The TEA GUI shell — replaces [`crate::bot::view::ViewEngine`] for migrated
-//! interactive command features.
+//! The TEA GUI shell for the bot's interactive command features.
 //!
 //! ## One-way dataflow
 //!

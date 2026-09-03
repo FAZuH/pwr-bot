@@ -5,7 +5,6 @@ use crate::bot::navigation::Navigation;
 use crate::bot::test_framework::GuiTestError;
 use crate::bot::view::Action;
 use crate::bot::view::ActionRegistry;
-use crate::bot::view::ViewCmd;
 
 /// Finds an action in the registry by its label.
 pub fn assert_has_action<T: Action + Clone>(
@@ -37,19 +36,6 @@ pub async fn assert_navigated_to<'a>(
     } else {
         Err(GuiTestError::assertion_failed(
             "navigation",
-            format!("{expected:?}"),
-            format!("{actual:?}"),
-        ))
-    }
-}
-
-/// Asserts that two [`crate::bot::view::ViewCmd`]s are equal.
-pub fn assert_eq_cmd(actual: ViewCmd, expected: ViewCmd, msg: &str) -> Result<(), GuiTestError> {
-    if actual == expected {
-        Ok(())
-    } else {
-        Err(GuiTestError::assertion_failed(
-            msg,
             format!("{expected:?}"),
             format!("{actual:?}"),
         ))
