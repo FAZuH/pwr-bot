@@ -42,46 +42,53 @@ Commands are organized by domain. Each top-level module is a command group; subc
 | `unregister.rs` | `/unregister` |
 | `dump_db.rs` | `/dump_db` |
 
-### Router → CommandHandler → View Flow
+### Router → CommandHandler → Host Flow
 
-Interactive commands follow a **Router → CommandHandler → View** flow:
+Interactive commands follow a **Router → CommandHandler → Host** flow:
 
 - **`Router`** — receives the Poise context, owns navigation state, drives handlers. Defined in `src/bot/command/mod.rs`.
 - **`CommandHandler`** — trait for handler run loops. Each domain has a concrete handler (e.g. `FeedListHandler`, `VoiceStatsHandler`).
 - **`Navigation`** — enum signalling the next navigation step (e.g. `Back`, `Exit`, `SettingsMain`). Defined in `src/bot/navigation.rs`.
-- **`ViewEngine`** — the event loop runner that drives the view life cycle.
+- **`Host`** — the TEA event loop that runs one interactive view. Defined in `src/bot/gui/rt.rs`.
 
-### View System (`src/bot/view/mod.rs`)
+### Interactive Views (TEA — `src/update/` cores + `src/bot/gui/` shell)
 
-The view system is built on a trait-based architecture driven by the **ViewEngine**.
+Interactive views run on the Elm Architecture (TEA) in three layers with one-way dependencies. ADR-0005 records the decision.
+
+| Layer | Location | Responsibility |
+|-------|----------|---------------|
+| Core | `src/update/<feature>.rs` | One `Model` per feature holding all session state, an exhaustive `Msg` enum, a data-only `Effect` enum, and a pure `update(msg, &mut model) -> Vec<Effect>`. Imports no serenity, tokio, diesel, or poise. |
+| Shell | `src/bot/gui/` | A sealed `GuiFeature` trait (pure `view`, `translate`, `update` via the core) plus the `Host` event loop: collectors, acknowledgement, and the reply handle. |
+| Adapter | Per feature, e.g. `src/bot/gui/voice_settings.rs` | One `EffectHandler` executing effects against services via `ctx.data().service`. Effect results return as `Msg`s (e.g. `SettingsPersisted`). |
+
+The `sealed::Sealed` supertrait closes `GuiFeature` to external implementors — only `src/bot/gui/` may add features. One-shot commands (`register`, `unregister`) drive `view` + `update` directly without the Host. Snapshot tests in each feature pin the rendered component JSON.
+
+#### Host Loop
+
+1. **Construction**: The command handler fetches the required data into a `Config` and calls `Host::<Feature, _>::new(ctx, config, adapter, timeout, router)`. `Feature::initial(config)` builds the `Model`. Initial data loads are data-in at construction, not effects; only in-session async work (refetch, image regeneration, persistence) becomes an `Effect -> Msg` round trip.
+2. **First frame**: The host applies the start message (`Feature::start_msg()`, the `Msg::Start` equivalent), renders through `Feature::view(&model, registry)`, and sends the message. `Feature::attachments` adds extra attachments to the reply, such as image bytes held in the model.
+3. **Collectors**: The host starts a `ViewChannel` on the sent message. It spawns only the collectors the feature enables through `channel_config()`: components, modals, messages, reactions.
+4. **Event loop**: `Host::run()` selects on two channels — the collector's event channel and the host's message channel:
+   - **Component interactions**: The `ViewChannel` resolves the `custom_id` back to an `Action` through the `ActionRegistry`. The host first consults `Feature::open_modal`: when the feature opens a modal, the host skips the acknowledge and the re-render — the modal itself already responds to the interaction — and the submission arrives later as a `Msg`. Otherwise `Feature::translate(action, values, &model)` maps the action and the select values to a `Msg`. Unknown ids are acknowledged and skipped.
+   - **Other events**: Modals, messages, and reactions go through `Feature::on_event`, which returns a `Msg` or nothing. The collector timeout becomes `Feature::timeout_msg()` — expiry is one more update, not a special path.
+   - **Effect follow-ups**: The adapter executes each returned effect. Fast effects return their result `Msg`s directly; slow effects `tokio::spawn` the work and deliver the result on the host's message channel.
+5. **Update and render**: The host applies each `Msg` through `Feature::update` — the only writer of the model — executes the returned effects through the adapter, re-renders through `view`, and edits the live message.
+6. **Exit**: `Feature::exit_navigation(msg)` returns the next `Navigation` when a message ends the feature (e.g. `Back` → `SettingsMain`). The host navigates the router and the loop ends.
+
+#### Interaction Substrate (`src/bot/view/mod.rs`)
+
+The substrate collects Discord events for the Host. It never renders and never mutates feature state.
 
 | Component | Responsibility |
 |-----------|---------------|
-| `Action` | Trait for enums representing user actions (buttons, select menus). |
-| `ViewRender<T>` | Trait defining how to translate state into Discord UI components. |
-| `ViewHandler` | Trait for business logic and state mutations in response to actions. |
-| `ViewEngine<T, H>` | The event loop runner that multiplexes interactions, async events, and timeouts. |
-| `ViewContext<T>` | Context passed to handlers, containing the event, action, sender, and router. |
+| `Action` | Trait for action enums: one variant per button or select option, each with a UI label. |
+| `ActionRegistry` / `RegisteredAction` | Maps `Type:timestamp:counter` custom ids to actions; `RegisteredAction` builds the Discord components (`.as_button()`, `.as_select()`). |
+| `SelectValues` | Select-menu values extracted from an interaction (string, channel, role, user). |
+| `ViewEvent` | One event that wakes the host loop: component, modal, message, reaction, async, timeout, or synthetic. |
+| `ViewChannel` / `ViewChannelConfig` | Background collectors, spawned as tasks, that feed events into the loop. |
+| `SyntheticEvent` | Synthetic button/select events injected by the GUI test framework. |
 
-#### View Lifecycle
-
-1. **Initialization**: `ViewEngine::new(ctx, handler, timeout, router)` is created with a handler that implements `ViewRender` and `ViewHandler`.
-2. **Rendering**: The engine calls `handler.render(&mut registry)` to build the Discord message. The `ActionRegistry::register` method returns a `RegisteredAction` which provides helper methods like `.as_button()` or `.as_select()` to create Discord components.
-3. **Event Loop**: `ViewEngine::run()` starts a `tokio::select!` loop listening for:
-   - **Component Interactions**: Matches `custom_id` back to an `Action`.
-   - **Async Events**: Dispatched via `ctx.spawn()` or `ctx.tx.send()`.
-   - **Modals/Messages**: Can be integrated into the same event stream via `ViewEvent`.
-   - **Timeouts**: Triggers `on_timeout()` on the handler.
-4. **Command Processing**: Handlers return a `ViewCmd` to control the loop:
-   - `Render`: Re-renders the view and updates the message.
-   - `RenderOnce`: Renders once and exits immediately (useful for intermediate states).
-   - `Continue`: Continues the loop without re-rendering.
-   - `Exit`: Breaks the loop.
-   - `AlreadyResponded`: Prevents auto-acknowledgment (essential for opening modals).
-
-#### Delegation Pattern
-
-Child views are integrated using `ctx.map(wrap, ParentAction::Child)`. This creates a `MappedViewSender` that wraps child actions into parent actions, allowing child views to be handled independently within a parent's `handle` method. This allows composition without the parent needing to know the child's internal state or action structure.
+Custom-id helpers live in `src/bot/gui/input.rs` (`build_custom_id`, `parse_custom_id`).
 
 ---
 
@@ -270,15 +277,20 @@ Discord interaction
   → Router::new(ctx)
   → Router::run(initial)             starts navigation loop
       → CommandHandler::run(router)
-          → Service::fetch(...)          fetch required data
-          → ViewHandler::new(...)        construct handler state
-          → ViewEngine::run(...)         start event loop (tokio::select!)
-              → ViewRender::render()     build Discord components
-              → [Event Loop]
-                  → Discord interaction / Async event / Modal
-                  → ViewHandler::handle(ctx)  process action → state mutation
-                  → ViewCmd::Render           re-render view
-              → ViewCmd::Exit
+          → Service::fetch(...)          fetch required data (boot-load)
+          → build EffectHandler          adapter over ctx.data().service
+          → Host::<Feature, _>::new(config, adapter, timeout).run()
+              → Feature::initial(config) build the Model
+              → update(start msg)         first transition
+              → Feature::view(model)      build Discord components
+              → [Host loop]
+                  → ViewChannel event      component / modal / async / timeout
+                  → Feature::open_modal?   modal trigger consumes interaction
+                  → Feature::translate     action → Msg
+                  → update(msg, model)     pure transition → Vec<Effect>
+                  → EffectHandler::execute effects (spawned, results as Msgs)
+                  → Feature::view(model)   re-render, edit reply
+              → exit msg (timeout) or terminal Msg
           → router.navigate(next)      signal next navigation step
       → Router routes to next CommandHandler or exits
 ```
@@ -312,9 +324,10 @@ Discord gateway event
 | Pattern | Where | Purpose |
 |---------|-------|---------|
 | Router → CommandHandler | Presentation | Navigation loop driving per-domain handlers |
-| ViewHandler | Presentation | Separates interaction state from view machinery |
+| TEA core (`src/update`) | Application | Pure `update -> Vec<Effect>` transitions, single-source-of-truth Models |
+| GuiFeature + Host (`src/bot/gui`) | Presentation | Sealed feature contract; host owns loop, acks, collectors |
+| EffectHandler adapter | Application | The only place effects execute (services, image gen) |
 | Strategy | Domain | Swappable platform implementations |
 | Repository (factory) | Infrastructure | `Repos` trait with `PgRepos` concrete impl |
 | Event Bus | Application | Decoupled pub/sub communication |
 | Service | Application | Business logic via trait objects (`SettingsProvider`, `FeedSubscriptionProvider`, etc.) |
-| Update (TEA) | Application | Pure state mutations separated from side effects |
