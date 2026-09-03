@@ -1,7 +1,10 @@
 //! The sealed [`GuiFeature`] trait — the shell contract for a TEA command view.
 
+use poise::serenity_prelude::ComponentInteraction;
+use poise::serenity_prelude::Context as SerenityContext;
 use poise::serenity_prelude::CreateAttachment;
 use poise::serenity_prelude::CreateComponent;
+use tokio::sync::mpsc;
 
 use crate::bot::navigation::Navigation;
 use crate::bot::view::Action;
@@ -98,5 +101,24 @@ pub trait GuiFeature: sealed::Sealed + Sized + Send + Sync + 'static {
     /// `Msg`. `None` → the host acks (if applicable) and continues.
     fn on_event(_event: &ViewEvent, _model: &Self::Model) -> Option<Self::Msg> {
         None
+    }
+
+    /// Opens a modal for actions that need one, consuming the component
+    /// interaction.
+    ///
+    /// The host consults this hook before [`GuiFeature::translate`]. Returning
+    /// `true` means the feature spawned the modal flow (via
+    /// `poise::execute_modal_on_component_interaction`, whose submission is
+    /// delivered back as a `Msg` on `tx`): the host must then skip both the
+    /// auto-acknowledge and the re-render — the `ViewCmd::AlreadyResponded`
+    /// equivalent, since opening the modal already responds to the
+    /// interaction. The default is `false` (no modal; normal handling).
+    fn open_modal(
+        _action: &Self::Action,
+        _ctx: SerenityContext,
+        _interaction: ComponentInteraction,
+        _tx: mpsc::UnboundedSender<Self::Msg>,
+    ) -> bool {
+        false
     }
 }

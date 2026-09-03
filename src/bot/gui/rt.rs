@@ -123,6 +123,19 @@ where
                                     .ok();
                                 continue;
                             };
+                            // Modal triggers consume the interaction (the
+                            // `ViewCmd::AlreadyResponded` equivalent): opening
+                            // the modal already responds to it, so the host
+                            // skips the acknowledge and the re-render. The
+                            // modal submission arrives later as a `Msg`.
+                            if F::open_modal(
+                                &action,
+                                self.ctx.serenity_context().clone(),
+                                interaction.clone(),
+                                fx_tx.clone(),
+                            ) {
+                                continue;
+                            }
                             let values = select_values(&event)
                                 .unwrap_or(SelectValues::String(Vec::new()));
                             let Some(msg) = F::translate(&action, values, &self.model) else {

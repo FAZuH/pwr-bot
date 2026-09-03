@@ -46,6 +46,7 @@ pub mod unregister;
 pub mod voice_leaderboard;
 pub mod voice_settings;
 pub mod voice_stats;
+pub mod welcome;
 
 pub use effects::EffectHandler;
 pub use effects::NoopEffectHandler;
