@@ -1,0 +1,42 @@
+---
+config:
+  layout: elk
+  class:
+    hideEmptyMembersBox: true
+---
+classDiagram
+    direction LR
+    class GuiFeature { <<Trait>> }
+    class AboutFeature
+    class Host~F,H~
+    class EffectHandler { <<Trait>> }
+    class NoopEffectHandler
+    class AboutModel
+    class AboutMsg {
+        <<enumeration>>
+        Start
+        Expired
+        Back
+    }
+    class AboutEffect {
+        <<enumeration>>
+    }
+    class AboutAction {
+        <<enumeration>>
+        Back
+    }
+    class ActionRegistry
+    class ViewChannel
+    class Router
+
+    GuiFeature <|.. AboutFeature
+    Host --> AboutFeature : F
+    Host --> NoopEffectHandler : H
+    NoopEffectHandler ..|> EffectHandler
+    AboutFeature ..> AboutModel : Model
+    AboutFeature ..> AboutMsg : Msg
+    AboutFeature ..> AboutEffect : Effect
+    AboutFeature ..> AboutAction : Action
+    Host --> ViewChannel : collects events
+    Host --> ActionRegistry : custom_ids
+    Host --> Router : navigate

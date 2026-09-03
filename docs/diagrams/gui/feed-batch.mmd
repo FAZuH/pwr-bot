@@ -1,0 +1,48 @@
+---
+config:
+  layout: elk
+  class:
+    hideEmptyMembersBox: true
+---
+classDiagram
+    direction LR
+    class GuiFeature { <<Trait>> }
+    class FeedBatchFeature
+    class Host~F,H~
+    class EffectHandler { <<Trait>> }
+    class NoopEffectHandler
+    class FeedBatchModel
+    class FeedBatchPhase {
+        <<enumeration>>
+        Confirm
+        Done
+    }
+    class FeedBatchMsg {
+        <<enumeration>>
+        Start
+        Expired
+        ViewSubscriptions
+    }
+    class FeedBatchEffect {
+        <<enumeration>>
+    }
+    class FeedSubscriptionBatchAction {
+        <<enumeration>>
+        ViewSubscriptions
+    }
+    class ActionRegistry
+    class ViewChannel
+    class Router
+
+    GuiFeature <|.. FeedBatchFeature
+    Host --> FeedBatchFeature : F
+    Host --> NoopEffectHandler : H
+    NoopEffectHandler ..|> EffectHandler
+    FeedBatchFeature ..> FeedBatchModel : Model
+    FeedBatchFeature ..> FeedBatchMsg : Msg
+    FeedBatchFeature ..> FeedBatchEffect : Effect
+    FeedBatchFeature ..> FeedSubscriptionBatchAction : Action
+    FeedBatchModel *-- FeedBatchPhase
+    Host --> ViewChannel : collects events
+    Host --> ActionRegistry : custom_ids
+    Host --> Router : navigate

@@ -1,0 +1,51 @@
+---
+config:
+  layout: elk
+  class:
+    hideEmptyMembersBox: true
+---
+classDiagram
+    direction LR
+    class GuiFeature { <<Trait>> }
+    class VoiceSettingsFeature
+    class Host~F,H~
+    class EffectHandler { <<Trait>> }
+    class VoiceSettingsEffectHandler
+    class VoiceSettingsModel
+    class VoiceSettingsMsg {
+        <<enumeration>>
+        Start
+        Expired
+        ToggleEnabled
+        Back
+        About
+    }
+    class VoiceSettingsEffect {
+        <<enumeration>>
+        PersistSettings
+    }
+    class SettingsVoiceAction {
+        <<enumeration>>
+        ToggleEnabled
+        Back
+        About
+    }
+    class ServerSettings
+    class VoiceTracker { <<Trait>> }
+    class ActionRegistry
+    class ViewChannel
+    class Router
+
+    GuiFeature <|.. VoiceSettingsFeature
+    Host --> VoiceSettingsFeature : F
+    Host --> VoiceSettingsEffectHandler : H
+    VoiceSettingsEffectHandler ..|> EffectHandler
+    VoiceSettingsFeature ..> VoiceSettingsModel : Model
+    VoiceSettingsFeature ..> VoiceSettingsMsg : Msg
+    VoiceSettingsFeature ..> VoiceSettingsEffect : Effect
+    VoiceSettingsFeature ..> SettingsVoiceAction : Action
+    VoiceSettingsModel *-- ServerSettings
+    VoiceSettingsEffectHandler --> VoiceTracker : persist settings
+    Host --> ViewChannel : collects events
+    Host --> ActionRegistry : custom_ids
+    Host --> Router : navigate
