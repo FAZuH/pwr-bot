@@ -142,11 +142,37 @@ See `.env-example` for available configuration options.
 | `DB_NAME` | PostgreSQL database name | `pwr_bot` |
 | `LOGS_PATH` | Directory for logs | `./logs` |
 | `DATA_PATH` | Directory for data files | `./data` |
+| `PLUGINS_TOML` | Plugin catalog file; see [Plugin catalog](#plugin-catalog) | `$DATA_PATH/plugins.toml` |
+| `PLUGINS_DIR` | Directory where plugin binaries are installed | `$DATA_PATH/plugins` |
 | `ENABLE_VOICE_TRACKING` | Enable voice channel tracking and heartbeat | `true` |
 | `ENABLE_FEED_PUBLISHER` | Enable feed polling and publishing | `true` |
 | `ENABLE_AUTOREGISTER_CMD` | Enable autorregister command | `true` |
 | `DISCORD_APPLICATION_ID` | Discord Application ID. Required for command autoregistration feature | `1234567890` |
 | `RUST_LOG` | Log level (e.g., `info`, `debug`. Read [here](https://rust-lang-nursery.github.io/rust-cookbook/development_tools/debugging/config_log.html) for more info) | `pwr_bot=info` |
+
+## Plugin catalog
+
+External plugins are pinned in a catalog file, `plugins.toml`. The bot reads
+it at startup and lists its plugins under `/plugins`.
+
+1.  **Location**
+    The default path is `$DATA_PATH/plugins.toml`. Set `PLUGINS_TOML` to use
+    another path. Installed plugin binaries go to `$PLUGINS_DIR` (default
+    `$DATA_PATH/plugins`).
+
+2.  **Format**
+    See [`plugins.toml.example`](plugins.toml.example) at the repo root. Copy
+    it to your catalog path and edit the entries. Each `[[plugins]]` entry
+    pins a plugin name, an https download URL, the binary's sha256, and the
+    plugin's manifest as a JSON string. `auto_enable = true` enables the
+    plugin in every guild by default.
+
+3.  **Missing or invalid catalog**
+    The bot still starts, and plugin commands stay absent. The failure is
+    logged, and the bot owner (`ADMIN_ID`) sees the exact path and cause in
+    `/plugins list` — and in the unknown-plugin errors of
+    `/plugins enable <name>` and `/plugins swap <name>`; other users see
+    "The plugin catalog is empty."
 
 ## Command Registration
 
