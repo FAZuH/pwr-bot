@@ -266,10 +266,11 @@ impl<P: PluginHandle> InteractionEngine<P> {
 
     /// Invokes the plugin's command and returns the [`ViewSpec`] to render:
     /// a pure call + parse, no session and no message id required. The
-    /// caller sends `spec.data` verbatim (e.g. via `ctx.send`), then opens
-    /// the session for the sent message with
-    /// [`InteractionEngine::register`] — the two-step split lets the reply
-    /// carry `spec.ephemeral` before the session exists.
+    /// caller defers the interaction with `spec.ephemeral` and edits the
+    /// deferred response with `spec.data` verbatim, then opens the session
+    /// for the edited message with [`InteractionEngine::register`] — the
+    /// two-step split lets the deferred response carry the view's
+    /// ephemerality before the session exists.
     pub async fn invoke(
         &self,
         plugin: Arc<P>,
@@ -307,8 +308,8 @@ impl<P: PluginHandle> InteractionEngine<P> {
     /// Opens a session for a plugin view: invokes the plugin's command
     /// ([`InteractionEngine::invoke`]) and registers the returned spec's
     /// session under `message_id` ([`InteractionEngine::register`]). Returns
-    /// the [`ViewSpec`] the caller renders verbatim (typically via
-    /// `ctx.send`). Any session already open for `message_id` is replaced.
+    /// the [`ViewSpec`] the caller renders verbatim. Any session already open
+    /// for `message_id` is replaced.
     pub async fn open(
         &self,
         message_id: serenity::MessageId,

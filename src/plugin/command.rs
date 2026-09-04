@@ -51,6 +51,7 @@ use poise::CommandParameter;
 use poise::CommandParameterChoice;
 use poise::serenity_prelude as serenity;
 use pwr_plugin_protocol::Manifest;
+use pwr_plugin_protocol::ViewSpec;
 use serde_json::Value;
 
 use crate::bot::Data;
@@ -592,6 +593,31 @@ pub fn routes_from_manifests(
     routes
 }
 
+/// How the initial render of a plugin view reaches Discord: the ephemerality
+/// of the deferred initial response, and the body of the edit that carries the
+/// payload.
+#[derive(Debug, Clone, PartialEq)]
+struct ViewPresentation {
+    /// Whether the deferred initial response is ephemeral.
+    ephemeral: bool,
+    /// The plugin's message JSON, sent verbatim as the edit body.
+    edit_body: Value,
+}
+
+/// Projects a validated [`ViewSpec`] onto the two calls of the initial render.
+///
+/// The payload never rides the initial response: Discord honors ephemerality
+/// only there, and content set on the first response survives a later
+/// content-less edit — which makes a components-V2 payload fail with "cannot
+/// use legacy fields with components V2" (50035). So the initial response is
+/// always a defer and the plugin's JSON rides the edit verbatim.
+fn view_presentation(spec: &ViewSpec) -> ViewPresentation {
+    ViewPresentation {
+        ephemeral: spec.ephemeral,
+        edit_body: spec.data.clone(),
+    }
+}
+
 /// Routes a slash invocation to its owning plugin's view session.
 ///
 /// The invoked command name is looked up in the plugin route table built from
@@ -601,11 +627,12 @@ pub fn routes_from_manifests(
 /// interaction's arguments are re-parsed against the command's schema
 /// ([`reparse_command_args`]) so the plugin receives the real payload instead
 /// of an empty object. The plugin handle comes from the manager, the initial
-/// render is invoke+placeholder+edit: invoke the plugin for its spec first
-/// (so the loading reply can carry `spec.ephemeral`), register the engine
-/// session on the reply's message id, then replace the message body with the
-/// returned spec's raw data via a bare HTTP edit — `serenity::Component` is
-/// not `Deserialize`, so the spec cannot ride a typed `CreateReply`.
+/// render is invoke+defer+edit ([`view_presentation`]): invoke the plugin for
+/// its spec first (so the deferred response can carry `spec.ephemeral`),
+/// replace that response with the spec's raw data via a bare HTTP edit —
+/// `serenity::Component` is not `Deserialize`, so the spec cannot ride a typed
+/// `CreateReply` — then register the engine session on the edited message's
+/// id. No placeholder message is ever sent.
 fn plugin_slash_dispatch(
     ctx: poise::ApplicationContext<'_, Data, Error>,
 ) -> poise::BoxFuture<'_, Result<(), poise::FrameworkError<'_, Data, Error>>> {
@@ -636,9 +663,9 @@ fn plugin_slash_dispatch(
         let interaction_token = ctx.interaction.token.as_str();
         let ctx: poise::Context<'_, Data, Error> = ctx.into();
 
-        // Invoke the plugin before sending anything, so the initial reply can
-        // carry the view's ephemeral flag (Discord only honors ephemeral on
-        // the first interaction response).
+        // Invoke the plugin before responding, so the deferred response can
+        // carry the view's ephemerality — Discord honors it on the first
+        // interaction response only.
         let spec = data
             .plugin_engine
             .invoke(plugin.clone(), command_name, args)
@@ -646,31 +673,31 @@ fn plugin_slash_dispatch(
             .map_err(|error| poise::FrameworkError::new_command(ctx, error.into()))?;
         validate_view_data(&spec.data)
             .map_err(|error| poise::FrameworkError::new_command(ctx, error.into()))?;
-        let reply = ctx
-            .send(
-                poise::CreateReply::new()
-                    .content("Loading…")
-                    .ephemeral(spec.ephemeral),
+        let presentation = view_presentation(&spec);
+        if presentation.ephemeral {
+            ctx.defer_ephemeral().await
+        } else {
+            ctx.defer().await
+        }
+        .map_err(|error| poise::FrameworkError::new_command(ctx, error.into()))?;
+        // Ephemeral responses cannot be edited via the channel-message route
+        // (`PATCH /channels/{id}/messages/{id}` returns Unknown Message for
+        // ephemeral messages); the interaction-webhook route is the only one
+        // that works, for both ephemeral and public responses. The deferred
+        // response carries no components, so no interaction can reach the
+        // session before it is registered from the edit's message id.
+        let message = ctx
+            .http()
+            .edit_original_interaction_response(
+                interaction_token,
+                &presentation.edit_body,
+                Vec::new(),
             )
             .await
             .map_err(|error| poise::FrameworkError::new_command(ctx, error.into()))?;
-        let message_id = reply
-            .message()
-            .await
-            .map_err(|error| poise::FrameworkError::new_command(ctx, error.into()))?
-            .id;
         data.plugin_engine
-            .register(message_id, plugin, command_name, spec.clone())
+            .register(message.id, plugin, command_name, spec)
             .await;
-        // Ephemeral replies cannot be edited via the channel-message route
-        // (`PATCH /channels/{id}/messages/{id}` returns Unknown Message for
-        // ephemeral messages); the interaction-webhook route is the only one
-        // that works, for both ephemeral and public replies. The message id
-        // fetched above is still needed for the engine session registration.
-        ctx.http()
-            .edit_original_interaction_response(interaction_token, &spec.data, Vec::new())
-            .await
-            .map_err(|error| poise::FrameworkError::new_command(ctx, error.into()))?;
         Ok(())
     })
 }
@@ -2014,5 +2041,45 @@ mod tests {
         )]);
 
         assert!(routes.is_empty());
+    }
+
+    // ── view_presentation ───────────────────────────────────────────────────
+
+    #[test]
+    fn view_presentation_defers_with_the_spec_ephemerality() {
+        let ephemeral_spec = ViewSpec {
+            data: json!({"components": []}),
+            ephemeral: true,
+            view: json!({}),
+        };
+        let public_spec = ViewSpec {
+            data: json!({"components": []}),
+            ephemeral: false,
+            view: json!({}),
+        };
+
+        assert!(view_presentation(&ephemeral_spec).ephemeral);
+        assert!(!view_presentation(&public_spec).ephemeral);
+    }
+
+    #[test]
+    fn view_presentation_sends_the_payload_on_the_edit_with_no_placeholder_content() {
+        let data = pwr_poise_components::view_data_v2([pwr_poise_components::container([
+            pwr_poise_components::text_display("Settings"),
+        ])]);
+        let spec = ViewSpec {
+            data: data.clone(),
+            ephemeral: true,
+            view: json!({"page": 1}),
+        };
+
+        let presentation = view_presentation(&spec);
+
+        assert_eq!(presentation.edit_body, data);
+        assert!(presentation.edit_body.get("content").is_none());
+        assert_eq!(
+            presentation.edit_body["flags"],
+            json!(pwr_poise_components::IS_COMPONENTS_V2)
+        );
     }
 }
