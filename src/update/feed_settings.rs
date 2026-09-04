@@ -8,11 +8,13 @@
 //! (`FeedSettingsEffect`).
 //!
 //! Persistence is now an explicit effect, not an implicit save-on-exit: the
-//! terminal messages (`Back`, `About`, `Expired`) return a
-//! [`FeedSettingsEffect::PersistSettings`] snapshot that the shell adapter
-//! executes when the host loop ends — mirroring the voice settings migration.
+//! terminal messages (`Back`, `About`) and the shared lifecycle expiry
+//! ([`Lifecycle::Expired`]) return a [`FeedSettingsEffect::PersistSettings`]
+//! snapshot that the shell adapter executes when the host loop ends —
+//! mirroring the voice settings migration.
 
 use crate::entity::ServerSettings;
+use crate::update::lifecycle::Lifecycle;
 
 /// The feed settings view model — the single source of truth for the view.
 #[derive(Debug, Clone)]
@@ -51,13 +53,11 @@ impl FeedSettingsModel {
 /// Messages that drive the feed settings view.
 ///
 /// Exhaustive: every way the world can change the feed settings model is one
-/// variant.
+/// variant. The lifecycle moments share the wrapped [`Lifecycle`] form.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FeedSettingsMsg {
-    /// Boot handshake — the host dispatches this on start.
-    Start,
-    /// The view loop timed out.
-    Expired,
+    /// The shared boot/timeout lifecycle moments.
+    Lifecycle(Lifecycle),
     /// Toggle whether feed notifications are enabled.
     ToggleEnabled,
     /// Set the notification channel id (or clear it).
@@ -70,6 +70,12 @@ pub enum FeedSettingsMsg {
     Back,
     /// The about button was pressed.
     About,
+}
+
+impl From<Lifecycle> for FeedSettingsMsg {
+    fn from(lifecycle: Lifecycle) -> Self {
+        Self::Lifecycle(lifecycle)
+    }
 }
 
 /// Effects the feed settings view can request.
@@ -85,12 +91,12 @@ pub enum FeedSettingsEffect {
 /// The pure update function — the only writer of the model.
 ///
 /// Each mutating message applies to `model.settings.feeds` in place. The
-/// terminal messages (`Expired`, `Back`, `About`) persist the current settings
-/// exactly once, mirroring the old save-on-exit semantics without an implicit
-/// write.
+/// terminal exits — lifecycle expiry (through [`Lifecycle::handle`]), `Back`,
+/// and `About` — persist the current settings exactly once, mirroring the old
+/// save-on-exit semantics without an implicit write.
 pub fn update(msg: FeedSettingsMsg, model: &mut FeedSettingsModel) -> Vec<FeedSettingsEffect> {
     match msg {
-        FeedSettingsMsg::Start => Vec::new(),
+        FeedSettingsMsg::Lifecycle(lifecycle) => lifecycle.handle(|| persist(model)),
         FeedSettingsMsg::ToggleEnabled => {
             let current = model.settings.feeds.enabled.unwrap_or(true);
             model.settings.feeds.enabled = Some(!current);
@@ -108,10 +114,14 @@ pub fn update(msg: FeedSettingsMsg, model: &mut FeedSettingsModel) -> Vec<FeedSe
             model.settings.feeds.unsubscribe_role_id = id;
             Vec::new()
         }
-        FeedSettingsMsg::Expired | FeedSettingsMsg::Back | FeedSettingsMsg::About => {
-            vec![FeedSettingsEffect::PersistSettings(model.settings.clone())]
-        }
+        FeedSettingsMsg::Back | FeedSettingsMsg::About => persist(model),
     }
+}
+
+/// The persist-on-exit behavior shared by expiry, `Back`, and `About`:
+/// snapshot the current settings exactly once.
+fn persist(model: &FeedSettingsModel) -> Vec<FeedSettingsEffect> {
+    vec![FeedSettingsEffect::PersistSettings(model.settings.clone())]
 }
 
 #[cfg(test)]
@@ -127,7 +137,7 @@ mod tests {
     #[test]
     fn start_is_a_noop() {
         let mut m = model(Some(true));
-        let effects = update(FeedSettingsMsg::Start, &mut m);
+        let effects = update(FeedSettingsMsg::Lifecycle(Lifecycle::Start), &mut m);
         assert!(effects.is_empty());
         assert!(m.is_enabled());
     }
@@ -205,7 +215,7 @@ mod tests {
     #[test]
     fn expired_persists_current_settings() {
         let mut m = model(None);
-        let effects = update(FeedSettingsMsg::Expired, &mut m);
+        let effects = update(FeedSettingsMsg::Lifecycle(Lifecycle::Expired), &mut m);
         assert_eq!(effects.len(), 1);
         match &effects[0] {
             FeedSettingsEffect::PersistSettings(s) => assert_eq!(s.feeds.enabled, None),

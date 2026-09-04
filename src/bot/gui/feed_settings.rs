@@ -60,14 +60,6 @@ impl GuiFeature for FeedSettingsFeature {
         FeedSettingsModel::new(config.settings)
     }
 
-    fn start_msg() -> Self::Msg {
-        FeedSettingsMsg::Start
-    }
-
-    fn timeout_msg() -> Self::Msg {
-        FeedSettingsMsg::Expired
-    }
-
     fn update(msg: Self::Msg, model: &mut Self::Model) -> Vec<Self::Effect> {
         feed_settings_update(msg, model)
     }

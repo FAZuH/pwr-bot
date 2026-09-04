@@ -48,14 +48,6 @@ impl GuiFeature for RegisterFeature {
         RegisterModel::new(config.num_commands)
     }
 
-    fn start_msg() -> Self::Msg {
-        RegisterMsg::Start
-    }
-
-    fn timeout_msg() -> Self::Msg {
-        RegisterMsg::Expired
-    }
-
     fn update(msg: Self::Msg, model: &mut Self::Model) -> Vec<Self::Effect> {
         register_update(msg, model)
     }

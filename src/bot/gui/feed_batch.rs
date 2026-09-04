@@ -42,14 +42,6 @@ impl GuiFeature for FeedBatchFeature {
         config
     }
 
-    fn start_msg() -> Self::Msg {
-        FeedBatchMsg::Start
-    }
-
-    fn timeout_msg() -> Self::Msg {
-        FeedBatchMsg::Expired
-    }
-
     fn update(msg: Self::Msg, model: &mut Self::Model) -> Vec<Self::Effect> {
         feed_batch_update(msg, model)
     }

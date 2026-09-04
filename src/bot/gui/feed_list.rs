@@ -63,14 +63,6 @@ impl GuiFeature for FeedListFeature {
         FeedListModel::new(config.subscriptions, SUBSCRIPTIONS_PER_PAGE)
     }
 
-    fn start_msg() -> Self::Msg {
-        FeedListMsg::Start
-    }
-
-    fn timeout_msg() -> Self::Msg {
-        FeedListMsg::Expired
-    }
-
     fn update(msg: Self::Msg, model: &mut Self::Model) -> Vec<Self::Effect> {
         feed_list_update(msg, model)
     }

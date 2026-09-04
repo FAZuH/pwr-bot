@@ -42,14 +42,6 @@ impl GuiFeature for AboutFeature {
         AboutModel::new(config.stats, config.avatar_url)
     }
 
-    fn start_msg() -> Self::Msg {
-        AboutMsg::Start
-    }
-
-    fn timeout_msg() -> Self::Msg {
-        AboutMsg::Expired
-    }
-
     fn update(msg: Self::Msg, model: &mut Self::Model) -> Vec<Self::Effect> {
         crate::update::about::update(msg, model)
     }

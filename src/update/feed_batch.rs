@@ -7,6 +7,7 @@
 //! results and handles the "View Subscriptions" action that concludes the flow.
 
 use crate::entity::SubscriberType;
+use crate::update::lifecycle::Lifecycle;
 
 /// The batch view phase.
 ///
@@ -50,14 +51,19 @@ impl FeedBatchModel {
 /// Messages that drive the feed batch view.
 ///
 /// Exhaustive: every way the world can change the batch model is one variant.
+/// The lifecycle moments share the wrapped [`Lifecycle`] form.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FeedBatchMsg {
-    /// Boot handshake — the host dispatches this on start.
-    Start,
-    /// The view loop timed out.
-    Expired,
+    /// The shared boot/timeout lifecycle moments.
+    Lifecycle(Lifecycle),
     /// The "View Subscriptions" action was pressed.
     ViewSubscriptions { subscriber_type: SubscriberType },
+}
+
+impl From<Lifecycle> for FeedBatchMsg {
+    fn from(lifecycle: Lifecycle) -> Self {
+        Self::Lifecycle(lifecycle)
+    }
 }
 
 /// Effects the feed batch view can request.
@@ -71,9 +77,13 @@ pub enum FeedBatchEffect {}
 /// The pure update function.
 ///
 /// Each render is a fresh model built by the shell, so every message is a
-/// no-op that returns no effects.
-pub fn update(_msg: FeedBatchMsg, _model: &mut FeedBatchModel) -> Vec<FeedBatchEffect> {
-    Vec::new()
+/// no-op that returns no effects (expiry included — the batch view persists
+/// nothing).
+pub fn update(msg: FeedBatchMsg, _model: &mut FeedBatchModel) -> Vec<FeedBatchEffect> {
+    match msg {
+        FeedBatchMsg::Lifecycle(lifecycle) => lifecycle.handle(Vec::new),
+        FeedBatchMsg::ViewSubscriptions { .. } => Vec::new(),
+    }
 }
 
 #[cfg(test)]
@@ -91,14 +101,14 @@ mod tests {
     #[test]
     fn start_is_a_noop() {
         let mut m = model();
-        let effects = update(FeedBatchMsg::Start, &mut m);
+        let effects = update(FeedBatchMsg::Lifecycle(Lifecycle::Start), &mut m);
         assert!(effects.is_empty());
     }
 
     #[test]
     fn expired_is_a_noop() {
         let mut m = model();
-        let effects = update(FeedBatchMsg::Expired, &mut m);
+        let effects = update(FeedBatchMsg::Lifecycle(Lifecycle::Expired), &mut m);
         assert!(effects.is_empty());
     }
 

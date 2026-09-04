@@ -6,6 +6,8 @@
 //! handler performs the actual `guild_id.set_commands` call); this core tracks
 //! the status and renders it.
 
+use crate::update::lifecycle::Lifecycle;
+
 /// The command unregistration status view model — the single source of truth.
 #[derive(Debug, Clone)]
 pub struct UnregisterModel {
@@ -34,15 +36,19 @@ impl Default for UnregisterModel {
 /// Messages that drive the unregistration view.
 ///
 /// Exhaustive: every way the world can change the unregistration model is one
-/// variant.
+/// variant. The lifecycle moments share the wrapped [`Lifecycle`] form.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnregisterMsg {
-    /// Boot handshake — the host dispatches this on start.
-    Start,
-    /// The view loop timed out.
-    Expired,
+    /// The shared boot/timeout lifecycle moments.
+    Lifecycle(Lifecycle),
     /// Command unregistration finished.
     Unregistered { duration_ms: u64 },
+}
+
+impl From<Lifecycle> for UnregisterMsg {
+    fn from(lifecycle: Lifecycle) -> Self {
+        Self::Lifecycle(lifecycle)
+    }
 }
 
 /// Effects the unregistration view can request.
@@ -58,10 +64,10 @@ pub fn update(msg: UnregisterMsg, model: &mut UnregisterModel) -> Vec<Unregister
         UnregisterMsg::Unregistered { duration_ms } => {
             model.is_complete = true;
             model.duration_ms = Some(duration_ms);
+            Vec::new()
         }
-        UnregisterMsg::Start | UnregisterMsg::Expired => {}
+        UnregisterMsg::Lifecycle(lifecycle) => lifecycle.handle(Vec::new),
     }
-    Vec::new()
 }
 
 #[cfg(test)]
@@ -71,7 +77,7 @@ mod tests {
     #[test]
     fn start_keeps_model_incomplete() {
         let mut m = UnregisterModel::new();
-        let effects = update(UnregisterMsg::Start, &mut m);
+        let effects = update(UnregisterMsg::Lifecycle(Lifecycle::Start), &mut m);
         assert!(effects.is_empty());
         assert!(!m.is_complete);
         assert_eq!(m.duration_ms, None);

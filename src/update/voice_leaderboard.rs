@@ -9,16 +9,15 @@
 
 use crate::bot::command::voice::VoiceLeaderboardTimeRange;
 use crate::entity::VoiceLeaderboardEntry;
+use crate::update::lifecycle::Lifecycle;
 use crate::update::pagination::PaginationAction;
 use crate::update::pagination::PaginationModel;
 
 /// Messages that can mutate the leaderboard model.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VoiceLeaderboardMsg {
-    /// Boot handshake — the host dispatches this on start.
-    Start,
-    /// The view loop timed out.
-    Expired,
+    /// The shared boot/timeout lifecycle moments.
+    Lifecycle(Lifecycle),
     /// Replace the full entry set after a database fetch. Carries the resolved
     /// partner display name (used only in partner mode).
     EntriesLoaded(LeaderboardData),
@@ -32,6 +31,12 @@ pub enum VoiceLeaderboardMsg {
     Pagination(PaginationAction),
     /// The adapter finished (re)rendering the current page image.
     ImageRendered(Option<Vec<u8>>),
+}
+
+impl From<Lifecycle> for VoiceLeaderboardMsg {
+    fn from(lifecycle: Lifecycle) -> Self {
+        Self::Lifecycle(lifecycle)
+    }
 }
 
 /// Data returned by a leaderboard query.
@@ -239,8 +244,10 @@ impl VoiceLeaderboardModel {
 
 /// The pure update function — the only writer of the leaderboard model.
 ///
-/// `Start` is a no-op (initial data arrives via the feature config). Time-range,
-/// mode, and target-user changes return a [`VoiceLeaderboardEffect::QueryLeaderboard`]
+/// The lifecycle start moment is a no-op (initial data arrives via the
+/// feature config); expiry disables pagination so the stale page can no
+/// longer be edited. Time-range, mode, and target-user changes return a
+/// [`VoiceLeaderboardEffect::QueryLeaderboard`]
 /// so the adapter refetches entries; the returned [`VoiceLeaderboardMsg::EntriesLoaded`]
 /// replaces the entry set and requests a fresh page image. Pagination is pure
 /// (the full list is loaded upfront) and requests a [`VoiceLeaderboardEffect::RenderImage`]
@@ -252,11 +259,10 @@ pub fn update(
     use VoiceLeaderboardMsg::*;
 
     match msg {
-        Start => Vec::new(),
-        Expired => {
+        VoiceLeaderboardMsg::Lifecycle(lifecycle) => lifecycle.handle(|| {
             model.pagination_disabled = true;
             Vec::new()
-        }
+        }),
         EntriesLoaded(data) => {
             model.target_user_name = data.target_user_name;
             model.apply_entries(data.entries);
@@ -722,7 +728,10 @@ mod tests {
     #[test]
     fn expired_disables_pagination() {
         let mut model = model_with(vec![entry(1, 100); 25], 10);
-        let effects = update(VoiceLeaderboardMsg::Expired, &mut model);
+        let effects = update(
+            VoiceLeaderboardMsg::Lifecycle(Lifecycle::Expired),
+            &mut model,
+        );
         assert!(effects.is_empty());
         assert!(model.pagination_disabled());
     }
@@ -730,7 +739,7 @@ mod tests {
     #[test]
     fn start_is_noop() {
         let mut model = model_with(vec![], 10);
-        let effects = update(VoiceLeaderboardMsg::Start, &mut model);
+        let effects = update(VoiceLeaderboardMsg::Lifecycle(Lifecycle::Start), &mut model);
         assert!(effects.is_empty());
     }
 

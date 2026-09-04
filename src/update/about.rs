@@ -10,6 +10,8 @@
 
 use std::time::Duration;
 
+use crate::update::lifecycle::Lifecycle;
+
 /// Statistics displayed on the about view.
 #[derive(Debug, Clone)]
 pub struct AboutStats {
@@ -93,14 +95,19 @@ impl AboutModel {
 /// Messages that drive the about view.
 ///
 /// Exhaustive: every way the world can change the about model is one variant.
+/// The lifecycle moments share the wrapped [`Lifecycle`] form.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AboutMsg {
-    /// Boot handshake — the host dispatches this on start.
-    Start,
-    /// The view loop timed out.
-    Expired,
+    /// The shared boot/timeout lifecycle moments.
+    Lifecycle(Lifecycle),
     /// The back button was pressed.
     Back,
+}
+
+impl From<Lifecycle> for AboutMsg {
+    fn from(lifecycle: Lifecycle) -> Self {
+        Self::Lifecycle(lifecycle)
+    }
 }
 
 /// Effects the about view can request.
@@ -111,9 +118,13 @@ pub enum AboutMsg {
 pub enum AboutEffect {}
 
 /// The pure update function. The about view never mutates its model, so every
-/// message is a no-op that returns no effects.
-pub fn update(_msg: AboutMsg, _model: &mut AboutModel) -> Vec<AboutEffect> {
-    Vec::new()
+/// message is a no-op that returns no effects (expiry included — the about
+/// view persists nothing).
+pub fn update(msg: AboutMsg, _model: &mut AboutModel) -> Vec<AboutEffect> {
+    match msg {
+        AboutMsg::Lifecycle(lifecycle) => lifecycle.handle(Vec::new),
+        AboutMsg::Back => Vec::new(),
+    }
 }
 
 #[cfg(test)]
@@ -139,14 +150,14 @@ mod tests {
     #[test]
     fn start_is_a_noop() {
         let mut m = model();
-        let effects = update(AboutMsg::Start, &mut m);
+        let effects = update(AboutMsg::Lifecycle(Lifecycle::Start), &mut m);
         assert!(effects.is_empty());
     }
 
     #[test]
     fn expired_is_a_noop() {
         let mut m = model();
-        let effects = update(AboutMsg::Expired, &mut m);
+        let effects = update(AboutMsg::Lifecycle(Lifecycle::Expired), &mut m);
         assert!(effects.is_empty());
     }
 

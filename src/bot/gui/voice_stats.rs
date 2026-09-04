@@ -95,14 +95,6 @@ impl GuiFeature for VoiceStatsFeature {
         )
     }
 
-    fn start_msg() -> Self::Msg {
-        VoiceStatsMsg::Start
-    }
-
-    fn timeout_msg() -> Self::Msg {
-        VoiceStatsMsg::Expired
-    }
-
     fn update(msg: Self::Msg, model: &mut Self::Model) -> Vec<Self::Effect> {
         voice_stats_update(msg, model)
     }

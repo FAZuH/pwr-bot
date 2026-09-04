@@ -12,6 +12,7 @@ use crate::bot::view::ActionRegistry;
 use crate::bot::view::SelectValues;
 use crate::bot::view::ViewChannelConfig;
 use crate::bot::view::ViewEvent;
+use crate::update::lifecycle::Lifecycle;
 
 /// Seal for [`GuiFeature`] — only this module's features may impl it.
 pub mod sealed {
@@ -40,7 +41,9 @@ pub trait GuiFeature: sealed::Sealed + Sized + Send + Sync + 'static {
     /// The feature's full state, single source of truth.
     type Model;
     /// Exhaustive message vocabulary: interactions, async results, lifecycle.
-    type Msg: Send + 'static;
+    /// Must wrap the shared [`Lifecycle`] form (via `From<Lifecycle>`), so the
+    /// host's start/timeout paths speak the one common vocabulary.
+    type Msg: From<Lifecycle> + Send + 'static;
     /// UI action enum, reusing the shared [`Action`] trait for labels.
     type Action: Action + 'static;
     /// Data-only effect vocabulary.
@@ -52,11 +55,18 @@ pub trait GuiFeature: sealed::Sealed + Sized + Send + Sync + 'static {
     fn initial(config: Self::Config) -> Self::Model;
 
     /// The message the host dispatches at boot to drive the first
-    /// update/render cycle.
-    fn start_msg() -> Self::Msg;
+    /// update/render cycle — the shared [`Lifecycle::Start`] in the feature's
+    /// own wrapped form. Fixed by the trait: features cannot override it.
+    fn start_msg() -> Self::Msg {
+        Self::Msg::from(Lifecycle::Start)
+    }
 
-    /// The message the host dispatches when the loop times out.
-    fn timeout_msg() -> Self::Msg;
+    /// The message the host dispatches when the loop times out — the shared
+    /// [`Lifecycle::Expired`] in the feature's own wrapped form. Fixed by the
+    /// trait: features cannot override it.
+    fn timeout_msg() -> Self::Msg {
+        Self::Msg::from(Lifecycle::Expired)
+    }
 
     /// Pure transition — the only writer of the model. Returns effects as data.
     fn update(msg: Self::Msg, model: &mut Self::Model) -> Vec<Self::Effect>;

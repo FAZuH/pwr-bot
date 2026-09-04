@@ -68,14 +68,6 @@ impl GuiFeature for VoiceLeaderboardFeature {
             .with_image_bytes(config.image_bytes)
     }
 
-    fn start_msg() -> Self::Msg {
-        VoiceLeaderboardMsg::Start
-    }
-
-    fn timeout_msg() -> Self::Msg {
-        VoiceLeaderboardMsg::Expired
-    }
-
     fn update(msg: Self::Msg, model: &mut Self::Model) -> Vec<Self::Effect> {
         voice_leaderboard_update(msg, model)
     }

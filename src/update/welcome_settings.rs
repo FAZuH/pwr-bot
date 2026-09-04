@@ -14,20 +14,20 @@
 //! [`WelcomeSettingsEffect::PersistSettings`] snapshot and a
 //! [`WelcomeSettingsEffect::RenderImage`] snapshot, mirroring the old
 //! `persist_and_regenerate` call the handler ran after each mutation. The
-//! terminal messages (`Back`, `About`, `Expired`) persist nothing: every change
-//! was already persisted when it happened, exactly as before.
+//! terminal messages (`Back`, `About`) and the shared lifecycle expiry persist
+//! nothing: every change was already persisted when it happened, exactly as
+//! before.
 
 use std::collections::HashSet;
 
 use crate::entity::ServerSettings;
+use crate::update::lifecycle::Lifecycle;
 
 /// Messages that can mutate the welcome-settings model.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WelcomeSettingsMsg {
-    /// Boot handshake — the host dispatches this on start.
-    Start,
-    /// The view loop timed out.
-    Expired,
+    /// The shared boot/timeout lifecycle moments.
+    Lifecycle(Lifecycle),
     ToggleEnabled,
     SetChannel(Option<String>),
     SetTemplate(Option<String>),
@@ -44,6 +44,12 @@ pub enum WelcomeSettingsMsg {
     ImageRendered(Option<Vec<u8>>),
     /// The adapter finished persisting the settings.
     SettingsPersisted,
+}
+
+impl From<Lifecycle> for WelcomeSettingsMsg {
+    fn from(lifecycle: Lifecycle) -> Self {
+        Self::Lifecycle(lifecycle)
+    }
 }
 
 /// Effects the welcome-settings view can request.
@@ -106,8 +112,9 @@ impl WelcomeSettingsModel {
 /// `persist_and_regenerate` pairing exactly (including for no-op edits such as
 /// empty or over-cap messages, which the old handler persisted too).
 /// Selection-only messages (`MarkRemoval`, `CancelRemoval`), the lifecycle
-/// messages (`Start`, `Expired`), navigation (`Back`, `About`), and the async
-/// results (`ImageRendered`, `SettingsPersisted`) return no effects.
+/// moments (through [`Lifecycle::handle`] — both start and expiry persist
+/// nothing), navigation (`Back`, `About`), and the async results
+/// (`ImageRendered`, `SettingsPersisted`) return no effects.
 pub fn update(
     msg: WelcomeSettingsMsg,
     model: &mut WelcomeSettingsModel,
@@ -115,7 +122,8 @@ pub fn update(
     use WelcomeSettingsMsg::*;
 
     match msg {
-        Start | Expired | Back | About | SettingsPersisted => Vec::new(),
+        WelcomeSettingsMsg::Lifecycle(lifecycle) => lifecycle.handle(Vec::new),
+        Back | About | SettingsPersisted => Vec::new(),
         ToggleEnabled => {
             let current = model.settings.welcome.enabled.unwrap_or(false);
             model.settings.welcome.enabled = Some(!current);
@@ -428,7 +436,7 @@ mod tests {
     #[test]
     fn start_is_a_noop() {
         let mut model = empty_model();
-        let fx = update(WelcomeSettingsMsg::Start, &mut model);
+        let fx = update(WelcomeSettingsMsg::Lifecycle(Lifecycle::Start), &mut model);
         assert!(fx.is_empty());
     }
 
@@ -436,7 +444,10 @@ mod tests {
     fn expired_persists_nothing() {
         let mut model = empty_model();
         model.settings.welcome.enabled = Some(true);
-        let fx = update(WelcomeSettingsMsg::Expired, &mut model);
+        let fx = update(
+            WelcomeSettingsMsg::Lifecycle(Lifecycle::Expired),
+            &mut model,
+        );
         assert!(fx.is_empty());
         assert!(model.is_enabled());
     }

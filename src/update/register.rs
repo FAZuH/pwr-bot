@@ -6,6 +6,8 @@
 //! actual `guild_id.set_commands` call); this core tracks the status and
 //! renders it.
 
+use crate::update::lifecycle::Lifecycle;
+
 /// The command registration status view model — the single source of truth.
 #[derive(Debug, Clone)]
 pub struct RegisterModel {
@@ -31,15 +33,19 @@ impl RegisterModel {
 /// Messages that drive the registration view.
 ///
 /// Exhaustive: every way the world can change the registration model is one
-/// variant.
+/// variant. The lifecycle moments share the wrapped [`Lifecycle`] form.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RegisterMsg {
-    /// Boot handshake — the host dispatches this on start.
-    Start,
-    /// The view loop timed out.
-    Expired,
+    /// The shared boot/timeout lifecycle moments.
+    Lifecycle(Lifecycle),
     /// Command registration finished.
     Registered { duration_ms: u64 },
+}
+
+impl From<Lifecycle> for RegisterMsg {
+    fn from(lifecycle: Lifecycle) -> Self {
+        Self::Lifecycle(lifecycle)
+    }
 }
 
 /// Effects the registration view can request.
@@ -55,10 +61,10 @@ pub fn update(msg: RegisterMsg, model: &mut RegisterModel) -> Vec<RegisterEffect
         RegisterMsg::Registered { duration_ms } => {
             model.is_complete = true;
             model.duration_ms = Some(duration_ms);
+            Vec::new()
         }
-        RegisterMsg::Start | RegisterMsg::Expired => {}
+        RegisterMsg::Lifecycle(lifecycle) => lifecycle.handle(Vec::new),
     }
-    Vec::new()
 }
 
 #[cfg(test)]
@@ -68,7 +74,7 @@ mod tests {
     #[test]
     fn start_keeps_model_incomplete() {
         let mut m = RegisterModel::new(5);
-        let effects = update(RegisterMsg::Start, &mut m);
+        let effects = update(RegisterMsg::Lifecycle(Lifecycle::Start), &mut m);
         assert!(effects.is_empty());
         assert!(!m.is_complete);
         assert_eq!(m.duration_ms, None);

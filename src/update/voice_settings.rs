@@ -8,11 +8,12 @@
 //! (`VoiceSettingsEffect`).
 //!
 //! Persistence is now an explicit effect, not an implicit save-on-exit: the
-//! terminal messages (`Back`, `About`, `Expired`) return a
-//! [`VoiceSettingsEffect::PersistSettings`] snapshot that the shell adapter
-//! executes when the host loop ends.
+//! terminal messages (`Back`, `About`) and the shared lifecycle expiry
+//! ([`Lifecycle::Expired`]) return a [`VoiceSettingsEffect::PersistSettings`]
+//! snapshot that the shell adapter executes when the host loop ends.
 
 use crate::entity::ServerSettings;
+use crate::update::lifecycle::Lifecycle;
 
 /// The voice settings view model — the single source of truth for the view.
 #[derive(Debug, Clone)]
@@ -36,19 +37,23 @@ impl VoiceSettingsModel {
 /// Messages that drive the voice settings view.
 ///
 /// Exhaustive: every way the world can change the voice settings model is one
-/// variant.
+/// variant. The lifecycle moments share the wrapped [`Lifecycle`] form.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VoiceSettingsMsg {
-    /// Boot handshake — the host dispatches this on start.
-    Start,
-    /// The view loop timed out.
-    Expired,
+    /// The shared boot/timeout lifecycle moments.
+    Lifecycle(Lifecycle),
     /// Toggle whether voice tracking is enabled.
     ToggleEnabled,
     /// The back button was pressed.
     Back,
     /// The about button was pressed.
     About,
+}
+
+impl From<Lifecycle> for VoiceSettingsMsg {
+    fn from(lifecycle: Lifecycle) -> Self {
+        Self::Lifecycle(lifecycle)
+    }
 }
 
 /// Effects the voice settings view can request.
@@ -63,21 +68,26 @@ pub enum VoiceSettingsEffect {
 
 /// The pure update function — the only writer of the model.
 ///
-/// Toggling flips the voice-enabled flag in place. The terminal messages
-/// (`Expired`, `Back`, `About`) persist the current settings exactly once,
-/// mirroring the old save-on-exit semantics without an implicit write.
+/// Toggling flips the voice-enabled flag in place. The terminal exits —
+/// lifecycle expiry (through [`Lifecycle::handle`]), `Back`, and `About` —
+/// persist the current settings exactly once, mirroring the old save-on-exit
+/// semantics without an implicit write.
 pub fn update(msg: VoiceSettingsMsg, model: &mut VoiceSettingsModel) -> Vec<VoiceSettingsEffect> {
     match msg {
-        VoiceSettingsMsg::Start => Vec::new(),
+        VoiceSettingsMsg::Lifecycle(lifecycle) => lifecycle.handle(|| persist(model)),
         VoiceSettingsMsg::ToggleEnabled => {
             let current = model.settings.voice.enabled.unwrap_or(true);
             model.settings.voice.enabled = Some(!current);
             Vec::new()
         }
-        VoiceSettingsMsg::Expired | VoiceSettingsMsg::Back | VoiceSettingsMsg::About => {
-            vec![VoiceSettingsEffect::PersistSettings(model.settings.clone())]
-        }
+        VoiceSettingsMsg::Back | VoiceSettingsMsg::About => persist(model),
     }
+}
+
+/// The persist-on-exit behavior shared by expiry, `Back`, and `About`:
+/// snapshot the current settings exactly once.
+fn persist(model: &VoiceSettingsModel) -> Vec<VoiceSettingsEffect> {
+    vec![VoiceSettingsEffect::PersistSettings(model.settings.clone())]
 }
 
 #[cfg(test)]
@@ -93,7 +103,7 @@ mod tests {
     #[test]
     fn start_is_a_noop() {
         let mut m = model(Some(true));
-        let effects = update(VoiceSettingsMsg::Start, &mut m);
+        let effects = update(VoiceSettingsMsg::Lifecycle(Lifecycle::Start), &mut m);
         assert!(effects.is_empty());
         assert!(m.voice_enabled());
     }
@@ -136,7 +146,7 @@ mod tests {
     #[test]
     fn expired_persists_current_settings() {
         let mut m = model(None);
-        let effects = update(VoiceSettingsMsg::Expired, &mut m);
+        let effects = update(VoiceSettingsMsg::Lifecycle(Lifecycle::Expired), &mut m);
         assert_eq!(effects.len(), 1);
         match &effects[0] {
             VoiceSettingsEffect::PersistSettings(s) => assert_eq!(s.voice.enabled, None),

@@ -99,14 +99,6 @@ impl GuiFeature for WelcomeFeature {
         WelcomeSettingsModel::new(config.settings, config.image_bytes)
     }
 
-    fn start_msg() -> Self::Msg {
-        WelcomeSettingsMsg::Start
-    }
-
-    fn timeout_msg() -> Self::Msg {
-        WelcomeSettingsMsg::Expired
-    }
-
     fn update(msg: Self::Msg, model: &mut Self::Model) -> Vec<Self::Effect> {
         welcome_settings_update(msg, model)
     }

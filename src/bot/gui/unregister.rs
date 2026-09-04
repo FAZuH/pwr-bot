@@ -44,14 +44,6 @@ impl GuiFeature for UnregisterFeature {
         UnregisterModel::new()
     }
 
-    fn start_msg() -> Self::Msg {
-        UnregisterMsg::Start
-    }
-
-    fn timeout_msg() -> Self::Msg {
-        UnregisterMsg::Expired
-    }
-
     fn update(msg: Self::Msg, model: &mut Self::Model) -> Vec<Self::Effect> {
         unregister_update(msg, model)
     }

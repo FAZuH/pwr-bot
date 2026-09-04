@@ -55,14 +55,6 @@ impl GuiFeature for VoiceSettingsFeature {
         VoiceSettingsModel::new(config.settings)
     }
 
-    fn start_msg() -> Self::Msg {
-        VoiceSettingsMsg::Start
-    }
-
-    fn timeout_msg() -> Self::Msg {
-        VoiceSettingsMsg::Expired
-    }
-
     fn update(msg: Self::Msg, model: &mut Self::Model) -> Vec<Self::Effect> {
         voice_settings_update(msg, model)
     }

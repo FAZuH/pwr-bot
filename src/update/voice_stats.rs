@@ -11,6 +11,7 @@ use crate::bot::command::voice::VoiceStatsTimeRange;
 use crate::entity::GuildDailyStats;
 use crate::entity::VoiceDailyActivity;
 use crate::entity::VoiceSessionsEntity;
+use crate::update::lifecycle::Lifecycle;
 
 /// The fetched display data for the voice stats view.
 ///
@@ -33,10 +34,8 @@ pub struct VoiceStatsData {
 /// Messages that can mutate the voice-stats model.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VoiceStatsMsg {
-    /// Boot handshake — the host dispatches this on start.
-    Start,
-    /// The view loop timed out.
-    Expired,
+    /// The shared boot/timeout lifecycle moments.
+    Lifecycle(Lifecycle),
     /// Switch to a different time range.
     ChangeTimeRange(VoiceStatsTimeRange),
     /// Switch to a different guild stat type.
@@ -49,6 +48,12 @@ pub enum VoiceStatsMsg {
     StatsLoaded(VoiceStatsData),
     /// The adapter finished (re)rendering the image.
     ImageRendered(Option<Vec<u8>>),
+}
+
+impl From<Lifecycle> for VoiceStatsMsg {
+    fn from(lifecycle: Lifecycle) -> Self {
+        Self::Lifecycle(lifecycle)
+    }
 }
 
 /// Effects the voice-stats view can request.
@@ -244,8 +249,7 @@ pub fn update(msg: VoiceStatsMsg, model: &mut VoiceStatsModel) -> Vec<VoiceStats
     use VoiceStatsMsg::*;
 
     match msg {
-        Start => Vec::new(),
-        Expired => Vec::new(),
+        VoiceStatsMsg::Lifecycle(lifecycle) => lifecycle.handle(Vec::new),
         ChangeTimeRange(range) => {
             if model.time_range != range {
                 model.time_range = range;
@@ -560,14 +564,14 @@ mod tests {
     #[test]
     fn start_is_noop() {
         let mut model = model(100);
-        let effects = update(VoiceStatsMsg::Start, &mut model);
+        let effects = update(VoiceStatsMsg::Lifecycle(Lifecycle::Start), &mut model);
         assert!(effects.is_empty());
     }
 
     #[test]
     fn expired_is_noop() {
         let mut model = model(100);
-        let effects = update(VoiceStatsMsg::Expired, &mut model);
+        let effects = update(VoiceStatsMsg::Lifecycle(Lifecycle::Expired), &mut model);
         assert!(effects.is_empty());
     }
 

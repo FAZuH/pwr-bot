@@ -15,6 +15,7 @@
 use std::collections::HashSet;
 
 use crate::service::feed_subscription::Subscription;
+use crate::update::lifecycle::Lifecycle;
 use crate::update::pagination::PaginationAction;
 
 /// View state for the feed list.
@@ -84,13 +85,11 @@ impl FeedListModel {
 /// Messages that drive the feed list view.
 ///
 /// Exhaustive: every way the world can change the feed list model is one
-/// variant.
+/// variant. The lifecycle moments share the wrapped [`Lifecycle`] form.
 #[derive(Debug, Clone)]
 pub enum FeedListMsg {
-    /// Boot handshake — the host dispatches this on start.
-    Start,
-    /// The view loop timed out.
-    Expired,
+    /// The shared boot/timeout lifecycle moments.
+    Lifecycle(Lifecycle),
     /// Switch to edit mode.
     Edit,
     /// Switch to view mode.
@@ -107,6 +106,12 @@ pub enum FeedListMsg {
     SubscriptionsLoaded(Vec<Subscription>),
 }
 
+impl From<Lifecycle> for FeedListMsg {
+    fn from(lifecycle: Lifecycle) -> Self {
+        Self::Lifecycle(lifecycle)
+    }
+}
+
 /// Effects the feed list view can request.
 ///
 /// Data-only. In-session async data fetching and unsubscribing are both driven
@@ -121,16 +126,17 @@ pub enum FeedListEffect {
 
 /// The pure update function — the only writer of the model.
 ///
-/// `Start` is a no-op (initial data arrives via the config). Pagination and
-/// post-save reloads return a [`FeedListEffect`] so the adapter refetches; the
-/// returned [`FeedListMsg::SubscriptionsLoaded`] replaces the page in place.
+/// The lifecycle start moment is a no-op (initial data arrives via the
+/// config); expiry disables pagination so the stale page can no longer be
+/// edited. Pagination and post-save reloads return a [`FeedListEffect`] so
+/// the adapter refetches; the returned [`FeedListMsg::SubscriptionsLoaded`]
+/// replaces the page in place.
 pub fn update(msg: FeedListMsg, model: &mut FeedListModel) -> Vec<FeedListEffect> {
     match msg {
-        FeedListMsg::Start => Vec::new(),
-        FeedListMsg::Expired => {
+        FeedListMsg::Lifecycle(lifecycle) => lifecycle.handle(|| {
             model.pagination_disabled = true;
             Vec::new()
-        }
+        }),
         FeedListMsg::Edit => {
             model.state = FeedListViewState::Edit;
             Vec::new()
@@ -224,7 +230,7 @@ mod tests {
     #[test]
     fn start_is_a_noop() {
         let mut m = model();
-        let effects = update(FeedListMsg::Start, &mut m);
+        let effects = update(FeedListMsg::Lifecycle(Lifecycle::Start), &mut m);
         assert!(effects.is_empty());
         assert_eq!(m.state(), FeedListViewState::View);
         assert_eq!(m.current_page(), 1);
@@ -233,7 +239,7 @@ mod tests {
     #[test]
     fn expired_disables_pagination() {
         let mut m = model();
-        let effects = update(FeedListMsg::Expired, &mut m);
+        let effects = update(FeedListMsg::Lifecycle(Lifecycle::Expired), &mut m);
         assert!(effects.is_empty());
         assert!(m.pagination_disabled());
     }
