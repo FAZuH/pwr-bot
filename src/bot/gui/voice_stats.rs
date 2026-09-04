@@ -105,8 +105,8 @@ impl GuiFeature for VoiceStatsFeature {
     ) -> Vec<CreateComponent<'a>> {
         use VoiceStatsAction::*;
 
-        // Keep the original registration order so the custom_id counter
-        // assignment (pinned by the GUI tests) stays byte-identical.
+        // Keep the original registration order so the component order stays
+        // byte-identical for the render snapshots in this module.
         let toggle = registry.register(ToggleDataMode);
         let time_yearly = registry.register(TimeYearly);
         let time_monthly = registry.register(TimeMonthly);
@@ -606,73 +606,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-
-    /// Rewrites every `custom_id` of the shape `Type:timestamp:counter` to a
-    /// stable sentinel `id:Type`, and redacts now-dependent Discord timestamps
-    /// (`<t:digits:f>` → `<t:TS:f>`) from text content, so the rendered shape is
-    /// reproducible across runs while still pinning kind/label/style/order.
-    fn normalize(value: &mut serde_json::Value) {
-        match value {
-            serde_json::Value::Object(map) => {
-                if let Some(serde_json::Value::String(cid)) = map.get("custom_id") {
-                    let parts: Vec<&str> = cid.split(':').collect();
-                    if parts.len() == 3
-                        && parts[1].chars().all(|c| c.is_ascii_digit())
-                        && parts[2].chars().all(|c| c.is_ascii_digit())
-                    {
-                        map.insert(
-                            "custom_id".to_string(),
-                            serde_json::json!(format!("id:{}", parts[0])),
-                        );
-                    }
-                }
-                for v in map.values_mut() {
-                    normalize(v);
-                }
-            }
-            serde_json::Value::Array(arr) => {
-                for v in arr {
-                    normalize(v);
-                }
-            }
-            serde_json::Value::String(s) => {
-                let redacted = redact_timestamps(s);
-                if redacted != *s {
-                    *s = redacted;
-                }
-            }
-            _ => {}
-        }
-    }
-
-    /// Redacts the numeric unix timestamp in a Discord `<t:...>` tag.
-    fn redact_timestamps(s: &str) -> String {
-        let mut out = String::with_capacity(s.len());
-        let mut rest = s;
-        while let Some(idx) = rest.find("<t:") {
-            let (before, after) = rest.split_at(idx);
-            out.push_str(before);
-            let close = after.find('>').expect("unclosed <t: tag");
-            let (tag, remaining) = after.split_at(close + 1);
-            let parts: Vec<&str> = tag.split(':').collect();
-            out.push_str("<t:TS");
-            for p in &parts[2..] {
-                out.push(':');
-                out.push_str(p);
-            }
-            rest = remaining;
-        }
-        out.push_str(rest);
-        out
-    }
-
-    fn capture(model: &VoiceStatsModel) -> serde_json::Value {
-        let mut registry = ActionRegistry::new();
-        let components = VoiceStatsFeature::view(model, &mut registry);
-        let mut value = serde_json::to_value(&components).unwrap();
-        normalize(&mut value);
-        value
-    }
+    use crate::bot::gui::cycle;
 
     #[test]
     fn voice_stats_render_snapshot_guild_state() {
@@ -699,7 +633,7 @@ mod tests {
             },
             None,
         );
-        let value = capture(&model);
+        let value = cycle::capture::<VoiceStatsFeature>(&model);
         assert_eq!(
             value,
             json!([
@@ -766,7 +700,7 @@ mod tests {
             },
             None,
         );
-        let value = capture(&model);
+        let value = cycle::capture::<VoiceStatsFeature>(&model);
         assert_eq!(
             value,
             json!([
@@ -824,5 +758,51 @@ mod tests {
                 }
             ])
         );
+    }
+
+    #[test]
+    fn toggle_data_mode_button_switches_to_user_stats_and_requests_a_query() {
+        let mut model = VoiceStatsModel::new(
+            VoiceStatsTimeRange::Monthly,
+            GuildStatType::AverageTime,
+            None,
+            1,
+            VoiceStatsData {
+                guild_name: "Test Server".to_string(),
+                user_activity: vec![],
+                guild_stats: vec![],
+                raw_sessions: vec![],
+                target_user_name: None,
+            },
+            None,
+        );
+        assert!(!model.is_user_stats());
+
+        let registry = cycle::view_actions::<VoiceStatsFeature>(&model);
+        assert!(!cycle::has_label(&registry, "SelectUser"));
+        let toggle = cycle::find_by_rendered_label::<VoiceStatsFeature>(&model, "Show user stats");
+        let msg = cycle::translate_action::<VoiceStatsFeature>(&toggle, &model);
+        assert_eq!(msg, VoiceStatsMsg::ToggleDataMode);
+
+        let effects = VoiceStatsFeature::update(msg, &mut model);
+        assert!(model.is_user_stats());
+        assert_eq!(
+            effects,
+            vec![VoiceStatsEffect::QueryStats {
+                time_range: VoiceStatsTimeRange::Monthly,
+                stat_type: GuildStatType::AverageTime,
+                user_id: Some(1),
+            }]
+        );
+
+        // The re-rendered view reflects user stats: the toggle label flips,
+        // the unique-users button disappears, and the user-select row is
+        // registered.
+        let after = cycle::capture::<VoiceStatsFeature>(&model);
+        let after_json = serde_json::to_string(&after).unwrap();
+        assert!(after_json.contains("Show server stats"));
+        assert!(!after_json.contains("Unique Users"));
+        let after_registry = cycle::view_actions::<VoiceStatsFeature>(&model);
+        assert!(cycle::has_label(&after_registry, "SelectUser"));
     }
 }

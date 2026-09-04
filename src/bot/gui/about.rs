@@ -118,7 +118,9 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+    use crate::bot::gui::cycle;
     use crate::bot::view::ActionRegistry;
+    use crate::update::lifecycle::Lifecycle;
 
     /// Rewrites every `custom_id` of the shape `Type:timestamp:counter` to a
     /// stable sentinel `id:Type`, so the rendered shape is reproducible across
@@ -221,5 +223,61 @@ mod tests {
         ]);
 
         assert_eq!(value, expected);
+    }
+
+    fn make_model() -> AboutModel {
+        let stats = AboutStats::new(
+            "0.1.0".to_string(),
+            Duration::from_secs(90_000),
+            2,
+            150,
+            42,
+            12,
+            320.0,
+            2026,
+        );
+        AboutModel::new(stats, "https://example.com/avatar.png".to_string())
+    }
+
+    #[test]
+    fn back_button_translates_to_back_msg_and_exits_to_settings_main() {
+        let mut model = make_model();
+
+        let registry = cycle::view_actions::<AboutFeature>(&model);
+        let back = cycle::find_by_label(&registry, "❮ Back");
+        let msg = cycle::translate_action::<AboutFeature>(&back, &model);
+        assert_eq!(msg, AboutMsg::Back);
+
+        let effects = AboutFeature::update(msg, &mut model);
+        assert!(effects.is_empty());
+        assert_eq!(
+            AboutFeature::exit_navigation(&AboutMsg::Back),
+            Some(Navigation::SettingsMain)
+        );
+    }
+
+    #[test]
+    fn timeout_exits_without_navigating() {
+        assert_eq!(
+            AboutFeature::timeout_msg(),
+            AboutMsg::Lifecycle(Lifecycle::Expired)
+        );
+        assert_eq!(
+            AboutFeature::exit_navigation(&AboutMsg::Lifecycle(Lifecycle::Expired)),
+            None
+        );
+    }
+
+    #[test]
+    fn back_press_leaves_the_rendered_view_unchanged() {
+        let mut model = make_model();
+        let before = cycle::capture::<AboutFeature>(&model);
+
+        let registry = cycle::view_actions::<AboutFeature>(&model);
+        let back = cycle::find_by_label(&registry, "❮ Back");
+        let msg = cycle::translate_action::<AboutFeature>(&back, &model);
+        AboutFeature::update(msg, &mut model);
+
+        assert_eq!(cycle::capture::<AboutFeature>(&model), before);
     }
 }

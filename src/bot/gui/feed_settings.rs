@@ -285,7 +285,9 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+    use crate::bot::gui::cycle;
     use crate::bot::view::ActionRegistry;
+    use crate::update::lifecycle::Lifecycle;
 
     /// Rewrites every `custom_id` of the shape `Type:timestamp:counter` to a
     /// stable sentinel `id:Type`, so the rendered shape is reproducible across
@@ -450,5 +452,83 @@ mod tests {
         let toggle = containers[1]["components"][0].as_object().unwrap();
         assert_eq!(toggle["label"], "Enable");
         assert_eq!(toggle["style"], 3);
+    }
+
+    #[test]
+    fn toggle_button_translates_flips_enabled_and_rerenders_paused() {
+        let mut settings = ServerSettings::default();
+        settings.feeds.enabled = Some(true);
+        let mut model = FeedSettingsModel::new(settings);
+        let before = cycle::capture::<FeedSettingsFeature>(&model);
+
+        let registry = cycle::view_actions::<FeedSettingsFeature>(&model);
+        let toggle = cycle::find_by_label(&registry, "Enabled");
+        let msg = cycle::translate_action::<FeedSettingsFeature>(&toggle, &model);
+        assert_eq!(msg, FeedSettingsMsg::ToggleEnabled);
+
+        let effects = FeedSettingsFeature::update(msg, &mut model);
+        assert!(effects.is_empty());
+        assert!(!model.is_enabled());
+
+        // The re-rendered view reflects the flipped state: the status text
+        // switches to paused and the toggle button label to "Enable".
+        let after = cycle::capture::<FeedSettingsFeature>(&model);
+        assert_ne!(after, before);
+        let containers = after[0]["components"].as_array().unwrap();
+        let status = containers[0]["content"].as_str().unwrap();
+        assert!(status.contains("**paused**"));
+        let button = containers[1]["components"][0].as_object().unwrap();
+        assert_eq!(button["label"], "Enable");
+    }
+
+    #[test]
+    fn back_button_persists_settings_and_exits_to_settings_main() {
+        let mut settings = ServerSettings::default();
+        settings.feeds.enabled = Some(true);
+        settings.feeds.channel_id = Some("123456789".to_string());
+        let mut model = FeedSettingsModel::new(settings);
+
+        let registry = cycle::view_actions::<FeedSettingsFeature>(&model);
+        let back = cycle::find_by_label(&registry, "❮ Back");
+        let msg = cycle::translate_action::<FeedSettingsFeature>(&back, &model);
+        assert_eq!(msg, FeedSettingsMsg::Back);
+
+        let effects = FeedSettingsFeature::update(msg, &mut model);
+        assert_eq!(effects.len(), 1);
+        assert!(matches!(
+            &effects[0],
+            FeedSettingsEffect::PersistSettings(s)
+                if s.feeds.channel_id.as_deref() == Some("123456789")
+        ));
+        assert_eq!(
+            FeedSettingsFeature::exit_navigation(&FeedSettingsMsg::Back),
+            Some(Navigation::SettingsMain)
+        );
+    }
+
+    #[test]
+    fn about_button_exits_to_settings_about() {
+        assert_eq!(
+            FeedSettingsFeature::exit_navigation(&FeedSettingsMsg::About),
+            Some(Navigation::SettingsAbout)
+        );
+    }
+
+    #[test]
+    fn expiry_persists_settings_without_navigating() {
+        let mut settings = ServerSettings::default();
+        settings.feeds.enabled = Some(false);
+        let mut model = FeedSettingsModel::new(settings);
+
+        let effects = FeedSettingsFeature::update(FeedSettingsFeature::timeout_msg(), &mut model);
+        assert_eq!(effects.len(), 1);
+        assert!(matches!(
+            &effects[0],
+            FeedSettingsEffect::PersistSettings(s) if !s.feeds.enabled.unwrap_or(true)
+        ));
+        assert_eq!(
+            FeedSettingsFeature::exit_navigation(&FeedSettingsMsg::Lifecycle(Lifecycle::Expired)),
+            None
+        );
     }
 }

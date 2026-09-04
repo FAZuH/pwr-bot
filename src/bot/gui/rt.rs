@@ -226,7 +226,9 @@ where
     }
 }
 
-/// Extracts select-menu values from a component (or synthetic) event.
+/// Extracts select-menu values from a component (or synthetic) event. The
+/// synthetic arm is reserved for the translation-layer seam (issue #143) —
+/// nothing injects synthetic events yet.
 fn select_values(event: &ViewEvent) -> Option<SelectValues> {
     use ComponentInteractionDataKind::*;
     match event {

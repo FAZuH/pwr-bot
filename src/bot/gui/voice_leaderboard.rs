@@ -415,65 +415,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-
-    /// Rewrites every `custom_id` of the shape `Type:timestamp:counter` to a
-    /// stable sentinel `id:Type`, and redacts now-dependent Discord timestamps
-    /// (`<t:digits:f>` → `<t:TS:f>`) from text content, so the rendered shape is
-    /// reproducible across runs while still pinning kind/label/style/order.
-    fn normalize(value: &mut serde_json::Value) {
-        match value {
-            serde_json::Value::Object(map) => {
-                if let Some(serde_json::Value::String(cid)) = map.get("custom_id") {
-                    let parts: Vec<&str> = cid.split(':').collect();
-                    if parts.len() == 3
-                        && parts[1].chars().all(|c| c.is_ascii_digit())
-                        && parts[2].chars().all(|c| c.is_ascii_digit())
-                    {
-                        map.insert(
-                            "custom_id".to_string(),
-                            serde_json::json!(format!("id:{}", parts[0])),
-                        );
-                    }
-                }
-                for v in map.values_mut() {
-                    normalize(v);
-                }
-            }
-            serde_json::Value::Array(arr) => {
-                for v in arr {
-                    normalize(v);
-                }
-            }
-            serde_json::Value::String(s) => {
-                let redacted = redact_timestamps(s);
-                if redacted != *s {
-                    *s = redacted;
-                }
-            }
-            _ => {}
-        }
-    }
-
-    /// Redacts the numeric unix timestamp in a Discord `<t:...>` tag.
-    fn redact_timestamps(s: &str) -> String {
-        let mut out = String::with_capacity(s.len());
-        let mut rest = s;
-        while let Some(idx) = rest.find("<t:") {
-            let (before, after) = rest.split_at(idx);
-            out.push_str(before);
-            let close = after.find('>').expect("unclosed <t: tag");
-            let (tag, remaining) = after.split_at(close + 1);
-            let parts: Vec<&str> = tag.split(':').collect();
-            out.push_str("<t:TS");
-            for p in &parts[2..] {
-                out.push(':');
-                out.push_str(p);
-            }
-            rest = remaining;
-        }
-        out.push_str(rest);
-        out
-    }
+    use crate::bot::gui::cycle;
 
     fn entry(user_id: u64, duration: i64) -> VoiceLeaderboardEntry {
         VoiceLeaderboardEntry {
@@ -482,19 +424,11 @@ mod tests {
         }
     }
 
-    fn capture(model: &VoiceLeaderboardModel) -> serde_json::Value {
-        let mut registry = ActionRegistry::new();
-        let components = VoiceLeaderboardFeature::view(model, &mut registry);
-        let mut value = serde_json::to_value(&components).unwrap();
-        normalize(&mut value);
-        value
-    }
-
     #[test]
     fn voice_leaderboard_render_server_snapshot() {
         let entries = vec![entry(100, 3600), entry(200, 7200)];
         let model = VoiceLeaderboardModel::from_entries(entries, 100, LEADERBOARD_PER_PAGE);
-        let value = capture(&model);
+        let value = cycle::capture::<VoiceLeaderboardFeature>(&model);
         assert_eq!(
             value,
             json!([
@@ -565,7 +499,7 @@ mod tests {
             image_bytes: None,
             pagination_disabled: false,
         };
-        let value = capture(&model);
+        let value = cycle::capture::<VoiceLeaderboardFeature>(&model);
         assert_eq!(
             value,
             json!([
@@ -626,5 +560,46 @@ mod tests {
                 }
             ])
         );
+    }
+
+    #[test]
+    fn toggle_mode_button_switches_to_partner_mode_and_requests_a_query() {
+        let mut model = VoiceLeaderboardModel::from_entries(vec![], 100, LEADERBOARD_PER_PAGE);
+        assert!(!model.is_partner_mode());
+        let before = cycle::capture::<VoiceLeaderboardFeature>(&model);
+        assert!(
+            serde_json::to_string(&before)
+                .unwrap()
+                .contains("Show Voice Partners")
+        );
+
+        let toggle =
+            cycle::find_by_rendered_label::<VoiceLeaderboardFeature>(&model, "Show Voice Partners");
+        let msg = cycle::translate_action::<VoiceLeaderboardFeature>(&toggle, &model);
+        assert_eq!(msg, VoiceLeaderboardMsg::ToggleMode);
+
+        let effects = VoiceLeaderboardFeature::update(msg, &mut model);
+        assert!(model.is_partner_mode());
+        assert_eq!(
+            effects,
+            vec![VoiceLeaderboardEffect::QueryLeaderboard {
+                time_range: VoiceLeaderboardTimeRange::ThisMonth,
+                is_partner_mode: true,
+                target_user_id: None,
+            }]
+        );
+
+        // The re-rendered view reflects partner mode: the title switches, the
+        // toggle label flips, and the partner user-select row is registered.
+        let after = cycle::capture::<VoiceLeaderboardFeature>(&model);
+        let after_json = serde_json::to_string(&after).unwrap();
+        assert!(!after_json.contains("Show Voice Partners"));
+        assert!(after_json.contains("Show Server Leaderboard"));
+        assert_eq!(
+            after[0]["components"][0]["content"],
+            "### Your Voice Partners"
+        );
+        let after_registry = cycle::view_actions::<VoiceLeaderboardFeature>(&model);
+        assert!(cycle::has_label(&after_registry, "SelectUser"));
     }
 }

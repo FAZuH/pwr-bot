@@ -540,37 +540,9 @@ impl EffectHandler for WelcomeSettingsEffectHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bot::view::ActionRegistry;
+    use crate::bot::gui::cycle;
     use crate::entity::WelcomeSettings;
-
-    /// Rewrites every `custom_id` of the shape `Type:timestamp:counter` to a
-    /// stable sentinel `id:Type`, so the rendered shape is reproducible across
-    /// runs while still pinning kind/label/style/prefix/order.
-    fn normalize_custom_ids(value: &mut serde_json::Value) {
-        match value {
-            serde_json::Value::Object(map) => {
-                if let Some(serde_json::Value::String(cid)) = map.get("custom_id") {
-                    let parts: Vec<&str> = cid.split(':').collect();
-                    if parts.len() == 3
-                        && parts[1].chars().all(|c| c.is_ascii_digit())
-                        && parts[2].chars().all(|c| c.is_ascii_digit())
-                    {
-                        let replacement = serde_json::json!(format!("id:{}", parts[0]));
-                        map.insert("custom_id".to_string(), replacement);
-                    }
-                }
-                for v in map.values_mut() {
-                    normalize_custom_ids(v);
-                }
-            }
-            serde_json::Value::Array(arr) => {
-                for v in arr {
-                    normalize_custom_ids(v);
-                }
-            }
-            _ => {}
-        }
-    }
+    use crate::update::lifecycle::Lifecycle;
 
     fn make_model(welcome: WelcomeSettings, marked: &[usize]) -> WelcomeSettingsModel {
         let settings = ServerSettings {
@@ -584,14 +556,6 @@ mod tests {
         model
     }
 
-    fn capture(model: &WelcomeSettingsModel) -> serde_json::Value {
-        let mut registry = ActionRegistry::new();
-        let components = WelcomeFeature::view(model, &mut registry);
-        let mut value = serde_json::to_value(&components).unwrap();
-        normalize_custom_ids(&mut value);
-        value
-    }
-
     #[test]
     fn welcome_render_with_msgs_snapshot() {
         let welcome = WelcomeSettings {
@@ -602,7 +566,7 @@ mod tests {
             messages: Some(vec!["Hello!".to_string(), "Welcome!!".to_string()]),
         };
         let model = make_model(welcome, &[1]);
-        let value = capture(&model);
+        let value = cycle::capture::<WelcomeFeature>(&model);
         assert_eq!(
             value,
             serde_json::json!([
@@ -761,7 +725,7 @@ mod tests {
             messages: None,
         };
         let model = make_model(welcome, &[]);
-        let value = capture(&model);
+        let value = cycle::capture::<WelcomeFeature>(&model);
         assert_eq!(
             value,
             serde_json::json!([
@@ -872,6 +836,79 @@ mod tests {
                     ]
                 }
             ])
+        );
+    }
+
+    #[test]
+    fn toggle_button_persists_rerenders_and_flips_enabled() {
+        let mut model = make_model(WelcomeSettings::default(), &[]);
+        assert!(!model.is_enabled());
+
+        let registry = cycle::view_actions::<WelcomeFeature>(&model);
+        assert!(cycle::has_label(&registry, "❮ Back"));
+        let toggle = cycle::find_by_rendered_label::<WelcomeFeature>(&model, "Enable");
+        let msg = cycle::translate_action::<WelcomeFeature>(&toggle, &model);
+        assert_eq!(msg, WelcomeSettingsMsg::ToggleEnabled);
+
+        let before = cycle::capture::<WelcomeFeature>(&model);
+        let button = before[0]["components"][1]["components"][0]
+            .as_object()
+            .unwrap();
+        assert_eq!(button["label"], "Enable");
+
+        let effects = WelcomeFeature::update(msg, &mut model);
+        assert_eq!(effects.len(), 2);
+        assert!(matches!(
+            effects[0],
+            WelcomeSettingsEffect::PersistSettings(_)
+        ));
+        assert!(matches!(effects[1], WelcomeSettingsEffect::RenderImage(_)));
+        assert!(model.is_enabled());
+
+        // The re-rendered view reflects the flipped state.
+        let after = cycle::capture::<WelcomeFeature>(&model);
+        let button = after[0]["components"][1]["components"][0]
+            .as_object()
+            .unwrap();
+        assert_eq!(button["label"], "Disable");
+        let status = after[0]["components"][0]["content"].as_str().unwrap();
+        assert!(status.contains("**active**"));
+    }
+
+    #[test]
+    fn modal_trigger_actions_translate_to_no_message() {
+        let model = make_model(WelcomeSettings::default(), &[]);
+        assert_eq!(
+            WelcomeFeature::translate(
+                &SettingsWelcomeAction::SetColor(None),
+                SelectValues::String(Vec::new()),
+                &model
+            ),
+            None
+        );
+        assert_eq!(
+            WelcomeFeature::translate(
+                &SettingsWelcomeAction::AddMessage(None),
+                SelectValues::String(Vec::new()),
+                &model
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn back_exits_to_settings_main_and_expiry_navigates_nowhere() {
+        assert_eq!(
+            WelcomeFeature::exit_navigation(&WelcomeSettingsMsg::Back),
+            Some(Navigation::SettingsMain)
+        );
+
+        let mut model = make_model(WelcomeSettings::default(), &[]);
+        let effects = WelcomeFeature::update(WelcomeFeature::timeout_msg(), &mut model);
+        assert!(effects.is_empty());
+        assert_eq!(
+            WelcomeFeature::exit_navigation(&WelcomeSettingsMsg::Lifecycle(Lifecycle::Expired)),
+            None
         );
     }
 }

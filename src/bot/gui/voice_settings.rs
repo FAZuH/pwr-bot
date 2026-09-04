@@ -180,7 +180,9 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+    use crate::bot::gui::cycle;
     use crate::bot::view::ActionRegistry;
+    use crate::update::lifecycle::Lifecycle;
 
     /// Rewrites every `custom_id` of the shape `Type:timestamp:counter` to a
     /// stable sentinel `id:Type`, so the rendered shape is reproducible across
@@ -266,6 +268,72 @@ mod tests {
                     ]
                 }
             ])
+        );
+    }
+
+    #[test]
+    fn toggle_button_translates_flips_enabled_and_rerenders_paused() {
+        let mut settings = ServerSettings::default();
+        settings.voice.enabled = Some(true);
+        let mut model = VoiceSettingsModel::new(settings);
+        let before = cycle::capture::<VoiceSettingsFeature>(&model);
+
+        let toggle = cycle::find_by_rendered_label::<VoiceSettingsFeature>(&model, "Disable");
+        let msg = cycle::translate_action::<VoiceSettingsFeature>(&toggle, &model);
+        assert_eq!(msg, VoiceSettingsMsg::ToggleEnabled);
+
+        let effects = VoiceSettingsFeature::update(msg, &mut model);
+        assert!(effects.is_empty());
+        assert!(!model.voice_enabled());
+
+        // The re-rendered view reflects the flipped state.
+        let after = cycle::capture::<VoiceSettingsFeature>(&model);
+        assert_ne!(after, before);
+        let containers = after[0]["components"].as_array().unwrap();
+        let status = containers[0]["content"].as_str().unwrap();
+        assert!(status.contains("**paused**"));
+        let button = containers[1]["components"][0].as_object().unwrap();
+        assert_eq!(button["label"], "Enable");
+    }
+
+    #[test]
+    fn back_button_persists_settings_and_exits_to_settings_main() {
+        let mut settings = ServerSettings::default();
+        settings.voice.enabled = Some(false);
+        let mut model = VoiceSettingsModel::new(settings);
+
+        let registry = cycle::view_actions::<VoiceSettingsFeature>(&model);
+        let back = cycle::find_by_label(&registry, "❮ Back");
+        let msg = cycle::translate_action::<VoiceSettingsFeature>(&back, &model);
+        assert_eq!(msg, VoiceSettingsMsg::Back);
+
+        let effects = VoiceSettingsFeature::update(msg, &mut model);
+        assert_eq!(effects.len(), 1);
+        assert!(matches!(
+            &effects[0],
+            VoiceSettingsEffect::PersistSettings(s) if !s.voice.enabled.unwrap_or(true)
+        ));
+        assert_eq!(
+            VoiceSettingsFeature::exit_navigation(&VoiceSettingsMsg::Back),
+            Some(Navigation::SettingsMain)
+        );
+    }
+
+    #[test]
+    fn expiry_persists_settings_without_navigating() {
+        let mut settings = ServerSettings::default();
+        settings.voice.enabled = Some(true);
+        let mut model = VoiceSettingsModel::new(settings);
+
+        let effects = VoiceSettingsFeature::update(VoiceSettingsFeature::timeout_msg(), &mut model);
+        assert_eq!(effects.len(), 1);
+        assert!(matches!(
+            &effects[0],
+            VoiceSettingsEffect::PersistSettings(s) if s.voice.enabled.unwrap_or(true)
+        ));
+        assert_eq!(
+            VoiceSettingsFeature::exit_navigation(&VoiceSettingsMsg::Lifecycle(Lifecycle::Expired)),
+            None
         );
     }
 }

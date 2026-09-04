@@ -277,6 +277,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+    use crate::bot::gui::cycle;
     use crate::bot::view::ActionRegistry;
     use crate::entity::FeedEntity;
     use crate::entity::FeedItemEntity;
@@ -477,5 +478,26 @@ mod tests {
                 }
             ])
         );
+    }
+
+    #[test]
+    fn edit_button_switches_the_rendered_view_to_edit_mode() {
+        let mut model = FeedListModel::new(
+            vec![make_sub("Alpha", "https://alpha.example.com/feed")],
+            SUBSCRIPTIONS_PER_PAGE,
+        );
+
+        let registry = cycle::view_actions::<FeedListFeature>(&model);
+        let edit = cycle::find_by_label(&registry, "✎ Edit Subscriptions");
+        let msg = cycle::translate_action::<FeedListFeature>(&edit, &model);
+        assert!(matches!(msg, FeedListMsg::Edit));
+
+        let effects = FeedListFeature::update(msg, &mut model);
+        assert!(effects.is_empty());
+        assert!(matches!(model.state(), FeedListViewState::Edit));
+
+        let after = cycle::view_actions::<FeedListFeature>(&model);
+        assert!(cycle::has_label(&after, "👁 View Mode"));
+        assert!(!cycle::has_label(&after, "✎ Edit Subscriptions"));
     }
 }

@@ -137,7 +137,9 @@ pub enum SelectValues {
     User(Vec<UserId>),
 }
 
-/// A synthetic event used for automated GUI testing.
+/// A synthetic button/select event that can be injected into the host loop
+/// without a Discord interaction. Reserved for the translation-layer seam
+/// (issue #143): no code produces these yet.
 #[derive(Debug, Clone)]
 pub enum SyntheticEvent {
     Button,
@@ -159,7 +161,8 @@ pub enum ViewEvent {
     Async,
     /// The view loop timed out.
     Timeout,
-    /// A synthetic event injected by the test framework.
+    /// A synthetic event injected into the loop directly. Reserved for the
+    /// translation-layer seam (issue #143); nothing produces it yet.
     Synthetic(SyntheticEvent),
 }
 
@@ -330,5 +333,16 @@ mod tests {
 
         let id2 = registry.register(TestAction::Second);
         assert_ne!(id1, id2);
+    }
+
+    #[test]
+    fn action_registry_resolves_registered_ids_and_rejects_unknown_ids() {
+        let mut registry = ActionRegistry::<TestAction>::new();
+        let registered = registry.register(TestAction::First);
+
+        assert_eq!(registry.get(&registered.id), Some(&TestAction::First));
+        // A custom id from a stale or foreign view never resolves: the host
+        // acks the interaction and continues instead of translating a message.
+        assert_eq!(registry.get("TestAction:0:999"), None);
     }
 }
