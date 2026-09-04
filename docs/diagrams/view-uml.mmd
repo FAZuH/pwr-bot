@@ -179,27 +179,6 @@ classDiagram
         run(router: Arc~Router~) Result
     }
 
-    class GuiTestError {
-        <<enum>>
-        AssertionFailed
-        SetupFailed
-        ExecutionFailed
-    }
-
-    class TestStep {
-        name: str
-        description: str
-        run: fn(Context) Result
-    }
-
-    class TestHelpers {
-        <<module>>
-        noop_sender() Arc~dyn ViewSender~
-        extract_actions(handler) ActionRegistry
-        simulate_click(ctx, handler, action, coord) Result~ViewCmd~
-        simulate_select(ctx, handler, action, values, coord) Result~ViewCmd~
-    }
-
     %% ── Concrete Update examples ──────────────────────────────────
     class VoiceLeaderboardUpdate {
         <<impl Update>>
@@ -272,7 +251,3 @@ classDiagram
     FeedListUpdate ..> Update : implements
     FeedSettingsUpdate ..> Update : implements
     SettingsMainUpdate ..> Update : implements
-    TestHelpers ..> ViewHandler : drives
-    TestHelpers ..> ActionRegistry : inspects
-    TestStep ..> GuiTestError : returns
-    TestHelpers ..> GuiTestError : propagates

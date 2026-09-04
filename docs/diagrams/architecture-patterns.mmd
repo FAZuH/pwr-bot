@@ -71,14 +71,12 @@ graph LR
         PT -.->|impl| MD & AL & CK
     end
 
-    subgraph TestPat["Automated GUI Testing"]
+    subgraph TestPat["Offline GUI Testing · TEA cycle"]
         direction TB
-        GuiTestCmd["/gui_test<br/>owner-only command"]
-        TestStep["TestStep<br/>name · description · run"]
-        SimClick["simulate_click()<br/>SyntheticEvent::Button"]
-        SimSelect["simulate_select()<br/>SyntheticEvent::Select"]
-        GuiTestCmd --> TestStep --> SimClick & SimSelect
-        SimClick & SimSelect -->|injects| Handler["ViewHandler::handle()"]
+        CycleHelpers["cycle helpers<br/>view_actions · find_by_label"]
+        Translate["translate_action()<br/>action → Msg"]
+        Update["update()<br/>Msg → Vec of Effect"]
+        CycleHelpers -->|select by visible label| Translate --> Update
     end
 
     subgraph RepoPat["Repos Factory Pattern"]

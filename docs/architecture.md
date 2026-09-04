@@ -86,7 +86,7 @@ The substrate collects Discord events for the Host. It never renders and never m
 | `SelectValues` | Select-menu values extracted from an interaction (string, channel, role, user). |
 | `ViewEvent` | One event that wakes the host loop: component, modal, message, reaction, async, timeout, or synthetic. |
 | `ViewChannel` / `ViewChannelConfig` | Background collectors, spawned as tasks, that feed events into the loop. |
-| `SyntheticEvent` | Synthetic button/select events injected by the GUI test framework. |
+| `SyntheticEvent` | Synthetic button/select events injectable into the host loop without Discord. Reserved for the translation-layer seam (issue #143); no producer yet. |
 
 Custom-id helpers live in `src/bot/gui/input.rs` (`build_custom_id`, `parse_custom_id`).
 
