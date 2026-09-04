@@ -10,6 +10,7 @@ pub mod error;
 pub mod error_handler;
 pub mod gui;
 pub mod navigation;
+pub mod translate;
 pub mod utils;
 pub mod view;
 
@@ -39,6 +40,7 @@ type Error = Box<dyn std::error::Error + Send + Sync>;
 use crate::bot::command::Cog;
 use crate::bot::command::Cogs;
 use crate::bot::error_handler::ErrorHandler;
+use crate::bot::translate::TranslateLayer;
 use crate::config::Config;
 use crate::entity::BotMetaKey;
 use crate::event::VoiceStateEvent;
@@ -86,6 +88,10 @@ pub struct Data {
     pub plugin_routes: Arc<PluginRoutes>,
     /// Manifests of the core plugins spawned at startup, by plugin name.
     pub core_manifests: Arc<HashMap<String, Manifest>>,
+    /// Tracks the messages owned by live Host (TEA) sessions, so the global
+    /// event handler skips their interactions and the Host acknowledges them
+    /// exactly once. See [`crate::bot::translate`].
+    pub translate_layer: Arc<TranslateLayer>,
     pub start_time: Instant,
 }
 
@@ -216,6 +222,7 @@ impl Bot {
             plugin_engine,
             plugin_routes,
             core_manifests,
+            translate_layer: Arc::new(TranslateLayer::new()),
             start_time: Instant::now(),
         });
 
@@ -586,6 +593,10 @@ impl BotEventHandler {
     /// `serenity::Component` is not `Deserialize`, so the spec cannot ride a
     /// typed `CreateReply`.
     ///
+    /// Host-owned messages never reach here: the handlers skip them before
+    /// acknowledging, so a "no open session" result below is always a
+    /// genuinely stale plugin view.
+    ///
     /// An interaction without an open session is acknowledged and dropped
     /// (stale view); a dead plugin is acknowledged, logged, and its session
     /// is abandoned.
@@ -632,8 +643,16 @@ impl BotEventHandler {
 
     /// Routes a component interaction: acknowledges the click, then hands the
     /// interaction to the open view session.
+    ///
+    /// Messages owned by a live Host session are skipped — the Host loop
+    /// owns both the routing and the acknowledgement there, so acking here
+    /// would answer the interaction twice.
     async fn handle_component_interaction(&self, interaction: &ComponentInteraction) {
         let message_id = interaction.message.id;
+
+        if self.data.translate_layer.host_owned(message_id) {
+            return;
+        }
 
         // Acknowledge the click before the plugin round trip: Discord
         // requires a response within 3 seconds, and the interact call may
@@ -659,22 +678,29 @@ impl BotEventHandler {
     /// Routes a modal submit like a component interaction: acknowledges the
     /// submit, then hands the interaction to the open view session for the
     /// message the modal was attached to.
+    ///
+    /// Modal submissions on Host-owned messages are skipped — the poise
+    /// modal task the Host's feature spawned acknowledges the submission
+    /// itself, so acking here would answer it twice.
     async fn handle_modal_submit_interaction(&self, interaction: &ModalInteraction) {
+        let attached_message = interaction.message.as_ref();
+
+        if attached_message.is_some_and(|message| self.data.translate_layer.host_owned(message.id))
+        {
+            return;
+        }
+
         if let Err(e) = interaction
             .create_response(&self.http, CreateInteractionResponse::Acknowledge)
             .await
         {
             warn!(
                 "failed to acknowledge modal submit on message {}: {e}",
-                interaction
-                    .message
-                    .as_ref()
-                    .map(|m| m.id)
-                    .unwrap_or_default()
+                attached_message.map(|m| m.id).unwrap_or_default()
             );
         }
 
-        let Some(message) = interaction.message.as_ref() else {
+        let Some(message) = attached_message else {
             debug!("modal submit without a message; not routed");
             return;
         };

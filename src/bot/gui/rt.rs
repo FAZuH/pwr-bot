@@ -21,7 +21,6 @@ use crate::bot::gui::effects::EffectHandler;
 use crate::bot::gui::feature::GuiFeature;
 use crate::bot::view::ActionRegistry;
 use crate::bot::view::SelectValues;
-use crate::bot::view::SyntheticEvent;
 use crate::bot::view::ViewChannel;
 use crate::bot::view::ViewEvent;
 
@@ -83,6 +82,15 @@ where
                 .await?
                 .id
         };
+
+        // Claim the message for this session: from here the translation
+        // layer (`crate::bot::translate`) routes the message's interactions
+        // to this loop alone, and the loop acknowledges them exactly once.
+        // The claim drops with `run` on any exit path, returning the
+        // message to plugin-session routing. `data` outlives the session
+        // claim (locals drop in reverse order).
+        let data = self.ctx.data();
+        let _session = data.translate_layer.host_session(msg_id);
 
         channel.start(
             &self.ctx,
@@ -226,9 +234,7 @@ where
     }
 }
 
-/// Extracts select-menu values from a component (or synthetic) event. The
-/// synthetic arm is reserved for the translation-layer seam (issue #143) —
-/// nothing injects synthetic events yet.
+/// Extracts select-menu values from a component event.
 fn select_values(event: &ViewEvent) -> Option<SelectValues> {
     use ComponentInteractionDataKind::*;
     match event {
@@ -241,7 +247,6 @@ fn select_values(event: &ViewEvent) -> Option<SelectValues> {
             UserSelect { values } => Some(SelectValues::User(values.to_vec())),
             _ => None,
         },
-        ViewEvent::Synthetic(SyntheticEvent::Select(values)) => Some(values.clone()),
         _ => None,
     }
 }

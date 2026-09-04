@@ -3,7 +3,7 @@
 //! This module holds the shared UI plumbing used by the [`GuiFeature`] shells
 //! in [`crate::bot::gui`] and executed by the [`Host`](crate::bot::gui::rt::Host)
 //! event loop: action registration with `Type:timestamp:counter` custom ids,
-//! select-menu value extraction, synthetic test events, and the background
+//! select-menu value extraction, and the background
 //! [`ViewChannel`] collectors that feed Discord interactions into the loop.
 //!
 //! Pure rendering and state transitions live elsewhere: a feature's `view`
@@ -137,15 +137,6 @@ pub enum SelectValues {
     User(Vec<UserId>),
 }
 
-/// A synthetic button/select event that can be injected into the host loop
-/// without a Discord interaction. Reserved for the translation-layer seam
-/// (issue #143): no code produces these yet.
-#[derive(Debug, Clone)]
-pub enum SyntheticEvent {
-    Button,
-    Select(SelectValues),
-}
-
 /// An event that wakes up the host loop.
 #[derive(Debug, Clone)]
 pub enum ViewEvent {
@@ -161,9 +152,6 @@ pub enum ViewEvent {
     Async,
     /// The view loop timed out.
     Timeout,
-    /// A synthetic event injected into the loop directly. Reserved for the
-    /// translation-layer seam (issue #143); nothing produces it yet.
-    Synthetic(SyntheticEvent),
 }
 
 // ── ViewChannel ───────────────────────────────────────────────────────────────
