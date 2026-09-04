@@ -29,16 +29,16 @@ graph TB
         
         subgraph SettingsFlow["Settings Flow"]
             direction TB
-            SettingsMain["SettingsMain"]
+            SettingsMain["SettingsMain<br/>(hub handoff: the host message morphs<br/>into the settings plugin's hub view)"]
             SettingsFeeds["SettingsFeeds"]
             SettingsVoice["SettingsVoice"]
             SettingsWelcome["SettingsWelcome"]
             SettingsAbout["SettingsAbout"]
-            
-            SettingsMain <-->|Feeds| SettingsFeeds
-            SettingsMain <-->|Voice| SettingsVoice
-            SettingsMain <-->|Welcome| SettingsWelcome
-            SettingsMain <-->|About| SettingsAbout
+
+            SettingsFeeds -->|"Back — hub handoff"| SettingsMain
+            SettingsVoice -->|"Back — hub handoff"| SettingsMain
+            SettingsWelcome -->|"Back — hub handoff"| SettingsMain
+            SettingsAbout -->|"Back — hub handoff"| SettingsMain
         end
         
         subgraph FeedFlow["Feed Flow"]
@@ -60,6 +60,8 @@ graph TB
             
             VoiceLeaderboard -->|Stats| VoiceStats
         end
+
+        Back["Navigation::Back<br/>(the session walk: pop one frame;<br/>over the last open frame the root view<br/>is dismissed) — no live producer today"]
     end
     
     Commands -->|settings| SettingsMain
@@ -81,3 +83,4 @@ graph TB
     style FeedBatch fill:#1e1e1e,stroke:#ffffff
     style VoiceLeaderboard fill:#2d2d2d,stroke:#ffffff,stroke-width:3px
     style VoiceStats fill:#1e1e1e,stroke:#ffffff
+    style Back fill:#1e1e1e,stroke:#ffffff,stroke-dasharray: 5 5

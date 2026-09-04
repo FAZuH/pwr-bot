@@ -28,8 +28,9 @@ _Avoid_: view payload
 
 **Gate**:
 The host's validate-only check of `ViewSpec.data` at every raw-send
-boundary: initial slash dispatch, component and modal re-render, and
-`host.open_view`. The host parses a clone of the payload through
+boundary: initial slash dispatch, component and modal re-render,
+`host.open_view`, and the hub handoff's message morph. The host parses a
+clone of the payload through
 `pwr_ext::prelude::CreateMessageDe`, discards the parsed value, and sends
 the original JSON unchanged. A failure is a `WireError` with kind
 `InvalidView`, and the host sends, registers, and commits nothing. The

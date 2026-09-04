@@ -46,9 +46,9 @@ Commands are organized by domain. Each top-level module is a command group; subc
 
 Interactive commands follow a **Router → CommandHandler → Host** flow:
 
-- **`Router`** — receives the Poise context, owns navigation state, drives handlers. Defined in `src/bot/command/mod.rs`.
+- **`Router`** — receives the Poise context, owns navigation state, drives handlers. Its session loop keeps the frames open on the message: each target that runs becomes the newest frame, and `Back` closes the newest frame and re-runs the one beneath it, morphing the same message. Defined in `src/bot/command/mod.rs`.
 - **`CommandHandler`** — trait for handler run loops. Each domain has a concrete handler (e.g. `FeedListHandler`, `VoiceStatsHandler`).
-- **`Navigation`** — enum signalling the next navigation step (e.g. `Back`, `Exit`, `SettingsMain`). Defined in `src/bot/navigation.rs`.
+- **`Navigation`** — enum signalling the next navigation step (e.g. `Back`, `Exit`, `SettingsMain`). `SettingsMain` hands the live message to the settings plugin's hub view, and a `Back` over the last open frame dismisses the message. Both terminal steps live in `src/bot/command/session_exit.rs`. Defined in `src/bot/navigation.rs`.
 - **`Host`** — the TEA event loop that runs one interactive view. Defined in `src/bot/gui/rt.rs`.
 
 ### Interactive Views (TEA — `src/update/` cores + `src/bot/gui/` shell)
@@ -73,7 +73,7 @@ The `sealed::Sealed` supertrait closes `GuiFeature` to external implementors —
    - **Other events**: Modals, messages, and reactions go through `Feature::on_event`, which returns a `Msg` or nothing. The collector timeout becomes `Feature::timeout_msg()` — expiry is one more update, not a special path.
    - **Effect follow-ups**: The adapter executes each returned effect. Fast effects return their result `Msg`s directly; slow effects `tokio::spawn` the work and deliver the result on the host's message channel.
 5. **Update and render**: The host applies each `Msg` through `Feature::update` — the only writer of the model — executes the returned effects through the adapter, re-renders through `view`, and edits the live message.
-6. **Exit**: `Feature::exit_navigation(msg)` returns the next `Navigation` when a message ends the feature (e.g. `Back` → `SettingsMain`). The host navigates the router and the loop ends.
+6. **Exit**: `Feature::exit_navigation(msg)` returns the next `Navigation` when a message ends the feature (e.g. `Back` → `Navigation::Back`). The host navigates the router and the loop ends; the session loop then resolves the target — `Back` re-runs the parent frame, `SettingsMain` morphs the message into the settings plugin's hub and ends the session as a plugin view session, and a root `Back` dismisses the message (see `src/bot/command/session_exit.rs`).
 
 #### Interaction Substrate (`src/bot/view/mod.rs`)
 
