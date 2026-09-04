@@ -73,7 +73,7 @@ The `sealed::Sealed` supertrait closes `GuiFeature` to external implementors —
    - **Other events**: Modals, messages, and reactions go through `Feature::on_event`, which returns a `Msg` or nothing. The collector timeout becomes `Feature::timeout_msg()` — expiry is one more update, not a special path.
    - **Effect follow-ups**: The adapter executes each returned effect. Fast effects return their result `Msg`s directly; slow effects `tokio::spawn` the work and deliver the result on the host's message channel.
 5. **Update and render**: The host applies each `Msg` through `Feature::update` — the only writer of the model — executes the returned effects through the adapter, re-renders through `view`, and edits the live message.
-6. **Exit**: `Feature::exit_navigation(msg)` returns the next `Navigation` when a message ends the feature (e.g. `Back` → `Navigation::Back`). The host navigates the router and the loop ends; the session loop then resolves the target — `Back` re-runs the parent frame, `SettingsMain` morphs the message into the settings plugin's hub and ends the session as a plugin view session, and a root `Back` dismisses the message (see `src/bot/command/session_exit.rs`).
+6. **Exit**: `Feature::exit_navigation(msg)` returns the next `Navigation` when a message ends the feature (e.g. `Back` → `Navigation::SettingsMain`, the hub handoff). The host navigates the router and the loop ends; the session loop then resolves the target — `Back` re-runs the parent frame, `SettingsMain` morphs the message into the settings plugin's hub and ends the session as a plugin view session, and a root `Back` dismisses the message (see `src/bot/command/session_exit.rs`). No feature returns a plain `Navigation::Back` today; on an empty stack it is the root dismissal.
 
 #### Interaction Substrate (`src/bot/view/mod.rs`)
 
@@ -97,6 +97,8 @@ Every interactive view message belongs to exactly one live session runtime — a
 |-------------------|----------------------|------------------------|
 | Live Host session | The Host loop, after handling — except modal-triggering actions, where opening the modal is itself the response, and modal submissions, which the poise modal task the feature spawned acknowledges while the session is live (a submission that arrives after the session ends is stale: the global handler acknowledges it and routes it to the engine, poise's own ack then fails `AlreadyResponded`, and the feature's modal task swallows both) | Skips the interaction entirely |
 | Everything else (plugin session, or no session) | The global handler, before the plugin round trip | Acknowledges, then routes through the plugin view engine (a "no open session" there means a genuinely stale view) |
+
+ADR-0006 records this ownership decision, including the accepted ghost window between the Host claim drop and the hub handoff's plugin registration.
 
 ---
 
@@ -246,12 +248,13 @@ Component / modal interaction
 ### Validate-Only Gate
 
 `validate_view_data` (`src/plugin/view.rs`) parses a clone of
-`ViewSpec.data` through pwr-ext `CreateMessageDe` at all three raw-send
-boundaries: initial dispatch, component and modal re-render, and
-`host.open_view`. It discards the parsed value and sends the original JSON
-verbatim. A failure is a `WireError` with kind `InvalidView`. The host
-never partially sends, registers, or commits. An invalid re-render keeps
-the prior session view and `last_active` unchanged.
+`ViewSpec.data` through pwr-ext `CreateMessageDe` at every raw-send
+boundary: initial dispatch, component and modal re-render,
+`host.open_view`, and the hub handoff's message morph. It discards the
+parsed value and sends the original JSON verbatim. A failure is a
+`WireError` with kind `InvalidView`. The host never partially sends,
+registers, or commits. An invalid re-render keeps the prior session
+view and `last_active` unchanged.
 
 ### View Authoring Split
 
@@ -271,7 +274,9 @@ same protocol port. It spawns a plugin, captures its view, and renders the
 payload to HTML/PNG under `.scratch/preview/` via `pwr-viewgen`.
 
 Glossary terms live in `CONTEXT.md`. The gate and authoring decisions
-live in ADR-0003 and ADR-0004.
+live in ADR-0003 and ADR-0004; ack ownership, the first-response shape,
+and the offline test strategy live in ADR-0006, ADR-0007, and
+ADR-0008.
 
 ---
 

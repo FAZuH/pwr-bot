@@ -70,3 +70,46 @@ once no Host session owns it the global handler acknowledges first and
 routes the interaction to the plugin view engine, whose own session map
 answers live versus stale. See Host, Plugin, and ViewSpec.
 _Avoid_: ack router, session registry
+
+**Lifecycle message**:
+The shared lifecycle pair every Host-driven feature speaks: `Start`, the
+boot moment, and `Expired`, the view loop's timeout. Each feature's
+message enum carries the pair as one wrapped `Lifecycle` variant from
+`src/update/lifecycle.rs`, and `Lifecycle::handle` is the one common
+handler: start runs nothing, expiry runs the feature's own expiry
+behavior, such as persist-on-exit. It replaces the per-feature ad-hoc
+exit messages. See Host and ADR-0005.
+_Avoid_: exit message, boot message
+
+**Host session vs Plugin session**:
+The two owners an interactive view message can have. A host session is
+a live TEA run: the Host loop drives one feature and owns the message
+through the Translation Layer's claim, held for the loop's lifetime. A
+plugin session is an entry in the plugin view engine's session map,
+registered after the engine's response creates or adopts the message.
+One message has at most one live owner at a time, and the owner answers
+its interactions. The two maps stay separate, so the sessions never
+overlap. See Translation Layer and ADR-0006.
+_Avoid_: owned message, session claim
+
+**Root Back**:
+A Back press with an empty navigation history: the view on screen is
+the root view, so Back dismisses it instead of navigating to a parent
+frame. A public root view is deleted; an ephemeral one is left for the
+user, because it belongs to the interaction that produced it. No host
+feature returns the plain Back navigation today — every Back-capable
+view hands off to the settings hub — so Root Back stays the navigation
+walk's well-defined empty-history branch.
+_Avoid_: exit Back, root dismissal
+
+**Content placeholder vs deferred think**:
+The two first-response shapes for an interaction. A content placeholder
+is an immediate real message, such as "Loading…", that a later edit
+replaces. A deferred think defers the interaction — Discord shows its
+thinking state — and the payload then edits the original response in
+place, so no placeholder message and no placeholder-then-followup pair
+exists. The placeholder shape is retired: content set on the first
+response survives a content-less edit and breaks components-V2 payloads
+with 50035. The deferred think is the settled shape, and the error path
+edits the original response too. See ADR-0007.
+_Avoid_: loading message, placeholder reply
