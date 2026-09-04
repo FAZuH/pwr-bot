@@ -38,11 +38,11 @@ async fn wait_until(timeout: Duration, mut cond: impl FnMut() -> bool) -> bool {
     cond()
 }
 
-/// Reads the click count from a fixture view's content string.
+/// Reads the click count from a fixture view's text display.
 fn parse_count(spec: &ViewSpec) -> u64 {
-    spec.data["content"]
+    spec.data["components"][0]["content"]
         .as_str()
-        .expect("content string")
+        .expect("text display content")
         .split("count=")
         .nth(1)
         .expect("count present")
@@ -126,10 +126,15 @@ async fn engine_drives_the_fixture_view_lifecycle() {
 
     let message_id = serenity::MessageId::new(1);
     let (plugin, engine, spec) = spawn_engine_and_open(message_id).await;
-    assert_eq!(spec.data["content"], "Hello from plugin!");
+    assert_eq!(spec.data["components"][0]["content"], "Hello from plugin!");
     assert_eq!(
-        spec.data["components"][0]["components"][0]["custom_id"], BUTTON_CUSTOM_ID,
+        spec.data["components"][1]["components"][0]["custom_id"], BUTTON_CUSTOM_ID,
         "the fixture's button rides in the rendered spec"
+    );
+    assert_eq!(
+        spec.data["flags"],
+        json!(pwr_poise_components::IS_COMPONENTS_V2),
+        "the fixture renders a components V2 payload"
     );
     assert!(!spec.ephemeral);
     assert!(
@@ -148,9 +153,9 @@ async fn engine_drives_the_fixture_view_lifecycle() {
         .await
         .expect("first click");
     assert!(
-        spec.data["content"]
+        spec.data["components"][0]["content"]
             .as_str()
-            .expect("content")
+            .expect("text display content")
             .contains("count=1")
     );
 
@@ -160,9 +165,9 @@ async fn engine_drives_the_fixture_view_lifecycle() {
         .await
         .expect("second click");
     assert!(
-        spec.data["content"]
+        spec.data["components"][0]["content"]
             .as_str()
-            .expect("content")
+            .expect("text display content")
             .contains("count=2")
     );
 
@@ -284,9 +289,9 @@ async fn modal_submit_round_trips_through_the_fixture() {
         .await
         .expect("modal submit");
     assert!(
-        spec.data["content"]
+        spec.data["components"][0]["content"]
             .as_str()
-            .expect("content")
+            .expect("text display content")
             .contains("Modal submitted! count=1")
     );
     assert!(

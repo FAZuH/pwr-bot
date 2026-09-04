@@ -451,19 +451,24 @@ async fn nav_click_opens_the_target_plugin_panel() {
         .with(
             mockall::predicate::eq(channel_id),
             mockall::predicate::eq("Loading…"),
-            mockall::predicate::eq(None::<serde_json::Value>),
         )
         .times(1)
-        .returning(move |_, _, _| Ok(Some(json!({ "message_id": produced }))));
+        .returning(move |_, _| Ok(Some(json!({ "message_id": produced }))));
     mock.expect_edit_message()
         .with(
             mockall::predicate::eq(channel_id),
             mockall::predicate::eq(produced),
             mockall::predicate::function(|data: &serde_json::Value| {
+                // The arg-echo fixture renders a Components V2 payload: the
+                // echoed args are the text of a text display.
                 data == &json!({
-                    "content": "{}",
-                    "tts": false,
+                    "attachments": [],
+                    "components": [{"content": "{}", "type": 10}],
+                    "embeds": [],
                     "enforce_nonce": false,
+                    "flags": 32768,
+                    "sticker_ids": [],
+                    "tts": false,
                 })
             }),
         )
@@ -521,7 +526,7 @@ async fn nav_click_opens_the_target_plugin_panel() {
         .await
         .expect("follow-up interaction routes to the target plugin");
     assert_eq!(
-        follow_up.data["content"],
+        follow_up.data["components"][0]["content"],
         "{\"custom_id\":\"arg-echo\",\"view\":{\"last_args\":{}}}"
     );
     assert_eq!(follow_up.data["tts"], false);

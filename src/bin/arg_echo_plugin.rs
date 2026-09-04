@@ -1,7 +1,7 @@
 //! Minimal test-plugin fixture for the host crate's own integration tests:
-//! echoes the args of every `invoke` call back in the resp envelope's
-//! `data.content`, so a test can assert the parsed arguments a dispatch
-//! produced actually reach a plugin over the wire.
+//! echoes the args of every `invoke` call back as the text of a Components V2
+//! view, so a test can assert the parsed arguments a dispatch produced
+//! actually reach a plugin over the wire.
 //!
 //! JSON-Lines over stdio like the canonical `hello` plugin: one compact JSON
 //! object per line, every stdout line flushed before the next read (piped
@@ -13,6 +13,7 @@ use std::io::BufRead;
 use std::io::Write;
 use std::process::ExitCode;
 
+use pwr_ext::view;
 use pwr_plugin_protocol::API_VERSION;
 use pwr_plugin_protocol::CommandDef;
 use pwr_plugin_protocol::Manifest;
@@ -30,6 +31,18 @@ fn write_msg(out: &mut impl Write, msg: &Msg) -> std::io::Result<()> {
     let line = serde_json::to_string(msg).expect("serialize protocol message");
     writeln!(out, "{line}")?;
     out.flush()
+}
+
+/// The echoed view: the args JSON as the text of a text display inside the
+/// `components_v2` root, which sets the V2 flag and emits no legacy content.
+fn view_data(args: &Value) -> Value {
+    let echoed = args.to_string();
+    let message = view! {
+        components_v2 {
+            text_display { content: echoed }
+        }
+    };
+    serde_json::to_value(message).expect("arg-echo view is serializable")
 }
 
 fn main() -> ExitCode {
@@ -74,11 +87,7 @@ fn main() -> ExitCode {
                 let data = if cmd.as_deref() == Some("malformed") {
                     Value::Array(vec![])
                 } else {
-                    json!({
-                        "content": args.to_string(),
-                        "tts": false,
-                        "enforce_nonce": false,
-                    })
+                    view_data(&args)
                 };
                 let resp = Msg::resp_ok(
                     id,

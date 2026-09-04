@@ -15,7 +15,8 @@ use serde::Serialize;
 pub enum HostCap {
     /// Defer the interaction response (long-running command).
     Defer,
-    /// Send a message to a channel.
+    /// Send a message to a channel. The prose renders as a Components V2
+    /// text display; a legacy `data` argument is accepted and ignored.
     SendMessage,
     /// Edit a previously sent message.
     EditMessage,

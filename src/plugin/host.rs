@@ -17,6 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use log::debug;
 use log::warn;
 use mockall::automock;
 use poise::serenity_prelude as serenity;
@@ -30,6 +31,7 @@ use crate::plugin::InteractionEngine;
 use crate::plugin::InteractionError;
 use crate::plugin::PluginManager;
 use crate::plugin::RunningPlugin;
+use crate::plugin::reject_content_on_edit;
 use crate::plugin::validate_view_data;
 
 /// The seam between plugin `host.*` ops and Discord. The real implementation
@@ -46,17 +48,20 @@ pub trait HostIo: Send + Sync {
     /// original response to be edited later.
     async fn acknowledge(&self, interaction_id: u64, token: &str) -> Result<(), HostError>;
 
-    /// Sends a message to a channel, optionally carrying extra payload fields
-    /// beyond `content`. Returns the created message's id.
+    /// Sends a message to a channel. The prose renders as a text display
+    /// inside a Components V2 envelope — the send seam has no legacy content
+    /// path, so a content-beside-V2 payload (Discord error 50035) is
+    /// unrepresentable here. Returns the created message's id.
     async fn send_message(
         &self,
         channel_id: u64,
         content: &str,
-        data: Option<Value>,
     ) -> Result<Option<Value>, HostError>;
 
-    /// Edits a previously sent message in place. `data` is the full Discord
-    /// message payload. Returns the edited message's id.
+    /// Edits a previously sent message in place. `data` is the edit body:
+    /// only the fields it provides are applied, so partial shapes are legal.
+    /// The only shape rule enforced is the content gate
+    /// ([`reject_content_on_edit`]). Returns the edited message's id.
     async fn edit_message(
         &self,
         channel_id: u64,
@@ -99,17 +104,14 @@ impl HostIo for SerenityHostIo {
         &self,
         channel_id: u64,
         content: &str,
-        data: Option<Value>,
     ) -> Result<Option<Value>, HostError> {
-        let mut payload = json!({ "content": content });
-        if let Some(Value::Object(fields)) = data {
-            for (key, value) in fields {
-                payload[key] = value;
-            }
-        }
         let message = self
             .http
-            .send_message(channel_id.into(), Vec::new(), &payload)
+            .send_message(
+                channel_id.into(),
+                Vec::new(),
+                &send_message_payload(content),
+            )
             .await?;
         Ok(Some(json!({ "message_id": message.id.get() })))
     }
@@ -134,6 +136,13 @@ pub enum HostError {
     /// The Discord API rejected the request.
     #[error("discord api error: {0}")]
     Serenity(#[from] serenity::Error),
+}
+
+/// Builds the wire payload for a [`HostIo::send_message`] call: the prose in
+/// a text display inside a Components V2 envelope, with the explicit `tts`
+/// and `enforce_nonce` fields the raw HTTP route needs.
+fn send_message_payload(content: &str) -> Value {
+    pwr_poise_components::view_data_v2([pwr_poise_components::text_display(content)])
 }
 
 /// The seam between plugin `host.kv.*` ops and key-value storage. The real
@@ -340,13 +349,14 @@ async fn io_call(
             Ok(None)
         }
         HostCap::SendMessage => {
-            let (channel_id, content, data) = parse_send_message(args)?;
-            io.send_message(channel_id, &content, data)
+            let (channel_id, content) = parse_send_message(args)?;
+            io.send_message(channel_id, &content)
                 .await
                 .map_err(host_io_err)
         }
         HostCap::EditMessage => {
             let (channel_id, message_id, data) = parse_edit_message(args)?;
+            reject_content_on_edit(&data).map_err(WireError::from)?;
             io.edit_message(channel_id, message_id, data)
                 .await
                 .map_err(host_io_err)
@@ -381,7 +391,7 @@ async fn open_view_call(
         return Err(error.into());
     }
     let placeholder = io
-        .send_message(channel_id, "Loading…", None)
+        .send_message(channel_id, "Loading…")
         .await
         .map_err(host_io_err)?;
     let message_id = match placeholder {
@@ -531,12 +541,22 @@ fn parse_id_token(args: Option<&Value>) -> Result<(u64, String), WireError> {
     Ok((interaction_id, token))
 }
 
-/// Parses `host.send_message` args: a channel id, content, and optional extra
-/// payload fields.
-fn parse_send_message(args: Option<&Value>) -> Result<(u64, String, Option<Value>), WireError> {
+/// Parses `host.send_message` args: a channel id and the prose to send. The
+/// prose renders as a text display inside a Components V2 envelope; unknown
+/// argument keys (e.g. a legacy plugin's `data` object) have no effect and
+/// are logged at debug level.
+fn parse_send_message(args: Option<&Value>) -> Result<(u64, String), WireError> {
     let obj = args.and_then(Value::as_object).ok_or_else(|| {
         invalid_args("expected args object with `channel_id` (u64) and `content` (string)")
     })?;
+    let ignored: Vec<&str> = obj
+        .keys()
+        .map(String::as_str)
+        .filter(|key| !matches!(*key, "channel_id" | "content"))
+        .collect();
+    if !ignored.is_empty() {
+        debug!("host.send_message ignored argument keys: {ignored:?}");
+    }
     let channel_id = obj
         .get("channel_id")
         .and_then(Value::as_u64)
@@ -546,16 +566,12 @@ fn parse_send_message(args: Option<&Value>) -> Result<(u64, String, Option<Value
         .and_then(Value::as_str)
         .ok_or_else(|| invalid_args("missing `content` (string)"))?
         .to_string();
-    let data = match obj.get("data") {
-        None => None,
-        Some(data) if data.is_object() => Some(data.clone()),
-        Some(_) => return Err(invalid_args("`data` must be an object")),
-    };
-    Ok((channel_id, content, data))
+    Ok((channel_id, content))
 }
 
-/// Parses `host.edit_message` args: a channel id, message id, and the full
-/// payload to write.
+/// Parses `host.edit_message` args: a channel id, message id, and the edit
+/// body. Only the fields the body provides are applied — partial shapes are
+/// legal; the content gate is the only rule enforced on it.
 fn parse_edit_message(args: Option<&Value>) -> Result<(u64, u64, Value), WireError> {
     let obj = args.and_then(Value::as_object).ok_or_else(|| {
         invalid_args("expected args object with `channel_id`, `message_id`, `data`")
@@ -642,6 +658,7 @@ mod tests {
     use std::time::Duration;
 
     use mockall::predicate::eq;
+    use pwr_ext::prelude::CreateMessageDe;
     use serde_json::json;
 
     use super::*;
@@ -797,13 +814,9 @@ mod tests {
     async fn send_message_routes_through_the_seam() {
         let mut mock = MockHostIo::new();
         mock.expect_send_message()
-            .with(
-                eq(99_u64),
-                eq("hello world"),
-                eq(Some(json!({ "flags": 0 }))),
-            )
+            .with(eq(99_u64), eq("hello world"))
             .times(1)
-            .returning(|_, _, _| Ok(Some(json!({ "message_id": 1234 }))));
+            .returning(|_, _| Ok(Some(json!({ "message_id": 1234 }))));
         let host = services(Some(Arc::new(mock)), Some(sample_config()));
 
         let resp = handle_host_call(
@@ -819,6 +832,22 @@ mod tests {
         )
         .await;
         assert_eq!(assert_ok(resp, 7), Some(json!({ "message_id": 1234 })));
+    }
+
+    #[tokio::test]
+    async fn send_message_renders_the_prose_as_a_v2_text_display() {
+        let payload = send_message_payload("Loading…");
+
+        assert_eq!(
+            payload["components"][0],
+            json!({ "content": "Loading…", "type": 10 })
+        );
+        assert_eq!(
+            payload["flags"],
+            json!(pwr_poise_components::IS_COMPONENTS_V2)
+        );
+        assert!(payload.get("content").is_none());
+        serde_json::from_value::<CreateMessageDe>(payload).unwrap();
     }
 
     #[tokio::test]
@@ -838,8 +867,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn send_message_non_object_data_is_invalid_args() {
-        let mock = MockHostIo::new();
+    async fn send_message_non_object_data_is_ignored() {
+        let mut mock = MockHostIo::new();
+        mock.expect_send_message()
+            .with(eq(99_u64), eq("x"))
+            .times(1)
+            .returning(|_, _| Ok(Some(json!({ "message_id": 1 }))));
         let host = services(Some(Arc::new(mock)), Some(sample_config()));
 
         let resp = handle_host_call(
@@ -850,7 +883,7 @@ mod tests {
             None,
         )
         .await;
-        assert_err(resp, 7, "InvalidArgs");
+        assert_ok(resp, 7);
     }
 
     // ── edit_message ──────────────────────────────────────────────────────────
@@ -859,7 +892,11 @@ mod tests {
     async fn edit_message_routes_through_the_seam() {
         let mut mock = MockHostIo::new();
         mock.expect_edit_message()
-            .with(eq(99_u64), eq(1234_u64), eq(json!({ "content": "edited" })))
+            .with(
+                eq(99_u64),
+                eq(1234_u64),
+                eq(json!({ "components": [{ "type": 10, "content": "edited" }] })),
+            )
             .times(1)
             .returning(|_, _, _| Ok(Some(json!({ "message_id": 1234 }))));
         let host = services(Some(Arc::new(mock)), Some(sample_config()));
@@ -870,7 +907,7 @@ mod tests {
             Some(&json!({
                 "channel_id": 99,
                 "message_id": 1234,
-                "data": { "content": "edited" },
+                "data": { "components": [{ "type": 10, "content": "edited" }] },
             })),
             Some(&host),
             None,
@@ -893,6 +930,72 @@ mod tests {
         )
         .await;
         assert_err(resp, 7, "InvalidArgs");
+    }
+
+    #[tokio::test]
+    async fn edit_message_with_content_beside_the_v2_flag_is_invalid_view() {
+        let mock = MockHostIo::new();
+        let host = services(Some(Arc::new(mock)), Some(sample_config()));
+
+        let resp = handle_host_call(
+            7,
+            "host.edit_message",
+            Some(&json!({
+                "channel_id": 99,
+                "message_id": 1234,
+                "data": {
+                    "content": "legacy prose",
+                    "flags": 32768,
+                },
+            })),
+            Some(&host),
+            None,
+        )
+        .await;
+        assert_err(resp, 7, "InvalidView");
+    }
+
+    #[tokio::test]
+    async fn edit_message_with_content_and_no_flags_is_invalid_view() {
+        // An edit cannot unset IS_COMPONENTS_V2, so content beside absent
+        // flags still 50035s against an already-V2 message: the arm rejects
+        // it even though the V2 flag is not in the payload.
+        let mock = MockHostIo::new();
+        let host = services(Some(Arc::new(mock)), Some(sample_config()));
+
+        let resp = handle_host_call(
+            7,
+            "host.edit_message",
+            Some(&json!({
+                "channel_id": 99,
+                "message_id": 1234,
+                "data": { "content": "legacy prose" },
+            })),
+            Some(&host),
+            None,
+        )
+        .await;
+        assert_err(resp, 7, "InvalidView");
+    }
+
+    #[tokio::test]
+    async fn edit_message_with_non_string_content_is_invalid_view() {
+        let mock = MockHostIo::new();
+        let host = services(Some(Arc::new(mock)), Some(sample_config()));
+
+        let resp = handle_host_call(
+            7,
+            "host.edit_message",
+            Some(&json!({
+                "channel_id": 99,
+                "message_id": 1234,
+                "data": { "content": 42, "flags": 32768 },
+            })),
+            Some(&host),
+            None,
+        )
+        .await;
+        assert_err(resp, 7, "InvalidView");
     }
 
     // ── get_config ────────────────────────────────────────────────────────────
@@ -1252,7 +1355,7 @@ mod tests {
     #[tokio::test]
     async fn seam_failure_is_host_io_error() {
         let mut mock = MockHostIo::new();
-        mock.expect_send_message().times(1).returning(|_, _, _| {
+        mock.expect_send_message().times(1).returning(|_, _| {
             Err(HostError::Serenity(serenity::Error::Http(
                 serenity::HttpError::InvalidWebhook,
             )))

@@ -5,6 +5,12 @@
 //! in poise or serenity. Every builder returns a [`serde_json::Value`] that
 //! matches the Discord wire shape: component `type` numbers, `custom_id`,
 //! button styles, select options, and the `flags` field.
+//!
+//! The full-message builders ([`view_data_v2`] and [`pagination`]) always emit
+//! the [`IS_COMPONENTS_V2`] flag and never a top-level `content`: all text
+//! rides [`text_display`] components. The legacy content-plus-V2 payload that
+//! Discord rejects with error 50035 is unrepresentable through this seam —
+//! there is no builder that sets a message-level `content` at all.
 
 use pwr_ext::prelude::CreateButtonDe;
 use pwr_ext::prelude::CreateComponentDe;
@@ -155,37 +161,6 @@ pub fn with_default(option: Value, default: bool) -> Value {
     serde_json::to_value(CreateSelectMenuOption::from(parsed).default_selection(default)).unwrap()
 }
 
-/// Assembles a full message payload: content plus the given components.
-/// `flags: 0` keeps the message free of special Discord flags. The explicit
-/// `tts` and `enforce_nonce` fields make the envelope valid for the host's
-/// `CreateMessageDe` gate while preserving the legacy visible payload.
-///
-/// # Panics
-///
-/// Panics if any component cannot be deserialized by the typed pwr-ext
-/// component wrappers or if Serenity cannot serialize the message.
-pub fn view_data(content: impl Into<String>, components: impl IntoIterator<Item = Value>) -> Value {
-    let components: Vec<pwr_ext::view_support::CreateComponent<'static>> = components
-        .into_iter()
-        .map(|value| {
-            serde_json::from_value::<CreateComponentDe>(value)
-                .unwrap()
-                .into()
-        })
-        .collect();
-    let mut output = serde_json::to_value(
-        pwr_ext::view_support::CreateMessage::new()
-            .content(content.into())
-            .components(components)
-            .flags(serenity_flags(0))
-            .tts(false)
-            .enforce_nonce(false),
-    )
-    .unwrap();
-    remove_false_disabled(&mut output);
-    output
-}
-
 /// The Discord message flag marking a payload as Components V2: every visible
 /// element must be a component (text display, section, container, ...), and
 /// the legacy top-level `content` must stay empty.
@@ -298,9 +273,11 @@ fn remove_false_disabled(value: &mut Value) {
 
 /// Assembles a Components V2 message payload: the given components plus the
 /// [`IS_COMPONENTS_V2`] flag. No top-level `content`: all text lives in
-/// [`text_display`] components.
-/// The explicit `tts` and `enforce_nonce` fields make this full envelope valid
-/// for the host's `CreateMessageDe` gate.
+/// [`text_display`] components. The explicit `tts` and `enforce_nonce` fields
+/// make this full envelope valid for the host's `CreateMessageDe` gate.
+///
+/// Together with [`pagination`] this is one of the crate's only full-message
+/// builders, and neither can express a legacy `content` field.
 ///
 /// # Panics
 ///
@@ -590,35 +567,12 @@ mod tests {
     }
 
     #[test]
-    fn view_data_assembles_content_and_components() {
-        let data = view_data("Hello", [action_row([button("btn", "Click")])]);
-        assert_eq!(
-            data,
-            json!({
-                "content": "Hello",
-                "components": [{
-                    "type": 1,
-                    "components": [{
-                        "type": 2,
-                        "custom_id": "btn",
-                        "label": "Click",
-                        "style": 1
-                    }]
-                }],
-                "flags": 0,
-                "tts": false,
-                "enforce_nonce": false
-            })
-        );
-    }
-
-    #[test]
     fn message_envelopes_deserialize_through_the_gate() {
-        let legacy = view_data("Hello", [action_row([button("btn", "Click")])]);
         let v2 = view_data_v2([container([text_display("Hello")])]);
+        let paged = pagination(12, 2, 5, "feeds");
 
-        serde_json::from_value::<CreateMessageDe>(legacy).unwrap();
         serde_json::from_value::<CreateMessageDe>(v2).unwrap();
+        serde_json::from_value::<CreateMessageDe>(paged).unwrap();
     }
 
     #[test]
@@ -655,9 +609,28 @@ mod tests {
         assert_eq!(data["components"][0]["type"], 17);
     }
 
+    /// The regression test for Discord error 50035: no full-message builder
+    /// may put a legacy `content` field beside the Components V2 flag.
+    #[test]
+    fn no_full_message_builder_puts_content_beside_the_v2_flag() {
+        let built = view_data_v2([container([text_display("Hello")])]);
+        assert_eq!(built["flags"], json!(IS_COMPONENTS_V2));
+        assert!(
+            built.get("content").is_none(),
+            "view_data_v2 must not emit legacy content beside the V2 flag"
+        );
+
+        let paged = pagination(12, 2, 5, "feeds");
+        assert_eq!(paged["flags"], json!(IS_COMPONENTS_V2));
+        assert!(
+            paged.get("content").is_none(),
+            "pagination must not emit legacy content beside the V2 flag"
+        );
+    }
+
     #[test]
     fn view_spec_round_trip_preserves_components() {
-        let data = view_data("Hello", [action_row([button("btn", "Click")])]);
+        let data = view_data_v2([text_display("Hello"), action_row([button("btn", "Click")])]);
         let spec = ViewSpec {
             data,
             ephemeral: true,

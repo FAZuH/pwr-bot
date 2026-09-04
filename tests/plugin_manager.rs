@@ -106,7 +106,10 @@ async fn spawn_hello_invoke_bye_round_trip() {
     };
     assert!(ok, "invoke must succeed");
     assert!(error.is_none(), "invoke must carry no error");
-    assert_eq!(data.expect("invoke data")["content"], "Hello from plugin!");
+    assert_eq!(
+        data.expect("invoke data")["components"][0]["content"],
+        "Hello from plugin!"
+    );
 
     let status = plugin.stop().await.expect("graceful stop");
     assert_eq!(status.code(), Some(0), "clean exit after bye: {status}");
@@ -157,13 +160,13 @@ async fn concurrent_calls_resolve_to_their_own_resps() {
     };
     assert_ne!(invoke_id, interact_id, "calls get distinct correlation ids");
     assert_eq!(
-        invoke_data.expect("invoke data")["content"],
+        invoke_data.expect("invoke data")["components"][0]["content"],
         "Hello from plugin!"
     );
     assert!(
-        interact_data.expect("interact data")["content"]
+        interact_data.expect("interact data")["components"][0]["content"]
             .as_str()
-            .expect("content string")
+            .expect("text display content")
             .contains("clicked"),
         "interact resp must belong to the interact call"
     );

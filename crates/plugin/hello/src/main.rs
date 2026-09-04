@@ -37,7 +37,6 @@ use std::process::ExitCode;
 
 use pwr_ext::view;
 use pwr_ext::view_support::ButtonStyle;
-use pwr_ext::view_support::MessageFlags;
 use pwr_plugin_protocol::API_VERSION;
 use pwr_plugin_protocol::BUTTON_CUSTOM_ID;
 use pwr_plugin_protocol::CommandDef;
@@ -54,21 +53,23 @@ use serde_json::json;
 const MODAL_CUSTOM_ID: &str = "hello:modal";
 
 /// The view payload the fixture renders: authored with `pwr_ext::view!` as a
-/// `CreateMessage`, serialized to JSON — one action-row button carrying the
-/// [`BUTTON_CUSTOM_ID`] custom id. The explicit `tts`/`enforce_nonce` fields
-/// keep the envelope valid for the host's `ViewSpec.data` gate.
-fn view_data(content: &str) -> Value {
+/// Components V2 `CreateMessage`, serialized to JSON — a text display with
+/// the given prose plus one action-row button carrying the
+/// [`BUTTON_CUSTOM_ID`] custom id. The `components_v2` root sets the
+/// `IS_COMPONENTS_V2` flag and emits no legacy content; `tts` and
+/// `enforce_nonce` serialize as the explicit fields the host's
+/// `ViewSpec.data` gate requires.
+fn view_data_v2(content: &str) -> Value {
     let content = content.to_owned();
     let message = view! {
-        content: content,
-        flags: MessageFlags::empty(),
-        tts: false,
-        enforce_nonce: false,
-        action_row {
-            button {
-                custom_id: BUTTON_CUSTOM_ID,
-                label: "Click me",
-                style: ButtonStyle::Primary
+        components_v2 {
+            text_display { content: content }
+            action_row {
+                button {
+                    custom_id: BUTTON_CUSTOM_ID,
+                    label: "Click me",
+                    style: ButtonStyle::Primary
+                }
             }
         }
     };
@@ -212,17 +213,17 @@ fn main() -> ExitCode {
                         == Some(MODAL_CUSTOM_ID);
                     let resp = match (op.as_str(), cmd.as_deref(), is_click, is_modal) {
                         ("invoke", Some(PLUGIN_NAME), _, _) => {
-                            Msg::resp_ok(id, Some(view_data("Hello from plugin!")))
+                            Msg::resp_ok(id, Some(view_data_v2("Hello from plugin!")))
                         }
                         ("view.interact", Some(PLUGIN_NAME), true, _) => {
                             count += 1;
                             let content = format!("Button clicked! count={count}");
-                            Msg::resp_ok(id, Some(view_data(&content)))
+                            Msg::resp_ok(id, Some(view_data_v2(&content)))
                         }
                         ("view.interact", Some(PLUGIN_NAME), _, true) => {
                             count += 1;
                             let content = format!("Modal submitted! count={count}");
-                            Msg::resp_ok(id, Some(view_data(&content)))
+                            Msg::resp_ok(id, Some(view_data_v2(&content)))
                         }
                         ("view.interact", Some(PLUGIN_NAME), false, false) => Msg::resp_err(
                             id,

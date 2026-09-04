@@ -12,6 +12,7 @@ resolver = "2"
 pwr-ext = { path = "../pwr-ext", features = ["macros"] }
 pwr-viewgen = { path = "../pwr-viewgen" }
 pwr-plugin-protocol = { path = "crates/pwr-plugin-protocol" }
+pwr-poise-components = { path = "crates/pwr-poise-components" }
 
 [package]
 name = "pwr-bot"
@@ -54,6 +55,7 @@ dotenv = "0.15.0"
 poise = { git = "https://github.com/serenity-rs/poise", branch = "serenity-next" }
 pwr-ext.workspace = true
 pwr-plugin-protocol.workspace = true
+pwr-poise-components.workspace = true
 serde = "1.0.228"
 serde_json = "1.0.149"
 tokio = { version = "1.49.0", features = ["rt-multi-thread", "macros", "signal", "process", "time", "io-util"] }
@@ -88,7 +90,6 @@ mockall = "0.13.1"
 [dev-dependencies]
 httpmock = "0.7.0"
 serial_test = "3.3.1"
-pwr-poise-components = { path = "crates/pwr-poise-components" }
 pwr-viewgen.workspace = true
 postgresql_embedded = { version = "=0.20.1", default-features = false, features = ["zonky", "tokio", "rustls"] }
 tokio-postgres = "0.7"

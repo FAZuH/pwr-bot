@@ -56,10 +56,13 @@ fn command_interaction(data: Value) -> serenity::CommandInteraction {
     .expect("command interaction deserializes")
 }
 
-/// Extracts the echoed args JSON from the fixture's resp envelope.
+/// Extracts the echoed args JSON from the fixture's resp envelope: the
+/// fixture renders the args as the text of a Components V2 text display.
 fn parse_echoed_args(spec: &ViewSpec) -> Value {
-    serde_json::from_str(spec.data["content"].as_str().expect("echoed args string"))
-        .expect("echoed args parse")
+    let text = spec.data["components"][0]["content"]
+        .as_str()
+        .expect("echoed args text display");
+    serde_json::from_str(text).expect("echoed args parse")
 }
 
 /// Echoes `args` through the fixture: spawns it and opens an engine session

@@ -16,6 +16,11 @@ at every raw-send boundary:
    `src/bot/mod.rs`
 3. The `host.open_view` op in `src/plugin/host.rs`.
 
+The `host.edit_message` op boundary is the exception: partial edit bodies
+are legal, so it runs only the narrow content rule (`reject_content_on_edit`
+in `src/plugin/view.rs`, no schema parse) — an edit cannot unset the V2
+flag, so any non-empty legacy `content` is refused there.
+
 An invalid payload fails before any send, registration, or commit. The
 initial dispatch sends no loading reply and registers no session. The
 re-render is transactional: an invalid returned view leaves the prior

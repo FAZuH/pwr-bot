@@ -143,8 +143,12 @@ async fn click(plugin: &RunningPlugin) -> Result<bool, pwr_bot::plugin::PluginEr
     if !ok {
         return Ok(false);
     }
-    let content = data.and_then(|data| data["content"].as_str().map(str::to_string));
-    Ok(content.is_some_and(|content| content.contains("count=1")))
+    let text = data.and_then(|data| {
+        data["components"][0]["content"]
+            .as_str()
+            .map(str::to_string)
+    });
+    Ok(text.is_some_and(|text| text.contains("count=1")))
 }
 
 // ── health: ping/pong keeps a healthy plugin running ───────────────────────

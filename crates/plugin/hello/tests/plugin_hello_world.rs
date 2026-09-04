@@ -85,12 +85,13 @@ async fn hello_plugin_round_trip() {
         assert!(ok, "invoke must succeed");
         assert!(error.is_none(), "invoke must carry no error");
         let data = data.expect("invoke data");
-        assert_eq!(data["content"], "Hello from plugin!");
+        assert_eq!(data["components"][0]["content"], "Hello from plugin!");
         assert_eq!(
-            data["components"][0]["components"][0]["custom_id"],
+            data["components"][1]["components"][0]["custom_id"],
             BUTTON_CUSTOM_ID
         );
-        assert_eq!(data["flags"], 0);
+        assert_eq!(data["flags"], 32768);
+        assert!(data.get("content").is_none());
 
         // 3. Component round-trip: re-render with bumped counter.
         send_line(
@@ -117,11 +118,11 @@ async fn hello_plugin_round_trip() {
         assert_eq!(id, 2);
         assert!(ok, "interact must succeed");
         assert!(
-            data.expect("interact data")["content"]
+            data.expect("interact data")["components"][0]["content"]
                 .as_str()
-                .expect("content string")
+                .expect("text display content")
                 .contains("clicked"),
-            "interact content must mention the click"
+            "interact text display must mention the click"
         );
 
         // 4. Unknown action -> first-class error on the wire.

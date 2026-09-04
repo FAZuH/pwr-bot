@@ -3,13 +3,13 @@
 use std::sync::atomic::Ordering;
 
 use log::error;
-use poise::CreateReply;
 use poise::FrameworkError;
 use poise::serenity_prelude::*;
 
 use crate::bot::Data;
 use crate::bot::Error;
 use crate::bot::error::BotError;
+use crate::bot::reply::text_reply;
 use crate::error::AppError;
 use crate::service::error::ServiceError;
 
@@ -80,12 +80,12 @@ impl ErrorHandler {
     /// have.
     async fn send_component(ctx: &poise::Context<'_, Data, Error>, message: &str) {
         let poise::Context::Application(app) = ctx else {
-            let _ = ctx.send(error_reply(message)).await;
+            let _ = ctx.send(text_reply(message)).await;
             return;
         };
         if app.has_sent_initial_response.load(Ordering::SeqCst) {
             let edit =
-                error_reply(message).to_slash_initial_response_edit(EditInteractionResponse::new());
+                text_reply(message).to_slash_initial_response_edit(EditInteractionResponse::new());
             if let Err(e) = app
                 .interaction
                 .edit_response(&app.serenity_context().http, edit)
@@ -94,50 +94,7 @@ impl ErrorHandler {
                 error!("failed to edit the error response into the original response: {e}");
             }
         } else {
-            let _ = ctx.send(error_reply(message)).await;
+            let _ = ctx.send(text_reply(message)).await;
         }
-    }
-}
-
-/// Builds the Components V2 error reply: the message wrapped in a container.
-fn error_reply(message: &str) -> CreateReply<'_> {
-    let components = vec![CreateComponent::Container(CreateContainer::new(vec![
-        CreateContainerComponent::TextDisplay(CreateTextDisplay::new(message)),
-    ]))];
-
-    CreateReply::default()
-        .flags(MessageFlags::IS_COMPONENTS_V2)
-        .components(components)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn error_reply_carries_the_v2_flag_and_container_without_legacy_content() {
-        let reply = error_reply("### ❌ Internal Error\n\nboom");
-
-        let edit = reply.to_slash_initial_response_edit(EditInteractionResponse::new());
-        let body = serde_json::to_value(&edit).expect("edit body serializes");
-
-        assert_eq!(
-            body["flags"],
-            serde_json::json!(MessageFlags::IS_COMPONENTS_V2)
-        );
-        assert_eq!(body["components"][0]["type"], 17);
-        assert!(body.get("content").is_none());
-    }
-
-    #[test]
-    fn error_reply_wraps_the_message_in_a_text_display() {
-        let reply = error_reply("the message");
-
-        let edit = reply.to_slash_initial_response_edit(EditInteractionResponse::new());
-        let body = serde_json::to_value(&edit).expect("edit body serializes");
-
-        let text = &body["components"][0]["components"][0];
-        assert_eq!(text["type"], 10);
-        assert_eq!(text["content"], "the message");
     }
 }

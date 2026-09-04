@@ -18,6 +18,7 @@ use pwr_plugin_protocol::Manifest;
 
 use crate::bot::command::prelude::*;
 use crate::bot::manifest_for;
+use crate::bot::reply::text_reply;
 use crate::plugin::CatalogEntry;
 use crate::plugin::InstallError;
 use crate::plugin::PluginError;
@@ -54,7 +55,7 @@ pub async fn list(ctx: Context<'_>) -> Result<(), Error> {
     if model.catalog.is_empty() {
         let reply =
             empty_catalog_message(data.plugin_catalog_error.as_ref(), author_is_bot_owner(ctx));
-        ctx.say(reply).await?;
+        ctx.send(text_reply(reply)).await?;
         return Ok(());
     }
     let mut lines = Vec::with_capacity(model.catalog.len());
@@ -66,7 +67,7 @@ pub async fn list(ctx: Context<'_>) -> Result<(), Error> {
         };
         lines.push(format!("`{name}` — {state}"));
     }
-    ctx.say(lines.join("\n")).await?;
+    ctx.send(text_reply(lines.join("\n"))).await?;
     Ok(())
 }
 
@@ -100,10 +101,11 @@ pub async fn enable(ctx: Context<'_>, plugin: String) -> Result<(), Error> {
                 .guild_plugins()
                 .set_enabled(guild_id.get(), &plugin, true)
                 .await?;
-            ctx.say(format!("Plugin `{plugin}` enabled.")).await?;
+            ctx.send(text_reply(format!("Plugin `{plugin}` enabled.")))
+                .await?;
         }
         PluginsCmd::None => {
-            ctx.say(format!("Plugin `{plugin}` is already enabled."))
+            ctx.send(text_reply(format!("Plugin `{plugin}` is already enabled.")))
                 .await?;
         }
         _ => unreachable!("enable only ever registers or no-ops"),
@@ -150,10 +152,11 @@ pub async fn disable(ctx: Context<'_>, plugin: String) -> Result<(), Error> {
             {
                 return Err(e.into());
             }
-            ctx.say(format!("Plugin `{plugin}` disabled.")).await?;
+            ctx.send(text_reply(format!("Plugin `{plugin}` disabled.")))
+                .await?;
         }
         PluginsCmd::None => {
-            ctx.say(format!("Plugin `{plugin}` is not enabled."))
+            ctx.send(text_reply(format!("Plugin `{plugin}` is not enabled.")))
                 .await?;
         }
         _ => unreachable!("disable only ever unregisters or no-ops"),
@@ -181,10 +184,11 @@ pub async fn swap(ctx: Context<'_>, plugin: String) -> Result<(), Error> {
             data.plugin_manager
                 .swap(&plugin, &path, &[guild_id])
                 .await?;
-            ctx.say(format!("Plugin `{plugin}` swapped.")).await?;
+            ctx.send(text_reply(format!("Plugin `{plugin}` swapped.")))
+                .await?;
         }
         PluginsCmd::None => {
-            ctx.say(format!("Plugin `{plugin}` is not enabled."))
+            ctx.send(text_reply(format!("Plugin `{plugin}` is not enabled.")))
                 .await?;
         }
         _ => unreachable!("swap only ever swaps or no-ops"),

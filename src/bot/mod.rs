@@ -10,6 +10,7 @@ pub mod error;
 pub mod error_handler;
 pub mod gui;
 pub mod navigation;
+pub mod reply;
 pub mod translate;
 pub mod utils;
 pub mod view;

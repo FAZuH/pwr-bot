@@ -71,10 +71,9 @@ async fn host_say_serves_send_message_through_the_seam() {
         .with(
             mockall::predicate::eq(987_654_321_u64),
             mockall::predicate::eq("hello from the fixture"),
-            mockall::predicate::eq(None::<serde_json::Value>),
         )
         .times(1)
-        .returning(|_, _, _| Ok(Some(json!({ "message_id": 123_456_789 }))));
+        .returning(|_, _| Ok(Some(json!({ "message_id": 123_456_789 }))));
 
     let plugin = RunningPlugin::spawn_with(
         probe_binary("hello"),
@@ -169,7 +168,9 @@ async fn host_edit_invoke_serves_edit_message_through_the_seam() {
         .with(
             mockall::predicate::eq(777_888_999_u64),
             mockall::predicate::eq(111_222_333_u64),
-            mockall::predicate::eq(json!({ "content": "edited" })),
+            mockall::predicate::eq(json!({
+                "components": [{ "type": 10, "content": "edited" }]
+            })),
         )
         .times(1)
         .returning(|_, _, _| Ok(Some(json!({ "message_id": 111_222_333 }))));
@@ -189,7 +190,7 @@ async fn host_edit_invoke_serves_edit_message_through_the_seam() {
             Some(json!({
                 "channel_id": 777_888_999,
                 "message_id": 111_222_333,
-                "data": { "content": "edited" },
+                "data": { "components": [{ "type": 10, "content": "edited" }] },
             })),
         )
         .await
@@ -225,19 +226,24 @@ async fn host_openview_opens_the_target_plugin_view_end_to_end() {
         .with(
             mockall::predicate::eq(channel_id),
             mockall::predicate::eq("Loading…"),
-            mockall::predicate::eq(None::<serde_json::Value>),
         )
         .times(1)
-        .returning(move |_, _, _| Ok(Some(json!({ "message_id": produced }))));
+        .returning(move |_, _| Ok(Some(json!({ "message_id": produced }))));
     mock.expect_edit_message()
         .with(
             mockall::predicate::eq(channel_id),
             mockall::predicate::eq(produced),
             mockall::predicate::function(|data: &serde_json::Value| {
+                // The arg-echo fixture renders a Components V2 payload: the
+                // echoed args are the text of a text display.
                 data == &json!({
-                    "content": "{}",
-                    "tts": false,
+                    "attachments": [],
+                    "components": [{"content": "{}", "type": 10}],
+                    "embeds": [],
                     "enforce_nonce": false,
+                    "flags": 32768,
+                    "sticker_ids": [],
+                    "tts": false,
                 })
             }),
         )
@@ -298,7 +304,7 @@ async fn host_openview_opens_the_target_plugin_view_end_to_end() {
         .await
         .expect("follow-up interaction routes to the target plugin");
     assert_eq!(
-        follow_up.data["content"],
+        follow_up.data["components"][0]["content"],
         "{\"custom_id\":\"arg-echo\",\"view\":{\"last_args\":{}}}"
     );
     assert_eq!(follow_up.data["tts"], false);
@@ -403,21 +409,13 @@ async fn host_call_without_services_is_host_unavailable() {
 async fn concurrent_host_calls_correlate_by_id() {
     let mut mock = MockHostIo::new();
     mock.expect_send_message()
-        .with(
-            mockall::predicate::eq(1_u64),
-            mockall::predicate::eq("one"),
-            mockall::predicate::eq(None::<serde_json::Value>),
-        )
+        .with(mockall::predicate::eq(1_u64), mockall::predicate::eq("one"))
         .times(1)
-        .returning(|_, _, _| Ok(Some(json!({ "message_id": 1 }))));
+        .returning(|_, _| Ok(Some(json!({ "message_id": 1 }))));
     mock.expect_send_message()
-        .with(
-            mockall::predicate::eq(2_u64),
-            mockall::predicate::eq("two"),
-            mockall::predicate::eq(None::<serde_json::Value>),
-        )
+        .with(mockall::predicate::eq(2_u64), mockall::predicate::eq("two"))
         .times(1)
-        .returning(|_, _, _| Ok(Some(json!({ "message_id": 2 }))));
+        .returning(|_, _| Ok(Some(json!({ "message_id": 2 }))));
 
     let plugin = Arc::new(
         RunningPlugin::spawn_with(
