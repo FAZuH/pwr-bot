@@ -16,7 +16,10 @@ use crate::bot::command::voice::VoiceStatsTimeRange;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Navigation {
     // -- Settings section --
-    /// Navigate to main settings page
+    /// Hand the session's message to the settings plugin's hub view: the
+    /// host run morphs the message into the hub and ends, and the message
+    /// continues as a plugin view session. See
+    /// [`crate::bot::command::session_exit`].
     SettingsMain,
     /// Navigate to feed settings page
     SettingsFeeds,
@@ -56,7 +59,9 @@ pub enum Navigation {
     },
 
     // -- Universal navigation --
-    /// Go back to previous handler
+    /// Pop one navigation level: the target revealed behind the marker runs
+    /// and morphs the same message; with an empty stack behind it the root
+    /// view is dismissed and the session ends.
     Back,
     /// Exit current coordinator session
     Exit,
