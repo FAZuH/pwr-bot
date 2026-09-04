@@ -10,7 +10,6 @@ pub mod error;
 pub mod error_handler;
 pub mod gui;
 pub mod navigation;
-pub mod test_framework;
 pub mod utils;
 pub mod view;
 
@@ -48,6 +47,7 @@ use crate::feed::Platforms;
 use crate::plugin::CatalogEntry;
 use crate::plugin::HostConfig;
 use crate::plugin::HostServices;
+use crate::plugin::InstallError;
 use crate::plugin::InteractionEngine;
 use crate::plugin::InteractionError;
 use crate::plugin::PgKvStore;
@@ -76,6 +76,10 @@ pub struct Data {
     pub repos: Arc<dyn Repos + Send + Sync>,
     pub plugin_manager: Arc<PluginManager>,
     pub plugin_catalog: Arc<HashMap<String, CatalogEntry>>,
+    /// Why the plugin catalog failed to load, if it did: owners see the real
+    /// path and cause through the `/plugins` commands while plain members
+    /// keep the friendly empty-catalog message.
+    pub plugin_catalog_error: Option<InstallError>,
     pub plugin_engine: Arc<InteractionEngine<RunningPlugin>>,
     /// Command-name → plugin-name routes for dispatch; built at startup from
     /// the loaded manifests ([`routes_from_manifests`]).
@@ -153,7 +157,7 @@ impl Bot {
         }
         let http = Arc::new(http);
 
-        let catalog = Self::load_plugin_catalog(&config);
+        let (catalog, catalog_error) = Self::load_plugin_catalog(&config);
         let plugin_engine = Arc::new(InteractionEngine::<RunningPlugin>::with_timeout(
             DEFAULT_VIEW_TIMEOUT,
         ));
@@ -208,6 +212,7 @@ impl Bot {
             repos,
             plugin_manager,
             plugin_catalog: Arc::new(catalog),
+            plugin_catalog_error: catalog_error,
             plugin_engine,
             plugin_routes,
             core_manifests,
@@ -305,17 +310,21 @@ impl Bot {
     }
 
     /// Loads the plugin catalog from `plugins.toml`. A missing or invalid
-    /// catalog logs a warning and yields an empty map: the bot stays up with
-    /// plugin commands absent rather than failing startup.
-    fn load_plugin_catalog(config: &Config) -> HashMap<String, CatalogEntry> {
+    /// catalog keeps the bot up with plugin commands absent rather than
+    /// failing startup, but the failure is logged loudly and returned so
+    /// owners see the real path and cause through the `/plugins`
+    /// commands ([`Data::plugin_catalog_error`]).
+    fn load_plugin_catalog(
+        config: &Config,
+    ) -> (HashMap<String, CatalogEntry>, Option<InstallError>) {
         match PluginCatalog::load(&config.plugins_toml) {
-            Ok(catalog) => catalog,
+            Ok(catalog) => (catalog, None),
             Err(e) => {
-                warn!(
+                error!(
                     "failed to load plugin catalog `{}`: {e}",
                     config.plugins_toml.display()
                 );
-                HashMap::new()
+                (HashMap::new(), Some(e))
             }
         }
     }
@@ -508,8 +517,8 @@ impl BotEventHandler {
     /// call unless the guild has explicitly disabled them. A missing
     /// `guild_plugins` row means enabled by default (auto-enable); an
     /// `enabled = false` row opts out. Failure to list state or register
-    /// commands is logged and skipped — the bot stays up and the plugin's
-    /// commands simply stay absent in that guild.
+    /// commands is logged at error level and skipped — the bot stays up and
+    /// the plugin's commands simply stay absent in that guild.
     async fn register_plugins_in_guild(&self, guild_id: poise::serenity_prelude::GuildId) {
         let rows = match self
             .data
@@ -520,7 +529,7 @@ impl BotEventHandler {
         {
             Ok(rows) => rows,
             Err(e) => {
-                warn!(
+                error!(
                     "failed to list guild plugins for guild {}: {e}",
                     guild_id.get()
                 );
@@ -544,9 +553,15 @@ impl BotEventHandler {
                 continue;
             }
             let Some(manifest) = self.data.manifest_for(&plugin_name) else {
-                warn!(
+                let catalog_suffix = match self.data.plugin_catalog_error.as_ref() {
+                    Some(catalog_error) => {
+                        format!(": the plugin catalog failed to load: {catalog_error}")
+                    }
+                    None => String::new(),
+                };
+                error!(
                     "no manifest for auto-enabled plugin `{plugin_name}`; \
-                     skipping registration in guild {}",
+                     skipping registration in guild {}{catalog_suffix}",
                     guild_id.get()
                 );
                 continue;
@@ -557,7 +572,7 @@ impl BotEventHandler {
             return;
         }
         if let Err(e) = register_in_guild(&self.http, &commands, guild_id).await {
-            warn!(
+            error!(
                 "failed to register auto-enabled plugin commands in guild {}: {e}",
                 guild_id.get()
             );
@@ -754,9 +769,85 @@ impl poise::serenity_prelude::EventHandler for BotEventHandler {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+    use std::path::PathBuf;
+
+    use tempfile::tempdir;
+
     use super::*;
     use crate::test_helpers::entry_named;
     use crate::test_helpers::manifest_named;
+
+    /// A `Config` whose catalog path points at `path`, nothing else set.
+    fn config_with_catalog(path: PathBuf) -> Config {
+        Config {
+            plugins_toml: path,
+            ..Default::default()
+        }
+    }
+
+    /// A one-entry `plugins.toml` for a plugin named `name`.
+    fn catalog_text(name: &str) -> String {
+        let manifest = serde_json::to_string(&manifest_named(name)).unwrap();
+        format!(
+            "[[plugins]]\nname = \"{name}\"\nurl = \"https://example.com/{name}\"\n\
+             sha256 = \"{}\"\nmanifest = '{manifest}'\n",
+            "ab".repeat(32)
+        )
+    }
+
+    #[test]
+    fn load_plugin_catalog_surfaces_a_missing_file_as_an_error() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("plugins.toml");
+
+        let (catalog, error) = Bot::load_plugin_catalog(&config_with_catalog(path.clone()));
+
+        assert!(catalog.is_empty());
+        let error = error.expect("a missing catalog must surface its load error");
+        match error {
+            InstallError::Catalog {
+                path: error_path, ..
+            } => assert_eq!(error_path, path),
+            other => panic!("expected a catalog error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn load_plugin_catalog_surfaces_an_invalid_entry_as_an_error() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("plugins.toml");
+        fs::write(
+            &path,
+            catalog_text("hello").replace("https://example.com/hello", "http://example.com/hello"),
+        )
+        .unwrap();
+
+        let (catalog, error) = Bot::load_plugin_catalog(&config_with_catalog(path));
+
+        assert!(catalog.is_empty());
+        let error = error.expect("an invalid entry must surface its load error");
+        let detail = error.to_string();
+        assert!(
+            detail.contains("must be https"),
+            "the error carries the real validation cause: {detail}"
+        );
+    }
+
+    #[test]
+    fn load_plugin_catalog_reports_no_error_for_a_valid_file() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("plugins.toml");
+        fs::write(&path, catalog_text("hello")).unwrap();
+
+        let (catalog, error) = Bot::load_plugin_catalog(&config_with_catalog(path));
+
+        assert!(error.is_none(), "a valid catalog must not report an error");
+        assert_eq!(
+            catalog.keys().map(String::as_str).collect::<Vec<_>>(),
+            ["hello"]
+        );
+    }
 
     #[test]
     fn plugin_commands_sort_each_group_by_plugin_name() {

@@ -32,16 +32,21 @@ pub async fn is_author_guild_admin(ctx: Context<'_>) -> Result<(), Error> {
 
 /// Checks if the command author is the bot owner.
 pub fn is_bot_owner(ctx: Context<'_>) -> Result<(), Error> {
-    let author = ctx.author().id;
-    let owners = &ctx.framework().options().owners;
-
-    if !owners.contains(&author) {
+    if !author_is_bot_owner(ctx) {
         Err(BotError::PermissionDenied(
             "You need `Manage Server` or `Administrator` permission to perform this action."
                 .to_string(),
         ))?
     };
     Ok(())
+}
+
+/// Whether the command author is the bot owner: a query form of
+/// [`is_bot_owner`] for commands that change their reply instead of erroring.
+pub fn author_is_bot_owner(ctx: Context<'_>) -> bool {
+    let author = ctx.author().id;
+    let owners = &ctx.framework().options().owners;
+    owners.contains(&author)
 }
 
 /// Checks if the command author has any of the required roles.

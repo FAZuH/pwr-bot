@@ -19,6 +19,7 @@ use pwr_plugin_protocol::Manifest;
 use crate::bot::command::prelude::*;
 use crate::bot::manifest_for;
 use crate::plugin::CatalogEntry;
+use crate::plugin::InstallError;
 use crate::plugin::PluginError;
 use crate::plugin::command::commands_from_manifest;
 use crate::plugin::command::register_in_guild;
@@ -40,15 +41,20 @@ pub async fn plugins(ctx: Context<'_>) -> Result<(), Error> {
 }
 
 /// Lists every catalog plugin and its enabled state in this guild.
+///
+/// When the catalog failed to load, the bot owner sees the real path and
+/// cause while other users keep the friendly empty message.
 #[poise::command(slash_command)]
 pub async fn list(ctx: Context<'_>) -> Result<(), Error> {
     is_author_guild_admin(ctx).await?;
     let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?;
     let data = ctx.data();
-    let model = guild_model(&data, guild_id).await;
+    let model = guild_model(&data, guild_id).await?;
 
     if model.catalog.is_empty() {
-        ctx.say("The plugin catalog is empty.").await?;
+        let reply =
+            empty_catalog_message(data.plugin_catalog_error.as_ref(), author_is_bot_owner(ctx));
+        ctx.say(reply).await?;
         return Ok(());
     }
     let mut lines = Vec::with_capacity(model.catalog.len());
@@ -71,8 +77,8 @@ pub async fn enable(ctx: Context<'_>, plugin: String) -> Result<(), Error> {
     is_author_guild_admin(ctx).await?;
     let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?;
     let data = ctx.data();
-    catalog_entry(&data, &plugin)?;
-    let mut model = guild_model(&data, guild_id).await;
+    catalog_entry(&data, &plugin, author_is_bot_owner(ctx))?;
+    let mut model = guild_model(&data, guild_id).await?;
 
     match PluginsUpdate::update(PluginsMsg::Enable(plugin.clone()), &mut model) {
         PluginsCmd::Register(_) => {
@@ -112,7 +118,7 @@ pub async fn disable(ctx: Context<'_>, plugin: String) -> Result<(), Error> {
     is_author_guild_admin(ctx).await?;
     let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?;
     let data = ctx.data();
-    let mut model = guild_model(&data, guild_id).await;
+    let mut model = guild_model(&data, guild_id).await?;
 
     match PluginsUpdate::update(PluginsMsg::Disable(plugin.clone()), &mut model) {
         PluginsCmd::Unregister(_) => {
@@ -161,8 +167,8 @@ pub async fn swap(ctx: Context<'_>, plugin: String) -> Result<(), Error> {
     is_author_guild_admin(ctx).await?;
     let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?;
     let data = ctx.data();
-    let entry = catalog_entry(&data, &plugin)?;
-    let mut model = guild_model(&data, guild_id).await;
+    let entry = catalog_entry(&data, &plugin, author_is_bot_owner(ctx))?;
+    let mut model = guild_model(&data, guild_id).await?;
 
     match PluginsUpdate::update(PluginsMsg::Swap(plugin.clone()), &mut model) {
         PluginsCmd::Swap(_) => {
@@ -186,17 +192,42 @@ pub async fn swap(ctx: Context<'_>, plugin: String) -> Result<(), Error> {
     Ok(())
 }
 
-/// The catalog entry for `name`, or an error when unknown.
+/// The catalog entry for `name`, or an error when unknown. When the catalog
+/// failed to load, the bot owner's error names the real cause; other users
+/// keep the plain unknown-plugin message.
 fn catalog_entry<'a>(
     data: &'a Arc<crate::bot::Data>,
     name: &str,
+    is_owner: bool,
 ) -> Result<&'a CatalogEntry, BotError> {
     data.plugin_catalog
         .get(name)
         .ok_or_else(|| BotError::InvalidCommandArgument {
             parameter: "plugin".to_string(),
-            reason: format!("`{name}` is not in the plugin catalog"),
+            reason: unknown_plugin_reason(name, data.plugin_catalog_error.as_ref(), is_owner),
         })
+}
+
+/// The reason a plugin name is unknown: the plain message, or — for the bot
+/// owner when the catalog failed to load — the real path and cause.
+fn unknown_plugin_reason(
+    name: &str,
+    catalog_error: Option<&InstallError>,
+    is_owner: bool,
+) -> String {
+    match catalog_error {
+        Some(error) if is_owner => format!("`{name}` is not in the plugin catalog: {error}"),
+        _ => format!("`{name}` is not in the plugin catalog"),
+    }
+}
+
+/// The message for an empty catalog: the bot owner sees the real load
+/// failure when there is one; other users keep the friendly message.
+fn empty_catalog_message(catalog_error: Option<&InstallError>, is_owner: bool) -> String {
+    match catalog_error {
+        Some(error) if is_owner => format!("The plugin catalog is empty: {error}"),
+        _ => "The plugin catalog is empty.".to_string(),
+    }
 }
 
 /// The guild's plugins model: catalog names plus the guild's enabled subset.
@@ -207,14 +238,20 @@ fn catalog_entry<'a>(
 /// row opts one out. This mirrors
 /// [`register_plugins_in_guild`](crate::bot::BotEventHandler) and lets
 /// `/plugins disable` turn an auto-enable off and persist `enabled = false`.
-async fn guild_model(data: &Arc<crate::bot::Data>, guild_id: GuildId) -> PluginsModel {
+///
+/// A listing failure propagates instead of masquerading as "no rows" —
+/// the admin sees the real database error rather than wrong enablement
+/// states (the startup path logs and skips; this path can reply).
+async fn guild_model(
+    data: &Arc<crate::bot::Data>,
+    guild_id: GuildId,
+) -> Result<PluginsModel, Error> {
     let catalog = data.plugin_catalog.keys().cloned().collect();
     let rows = data
         .repos
         .guild_plugins()
         .list_for_guild(guild_id.get())
-        .await
-        .unwrap_or_default();
+        .await?;
     let mut enabled: Vec<String> = rows
         .iter()
         .filter(|entry| entry.enabled)
@@ -225,7 +262,7 @@ async fn guild_model(data: &Arc<crate::bot::Data>, guild_id: GuildId) -> Plugins
             enabled.push(plugin);
         }
     }
-    PluginsModel::new(catalog, enabled)
+    Ok(PluginsModel::new(catalog, enabled))
 }
 
 /// The routing commands of every plugin in `enabled`: the union a
@@ -272,9 +309,71 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::*;
     use crate::test_helpers::entry_named;
     use crate::test_helpers::manifest_named;
+
+    /// The catalog load failure a fresh checkout produces: no `plugins.toml`.
+    fn missing_catalog_error() -> InstallError {
+        InstallError::Catalog {
+            path: PathBuf::from("/srv/pwr-bot/data/plugins.toml"),
+            detail: "No such file or directory (os error 2)".to_string(),
+        }
+    }
+
+    #[test]
+    fn empty_catalog_message_shows_the_load_failure_to_the_bot_owner() {
+        let message = empty_catalog_message(Some(&missing_catalog_error()), true);
+
+        assert!(
+            message.contains("/srv/pwr-bot/data/plugins.toml"),
+            "the owner sees the real path: {message}"
+        );
+        assert!(
+            message.contains("No such file or directory"),
+            "the owner sees the real cause: {message}"
+        );
+    }
+
+    #[test]
+    fn empty_catalog_message_keeps_the_friendly_line_for_other_users() {
+        let message = empty_catalog_message(Some(&missing_catalog_error()), false);
+
+        assert_eq!(message, "The plugin catalog is empty.");
+    }
+
+    #[test]
+    fn empty_catalog_message_stays_friendly_when_the_catalog_is_genuinely_empty() {
+        let message = empty_catalog_message(None, true);
+
+        assert_eq!(message, "The plugin catalog is empty.");
+    }
+
+    #[test]
+    fn unknown_plugin_reason_names_the_load_failure_for_the_bot_owner() {
+        let reason = unknown_plugin_reason("hello", Some(&missing_catalog_error()), true);
+
+        assert!(
+            reason.contains("No such file or directory"),
+            "the owner sees the real cause: {reason}"
+        );
+    }
+
+    #[test]
+    fn unknown_plugin_reason_keeps_the_plain_message_for_other_users() {
+        let reason = unknown_plugin_reason("hello", Some(&missing_catalog_error()), false);
+
+        assert_eq!(reason, "`hello` is not in the plugin catalog");
+    }
+
+    #[test]
+    fn unknown_plugin_reason_keeps_the_plain_message_without_a_load_failure() {
+        let reason = unknown_plugin_reason("hello", None, true);
+
+        assert_eq!(reason, "`hello` is not in the plugin catalog");
+    }
 
     #[test]
     fn enabling_one_plugin_registers_all_enabled_plugins_commands() {
