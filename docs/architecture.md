@@ -67,7 +67,7 @@ The `sealed::Sealed` supertrait closes `GuiFeature` to external implementors —
 
 1. **Construction**: The command handler fetches the required data into a `Config` and calls `Host::<Feature, _>::new(ctx, config, adapter, timeout, router)`. `Feature::initial(config)` builds the `Model`. Initial data loads are data-in at construction, not effects; only in-session async work (refetch, image regeneration, persistence) becomes an `Effect -> Msg` round trip.
 2. **First frame**: The host applies the start message (`Feature::start_msg()`, the `Msg::Start` equivalent), renders through `Feature::view(&model, registry)`, and sends the message. `Feature::attachments` adds extra attachments to the reply, such as image bytes held in the model.
-3. **Collectors**: The host starts a `ViewChannel` on the sent message. It spawns only the collectors the feature enables through `channel_config()`: components, modals, messages, reactions.
+3. **Collectors**: The host claims the sent message with the translation layer (`ctx.data().translate_layer.host_session(msg_id)`, released when the loop ends) and starts a `ViewChannel` on it. It spawns only the collectors the feature enables through `channel_config()`: components, modals, messages, reactions.
 4. **Event loop**: `Host::run()` selects on two channels — the collector's event channel and the host's message channel:
    - **Component interactions**: The `ViewChannel` resolves the `custom_id` back to an `Action` through the `ActionRegistry`. The host first consults `Feature::open_modal`: when the feature opens a modal, the host skips the acknowledge and the re-render — the modal itself already responds to the interaction — and the submission arrives later as a `Msg`. Otherwise `Feature::translate(action, values, &model)` maps the action and the select values to a `Msg`. Unknown ids are acknowledged and skipped.
    - **Other events**: Modals, messages, and reactions go through `Feature::on_event`, which returns a `Msg` or nothing. The collector timeout becomes `Feature::timeout_msg()` — expiry is one more update, not a special path.
@@ -84,11 +84,19 @@ The substrate collects Discord events for the Host. It never renders and never m
 | `Action` | Trait for action enums: one variant per button or select option, each with a UI label. |
 | `ActionRegistry` / `RegisteredAction` | Maps `Type:timestamp:counter` custom ids to actions; `RegisteredAction` builds the Discord components (`.as_button()`, `.as_select()`). |
 | `SelectValues` | Select-menu values extracted from an interaction (string, channel, role, user). |
-| `ViewEvent` | One event that wakes the host loop: component, modal, message, reaction, async, timeout, or synthetic. |
+| `ViewEvent` | One event that wakes the host loop: component, modal, message, reaction, async, or timeout. |
 | `ViewChannel` / `ViewChannelConfig` | Background collectors, spawned as tasks, that feed events into the loop. |
-| `SyntheticEvent` | Synthetic button/select events injectable into the host loop without Discord. Reserved for the translation-layer seam (issue #143); no producer yet. |
 
 Custom-id helpers live in `src/bot/gui/input.rs` (`build_custom_id`, `parse_custom_id`).
+
+#### Translation Layer (`src/bot/translate.rs`)
+
+Every interactive view message belongs to exactly one live session runtime — a Host (TEA) session or a plugin view session — and exactly one runtime acknowledges each interaction on it. The translation layer owns that routing decision: it tracks the messages of live Host sessions (`TranslateLayer`, claimed by `Host::run` through an RAII `HostSession` guard), while the plugin engine keeps tracking its own sessions. The global event handler consults the layer before it responds:
+
+| Message ownership | Acknowledgement owner | Global handler behavior |
+|-------------------|----------------------|------------------------|
+| Live Host session | The Host loop, after handling — except modal-triggering actions, where opening the modal is itself the response, and modal submissions, which the poise modal task the feature spawned acknowledges while the session is live (a submission that arrives after the session ends is stale: the global handler acknowledges it and routes it to the engine, poise's own ack then fails `AlreadyResponded`, and the feature's modal task swallows both) | Skips the interaction entirely |
+| Everything else (plugin session, or no session) | The global handler, before the plugin round trip | Acknowledges, then routes through the plugin view engine (a "no open session" there means a genuinely stale view) |
 
 ---
 

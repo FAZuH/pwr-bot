@@ -60,3 +60,12 @@ as the settings hub nav row) at its pinned positions, `Option`-gated on
 discovery. No in-repo view is library-composed any more.
 See ADR-0004.
 _Avoid_: pwr-ext
+
+**Translation Layer**:
+The routing decision that gives every interactive view message exactly one
+live session and one acknowledger. While a Host session owns a message the
+global event handler skips its interactions and the Host loop answers them;
+once no Host session owns it the global handler acknowledges first and
+routes the interaction to the plugin view engine, whose own session map
+answers live versus stale. See Host, Plugin, and ViewSpec.
+_Avoid_: ack router, session registry

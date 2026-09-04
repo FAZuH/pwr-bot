@@ -49,7 +49,7 @@ side) became the bodies of the pure `view(&Model)` functions unchanged.
 
 The old `ViewEngine`, `ViewRender`, `ViewHandler`, `ViewCmd`, and
 `ViewContext` are retired. The interaction substrate survives them:
-`Action`, `ActionRegistry`, `SelectValues`, `ViewEvent`, `ViewChannel`,
-and `SyntheticEvent` remain the collector machinery the `Host` runs on.
+`Action`, `ActionRegistry`, `SelectValues`, `ViewEvent`, and `ViewChannel`
+remain the collector machinery the `Host` runs on.
 The plugin runtime (`src/plugin/**`, message-id keyed) is a separate
 engine and is not affected by this decision.

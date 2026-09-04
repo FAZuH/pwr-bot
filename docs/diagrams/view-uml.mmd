@@ -11,21 +11,6 @@
 }}%%
 classDiagram
     %% ── Core structs ──────────────────────────────────────────────
-    class ViewContext~T~ {
-        poise: Context
-        action: Option~T~
-        event: ViewEvent
-        tx: Arc~dyn ViewSender~T~~
-        coordinator: Arc~Router~
-        map(wrap, action) ViewContext~C~
-        spawn(future)
-        select_values() Option~SelectValues~
-        string_select_values() Option~Vec~String~~
-        channel_select_values() Option~Vec~GenericChannelId~~
-        role_select_values() Option~Vec~RoleId~~
-        user_select_values() Option~Vec~UserId~~
-    }
-
     class ActionRegistry~T~ {
         actions: HashMap~String, T~
         prefix: String
@@ -36,24 +21,12 @@ classDiagram
         clear()
     }
 
-    class ViewEngine~T, H~ {
-        ctx: Context
-        handler: H
-        registry: Registry~T~
-        timeout: Duration
-        coordinator: Arc~Router~
-        should_acknowledge: bool
-        render_view() Result
-        run() Result
-    }
-
     class ViewChannel~T~ {
         tx: UnboundedSender~EventMessage~T~~
         rx: UnboundedReceiver~EventMessage~T~~
         registry: Registry~T~
         config: ViewChannelConfig
         new(config, registry)
-        sender() Arc~dyn ViewSender~T~~
         recv() Option~EventMessage~T~~
         start(ctx, msg_id, author_id, channel_id, timeout)
     }
@@ -63,11 +36,6 @@ classDiagram
         modals: bool
         messages: bool
         reactions: bool
-    }
-
-    class MappedViewSender~C, P~ {
-        parent_tx: Arc~dyn ViewSender~P~~
-        wrap: fn(Option~C~) -> Option~P~
     }
 
     class RegisteredAction {
@@ -95,15 +63,6 @@ classDiagram
         ...
     }
 
-    class ViewCmd {
-        <<enum>>
-        Render
-        RenderOnce
-        Exit
-        Continue
-        AlreadyResponded
-    }
-
     class ViewEvent {
         <<enum>>
         Component(ComponentInteraction)
@@ -112,13 +71,6 @@ classDiagram
         Reaction(Reaction)
         Async
         Timeout
-        Synthetic(SyntheticEvent)
-    }
-
-    class SyntheticEvent {
-        <<enum>>
-        Button
-        Select(SelectValues)
     }
 
     class SelectValues {
@@ -146,19 +98,14 @@ classDiagram
         label() str
     }
 
-    class ViewRender {
+    class GuiFeature {
         <<trait>>
         type Action: Action
-        render(registry) ResponseKind
-        create_reply(registry) CreateReply
-    }
-
-    class ViewHandler {
-        <<trait>>
-        type Action: Action
-        handle(ctx) Result~ViewCmd~
-        on_timeout() Result~ViewCmd~
-        channel_config() ViewChannelConfig
+        update(msg, model) Vec~Effect~
+        view(model, registry) Vec~CreateComponent~
+        translate(action, values) Option~Msg~
+        on_event(event, model) Option~Msg~
+        open_modal(action, ctx, interaction, tx) bool
     }
 
     class Update {
@@ -169,85 +116,15 @@ classDiagram
         update(msg, model) Cmd
     }
 
-    class ViewSender~T~ {
-        <<trait>>
-        send(message: EventMessage~T~)
-    }
-
     class CommandHandler {
         <<trait>>
         run(router: Arc~Router~) Result
     }
 
-    %% ── Concrete Update examples ──────────────────────────────────
-    class VoiceLeaderboardUpdate {
-        <<impl Update>>
-        Model = VoiceLeaderboardModel
-        Msg = VoiceLeaderboardMsg
-        Cmd = VoiceLeaderboardCmd
-    }
-
-    class VoiceStatsUpdate {
-        <<impl Update>>
-        Model = VoiceStatsModel
-        Msg = VoiceStatsMsg
-        Cmd = VoiceStatsCmd
-    }
-
-    class WelcomeSettingsUpdate {
-        <<impl Update>>
-        Model = WelcomeSettingsModel
-        Msg = WelcomeSettingsMsg
-        Cmd = WelcomeSettingsCmd
-    }
-
-    class FeedListUpdate {
-        <<impl Update>>
-        Model = FeedListModel
-        Msg = FeedListMsg
-        Cmd = FeedListCmd
-    }
-
-    class FeedSettingsUpdate {
-        <<impl Update>>
-        Model = FeedSettingsModel
-        Msg = FeedSettingsMsg
-        Cmd = FeedSettingsCmd
-    }
-
-    class SettingsMainUpdate {
-        <<impl Update>>
-        Model = SettingsMainModel
-        Msg = SettingsMainMsg
-        Cmd = SettingsMainCmd
-    }
-
-    %% ── Trait relationships ───────────────────────────────────────
-    ViewEngine --> ViewHandler : owns
-    ViewEngine --> ViewRender : owns
-    ViewEngine --> ViewChannel : drives
-    ViewEngine --> ActionRegistry : owns
+    %% ── Relationships ─────────────────────────────────────────────
     ViewChannel --> ActionRegistry : reads
-    ViewHandler ..> ViewCmd : returns
-    ViewHandler ..> ViewEvent : receives via ctx
-    ViewHandler ..> ViewContext : receives
-    ViewHandler ..> ViewChannelConfig : configures
-    ViewHandler ..> Update : delegates to
-    Update ..> ViewHandler : used by
     ActionRegistry ..> Action : maps
     ActionRegistry ..> RegisteredAction : produces
-    MappedViewSender ..> ViewSender : implements
-    ViewSender ..> EventMessage : sends
     Router ..> CommandHandler : drives
     CommandHandler ..> Navigation : returns
-    ViewContext ..> ViewSender : uses
-    ViewContext ..> MappedViewSender : creates via map()
-    ViewContext ..> SelectValues : uses
-    ViewEvent ..> SyntheticEvent : contains
-    SyntheticEvent ..> SelectValues : contains
-    VoiceLeaderboardUpdate ..> Update : implements
-    VoiceStatsUpdate ..> Update : implements
-    WelcomeSettingsUpdate ..> Update : implements
-    FeedListUpdate ..> Update : implements
-    FeedSettingsUpdate ..> Update : implements
-    SettingsMainUpdate ..> Update : implements
+    GuiFeature ..> SelectValues : uses
