@@ -31,6 +31,7 @@ use crate::plugin::InteractionEngine;
 use crate::plugin::InteractionError;
 use crate::plugin::PluginManager;
 use crate::plugin::RunningPlugin;
+use crate::plugin::edit_body_for_transport;
 use crate::plugin::reject_content_on_edit;
 use crate::plugin::validate_view_data;
 
@@ -60,8 +61,14 @@ pub trait HostIo: Send + Sync {
 
     /// Edits a previously sent message in place. `data` is the edit body:
     /// only the fields it provides are applied, so partial shapes are legal.
-    /// The only shape rule enforced is the content gate
-    /// ([`reject_content_on_edit`]). Returns the edited message's id.
+    /// The shape rules enforced are the content gate
+    /// ([`reject_content_on_edit`]) and, at every call site, the transport
+    /// strip ([`edit_body_for_transport`]): a view envelope is built for
+    /// sending, so create-only fields — `sticker_ids` above all, which the
+    /// channel edit endpoint rejects with error 50080 even when the array
+    /// is empty — are removed before the body reaches this seam. The
+    /// implementation sends what it receives verbatim. Returns the edited
+    /// message's id.
     async fn edit_message(
         &self,
         channel_id: u64,
@@ -357,7 +364,7 @@ async fn io_call(
         HostCap::EditMessage => {
             let (channel_id, message_id, data) = parse_edit_message(args)?;
             reject_content_on_edit(&data).map_err(WireError::from)?;
-            io.edit_message(channel_id, message_id, data)
+            io.edit_message(channel_id, message_id, edit_body_for_transport(&data))
                 .await
                 .map_err(host_io_err)
         }
@@ -417,7 +424,10 @@ async fn open_view_call(
             spec.clone(),
         )
         .await;
-    if let Err(e) = io.edit_message(channel_id, message_id, spec.data).await {
+    if let Err(e) = io
+        .edit_message(channel_id, message_id, edit_body_for_transport(&spec.data))
+        .await
+    {
         // The session is live on the placeholder, but the placeholder never
         // resolved to the final payload; abandon the session so it does not
         // leak in the engine, mirroring the router's dead-session handling.
@@ -908,6 +918,47 @@ mod tests {
                 "channel_id": 99,
                 "message_id": 1234,
                 "data": { "components": [{ "type": 10, "content": "edited" }] },
+            })),
+            Some(&host),
+            None,
+        )
+        .await;
+        assert_eq!(assert_ok(resp, 7), Some(json!({ "message_id": 1234 })));
+    }
+
+    #[tokio::test]
+    async fn edit_message_drops_create_only_fields_before_the_seam() {
+        // A plugin edit body is built for sending, so it carries create-only
+        // fields the channel edit endpoint rejects (error 50080 for
+        // `sticker_ids`): the op arm strips them before the transport seam.
+        let mut mock = MockHostIo::new();
+        mock.expect_edit_message()
+            .with(
+                eq(99_u64),
+                eq(1234_u64),
+                eq(json!({
+                    "components": [{ "type": 10, "content": "edited" }],
+                    "flags": 32768,
+                })),
+            )
+            .times(1)
+            .returning(|_, _, _| Ok(Some(json!({ "message_id": 1234 }))));
+        let host = services(Some(Arc::new(mock)), Some(sample_config()));
+
+        let resp = handle_host_call(
+            7,
+            "host.edit_message",
+            Some(&json!({
+                "channel_id": 99,
+                "message_id": 1234,
+                "data": {
+                    "components": [{ "type": 10, "content": "edited" }],
+                    "flags": 32768,
+                    "sticker_ids": [],
+                    "tts": false,
+                    "enforce_nonce": false,
+                    "nonce": "view-42",
+                },
             })),
             Some(&host),
             None,

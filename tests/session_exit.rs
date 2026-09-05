@@ -105,6 +105,11 @@ async fn the_adopted_message_answers_about_and_back() {
             mockall::predicate::function(|data: &serde_json::Value| {
                 data["flags"] == json!(IS_COMPONENTS_V2)
                     && data["components"][0]["components"][0]["content"] == json!("-# **Settings**")
+                    // The hub view is a create envelope: the morph strips its
+                    // create-only fields, which Discord rejects on edit.
+                    && data.get("sticker_ids").is_none()
+                    && data.get("tts").is_none()
+                    && data.get("enforce_nonce").is_none()
             }),
         )
         .times(1)

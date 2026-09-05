@@ -235,15 +235,15 @@ async fn host_openview_opens_the_target_plugin_view_end_to_end() {
             mockall::predicate::eq(produced),
             mockall::predicate::function(|data: &serde_json::Value| {
                 // The arg-echo fixture renders a Components V2 payload: the
-                // echoed args are the text of a text display.
+                // echoed args are the text of a text display. The edit
+                // transport strips the create-only fields the fixture's
+                // envelope carries (`sticker_ids`, `tts`, `enforce_nonce`):
+                // Discord rejects them on edit.
                 data == &json!({
                     "attachments": [],
                     "components": [{"content": "{}", "type": 10}],
                     "embeds": [],
-                    "enforce_nonce": false,
                     "flags": 32768,
-                    "sticker_ids": [],
-                    "tts": false,
                 })
             }),
         )

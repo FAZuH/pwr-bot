@@ -65,6 +65,7 @@ use crate::plugin::command::PluginRoutes;
 use crate::plugin::command::commands_from_manifest;
 use crate::plugin::command::register_in_guild;
 use crate::plugin::command::routes_from_manifests;
+use crate::plugin::edit_body_for_transport;
 use crate::plugin::interaction::DEFAULT_VIEW_TIMEOUT;
 use crate::plugin::validate_view_data;
 use crate::repo::traits::Repos;
@@ -619,9 +620,13 @@ impl BotEventHandler {
 
         match result {
             Ok(spec) => {
+                // The plugin's payload is a create envelope: the edit
+                // transport strips the create-only fields Discord rejects on
+                // edit (error 50080 for `sticker_ids`) before sending.
+                let body = edit_body_for_transport(&spec.data);
                 if let Err(e) = self
                     .http
-                    .edit_message(channel_id, message_id, &spec.data, Vec::new())
+                    .edit_message(channel_id, message_id, &body, Vec::new())
                     .await
                 {
                     warn!("failed to update message {message_id} after {kind}: {e}");

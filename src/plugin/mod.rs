@@ -86,6 +86,7 @@ use tokio::sync::Mutex;
 use tokio::sync::oneshot;
 use tokio::sync::watch;
 pub use view::ViewValidationError;
+pub use view::edit_body_for_transport;
 pub use view::reject_content_beside_v2;
 pub use view::reject_content_on_edit;
 pub use view::validate_view_data;

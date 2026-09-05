@@ -50,6 +50,7 @@ use crate::plugin::HostIo;
 use crate::plugin::InteractionEngine;
 use crate::plugin::RunningPlugin;
 use crate::plugin::SerenityHostIo;
+use crate::plugin::edit_body_for_transport;
 use crate::plugin::validate_view_data;
 
 /// The plugin whose hub view the handoff adopts the message into: the
@@ -153,8 +154,12 @@ pub async fn adopt_message_into_hub(
         .invoke(plugin.clone(), SETTINGS_PLUGIN, json!({}))
         .await?;
     validate_view_data(&spec.data)?;
-    io.edit_message(channel_id.get(), message_id.get(), spec.data.clone())
-        .await?;
+    io.edit_message(
+        channel_id.get(),
+        message_id.get(),
+        edit_body_for_transport(&spec.data),
+    )
+    .await?;
     engine
         .register(message_id, plugin, SETTINGS_PLUGIN, spec)
         .await;
