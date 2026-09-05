@@ -113,3 +113,27 @@ response survives a content-less edit and breaks components-V2 payloads
 with 50035. The deferred think is the settled shape, and the error path
 edits the original response too. See ADR-0007.
 _Avoid_: loading message, placeholder reply
+
+**Host op**:
+One operation a plugin can call on the host over the protocol, written
+`host.<name>` on the wire, such as `host.kv.get`. A plugin declares the
+ops it calls in its hello `caps` list, and the host rejects an unknown
+`host.*` op at spawn. See Host and ADR-0010.
+_Avoid_: host command, host method
+
+**Service RPC**:
+A host op that mirrors one method of a host service, for example
+`host.feed.get_settings`. The service stays the single source of truth,
+and the plugin stays a thin client. Ops are shaped by services, never by
+plugins: the host API grows only when the host domain grows. See Host op,
+Panel plugin, and ADR-0010.
+_Avoid_: bespoke op, plugin-shaped op
+
+**Panel plugin**:
+A plugin crate that owns one settings panel end to end — the interactive
+settings view for one feature, such as feed settings, voice settings, or
+welcome. It renders the view, answers its interactions, and reaches
+service data through service RPCs. The panel migration turns the three
+host-side panels into panel plugins, one crate each. See Service RPC and
+ADR-0009.
+_Avoid_: host panel, feature panel
