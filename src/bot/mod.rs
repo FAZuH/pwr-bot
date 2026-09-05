@@ -590,10 +590,16 @@ impl BotEventHandler {
 
     /// Routes a view interaction (component click or modal submit) to the
     /// plugin view session open for its message. The session's plugin
-    /// renders a fresh spec; the interaction is acknowledged and the message
-    /// body is replaced with the spec's raw data via a bare HTTP edit —
-    /// `serenity::Component` is not `Deserialize`, so the spec cannot ride a
-    /// typed `CreateReply`.
+    /// renders a fresh spec; the interaction is acknowledged and the
+    /// message body is replaced with the spec's raw data through the
+    /// interaction webhook — `serenity::Component` is not `Deserialize`, so
+    /// the spec cannot ride a typed `CreateReply`.
+    ///
+    /// The webhook route (`@original`) is the only edit route that works
+    /// for both ephemeral and public responses; the channel-message route
+    /// rejects ephemeral messages with `Missing Access`. The `Acknowledge`
+    /// response pins `@original` to the message the interaction was fired
+    /// on.
     ///
     /// Host-owned messages never reach here: the handlers skip them before
     /// acknowledging, so a "no open session" result below is always a
@@ -607,7 +613,7 @@ impl BotEventHandler {
         message_id: MessageId,
         custom_id: &str,
         interaction: Value,
-        channel_id: GenericChannelId,
+        interaction_token: &str,
         kind: &str,
     ) {
         let result = self
@@ -622,11 +628,17 @@ impl BotEventHandler {
             Ok(spec) => {
                 // The plugin's payload is a create envelope: the edit
                 // transport strips the create-only fields Discord rejects on
-                // edit (error 50080 for `sticker_ids`) before sending.
+                // edit (error 50080 for `sticker_ids`) before sending, and
+                // the body rides the interaction webhook as raw JSON — the
+                // channel-message route cannot edit ephemeral replies.
                 let body = edit_body_for_transport(&spec.data);
                 if let Err(e) = self
                     .http
-                    .edit_message(channel_id, message_id, &body, Vec::new())
+                    .edit_original_interaction_response(
+                        interaction_token,
+                        &body,
+                        Vec::new(),
+                    )
                     .await
                 {
                     warn!("failed to update message {message_id} after {kind}: {e}");
@@ -675,7 +687,7 @@ impl BotEventHandler {
             message_id,
             &interaction.data.custom_id,
             serde_json::to_value(interaction).unwrap_or_default(),
-            interaction.channel_id,
+            interaction.token.as_str(),
             "component interaction",
         )
         .await;
@@ -715,7 +727,7 @@ impl BotEventHandler {
             message.id,
             &interaction.data.custom_id,
             serde_json::to_value(interaction).unwrap_or_default(),
-            interaction.channel_id,
+            interaction.token.as_str(),
             "modal submit",
         )
         .await;
