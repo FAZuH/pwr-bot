@@ -14,7 +14,9 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::OnceLock;
 use std::time::Duration;
+use std::time::Instant;
 
 use async_trait::async_trait;
 use log::debug;
@@ -22,6 +24,7 @@ use log::warn;
 use mockall::automock;
 use poise::serenity_prelude as serenity;
 use pwr_plugin_protocol::HostCap;
+use pwr_plugin_protocol::HostStats;
 use pwr_plugin_protocol::Msg;
 use pwr_plugin_protocol::WireError;
 use serde_json::Value;
@@ -228,10 +231,133 @@ impl From<&crate::config::Config> for HostConfig {
     }
 }
 
+/// An error from a [`StatsSource`] operation.
+#[derive(Debug, thiserror::Error)]
+pub enum StatsError {
+    /// The gateway cache is not attached yet: the host is still starting.
+    #[error("gateway cache is not attached yet")]
+    Unavailable,
+    /// The Discord API rejected the latency probe.
+    #[error("discord api error: {0}")]
+    Http(#[from] serenity::Error),
+}
+
+/// The seam between plugin `host.stats` op and live bot statistics. The real
+/// implementation reads the gateway cache and probes the REST API for
+/// latency; tests use the mockall mock generated from this trait, so no
+/// plugin test touches a live cache or gateway.
+#[automock]
+#[async_trait]
+pub trait StatsSource: Send + Sync {
+    /// Gathers the live bot stats snapshot served by `host.stats`.
+    async fn stats(&self) -> Result<HostStats, StatsError>;
+}
+
+/// The real [`StatsSource`], backed by the bot's gateway cache and HTTP
+/// client. Created at host construction with the facts known then (uptime
+/// start, version, command count); the real gateway cache exists only inside
+/// the `Client` after startup, so it is attached once via
+/// [`SerenityStatsSource::attach_cache`] — until then every gather answers
+/// [`StatsError::Unavailable`].
+pub struct SerenityStatsSource {
+    cache: OnceLock<Arc<serenity::Cache>>,
+    http: Arc<serenity::Http>,
+    start_time: Instant,
+    version: String,
+    command_count: usize,
+}
+
+impl SerenityStatsSource {
+    /// Wraps the bot's HTTP client and the stats facts known before the
+    /// gateway cache exists.
+    pub fn new(
+        http: Arc<serenity::Http>,
+        start_time: Instant,
+        version: String,
+        command_count: usize,
+    ) -> Self {
+        Self {
+            cache: OnceLock::new(),
+            http,
+            start_time,
+            version,
+            command_count,
+        }
+    }
+
+    /// Attaches the real gateway cache once the Discord client has been
+    /// built. Best-effort: a second attach is ignored (the handle may only be
+    /// filled once).
+    pub fn attach_cache(&self, cache: Arc<serenity::Cache>) {
+        let _ = self.cache.set(cache);
+    }
+}
+
+#[async_trait]
+impl StatsSource for SerenityStatsSource {
+    async fn stats(&self) -> Result<HostStats, StatsError> {
+        let Some(cache) = self.cache.get() else {
+            return Err(StatsError::Unavailable);
+        };
+        let guilds = cache.guilds();
+        let guild_count = guilds.len() as u64;
+        let user_count: u64 = guilds
+            .iter()
+            .filter_map(|guild_id| {
+                cache
+                    .guild(*guild_id)
+                    .map(|guild| guild.member_count.get() as u64)
+            })
+            .sum();
+
+        // Make a request to Discord server to get latency, like /about does.
+        let latency_start = Instant::now();
+        let _ = self.http.get_current_user().await?;
+        let latency_ms = latency_start.elapsed().as_millis() as u64;
+
+        Ok(HostStats {
+            version: self.version.clone(),
+            uptime_secs: self.start_time.elapsed().as_secs(),
+            guild_count,
+            user_count,
+            latency_ms,
+            command_count: self.command_count as u64,
+            memory_mb: crate::bot::utils::process_memory_mb(),
+        })
+    }
+}
+
+/// Interior-mutable slot for the live [`StatsSource`], held inside the
+/// [`HostServices`] arc plugins already carry. The source is attached once
+/// (with the real gateway cache, at/after client start); before that, every
+/// `host.stats` call answers [`StatsError::Unavailable`].
+#[derive(Default)]
+pub struct StatsHandle {
+    source: OnceLock<Arc<dyn StatsSource>>,
+}
+
+impl StatsHandle {
+    /// Attaches the live stats source. Best-effort: a second attach is
+    /// ignored.
+    pub fn attach(&self, source: Arc<dyn StatsSource>) {
+        let _ = self.source.set(source);
+    }
+
+    /// Serves the `host.stats` op: the attached source's snapshot, or
+    /// [`StatsError::Unavailable`] before attachment.
+    pub async fn stats(&self) -> Result<HostStats, StatsError> {
+        let source = self.source.get().ok_or(StatsError::Unavailable)?;
+        source.stats().await
+    }
+}
+
 /// What the host can serve a plugin: the Discord I/O seam, the config subset,
-/// the key-value store, and the interaction engine used to open
-/// `host.open_view` sessions. All are optional so a plugin can be spawned
-/// without any of them and still answer `UnknownOp`/`Unavailable` cleanly.
+/// the key-value store, the interaction engine used to open `host.open_view`
+/// sessions, and the live-stats handle. All are optional so a plugin can be
+/// spawned without any of them and still answer `UnknownOp`/`Unavailable`
+/// cleanly. The stats handle is always present (it carries no dependencies at
+/// construction), but its source is attached only once the host's gateway
+/// cache exists.
 #[derive(Clone, Default)]
 pub struct HostServices {
     /// Discord I/O seam, absent when the host is not wired to Discord.
@@ -242,6 +368,9 @@ pub struct HostServices {
     pub kv: Option<Arc<dyn KvStore>>,
     /// Interaction engine, absent when the host cannot open target sessions.
     pub engine: Option<Arc<InteractionEngine<RunningPlugin>>>,
+    /// Live bot stats for `host.stats`; serves `Unavailable` until the real
+    /// gateway cache is attached after client start.
+    pub stats: Arc<StatsHandle>,
 }
 
 /// Serves one plugin→host [`Msg::Call`], answering with the correlation-id
@@ -328,6 +457,24 @@ pub async fn handle_host_call(
             };
             let names = manager.running_names().await;
             Msg::resp_ok(id, Some(json!({ "plugins": names })))
+        }
+        HostCap::Stats => {
+            let Some(stats) = host.map(|host| host.stats.clone()) else {
+                return resp_err(id, "HostUnavailable", "host stats are not configured");
+            };
+            match stats.stats().await {
+                Ok(data) => match serde_json::to_value(&data) {
+                    Ok(value) => Msg::resp_ok(id, Some(value)),
+                    Err(e) => Msg::resp_err(
+                        id,
+                        WireError {
+                            kind: "StatsError".into(),
+                            msg: e.to_string(),
+                        },
+                    ),
+                },
+                Err(e) => Msg::resp_err(id, stats_err(e)),
+            }
         }
     }
 }
@@ -653,6 +800,22 @@ fn kv_err(err: KvError) -> WireError {
     }
 }
 
+/// Maps a [`StatsError`] to a wire error: an unattached source is the same
+/// `HostUnavailable` a missing service answers, any other gather failure is a
+/// `StatsError`.
+fn stats_err(err: StatsError) -> WireError {
+    match err {
+        StatsError::Unavailable => WireError {
+            kind: "HostUnavailable".into(),
+            msg: "host stats are not attached yet".into(),
+        },
+        StatsError::Http(e) => WireError {
+            kind: "StatsError".into(),
+            msg: e.to_string(),
+        },
+    }
+}
+
 fn resp_err(id: u64, kind: &str, msg: impl Into<String>) -> Msg {
     Msg::resp_err(
         id,
@@ -680,6 +843,7 @@ mod tests {
             config,
             kv: None,
             engine: None,
+            stats: Arc::new(StatsHandle::default()),
         }
     }
 
@@ -693,6 +857,7 @@ mod tests {
             config,
             kv,
             engine: None,
+            stats: Arc::new(StatsHandle::default()),
         }
     }
 
@@ -704,6 +869,7 @@ mod tests {
             config,
             kv: None,
             engine: Some(Arc::new(InteractionEngine::new())),
+            stats: Arc::new(StatsHandle::default()),
         }
     }
 
@@ -1210,6 +1376,84 @@ mod tests {
     async fn list_plugins_without_manager_is_host_unavailable() {
         let resp = handle_host_call(7, "host.list_plugins", None, None, None).await;
         assert_err(resp, 7, "HostUnavailable");
+    }
+
+    // ── stats ─────────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn stats_routes_through_the_seam() {
+        let mut mock = MockStatsSource::new();
+        mock.expect_stats().times(1).returning(|| {
+            Ok(HostStats {
+                version: "0.4.2".into(),
+                uptime_secs: 90_000,
+                guild_count: 2,
+                user_count: 1_500,
+                latency_ms: 42,
+                command_count: 12,
+                memory_mb: 320.0,
+            })
+        });
+        let handle = StatsHandle::default();
+        handle.attach(Arc::new(mock));
+        let host = HostServices {
+            io: None,
+            config: Some(sample_config()),
+            kv: None,
+            engine: None,
+            stats: Arc::new(handle),
+        };
+
+        let resp = handle_host_call(7, "host.stats", None, Some(&host), None).await;
+        assert_eq!(
+            assert_ok(resp, 7),
+            Some(json!({
+                "version": "0.4.2",
+                "uptime_secs": 90_000,
+                "guild_count": 2,
+                "user_count": 1_500,
+                "latency_ms": 42,
+                "command_count": 12,
+                "memory_mb": 320.0,
+            }))
+        );
+    }
+
+    #[tokio::test]
+    async fn stats_before_attachment_is_host_unavailable() {
+        let host = services(None, Some(sample_config()));
+
+        let resp = handle_host_call(7, "host.stats", None, Some(&host), None).await;
+        assert_err(resp, 7, "HostUnavailable");
+    }
+
+    #[tokio::test]
+    async fn stats_without_services_is_host_unavailable() {
+        let resp = handle_host_call(7, "host.stats", None, None, None).await;
+        assert_err(resp, 7, "HostUnavailable");
+    }
+
+    #[tokio::test]
+    async fn stats_failure_is_stats_error() {
+        let mut mock = MockStatsSource::new();
+        mock.expect_stats().times(1).returning(|| {
+            Err(StatsError::Http(serenity::Error::Http(
+                serenity::HttpError::InvalidWebhook,
+            )))
+        });
+        let handle = StatsHandle::default();
+        handle.attach(Arc::new(mock));
+        let host = HostServices {
+            io: None,
+            config: Some(sample_config()),
+            kv: None,
+            engine: None,
+            stats: Arc::new(handle),
+        };
+
+        let resp = handle_host_call(7, "host.stats", None, Some(&host), None).await;
+        let msg = assert_err(resp, 7, "StatsError");
+        assert!(msg.contains("webhook"), "msg: {msg}");
     }
 
     // ── kv ────────────────────────────────────────────────────────────────────

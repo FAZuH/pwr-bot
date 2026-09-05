@@ -78,7 +78,7 @@ impl AboutStats {
 
         let command_count = Self::count_commands(&ctx.framework().options().commands);
 
-        let memory_mb = Self::get_process_memory_mb();
+        let memory_mb = crate::bot::utils::process_memory_mb();
 
         let current_year = Utc::now().year();
 
@@ -94,27 +94,10 @@ impl AboutStats {
         ))
     }
 
-    fn count_commands<U, E>(commands: &[Command<U, E>]) -> usize {
+    pub(crate) fn count_commands<U, E>(commands: &[Command<U, E>]) -> usize {
         commands
             .iter()
             .map(|cmd| 1 + Self::count_commands(&cmd.subcommands))
             .sum()
-    }
-
-    /// Gets the current process memory usage in megabytes.
-    fn get_process_memory_mb() -> f64 {
-        use sysinfo::System;
-        use sysinfo::get_current_pid;
-
-        let mut s = System::new_all();
-        s.refresh_all();
-
-        if let Ok(pid) = get_current_pid()
-            && let Some(process) = s.process(pid)
-        {
-            return process.memory() as f64 / (1024.0 * 1024.0);
-        }
-
-        0.0
     }
 }

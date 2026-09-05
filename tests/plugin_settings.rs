@@ -14,9 +14,11 @@
 //! - `view.interact` on the toggle select (`settings:toggle`) flips every
 //!   selected feature of the session's own model and persists it via
 //!   `host.kv.set` before answering;
-//! - About/Back swap the session's page without touching the model; the page
-//!   rides the per-session `view` payload, so concurrent hubs stay
-//!   independent and every fresh invoke opens the hub;
+//! - an About click issues `host.stats` and renders the About panel with the
+//!   live values (the fallback copy when the op fails); Back returns to the
+//!   hub — neither touches the model. The page rides the per-session `view`
+//!   payload, so concurrent hubs stay independent and every fresh invoke
+//!   opens the hub;
 //! - a `settings:config:<feature>` button re-renders the current page (the
 //!   panels it would open are not plugins yet);
 //! - a `settings:open:<plugin>` nav click issues `host.open_view`, opening
@@ -40,7 +42,11 @@ use pwr_bot::plugin::KvStore;
 use pwr_bot::plugin::PluginManager;
 use pwr_bot::plugin::RespawnPolicy;
 use pwr_bot::plugin::RunningPlugin;
+use pwr_bot::plugin::StatsHandle;
+use pwr_bot::plugin::StatsSource;
 use pwr_bot::plugin::host::MockHostIo;
+use pwr_bot::plugin::host::MockStatsSource;
+use pwr_plugin_protocol::HostStats;
 use pwr_plugin_protocol::Msg;
 use pwr_poise_components::IS_COMPONENTS_V2;
 use serde_json::Value;
@@ -114,6 +120,7 @@ fn host_services(kv: Option<Arc<dyn KvStore>>) -> Arc<HostServices> {
         }),
         kv,
         engine: None,
+        stats: Arc::new(StatsHandle::default()),
     })
 }
 
@@ -134,6 +141,30 @@ fn view_host_services(
         }),
         kv: Some(kv),
         engine: Some(Arc::new(engine)),
+        stats: Arc::new(StatsHandle::default()),
+    })
+}
+
+/// Like [`view_host_services`], but with a live `host.stats` source serving
+/// the given snapshot, so the About panel renders real values.
+fn stats_host_services(
+    io: Arc<dyn HostIo>,
+    kv: Arc<dyn KvStore>,
+    engine: InteractionEngine<RunningPlugin>,
+    stats: Arc<dyn StatsSource>,
+) -> Arc<HostServices> {
+    let handle = StatsHandle::default();
+    handle.attach(stats);
+    Arc::new(HostServices {
+        io: Some(io),
+        config: Some(HostConfig {
+            db_url: "postgres://test".into(),
+            data_path: PathBuf::from("/tmp/pwr-bot-test"),
+            poll_interval: std::time::Duration::from_secs(30),
+        }),
+        kv: Some(kv),
+        engine: Some(Arc::new(engine)),
+        stats: Arc::new(handle),
     })
 }
 
@@ -537,9 +568,10 @@ async fn nav_click_opens_the_target_plugin_panel() {
         .expect("stop target plugin");
 }
 
-/// The About click answers immediately with the plugin-side About panel (a
-/// v2 container holding a section with a link-button accessory), and Back
-/// restores the hub.
+/// The About click answers with the plugin-side About panel (a v2 container
+/// holding a section with a link-button accessory) after one `host.stats`
+/// round trip — which fails on a spawn without a stats source, so the
+/// fallback copy shows — and Back restores the hub.
 #[tokio::test]
 async fn about_click_renders_the_about_panel_and_back_restores_the_hub() {
     let plugin = spawn_settings(None).await;
@@ -597,6 +629,76 @@ async fn about_click_renders_the_about_panel_and_back_restores_the_hub() {
         .expect("back click answered");
     let view = assert_envelope(&back, 2);
     assert_toggles(&view, false, false, false);
+
+    let status = plugin.stop().await.expect("graceful stop");
+    assert_eq!(status.code(), Some(0), "clean exit after bye: {status}");
+}
+
+/// An About click issues `host.stats` and renders the live values formatted
+/// like `/about`'s Stats section — served by a mock source riding the real
+/// wire, proving the host op reaches the plugin end to end.
+#[tokio::test]
+async fn about_click_renders_live_stats_from_the_host() {
+    let mut source = MockStatsSource::new();
+    source.expect_stats().times(1).returning(|| {
+        Ok(HostStats {
+            version: "9.9.9".into(),
+            uptime_secs: 90_000,
+            guild_count: 2,
+            user_count: 1_500,
+            latency_ms: 42,
+            command_count: 12,
+            memory_mb: 320.0,
+        })
+    });
+    let services = stats_host_services(
+        Arc::new(MockHostIo::new()),
+        SharedKv::new(),
+        InteractionEngine::new(),
+        Arc::new(source),
+    );
+    let plugin = RunningPlugin::spawn_with(probe_binary("settings"), Some(services), None, None)
+        .await
+        .expect("spawn settings plugin");
+
+    plugin
+        .call("invoke", Some("settings"), Some(json!({})))
+        .await
+        .expect("invoke answered");
+
+    let resp = plugin
+        .call(
+            "view.interact",
+            Some("settings"),
+            Some(json!({ "custom_id": "settings:about" })),
+        )
+        .await
+        .expect("about click answered");
+    let view = assert_envelope(&resp, 1);
+    assert_page(&view, "about");
+
+    let Msg::Resp {
+        data: Some(data), ..
+    } = &resp
+    else {
+        panic!("expected ok envelope, got {resp:?}");
+    };
+    let text = &data["data"]["components"][0]["components"][0]["components"][0];
+    assert_eq!(text["type"], json!(10), "the copy is one text display");
+    let content = text["content"].as_str().unwrap();
+    for line in [
+        "### Stats",
+        "- **Uptime**: 1 days, 1 hours, 0 minutes",
+        "- **Servers**: 2",
+        "- **Users**: 1.5k",
+        "- **Commands**: 12",
+        "- **Latency**: 42ms",
+        "- **Memory**: 320.0 MB",
+        "Copyright © FAZuH — v9.9.9",
+    ] {
+        assert!(content.contains(line), "missing {line:?} in: {content}");
+    }
+    assert!(content.contains("### Info"), "Info section still renders");
 
     let status = plugin.stop().await.expect("graceful stop");
     assert_eq!(status.code(), Some(0), "clean exit after bye: {status}");

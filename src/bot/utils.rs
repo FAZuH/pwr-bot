@@ -57,6 +57,23 @@ pub fn validate_url_count(urls: &[&str]) -> Result<(), BotError> {
     Ok(())
 }
 
+/// Gets the current process memory usage in megabytes.
+pub fn process_memory_mb() -> f64 {
+    use sysinfo::System;
+    use sysinfo::get_current_pid;
+
+    let mut s = System::new_all();
+    s.refresh_all();
+
+    if let Ok(pid) = get_current_pid()
+        && let Some(process) = s.process(pid)
+    {
+        return process.memory() as f64 / (1024.0 * 1024.0);
+    }
+
+    0.0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

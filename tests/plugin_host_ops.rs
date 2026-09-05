@@ -21,6 +21,7 @@ use pwr_bot::plugin::KvStore;
 use pwr_bot::plugin::PluginManager;
 use pwr_bot::plugin::RespawnPolicy;
 use pwr_bot::plugin::RunningPlugin;
+use pwr_bot::plugin::StatsHandle;
 use pwr_bot::plugin::host::MockHostIo;
 use pwr_bot::plugin::host::MockKvStore;
 use pwr_plugin_protocol::Msg;
@@ -39,6 +40,7 @@ fn host_services(io: Arc<dyn HostIo>, kv: Option<Arc<dyn KvStore>>) -> Arc<HostS
         }),
         kv,
         engine: None,
+        stats: Arc::new(StatsHandle::default()),
     })
 }
 
@@ -57,6 +59,7 @@ fn view_host_services(
         }),
         kv: None,
         engine: Some(Arc::new(engine)),
+        stats: Arc::new(StatsHandle::default()),
     })
 }
 

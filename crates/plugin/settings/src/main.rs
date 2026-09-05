@@ -19,8 +19,10 @@
 //! - answers `view.interact` on the toggle select (`settings:toggle`) by
 //!   toggling every selected feature via the settings update logic and
 //!   persisting the model through `host.kv.set` before replying;
-//! - `settings:about` / `settings:about:back` switch between the hub and the
-//!   plugin-side About panel without touching the model;
+//! - `settings:about` issues `host.stats` and renders the plugin-side About
+//!   panel with the live values (formatted like `/about`'s Stats section);
+//!   a failed op renders the fallback copy — `settings:about:back` returns
+//!   to the hub, neither touching the model;
 //! - a `settings:config:<feature>` click is a navigation stub until
 //!   per-feature panels exist as plugins: it re-renders the current page;
 //! - a `settings:open:<plugin>` nav click issues `host.open_view` for the
@@ -54,6 +56,7 @@ use pwr_ext::view_support::CreateSelectMenuOption;
 use pwr_ext::view_support::check_select_menu_options;
 use pwr_plugin_protocol::API_VERSION;
 use pwr_plugin_protocol::CommandDef;
+use pwr_plugin_protocol::HostStats;
 use pwr_plugin_protocol::Manifest;
 use pwr_plugin_protocol::Msg;
 use pwr_plugin_protocol::WireError;
@@ -120,6 +123,8 @@ enum Pending {
     OpenView(u64, ViewState),
     /// The `host.list_plugins` issued to discover the nav row's targets.
     ListPlugins(u64),
+    /// The `host.stats` issued to render the About panel with live values.
+    Stats(u64, ViewState),
 }
 
 impl Pending {
@@ -131,6 +136,7 @@ impl Pending {
             Pending::Save(..) => "host.kv.set",
             Pending::OpenView(..) => "host.open_view",
             Pending::ListPlugins(_) => "host.list_plugins",
+            Pending::Stats(..) => "host.stats",
         }
     }
 }
@@ -321,21 +327,76 @@ const TOGGLE_INFO: &str = concat!(
     "> 🛈  Turn features on or off. A checkmark means the feature is currently enabled.",
 );
 
-/// About panel copy: the monolith's Info section without the live stats
-/// (uptime, servers, ...) — no host op exposes them to plugins yet.
-fn about_copy() -> String {
-    format!(
-        concat!(
-            "-# **Settings > About**\n",
-            "## pwr-bot\n",
-            "### Info\n",
-            "- **Author**: [FAZuH](https://github.com/FAZuH)\n",
-            "- **Source**: [GitHub](https://github.com/FAZuH/pwr-bot)\n",
-            "- **License**: [MIT](https://github.com/FAZuH/pwr-bot/blob/main/LICENSE)\n",
-            "Copyright © FAZuH — v{}"
+/// About panel copy: with live stats the monolith's Stats + Info sections,
+/// the values fed by `host.stats` and formatted exactly like `/about`; with
+/// none, the Info section only — the graceful fallback when the op errors or
+/// its payload is malformed (the plugin's own version closes the footer).
+fn about_copy(stats: Option<&HostStats>) -> String {
+    match stats {
+        Some(stats) => format!(
+            concat!(
+                "-# **Settings > About**\n",
+                "## pwr-bot\n",
+                "### Stats\n",
+                "- **Uptime**: {}\n",
+                "- **Servers**: {}\n",
+                "- **Users**: {}\n",
+                "- **Commands**: {}\n",
+                "- **Latency**: {}ms\n",
+                "- **Memory**: {:.1} MB\n",
+                "### Info\n",
+                "- **Author**: [FAZuH](https://github.com/FAZuH)\n",
+                "- **Source**: [GitHub](https://github.com/FAZuH/pwr-bot)\n",
+                "- **License**: [MIT](https://github.com/FAZuH/pwr-bot/blob/main/LICENSE)\n",
+                "Copyright © FAZuH — v{}"
+            ),
+            format_uptime(stats.uptime_secs),
+            format_number(stats.guild_count),
+            format_number(stats.user_count),
+            stats.command_count,
+            stats.latency_ms,
+            stats.memory_mb,
+            stats.version,
         ),
-        env!("CARGO_PKG_VERSION")
-    )
+        None => format!(
+            concat!(
+                "-# **Settings > About**\n",
+                "## pwr-bot\n",
+                "### Info\n",
+                "- **Author**: [FAZuH](https://github.com/FAZuH)\n",
+                "- **Source**: [GitHub](https://github.com/FAZuH/pwr-bot)\n",
+                "- **License**: [MIT](https://github.com/FAZuH/pwr-bot/blob/main/LICENSE)\n",
+                "Copyright © FAZuH — v{}"
+            ),
+            env!("CARGO_PKG_VERSION")
+        ),
+    }
+}
+
+/// Formats an uptime in seconds the way the monolith's `/about` does: the
+/// coarsest nonzero unit leads, days keep hours and minutes.
+fn format_uptime(secs: u64) -> String {
+    let days = secs / 86400;
+    let hours = (secs % 86400) / 3600;
+    let minutes = (secs % 3600) / 60;
+    if days > 0 {
+        format!("{days} days, {hours} hours, {minutes} minutes")
+    } else if hours > 0 {
+        format!("{hours} hours, {minutes} minutes")
+    } else {
+        format!("{minutes} minutes")
+    }
+}
+
+/// Formats a count with k/M suffixes for readability, matching `/about`.
+fn format_number(num: u64) -> String {
+    if num >= 1_000_000 {
+        format!("{:.1}M", num as f64 / 1_000_000.0)
+    } else if num >= 1_000 {
+        format!("{:.1}k", num as f64 / 1_000.0)
+    } else {
+        num.to_string()
+    }
 }
 
 /// Renders the settings hub as Components V2, mirroring the original monolith
@@ -412,10 +473,10 @@ fn view_data(model: &SettingsModel, nav: &NavTargets) -> Value {
 
 /// Renders the plugin-side About panel: a container holding a section with
 /// the About copy (a Source Code link button as its accessory) plus the
-/// License link row, and the ❮ Back button outside. The live stats of the
-/// monolith panel need host capabilities no host op exposes yet.
-fn about_view() -> Value {
-    let copy = about_copy();
+/// License link row, and the ❮ Back button outside. The copy is live when the
+/// plugin holds a [`HostStats`] snapshot, the fallback copy otherwise.
+fn about_view(stats: Option<&HostStats>) -> Value {
+    let copy = about_copy(stats);
     let message = view! {
         components_v2 {
             container {
@@ -483,13 +544,22 @@ fn nav_button(target: &str) -> CreateButton<'static> {
     CreateButton::new(format!("{CUSTOM_ID_OPEN_PREFIX}{target}")).label(format!("Open {target}"))
 }
 
+/// The render inputs every envelope draw reads beyond the session state:
+/// the discovered nav targets and the last known stats snapshot. Both are
+/// process-global caches, threaded explicitly so tests can pin them.
+struct RenderCtx<'a> {
+    nav: &'a NavTargets,
+    stats: Option<&'a HostStats>,
+}
+
 /// The full envelope a view reply carries: raw message data, visibility, and
 /// the session state the host stores per message and hands back on
-/// interactions.
-fn envelope(state: &ViewState, nav: &NavTargets) -> Value {
+/// interactions. The last known `host.stats` snapshot feeds the About page;
+/// `None` renders its fallback copy.
+fn envelope(state: &ViewState, ctx: &RenderCtx<'_>) -> Value {
     let data = match state.page {
-        Page::Hub => view_data(&state.model, nav),
-        Page::About => about_view(),
+        Page::Hub => view_data(&state.model, ctx.nav),
+        Page::About => about_view(ctx.stats),
     };
     json!({
         "data": data,
@@ -504,18 +574,17 @@ fn reply_envelope(
     out: &mut impl Write,
     invoke_id: u64,
     state: &ViewState,
-    nav: &NavTargets,
+    ctx: &RenderCtx<'_>,
 ) -> bool {
-    let resp = Msg::resp_ok(invoke_id, Some(envelope(state, nav)));
+    let resp = Msg::resp_ok(invoke_id, Some(envelope(state, ctx)));
     write_msg(out, &resp).is_ok()
 }
 
-/// The page a click needing no host call lands on: About opens the panel,
-/// Back returns to the hub, and a Configure stub keeps the current page.
-/// `None` when the custom id is none of those.
+/// The page a click needing no host call lands on: Back returns to the hub
+/// and a Configure stub keeps the current page. About is not here — it needs
+/// a `host.stats` call first. `None` when the custom id is none of those.
 fn page_swap(custom_id: Option<&str>, current: Page) -> Option<Page> {
     match custom_id {
-        Some(CUSTOM_ID_ABOUT) => Some(Page::About),
         Some(CUSTOM_ID_ABOUT_BACK) => Some(Page::Hub),
         Some(clicked)
             if clicked
@@ -587,6 +656,17 @@ fn open_view_args(channel_id: u64, plugin: &str) -> Value {
     })
 }
 
+/// The `host.stats` call args: the op takes none.
+fn stats_args() -> Value {
+    json!({})
+}
+
+/// Parses a `host.stats` resp payload; `None` on a missing or malformed
+/// payload, so the caller keeps its last known snapshot.
+fn parse_stats(data: Option<&Value>) -> Option<HostStats> {
+    serde_json::from_value(data?.clone()).ok()
+}
+
 /// Serializes `msg` to one JSON line, writes it, then flushes. Every protocol
 /// line must end with `\n` and be flushed before the host can read it — piped
 /// stdout is block-buffered.
@@ -643,7 +723,7 @@ fn answer_envelope(
     error: Option<WireError>,
     pending_kind: Pending,
     state: &ViewState,
-    nav: &NavTargets,
+    ctx: &RenderCtx<'_>,
 ) -> bool {
     if !ok {
         eprintln!(
@@ -655,7 +735,7 @@ fn answer_envelope(
             })
         );
     }
-    reply_envelope(out, invoke_id, state, nav)
+    reply_envelope(out, invoke_id, state, ctx)
 }
 
 fn main() -> ExitCode {
@@ -672,6 +752,11 @@ fn main() -> ExitCode {
     // opens one); live sessions carry their own state in their envelope.
     let mut model: Option<SettingsModel> = None;
     let mut nav = NavTargets::Fallback;
+    // The last stats snapshot the host served, fed to the About page. It is
+    // process-global like the model and nav caches (stats are host-wide, not
+    // session-wide); a failed refresh keeps the last snapshot, and until the
+    // first one arrives the About page renders its fallback copy.
+    let mut stats: Option<HostStats> = None;
     let mut next_call_id: u64 = 0;
     // plugin->host calls in flight: our call id -> the pending kind whose resp
     // completes this call chain.
@@ -687,6 +772,7 @@ fn main() -> ExitCode {
             "host.kv.set".into(),
             "host.open_view".into(),
             "host.list_plugins".into(),
+            "host.stats".into(),
         ],
         manifest: Some(manifest()),
     };
@@ -719,7 +805,15 @@ fn main() -> ExitCode {
                         model: model.unwrap_or_default(),
                         page: Page::Hub,
                     };
-                    if !reply_envelope(&mut out, id, &state, &nav) {
+                    if !reply_envelope(
+                        &mut out,
+                        id,
+                        &state,
+                        &RenderCtx {
+                            nav: &nav,
+                            stats: stats.as_ref(),
+                        },
+                    ) {
                         return ExitCode::FAILURE;
                     }
                     continue;
@@ -763,8 +857,15 @@ fn main() -> ExitCode {
                                 Pending::OpenView(id, session),
                                 open_view_args(channel_id, target),
                             ))
+                        } else if custom_id == Some(CUSTOM_ID_ABOUT) {
+                            // About opens with live stats: one `host.stats`
+                            // round trip, then the resp renders the panel —
+                            // live values on success, the fallback copy when
+                            // the op errors. The session swaps to the About
+                            // page either way.
+                            Some(HostCall::new(Pending::Stats(id, session), stats_args()))
                         } else if let Some(next_page) = page_swap(custom_id, session.page) {
-                            // Pages needing no host call: About/Back swap the
+                            // Pages needing no host call: Back swaps the
                             // session's page; a Configure button is a
                             // navigation stub until per-feature panels exist
                             // as plugins — it re-renders the current page
@@ -773,7 +874,15 @@ fn main() -> ExitCode {
                                 model: session.model,
                                 page: next_page,
                             };
-                            if !reply_envelope(&mut out, id, &state, &nav) {
+                            if !reply_envelope(
+                                &mut out,
+                                id,
+                                &state,
+                                &RenderCtx {
+                                    nav: &nav,
+                                    stats: stats.as_ref(),
+                                },
+                            ) {
                                 return ExitCode::FAILURE;
                             }
                             continue;
@@ -913,6 +1022,33 @@ fn main() -> ExitCode {
                             return ExitCode::FAILURE;
                         }
                     }
+                    Pending::Stats(invoke_id, session) => {
+                        // The panel renders on the About page either way: a
+                        // successful gather refreshes the snapshot, a failure
+                        // (typed error or malformed payload) keeps the last
+                        // one — until the first arrival the fallback copy
+                        // shows.
+                        let fresh = if ok { parse_stats(data.as_ref()) } else { None };
+                        match fresh {
+                            Some(fresh) => stats = Some(fresh),
+                            None => eprintln!("host.stats failed: {error:?}"),
+                        }
+                        let state = ViewState {
+                            model: session.model,
+                            page: Page::About,
+                        };
+                        if !reply_envelope(
+                            &mut out,
+                            invoke_id,
+                            &state,
+                            &RenderCtx {
+                                nav: &nav,
+                                stats: stats.as_ref(),
+                            },
+                        ) {
+                            return ExitCode::FAILURE;
+                        }
+                    }
                     Pending::Save(invoke_id, state) | Pending::OpenView(invoke_id, state) => {
                         if !answer_envelope(
                             &mut out,
@@ -921,7 +1057,10 @@ fn main() -> ExitCode {
                             error,
                             pending_kind,
                             &state,
-                            &nav,
+                            &RenderCtx {
+                                nav: &nav,
+                                stats: stats.as_ref(),
+                            },
                         ) {
                             return ExitCode::FAILURE;
                         }
@@ -999,7 +1138,13 @@ mod tests {
     #[test]
     fn envelope_carries_data_ephemeral_and_the_session_view() {
         let state = ViewState::default();
-        let envelope = envelope(&state, &NavTargets::Fallback);
+        let envelope = envelope(
+            &state,
+            &RenderCtx {
+                nav: &NavTargets::Fallback,
+                stats: None,
+            },
+        );
         assert!(envelope.get("data").is_some());
         assert_eq!(envelope["ephemeral"], false);
         assert_eq!(envelope["view"]["page"], json!("hub"));
@@ -1208,7 +1353,7 @@ mod tests {
 
     #[test]
     fn about_panel_renders_section_license_row_and_back_button() {
-        let data = about_view();
+        let data = about_view(None);
         assert_eq!(data["flags"], json!(components::IS_COMPONENTS_V2));
         let components = data["components"].as_array().unwrap();
         assert_eq!(components.len(), 2, "container plus the Back row");
@@ -1233,14 +1378,97 @@ mod tests {
     }
 
     #[test]
-    fn page_swap_routes_about_back_and_config_stubs() {
-        assert_eq!(
-            page_swap(Some(CUSTOM_ID_ABOUT), Page::Hub),
-            Some(Page::About)
+    fn about_panel_renders_live_stats_like_the_monolith() {
+        let stats = fixture_stats();
+        let data = about_view(Some(&stats));
+        let content = data["components"][0]["components"][0]["components"][0]["content"]
+            .as_str()
+            .unwrap();
+        for line in [
+            "### Stats",
+            "- **Uptime**: 1 days, 1 hours, 0 minutes",
+            "- **Servers**: 2",
+            "- **Users**: 1.5k",
+            "- **Commands**: 12",
+            "- **Latency**: 42ms",
+            "- **Memory**: 320.0 MB",
+            "- **Author**: [FAZuH](https://github.com/FAZuH)",
+            "Copyright © FAZuH — v1.2.3",
+        ] {
+            assert!(content.contains(line), "missing {line:?} in: {content}");
+        }
+        assert!(
+            !content.contains(env!("CARGO_PKG_VERSION")),
+            "live copy shows the host's version, not the plugin's"
         );
+    }
+
+    #[test]
+    fn about_panel_without_stats_renders_the_fallback_copy() {
+        let data = about_view(None);
+        let content = data["components"][0]["components"][0]["components"][0]["content"]
+            .as_str()
+            .unwrap();
+        assert!(
+            !content.contains("### Stats"),
+            "no snapshot, no stats section: {content}"
+        );
+        assert!(content.contains("Copyright © FAZuH — v"), "{content}");
+    }
+
+    fn fixture_stats() -> HostStats {
+        HostStats {
+            version: "1.2.3".into(),
+            uptime_secs: 90_000,
+            guild_count: 2,
+            user_count: 1_500,
+            latency_ms: 42,
+            command_count: 12,
+            memory_mb: 320.0,
+        }
+    }
+
+    #[test]
+    fn format_uptime_mirrors_the_monolith() {
+        assert_eq!(format_uptime(90_000), "1 days, 1 hours, 0 minutes");
+        assert_eq!(format_uptime(3_600), "1 hours, 0 minutes");
+        assert_eq!(format_uptime(300), "5 minutes");
+    }
+
+    #[test]
+    fn format_number_mirrors_the_monolith() {
+        assert_eq!(format_number(999), "999");
+        assert_eq!(format_number(1_500), "1.5k");
+        assert_eq!(format_number(2_000_000), "2.0M");
+    }
+
+    #[test]
+    fn parse_stats_accepts_a_host_snapshot() {
+        let payload = serde_json::to_value(fixture_stats()).unwrap();
+        assert_eq!(parse_stats(Some(&payload)), Some(fixture_stats()));
+    }
+
+    #[test]
+    fn parse_stats_fails_on_missing_or_malformed_payloads() {
+        assert_eq!(parse_stats(None), None);
+        assert_eq!(parse_stats(Some(&json!({}))), None);
+        assert_eq!(parse_stats(Some(&json!(42))), None);
+        assert_eq!(
+            parse_stats(Some(&json!({"version": 1, "uptime_secs": "late"}))),
+            None
+        );
+    }
+
+    #[test]
+    fn page_swap_routes_back_and_config_stubs() {
         assert_eq!(
             page_swap(Some(CUSTOM_ID_ABOUT_BACK), Page::About),
             Some(Page::Hub)
+        );
+        assert_eq!(
+            page_swap(Some(CUSTOM_ID_ABOUT), Page::Hub),
+            None,
+            "About needs a host.stats call, so it is not a page swap"
         );
         assert_eq!(
             page_swap(Some("settings:config:feeds"), Page::About),

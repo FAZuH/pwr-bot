@@ -60,6 +60,8 @@ use crate::plugin::PluginManager;
 use crate::plugin::RespawnPolicy;
 use crate::plugin::RunningPlugin;
 use crate::plugin::SerenityHostIo;
+use crate::plugin::SerenityStatsSource;
+use crate::plugin::StatsHandle;
 use crate::plugin::VOICE_STATE_EVENT;
 use crate::plugin::command::PluginRoutes;
 use crate::plugin::command::commands_from_manifest;
@@ -71,6 +73,7 @@ use crate::plugin::validate_view_data;
 use crate::repo::traits::Repos;
 use crate::service::Services;
 use crate::subscriber::voice_state::VoiceStateSubscriber;
+use crate::update::about::AboutStats;
 
 /// Data shared across bot commands and contexts.
 pub struct Data {
@@ -142,6 +145,9 @@ pub struct Bot {
     pub http: Arc<Http>,
     client_builder: Option<ClientBuilder>,
     client: Arc<Mutex<Option<Client>>>,
+    /// The real source behind the `host.stats` handle; its gateway cache is
+    /// attached in [`Bot::start`] once the client is built.
+    stats_source: Arc<SerenityStatsSource>,
 }
 
 impl Bot {
@@ -170,11 +176,16 @@ impl Bot {
             DEFAULT_VIEW_TIMEOUT,
         ));
         let plugin_events = Arc::new(PluginEventRouter::new());
+        // The stats handle is present from construction; the source riding it
+        // is attached below once the command count is known, and the real
+        // gateway cache attaches in `start()` after the client is built.
+        let stats_handle = Arc::new(StatsHandle::default());
         let host_services = Arc::new(HostServices {
             io: Some(Arc::new(SerenityHostIo::new(http.clone()))),
             config: Some(HostConfig::from(&*config)),
             kv: Some(Arc::new(PgKvStore::new(repos.plugin_kv()))),
             engine: Some(plugin_engine.clone()),
+            stats: stats_handle.clone(),
         });
         let plugin_manager = Arc::new(
             PluginManager::new(Some(http.clone()), RespawnPolicy::default())
@@ -213,6 +224,7 @@ impl Bot {
 
         let framework = Self::create_framework(&config, &catalog, &core_manifests)?;
 
+        let start_time = Instant::now();
         let data = Arc::new(Data {
             config: config.clone(),
             platforms,
@@ -225,8 +237,20 @@ impl Bot {
             plugin_routes,
             core_manifests,
             translate_layer: Arc::new(TranslateLayer::new()),
-            start_time: Instant::now(),
+            start_time,
         });
+
+        // The command count comes from the finished framework options, so the
+        // source can only ride the pre-start handle here — after the core
+        // plugins spawned. Calls before this point answer `HostUnavailable`
+        // (the handle serves a typed error until a source is attached).
+        let stats_source = Arc::new(SerenityStatsSource::new(
+            http.clone(),
+            start_time,
+            config.version.clone(),
+            AboutStats::count_commands(&framework.options().commands),
+        ));
+        stats_handle.attach(stats_source.clone());
 
         let event_handler = Arc::new(BotEventHandler::new(
             event_bus,
@@ -250,6 +274,7 @@ impl Bot {
             http,
             client_builder: Some(client_builder),
             client: Arc::new(Mutex::new(None)),
+            stats_source,
         })
     }
 
@@ -258,6 +283,7 @@ impl Bot {
         info!("Starting bot client...");
         let client_builder = self.client_builder.take().expect("start() called twice");
         let client = self.client.clone();
+        let stats_source = self.stats_source.clone();
 
         tokio::spawn(async move {
             info!("Connecting bot to Discord...");
@@ -265,6 +291,10 @@ impl Bot {
             let built_client = client_builder
                 .await
                 .expect("Failed to build Discord client");
+
+            // The gateway cache only exists after the build; from here the
+            // `host.stats` gather serves live guild/user counts.
+            stats_source.attach_cache(built_client.cache.clone());
 
             *client.lock().await = Some(built_client);
             info!("Bot connected to Discord.");
@@ -634,11 +664,7 @@ impl BotEventHandler {
                 let body = edit_body_for_transport(&spec.data);
                 if let Err(e) = self
                     .http
-                    .edit_original_interaction_response(
-                        interaction_token,
-                        &body,
-                        Vec::new(),
-                    )
+                    .edit_original_interaction_response(interaction_token, &body, Vec::new())
                     .await
                 {
                     warn!("failed to update message {message_id} after {kind}: {e}");

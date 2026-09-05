@@ -26,6 +26,7 @@ use pwr_bot::plugin::InteractionEngine;
 use pwr_bot::plugin::KvError;
 use pwr_bot::plugin::KvStore;
 use pwr_bot::plugin::RunningPlugin;
+use pwr_bot::plugin::StatsHandle;
 use pwr_bot::plugin::host::MockHostIo;
 use pwr_bot::plugin::validate_view_data;
 use pwr_poise_components::IS_COMPONENTS_V2;
@@ -80,6 +81,7 @@ async fn spawn_settings() -> Arc<RunningPlugin> {
                 }),
                 kv: Some(Arc::new(MemoryKv::default())),
                 engine: None,
+                stats: Arc::new(StatsHandle::default()),
             })),
             None,
             None,
