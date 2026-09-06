@@ -23,11 +23,16 @@
 //!   panel with the live values (formatted like `/about`'s Stats section);
 //!   a failed op renders the fallback copy — `settings:about:back` returns
 //!   to the hub, neither touching the model;
-//! - a `settings:config:<feature>` click is a navigation stub until
-//!   per-feature panels exist as plugins: it re-renders the current page;
+//! - a `settings:config:<feature>` click is a navigation stub until that
+//!   feature's panel exists as a plugin: it re-renders the current page.
+//!   Feeds migrated (ADR-0009): its button rides the nav id
+//!   (`settings:open:feed-settings`) and opens the feed-settings panel;
 //! - a `settings:open:<plugin>` nav click issues `host.open_view` for the
 //!   target plugin (the settings hub's promise: navigate to any panel),
-//!   answering the interaction with the current envelope again;
+//!   forwarding the source interaction's `guild_id` in the invoke args so
+//!   panel plugins can key their settings, and answering the interaction
+//!   with the current envelope again. A panel's own Back/About handoff
+//!   names the page this hub lands on through the same args;
 //! - the nav row is built at runtime from the host's running plugins
 //!   (`host.list_plugins`), minus the settings plugin itself; a host
 //!   without that cap — or a manager-less spawn — falls back to the
@@ -92,6 +97,18 @@ const FEATURES: [(&str, SettingsMsg); 3] = [
 /// separator, so the hub can open any plugin's panel.
 const CUSTOM_ID_OPEN_PREFIX: &str = "settings:open:";
 
+/// The panel plugin a config button opens, when its panel has migrated
+/// (ADR-0009); `None` while the button is still a navigation stub. The
+/// button rides the nav id (`settings:open:<plugin>`), so the existing
+/// open-view arm serves it — the panel plugin receives the source
+/// interaction's `guild_id` through the forwarded args.
+fn config_target(label: &str) -> Option<&'static str> {
+    match label {
+        "Feeds" => Some("feed-settings"),
+        _ => None,
+    }
+}
+
 /// The nav button's target while discovery has not run or the host did not
 /// answer `host.list_plugins`: the hello-style fixture the integration tests
 /// spawn.
@@ -116,13 +133,16 @@ enum NavTargets {
 #[derive(Debug, Clone, Copy)]
 enum Pending {
     /// The `host.kv.get` issued to load the model before the first render.
-    Load(u64),
+    /// The page a panel asked the hub to open on rides the chain: the
+    /// monolith's `Navigation::Settings*` handoff lands the fresh session
+    /// there.
+    Load(u64, Page),
     /// The `host.kv.set` issued to persist a toggled session model.
     Save(u64, ViewState),
     /// The `host.open_view` issued to open a target plugin's panel.
     OpenView(u64, ViewState),
     /// The `host.list_plugins` issued to discover the nav row's targets.
-    ListPlugins(u64),
+    ListPlugins(u64, Page),
     /// The `host.stats` issued to render the About panel with live values.
     Stats(u64, ViewState),
 }
@@ -132,10 +152,10 @@ impl Pending {
     /// it stays paired with the kind that resolves its resp.
     fn op(self) -> &'static str {
         match self {
-            Pending::Load(_) => "host.kv.get",
+            Pending::Load(..) => "host.kv.get",
             Pending::Save(..) => "host.kv.set",
             Pending::OpenView(..) => "host.open_view",
-            Pending::ListPlugins(_) => "host.list_plugins",
+            Pending::ListPlugins(..) => "host.list_plugins",
             Pending::Stats(..) => "host.stats",
         }
     }
@@ -424,7 +444,11 @@ fn view_data(model: &SettingsModel, nav: &NavTargets) -> Value {
     let config_buttons: Vec<CreateButton<'static>> = FEATURES
         .iter()
         .map(|(label, _)| {
-            CreateButton::new(format!("{CUSTOM_ID_CONFIG_PREFIX}{}", label.to_lowercase()))
+            let custom_id = match config_target(label) {
+                Some(target) => format!("{CUSTOM_ID_OPEN_PREFIX}{target}"),
+                None => format!("{CUSTOM_ID_CONFIG_PREFIX}{}", label.to_lowercase()),
+            };
+            CreateButton::new(custom_id)
                 .label(*label)
                 .style(ButtonStyle::Secondary)
         })
@@ -646,14 +670,27 @@ fn kv_set_args(model: &SettingsModel) -> Value {
 
 /// The `host.open_view` call args opening the target plugin's panel: the
 /// channel the source interaction came from, the target name as both the
-/// plugin and the command, and no invoke args.
-fn open_view_args(channel_id: u64, plugin: &str) -> Value {
+/// plugin and the command, and the source guild's id when the interaction
+/// carried one — the panel plugins key their settings by guild.
+fn open_view_args(channel_id: u64, guild_id: Option<u64>, plugin: &str) -> Value {
+    let mut invoke_args = serde_json::Map::new();
+    if let Some(guild_id) = guild_id {
+        invoke_args.insert("guild_id".into(), json!(guild_id));
+    }
     json!({
         "channel_id": channel_id,
         "plugin": plugin,
         "command": plugin,
-        "args": {},
+        "args": invoke_args,
     })
+}
+
+/// Reads a Discord id from a wire value: a number, or the string form
+/// serenity's ids serialize to.
+fn id_as_u64(value: &Value) -> Option<u64> {
+    value
+        .as_u64()
+        .or_else(|| value.as_str().and_then(|s| s.parse().ok()))
 }
 
 /// The `host.stats` call args: the op takes none.
@@ -798,12 +835,18 @@ fn main() -> ExitCode {
                 // An invoke with the model already loaded answers immediately
                 // with a fresh hub session; the first invoke loads from KV
                 // first. Every invoke opens the hub — pages belong to the
-                // sessions their messages carry.
+                // sessions their messages carry, and a panel's handoff names
+                // the page to land on (its `page` arg).
                 if (op.as_str(), cmd.as_deref()) == ("invoke", Some(PLUGIN_NAME)) && model.is_some()
                 {
+                    let page = page_from_name(
+                        args.as_ref()
+                            .and_then(|a| a.get("page"))
+                            .and_then(Value::as_str),
+                    );
                     let state = ViewState {
                         model: model.unwrap_or_default(),
-                        page: Page::Hub,
+                        page,
                     };
                     if !reply_envelope(
                         &mut out,
@@ -820,7 +863,12 @@ fn main() -> ExitCode {
                 }
                 let host_call = match (op.as_str(), cmd.as_deref()) {
                     ("invoke", Some(PLUGIN_NAME)) => {
-                        Some(HostCall::new(Pending::Load(id), kv_get_args()))
+                        let page = page_from_name(
+                            args.as_ref()
+                                .and_then(|a| a.get("page"))
+                                .and_then(Value::as_str),
+                        );
+                        Some(HostCall::new(Pending::Load(id, page), kv_get_args()))
                     }
                     ("view.interact", Some(PLUGIN_NAME)) => {
                         let custom_id = args
@@ -841,7 +889,7 @@ fn main() -> ExitCode {
                             let Some(channel_id) = args
                                 .as_ref()
                                 .and_then(|a| a.get("channel_id"))
-                                .and_then(Value::as_u64)
+                                .and_then(id_as_u64)
                             else {
                                 if !reply_err(
                                     &mut out,
@@ -853,9 +901,13 @@ fn main() -> ExitCode {
                                 }
                                 continue;
                             };
+                            let guild_id = args
+                                .as_ref()
+                                .and_then(|a| a.get("guild_id"))
+                                .and_then(id_as_u64);
                             Some(HostCall::new(
                                 Pending::OpenView(id, session),
-                                open_view_args(channel_id, target),
+                                open_view_args(channel_id, guild_id, target),
                             ))
                         } else if custom_id == Some(CUSTOM_ID_ABOUT) {
                             // About opens with live stats: one `host.stats`
@@ -978,7 +1030,7 @@ fn main() -> ExitCode {
                     continue;
                 };
                 match pending_kind {
-                    Pending::Load(invoke_id) => {
+                    Pending::Load(invoke_id, page) => {
                         // The stored model, or the default when unset or
                         // failed; then discover the nav row's targets before
                         // the first render.
@@ -993,16 +1045,16 @@ fn main() -> ExitCode {
                         };
                         let current = loaded.unwrap_or_default();
                         model = Some(current);
-                        let call = HostCall::new(Pending::ListPlugins(invoke_id), json!({}));
+                        let call = HostCall::new(Pending::ListPlugins(invoke_id, page), json!({}));
                         if !issue_host_call(&mut out, &mut pending, &mut next_call_id, call) {
                             return ExitCode::FAILURE;
                         }
                     }
-                    Pending::ListPlugins(invoke_id) => {
+                    Pending::ListPlugins(invoke_id, page) => {
                         // The running plugin names, or the default target when
                         // discovery failed; then persist the panel state
-                        // before the first render. A first render is always a
-                        // fresh hub session.
+                        // before the first render. The session lands on the
+                        // page the handoff asked for, the hub page by default.
                         match parse_list_plugins(data.as_ref()) {
                             Some(targets) => nav = NavTargets::Discovered(targets),
                             None => {
@@ -1012,7 +1064,7 @@ fn main() -> ExitCode {
                         }
                         let state = ViewState {
                             model: model.unwrap_or_default(),
-                            page: Page::Hub,
+                            page,
                         };
                         let call = HostCall::new(
                             Pending::Save(invoke_id, state),
@@ -1233,11 +1285,15 @@ mod tests {
             assert_eq!(button["type"], json!(2));
             assert_eq!(button["style"], json!(2), "secondary like the original");
             assert_eq!(button["label"], json!(label));
-            assert_eq!(
-                button["custom_id"],
-                json!(format!("{CUSTOM_ID_CONFIG_PREFIX}{}", label.to_lowercase()))
-            );
         }
+        // Feeds migrated (ADR-0009): its button opens the feed-settings
+        // panel; the others stay config stubs until their tickets land.
+        assert_eq!(
+            buttons[0]["custom_id"],
+            json!("settings:open:feed-settings")
+        );
+        assert_eq!(buttons[1]["custom_id"], json!("settings:config:voice"));
+        assert_eq!(buttons[2]["custom_id"], json!("settings:config:welcome"));
     }
 
     #[test]
@@ -1532,11 +1588,30 @@ mod tests {
 
     #[test]
     fn open_view_args_carry_channel_plugin_and_command() {
-        let args = open_view_args(987_654_321, "hello");
+        let args = open_view_args(987_654_321, None, "hello");
         assert_eq!(args["channel_id"], json!(987_654_321));
         assert_eq!(args["plugin"], json!("hello"));
         assert_eq!(args["command"], json!("hello"));
-        assert_eq!(args["args"], json!({}));
+        assert_eq!(args["args"], json!({}), "no guild known: args stay empty");
+
+        let args = open_view_args(1, Some(42), "feed-settings");
+        assert_eq!(
+            args["args"],
+            json!({ "guild_id": 42 }),
+            "a known guild rides the invoke args for panel plugins"
+        );
+    }
+
+    #[test]
+    fn id_as_u64_accepts_numbers_and_string_ids() {
+        assert_eq!(id_as_u64(&json!(42)), Some(42));
+        assert_eq!(
+            id_as_u64(&json!("42")),
+            Some(42),
+            "serenity ids serialize as strings"
+        );
+        assert_eq!(id_as_u64(&json!("nope")), None);
+        assert_eq!(id_as_u64(&json!(null)), None);
     }
 
     #[test]

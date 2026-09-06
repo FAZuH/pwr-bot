@@ -121,6 +121,7 @@ fn host_services(kv: Option<Arc<dyn KvStore>>) -> Arc<HostServices> {
         kv,
         engine: None,
         stats: Arc::new(StatsHandle::default()),
+        feeds: None,
     })
 }
 
@@ -142,6 +143,7 @@ fn view_host_services(
         kv: Some(kv),
         engine: Some(Arc::new(engine)),
         stats: Arc::new(StatsHandle::default()),
+        feeds: None,
     })
 }
 
@@ -165,6 +167,7 @@ fn stats_host_services(
         kv: Some(kv),
         engine: Some(Arc::new(engine)),
         stats: Arc::new(handle),
+        feeds: None,
     })
 }
 
@@ -243,8 +246,10 @@ fn assert_hub(data: &Value, enabled: &[bool; 3]) {
     assert_eq!(header["content"], json!("-# **Settings**"));
 
     let config_buttons = children[2]["components"].as_array().expect("config row");
+    // Feeds migrated (ADR-0009): its button opens the feed-settings panel;
+    // the others stay config stubs until their tickets land.
     let config_ids = [
-        "settings:config:feeds",
+        "settings:open:feed-settings",
         "settings:config:voice",
         "settings:config:welcome",
     ];

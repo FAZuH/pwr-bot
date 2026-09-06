@@ -21,6 +21,7 @@
 pub mod caps;
 pub mod manifest;
 pub mod msg;
+pub mod settings;
 pub mod stats;
 pub mod view;
 
@@ -38,6 +39,10 @@ pub use msg::CallIdSeq;
 pub use msg::Msg;
 pub use msg::PLUGIN_NAME;
 pub use msg::WireError;
+pub use settings::FeedsSettings;
+pub use settings::ServerSettings;
+pub use settings::VoiceSettings;
+pub use settings::WelcomeSettings;
 pub use stats::HostStats;
 pub use view::ViewPayload;
 pub use view::ViewSpec;

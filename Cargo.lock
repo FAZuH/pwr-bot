@@ -1790,6 +1790,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "feed-settings"
+version = "0.1.0"
+dependencies = [
+ "pwr-ext",
+ "pwr-plugin-protocol",
+ "pwr-poise-components",
+ "serde_json",
+]
+
+[[package]]
 name = "filetime"
 version = "0.2.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"

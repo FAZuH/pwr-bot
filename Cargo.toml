@@ -4,6 +4,7 @@ members = [
     "crates/pwr-poise-components",
     "crates/plugin/hello",
     "crates/plugin/settings",
+    "crates/plugin/feed-settings",
     "crates/preview",
 ]
 resolver = "2"

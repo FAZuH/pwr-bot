@@ -26,6 +26,7 @@ use poise::serenity_prelude as serenity;
 use pwr_plugin_protocol::HostCap;
 use pwr_plugin_protocol::HostStats;
 use pwr_plugin_protocol::Msg;
+use pwr_plugin_protocol::ServerSettings;
 use pwr_plugin_protocol::WireError;
 use serde_json::Value;
 use serde_json::json;
@@ -37,6 +38,8 @@ use crate::plugin::RunningPlugin;
 use crate::plugin::edit_body_for_transport;
 use crate::plugin::reject_content_on_edit;
 use crate::plugin::validate_view_data;
+use crate::service::error::ServiceError;
+use crate::service::traits::FeedSubscriptionProvider;
 
 /// The seam between plugin `host.*` ops and Discord. The real implementation
 /// wraps [`serenity::Http`]; tests use the mockall mock generated from this
@@ -351,6 +354,67 @@ impl StatsHandle {
     }
 }
 
+/// An error from a [`FeedSettingsSource`] operation.
+#[derive(Debug, thiserror::Error)]
+pub enum FeedSettingsError {
+    /// The feed service failed (database or feed-layer error).
+    #[error(transparent)]
+    Service(#[from] ServiceError),
+}
+
+/// The seam between the `host.feed.*` ops and the feed subscription service,
+/// mirroring `FeedSubscriptionProvider::get_server_settings` /
+/// `update_server_settings` one-to-one (ADR-0010: ops are shaped by
+/// services). The real implementation wraps the service the host already
+/// holds; tests use the mockall mock generated from this trait.
+#[automock]
+#[async_trait]
+pub trait FeedSettingsSource: Send + Sync {
+    /// Reads a guild's whole settings snapshot, as
+    /// `FeedSubscriptionProvider::get_server_settings` does.
+    async fn get_settings(&self, guild_id: u64) -> Result<ServerSettings, FeedSettingsError>;
+
+    /// Writes a guild's whole settings snapshot, as
+    /// `FeedSubscriptionProvider::update_server_settings` does.
+    async fn update_settings(
+        &self,
+        guild_id: u64,
+        settings: ServerSettings,
+    ) -> Result<(), FeedSettingsError>;
+}
+
+/// The real [`FeedSettingsSource`]: a thin adapter over the feed subscription
+/// service the host holds at construction. No post-start attachment — the
+/// service Arc exists at `Bot::new`, so the field is wired once.
+pub struct ServiceFeedSettingsSource {
+    service: Arc<dyn FeedSubscriptionProvider>,
+}
+
+impl ServiceFeedSettingsSource {
+    /// Wraps the host's feed subscription service.
+    pub fn new(service: Arc<dyn FeedSubscriptionProvider>) -> Self {
+        Self { service }
+    }
+}
+
+#[async_trait]
+impl FeedSettingsSource for ServiceFeedSettingsSource {
+    async fn get_settings(&self, guild_id: u64) -> Result<ServerSettings, FeedSettingsError> {
+        Ok(self.service.get_server_settings(guild_id).await?)
+    }
+
+    async fn update_settings(
+        &self,
+        guild_id: u64,
+        settings: ServerSettings,
+    ) -> Result<(), FeedSettingsError> {
+        Ok(self
+            .service
+            .update_server_settings(guild_id, settings)
+            .await?)
+    }
+}
+
 /// What the host can serve a plugin: the Discord I/O seam, the config subset,
 /// the key-value store, the interaction engine used to open `host.open_view`
 /// sessions, and the live-stats handle. All are optional so a plugin can be
@@ -371,6 +435,9 @@ pub struct HostServices {
     /// Live bot stats for `host.stats`; serves `Unavailable` until the real
     /// gateway cache is attached after client start.
     pub stats: Arc<StatsHandle>,
+    /// Feed settings for the `host.feed.*` ops, mirroring the feed
+    /// subscription service; absent when the host holds no feed service.
+    pub feeds: Option<Arc<dyn FeedSettingsSource>>,
 }
 
 /// Serves one plugin→host [`Msg::Call`], answering with the correlation-id
@@ -474,6 +541,24 @@ pub async fn handle_host_call(
                     ),
                 },
                 Err(e) => Msg::resp_err(id, stats_err(e)),
+            }
+        }
+        HostCap::FeedGetSettings => {
+            let Some(feeds) = host.and_then(|host| host.feeds.clone()) else {
+                return resp_err(id, "HostUnavailable", "feed settings are not configured");
+            };
+            match feed_call(cap, args, &*feeds).await {
+                Ok(data) => Msg::resp_ok(id, data),
+                Err(wire) => Msg::resp_err(id, wire),
+            }
+        }
+        HostCap::FeedUpdateSettings => {
+            let Some(feeds) = host.and_then(|host| host.feeds.clone()) else {
+                return resp_err(id, "HostUnavailable", "feed settings are not configured");
+            };
+            match feed_call(cap, args, &*feeds).await {
+                Ok(data) => Msg::resp_ok(id, data),
+                Err(wire) => Msg::resp_err(id, wire),
             }
         }
     }
@@ -816,6 +901,69 @@ fn stats_err(err: StatsError) -> WireError {
     }
 }
 
+/// Runs one feed-settings op against the seam and turns the outcome into a
+/// wire value: `Ok(data)` for a successful `resp_ok` (the settings snapshot
+/// for a read, `None` for a write), `Err(wire)` for a failed `resp_err`
+/// (`InvalidArgs` or `FeedSettingsError`).
+async fn feed_call(
+    cap: HostCap,
+    args: Option<&Value>,
+    feeds: &dyn FeedSettingsSource,
+) -> Result<Option<Value>, WireError> {
+    match cap {
+        HostCap::FeedGetSettings => {
+            let guild_id = parse_guild_id(args)?;
+            let settings = feeds
+                .get_settings(guild_id)
+                .await
+                .map_err(feed_settings_err)?;
+            let value = serde_json::to_value(&settings).map_err(|e| WireError {
+                kind: "FeedSettingsError".into(),
+                msg: e.to_string(),
+            })?;
+            Ok(Some(value))
+        }
+        HostCap::FeedUpdateSettings => {
+            let (guild_id, settings) = parse_update_settings(args)?;
+            feeds
+                .update_settings(guild_id, settings)
+                .await
+                .map_err(feed_settings_err)?;
+            Ok(None)
+        }
+        _ => unreachable!("feed_call only receives feed-settings ops"),
+    }
+}
+
+/// Parses the `guild_id` (u64) shared by the `host.feed.*` ops.
+fn parse_guild_id(args: Option<&Value>) -> Result<u64, WireError> {
+    args.and_then(Value::as_object)
+        .and_then(|obj| obj.get("guild_id"))
+        .and_then(Value::as_u64)
+        .ok_or_else(|| invalid_args("missing `guild_id` (u64)"))
+}
+
+/// Parses the `host.feed.update_settings` args: `guild_id` (u64) plus the
+/// whole [`ServerSettings`] snapshot under `settings`.
+fn parse_update_settings(args: Option<&Value>) -> Result<(u64, ServerSettings), WireError> {
+    let guild_id = parse_guild_id(args)?;
+    let settings = args
+        .and_then(Value::as_object)
+        .and_then(|obj| obj.get("settings"))
+        .ok_or_else(|| invalid_args("missing `settings` (ServerSettings object)"))?;
+    serde_json::from_value(settings.clone())
+        .map_err(|e| invalid_args(&format!("`settings` is not a ServerSettings: {e}")))
+        .map(|settings| (guild_id, settings))
+}
+
+/// Maps a [`FeedSettingsError`] to its wire error.
+fn feed_settings_err(err: FeedSettingsError) -> WireError {
+    WireError {
+        kind: "FeedSettingsError".into(),
+        msg: err.to_string(),
+    }
+}
+
 fn resp_err(id: u64, kind: &str, msg: impl Into<String>) -> Msg {
     Msg::resp_err(
         id,
@@ -844,6 +992,7 @@ mod tests {
             kv: None,
             engine: None,
             stats: Arc::new(StatsHandle::default()),
+            feeds: None,
         }
     }
 
@@ -858,6 +1007,7 @@ mod tests {
             kv,
             engine: None,
             stats: Arc::new(StatsHandle::default()),
+            feeds: None,
         }
     }
 
@@ -870,6 +1020,7 @@ mod tests {
             kv: None,
             engine: Some(Arc::new(InteractionEngine::new())),
             stats: Arc::new(StatsHandle::default()),
+            feeds: None,
         }
     }
 
@@ -1402,6 +1553,7 @@ mod tests {
             kv: None,
             engine: None,
             stats: Arc::new(handle),
+            feeds: None,
         };
 
         let resp = handle_host_call(7, "host.stats", None, Some(&host), None).await;
@@ -1449,11 +1601,184 @@ mod tests {
             kv: None,
             engine: None,
             stats: Arc::new(handle),
+            feeds: None,
         };
 
         let resp = handle_host_call(7, "host.stats", None, Some(&host), None).await;
         let msg = assert_err(resp, 7, "StatsError");
         assert!(msg.contains("webhook"), "msg: {msg}");
+    }
+
+    // ── feed settings ─────────────────────────────────────────────────────────
+
+    fn sample_settings() -> ServerSettings {
+        ServerSettings {
+            feeds: pwr_plugin_protocol::FeedsSettings {
+                enabled: Some(true),
+                channel_id: Some("123456789".into()),
+                subscribe_role_id: Some("987654321".into()),
+                unsubscribe_role_id: None,
+            },
+            ..ServerSettings::default()
+        }
+    }
+
+    fn feed_services(feeds: Arc<dyn FeedSettingsSource>) -> HostServices {
+        HostServices {
+            io: None,
+            config: Some(sample_config()),
+            kv: None,
+            engine: None,
+            stats: Arc::new(StatsHandle::default()),
+            feeds: Some(feeds),
+        }
+    }
+
+    #[tokio::test]
+    async fn feed_get_settings_routes_through_the_seam() {
+        let mut mock = MockFeedSettingsSource::new();
+        mock.expect_get_settings()
+            .with(eq(42u64))
+            .times(1)
+            .returning(|_| Ok(sample_settings()));
+        let host = feed_services(Arc::new(mock));
+
+        let resp = handle_host_call(
+            7,
+            "host.feed.get_settings",
+            Some(&json!({ "guild_id": 42 })),
+            Some(&host),
+            None,
+        )
+        .await;
+        assert_eq!(
+            assert_ok(resp, 7),
+            Some(json!({
+                "feeds": {
+                    "enabled": true,
+                    "channel_id": "123456789",
+                    "subscribe_role_id": "987654321",
+                    "unsubscribe_role_id": null,
+                },
+                "voice": { "enabled": null },
+                "welcome": {
+                    "enabled": null,
+                    "channel_id": null,
+                    "primary_color": null,
+                    "template_id": null,
+                    "messages": null,
+                },
+            }))
+        );
+    }
+
+    #[tokio::test]
+    async fn feed_update_settings_routes_through_the_seam() {
+        let settings = sample_settings();
+        let mut mock = MockFeedSettingsSource::new();
+        mock.expect_update_settings()
+            .with(eq(42u64), eq(settings.clone()))
+            .times(1)
+            .returning(|_, _| Ok(()));
+        let host = feed_services(Arc::new(mock));
+
+        let resp = handle_host_call(
+            7,
+            "host.feed.update_settings",
+            Some(&json!({ "guild_id": 42, "settings": settings })),
+            Some(&host),
+            None,
+        )
+        .await;
+        assert_eq!(assert_ok(resp, 7), None);
+    }
+
+    #[tokio::test]
+    async fn feed_settings_without_services_is_host_unavailable() {
+        let resp = handle_host_call(
+            7,
+            "host.feed.get_settings",
+            Some(&json!({ "guild_id": 42 })),
+            None,
+            None,
+        )
+        .await;
+        assert_err(resp, 7, "HostUnavailable");
+
+        let resp = handle_host_call(
+            7,
+            "host.feed.update_settings",
+            Some(&json!({ "guild_id": 42, "settings": ServerSettings::default() })),
+            None,
+            None,
+        )
+        .await;
+        assert_err(resp, 7, "HostUnavailable");
+    }
+
+    #[tokio::test]
+    async fn feed_settings_without_source_is_host_unavailable() {
+        let host = services(None, Some(sample_config()));
+
+        let resp = handle_host_call(
+            7,
+            "host.feed.get_settings",
+            Some(&json!({ "guild_id": 42 })),
+            Some(&host),
+            None,
+        )
+        .await;
+        assert_err(resp, 7, "HostUnavailable");
+    }
+
+    #[tokio::test]
+    async fn feed_settings_missing_guild_id_is_invalid_args() {
+        let mock = MockFeedSettingsSource::new();
+        let host = feed_services(Arc::new(mock));
+
+        let resp = handle_host_call(7, "host.feed.get_settings", None, Some(&host), None).await;
+        assert_err(resp, 7, "InvalidArgs");
+    }
+
+    #[tokio::test]
+    async fn feed_settings_malformed_snapshot_is_invalid_args() {
+        let mock = MockFeedSettingsSource::new();
+        let host = feed_services(Arc::new(mock));
+
+        let resp = handle_host_call(
+            7,
+            "host.feed.update_settings",
+            Some(&json!({ "guild_id": 42, "settings": "not-a-snapshot" })),
+            Some(&host),
+            None,
+        )
+        .await;
+        assert_err(resp, 7, "InvalidArgs");
+    }
+
+    #[tokio::test]
+    async fn feed_settings_service_failure_is_feed_settings_error() {
+        let mut mock = MockFeedSettingsSource::new();
+        mock.expect_get_settings()
+            .with(eq(42u64))
+            .times(1)
+            .returning(|_| {
+                Err(FeedSettingsError::Service(ServiceError::UnexpectedResult {
+                    message: "no such guild".into(),
+                }))
+            });
+        let host = feed_services(Arc::new(mock));
+
+        let resp = handle_host_call(
+            7,
+            "host.feed.get_settings",
+            Some(&json!({ "guild_id": 42 })),
+            Some(&host),
+            None,
+        )
+        .await;
+        let msg = assert_err(resp, 7, "FeedSettingsError");
+        assert!(msg.contains("no such guild"), "msg: {msg}");
     }
 
     // ── kv ────────────────────────────────────────────────────────────────────

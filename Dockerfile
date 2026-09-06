@@ -32,6 +32,7 @@ RUN apt-get update && apt-get install -y libfontconfig1 libpq5 && rm -rf /var/li
 
 COPY --from=build /app/migrations /app/migrations
 COPY --from=build /app/target/release/pwr-bot /app/pwr-bot
+COPY --from=build /app/target/release/feed-settings /app/feed-settings
 
 WORKDIR /app
 CMD ["./pwr-bot"]

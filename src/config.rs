@@ -23,6 +23,7 @@ pub struct Config {
     pub plugins_toml: PathBuf,
     pub plugins_dir: PathBuf,
     pub settings_plugin_path: PathBuf,
+    pub feed_settings_plugin_path: PathBuf,
     /// Core plugins the host spawns at startup, in order.
     pub core_plugins: Vec<CorePluginSpec>,
     pub features: Features,
@@ -103,10 +104,25 @@ impl Config {
                     .map(|dir| dir.join("settings"))
                     .unwrap_or_else(|| self.data_path.join("settings"))
             });
-        self.core_plugins = vec![CorePluginSpec {
-            name: "settings".to_string(),
-            path: self.settings_plugin_path.clone(),
-        }];
+        self.feed_settings_plugin_path = std::env::var("FEED_SETTINGS_PLUGIN_PATH")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| {
+                std::env::current_exe()
+                    .ok()
+                    .and_then(|exe| exe.parent().map(|p| p.to_path_buf()))
+                    .map(|dir| dir.join("feed-settings"))
+                    .unwrap_or_else(|| self.data_path.join("feed-settings"))
+            });
+        self.core_plugins = vec![
+            CorePluginSpec {
+                name: "settings".to_string(),
+                path: self.settings_plugin_path.clone(),
+            },
+            CorePluginSpec {
+                name: "feed-settings".to_string(),
+                path: self.feed_settings_plugin_path.clone(),
+            },
+        ];
 
         self.features = Features {
             voice_tracking: parse_bool_env("ENABLE_VOICE_TRACKING", true),

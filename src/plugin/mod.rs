@@ -47,6 +47,8 @@ pub use error::InstallError;
 pub use error::PluginError;
 pub use events::PluginEventRouter;
 pub use events::VOICE_STATE_EVENT;
+pub use host::FeedSettingsError;
+pub use host::FeedSettingsSource;
 pub use host::HostConfig;
 pub use host::HostError;
 pub use host::HostIo;
@@ -56,6 +58,7 @@ pub use host::KvStore;
 pub use host::PgKvStore;
 pub use host::SerenityHostIo;
 pub use host::SerenityStatsSource;
+pub use host::ServiceFeedSettingsSource;
 pub use host::StatsError;
 pub use host::StatsHandle;
 pub use host::StatsSource;
@@ -835,12 +838,13 @@ mod tests {
         };
         assert_eq!(v, API_VERSION);
         assert_eq!(name, "host");
-        assert_eq!(caps.len(), 11, "every v1 host cap must be announced");
+        assert_eq!(caps.len(), 13, "every v1 host cap must be announced");
         assert!(caps.iter().any(|c| c == "host.defer"));
         assert!(caps.iter().any(|c| c == "host.kv.get"));
         assert!(caps.iter().any(|c| c == "host.get_config"));
         assert!(caps.iter().any(|c| c == "host.list_plugins"));
         assert!(caps.iter().any(|c| c == "host.stats"));
+        assert!(caps.iter().any(|c| c == "host.feed.get_settings"));
     }
 
     // ── pong accounting (the health checker's liveness signal) ──────────────

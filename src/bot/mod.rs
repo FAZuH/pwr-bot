@@ -61,6 +61,7 @@ use crate::plugin::RespawnPolicy;
 use crate::plugin::RunningPlugin;
 use crate::plugin::SerenityHostIo;
 use crate::plugin::SerenityStatsSource;
+use crate::plugin::ServiceFeedSettingsSource;
 use crate::plugin::StatsHandle;
 use crate::plugin::VOICE_STATE_EVENT;
 use crate::plugin::command::PluginRoutes;
@@ -186,6 +187,9 @@ impl Bot {
             kv: Some(Arc::new(PgKvStore::new(repos.plugin_kv()))),
             engine: Some(plugin_engine.clone()),
             stats: stats_handle.clone(),
+            feeds: Some(Arc::new(ServiceFeedSettingsSource::new(
+                service.feed_subscription.clone(),
+            ))),
         });
         let plugin_manager = Arc::new(
             PluginManager::new(Some(http.clone()), RespawnPolicy::default())

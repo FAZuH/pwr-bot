@@ -232,52 +232,20 @@ pub struct FeedSubscriptionEntity {
 #[diesel(table_name = server_settings)]
 #[diesel(primary_key(guild_id))]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-#[derive(Serialize, Deserialize, Default, Clone, Debug)]
+#[derive(Serialize, Deserialize)]
 pub struct ServerSettingsEntity {
     pub guild_id: DbU64,
     pub settings: Json<ServerSettings>,
 }
 
-#[derive(Serialize, Deserialize, Default, Clone, Debug)]
-pub struct ServerSettings {
-    #[serde(default)]
-    pub feeds: FeedsSettings,
-    #[serde(default)]
-    pub voice: VoiceSettings,
-    #[serde(default)]
-    pub welcome: WelcomeSettings,
-}
-
-#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
-pub struct WelcomeSettings {
-    #[serde(default)]
-    pub enabled: Option<bool>,
-    #[serde(default)]
-    pub channel_id: Option<String>,
-    #[serde(default)]
-    pub primary_color: Option<String>,
-    #[serde(default)]
-    pub template_id: Option<String>,
-    #[serde(default)]
-    pub messages: Option<Vec<String>>,
-}
-
-#[derive(Serialize, Deserialize, Default, Clone, Debug)]
-pub struct FeedsSettings {
-    #[serde(default)]
-    pub enabled: Option<bool>,
-    #[serde(default)]
-    pub channel_id: Option<String>,
-    #[serde(default)]
-    pub subscribe_role_id: Option<String>,
-    #[serde(default)]
-    pub unsubscribe_role_id: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Default, Clone, Debug)]
-pub struct VoiceSettings {
-    pub enabled: Option<bool>,
-}
+// The settings payload structs moved to `pwr-plugin-protocol/src/settings.rs`
+// so the shared wire contract owns the shape both sides serialize (ADR-0010).
+// Re-exported here to keep every in-crate import stable; the diesel coupling
+// stays in `ServerSettingsEntity` above.
+pub use pwr_plugin_protocol::FeedsSettings;
+pub use pwr_plugin_protocol::ServerSettings;
+pub use pwr_plugin_protocol::VoiceSettings;
+pub use pwr_plugin_protocol::WelcomeSettings;
 
 /// Diesel-compatible struct for voice_sessions queries.
 #[derive(Queryable, Selectable)]

@@ -82,6 +82,7 @@ async fn spawn_settings() -> Arc<RunningPlugin> {
                 kv: Some(Arc::new(MemoryKv::default())),
                 engine: None,
                 stats: Arc::new(StatsHandle::default()),
+                feeds: None,
             })),
             None,
             None,
