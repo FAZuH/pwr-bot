@@ -8,16 +8,20 @@
 //!
 //! Protocol behavior:
 //! - announces `hello` (`v`, `name`, `caps`) as its first line after spawn;
-//! - answers `call` (`invoke`, `view.interact`) with a correlation-id-matched
-//!   `resp`, keeping a per-process click counter for [`BUTTON_CUSTOM_ID`];
+//! - answers `call` (`invoke`, `view.interact`, `view.modal_submit`) with a
+//!   correlation-id-matched `resp`, keeping a per-process click counter for
+//!   [`BUTTON_CUSTOM_ID`];
 //! - issues plugin→host calls for the `host.say`/`host.defer`/`host.edit`/
-//!   `host.kvget`/`host.kvset`/`host.kvdel`/`host.openview` invoke cmds,
-//!   forwarding the host's resp back to the original invoke;
+//!   `host.kvget`/`host.kvset`/`host.kvdel`/`host.openview`/`host.openmodal`
+//!   invoke cmds, forwarding the host's resp back to the original invoke;
 //! - treats `event` (e.g. `view.timeout`) as one-way, never answering it; a
 //!   `voice_state` event is echoed back as `voice_state.ack` (plugin→host
 //!   event, broadcast by the host on its event bus);
 //! - answers `view.interact` on [`MODAL_CUSTOM_ID`] with a modal-submit
 //!   counter, mirroring how a real plugin handles a Discord modal submit;
+//! - answers a `view.modal_submit` call (the host routing a submission of a
+//!   modal the plugin opened via `host.open_modal`) with a view echoing the
+//!   submitted `note` input's value;
 //! - answers `ping` with `pong`;
 //! - tolerates the host's hello ack silently;
 //! - exits 0 on `bye` and on EOF.
@@ -149,6 +153,7 @@ fn main() -> ExitCode {
                 "host.kv.set".into(),
                 "host.kv.delete".into(),
                 "host.open_view".into(),
+                "host.open_modal".into(),
             ],
             manifest: Some(manifest()),
         };
@@ -183,6 +188,7 @@ fn main() -> ExitCode {
                         Some("host.kvset") => Some("host.kv.set"),
                         Some("host.kvdel") => Some("host.kv.delete"),
                         Some("host.openview") => Some("host.open_view"),
+                        Some("host.openmodal") => Some("host.open_modal"),
                         _ => None,
                     };
                     if op == "invoke"
@@ -242,6 +248,35 @@ fn main() -> ExitCode {
                                 return ExitCode::FAILURE;
                             }
                             Msg::resp_ok(id, None)
+                        }
+                        ("view.modal_submit", _, _, _) => {
+                            // The host routed a submission of a modal this
+                            // plugin opened via `host.open_modal`: echo the
+                            // `note` input's value as the submission's view.
+                            let note = args
+                                .as_ref()
+                                .and_then(|a| a.get("data"))
+                                .and_then(|d| d.get("components"))
+                                .and_then(Value::as_array)
+                                .and_then(|components| {
+                                    components.iter().find_map(|entry| {
+                                        let input = entry.get("component")?;
+                                        (input.get("custom_id").and_then(Value::as_str)
+                                            == Some("note"))
+                                        .then(|| {
+                                            input
+                                                .get("value")
+                                                .and_then(Value::as_str)
+                                                .unwrap_or("")
+                                                .to_string()
+                                        })
+                                    })
+                                })
+                                .unwrap_or_default();
+                            Msg::resp_ok(
+                                id,
+                                Some(view_data_v2(&format!("Modal submitted! note={note}"))),
+                            )
                         }
                         _ => {
                             let cmd_repr = cmd.as_deref().unwrap_or("");

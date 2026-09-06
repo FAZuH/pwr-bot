@@ -23,6 +23,7 @@ use log::debug;
 use log::warn;
 use mockall::automock;
 use poise::serenity_prelude as serenity;
+use pwr_ext::prelude::CreateModalDe;
 use pwr_plugin_protocol::HostCap;
 use pwr_plugin_protocol::HostStats;
 use pwr_plugin_protocol::Msg;
@@ -41,7 +42,6 @@ use crate::plugin::validate_view_data;
 use crate::service::error::ServiceError;
 use crate::service::traits::FeedSubscriptionProvider;
 use crate::service::traits::VoiceTracker;
-
 /// The seam between plugin `host.*` ops and Discord. The real implementation
 /// wraps [`serenity::Http`]; tests use the mockall mock generated from this
 /// trait, so no plugin test ever touches a live gateway.
@@ -82,6 +82,18 @@ pub trait HostIo: Send + Sync {
         message_id: u64,
         data: Value,
     ) -> Result<Option<Value>, HostError>;
+
+    /// Opens a modal as the response to the interaction `interaction_id`:
+    /// the modal IS the response (ADR-0007), so an already-acked or
+    /// already-answered interaction fails. `modal` is the modal spec in the
+    /// same JSON grammar a view spec uses; a spec the host cannot parse
+    /// fails before anything is sent.
+    async fn open_modal(
+        &self,
+        interaction_id: u64,
+        token: &str,
+        modal: Value,
+    ) -> Result<(), HostError>;
 }
 
 /// The real [`HostIo`], backed by a shared [`serenity::Http`] client.
@@ -142,6 +154,21 @@ impl HostIo for SerenityHostIo {
             .await?;
         Ok(Some(json!({ "message_id": message.id.get() })))
     }
+
+    async fn open_modal(
+        &self,
+        interaction_id: u64,
+        token: &str,
+        modal: Value,
+    ) -> Result<(), HostError> {
+        let modal: serenity::CreateModal<'static> = serde_json::from_value::<CreateModalDe>(modal)
+            .map_err(|e| HostError::InvalidModal(e.to_string()))?
+            .into();
+        serenity::CreateInteractionResponse::Modal(modal)
+            .execute(&self.http, interaction_id.into(), token)
+            .await?;
+        Ok(())
+    }
 }
 
 /// An error from a [`HostIo`] operation.
@@ -150,6 +177,9 @@ pub enum HostError {
     /// The Discord API rejected the request.
     #[error("discord api error: {0}")]
     Serenity(#[from] serenity::Error),
+    /// The modal spec could not be parsed into a Discord modal.
+    #[error("invalid modal spec: {0}")]
+    InvalidModal(String),
 }
 
 /// Builds the wire payload for a [`HostIo::send_message`] call: the prose in
@@ -513,10 +543,15 @@ pub struct HostServices {
 /// Serves one plugin→host [`Msg::Call`], answering with the correlation-id
 /// matched `resp`. Every failure crosses the wire as a first-class
 /// [`WireError`]; nothing panics on unknown ops or missing services. The
-/// plugin manager resolves targets for `host.open_view`; it is optional so
-/// plain spawns without a manager still answer `HostUnavailable`.
+/// plugin manager resolves targets for `host.open_view` and receives
+/// `host.open_modal` route bindings; it is optional so plain spawns without a
+/// manager still answer `HostUnavailable`. `caller` is the manager-registered
+/// name of the plugin session whose reader received the call — the
+/// host-stamped owner for ops that bind state to the calling session, so a
+/// plugin cannot bind a route under another plugin's name.
 pub async fn handle_host_call(
     id: u64,
+    caller: &str,
     op: &str,
     args: Option<&Value>,
     host: Option<&HostServices>,
@@ -580,6 +615,22 @@ pub async fn handle_host_call(
                 );
             };
             match open_view_call(args, &*io, &engine, manager).await {
+                Ok(data) => Msg::resp_ok(id, data),
+                Err(wire) => Msg::resp_err(id, wire),
+            }
+        }
+        HostCap::OpenModal => {
+            let Some(io) = host.and_then(|host| host.io.clone()) else {
+                return resp_err(id, "HostUnavailable", "host io is not configured");
+            };
+            let Some(manager) = manager else {
+                return resp_err(
+                    id,
+                    "HostUnavailable",
+                    "host plugin manager is not configured",
+                );
+            };
+            match open_modal_call(args, &*io, manager, caller).await {
                 Ok(data) => Msg::resp_ok(id, data),
                 Err(wire) => Msg::resp_err(id, wire),
             }
@@ -779,6 +830,64 @@ fn open_view_err(err: InteractionError) -> WireError {
             msg: err.to_string(),
         },
     }
+}
+
+/// Runs the `host.open_modal` op end to end: validates the modal spec
+/// (parse-on-clone-discard, the [`validate_view_data`] precedent), opens it
+/// as the response to the triggering interaction — the open IS the response
+/// (ADR-0007), so an already-acked interaction fails — and binds the
+/// author's submission route to the calling plugin session (`caller`, the
+/// host-stamped owner). The bind happens only after Discord accepted the
+/// open, so a failed open leaves no route behind.
+async fn open_modal_call(
+    args: Option<&Value>,
+    io: &dyn HostIo,
+    manager: &PluginManager,
+    caller: &str,
+) -> Result<Option<Value>, WireError> {
+    let (author_id, interaction_id, token, modal) = parse_open_modal(args)?;
+    serde_json::from_value::<CreateModalDe>(modal.clone())
+        .map_err(|e| invalid_args(&format!("`modal` is not a valid modal spec: {e}")))?;
+    // `CreateModalDe` requires `custom_id: Cow<str>`, so a spec that just
+    // validated always carries it as a string here.
+    let custom_id = modal
+        .get("custom_id")
+        .and_then(Value::as_str)
+        .expect("validated `CreateModalDe` always carries a string `custom_id`")
+        .to_string();
+    io.open_modal(interaction_id, &token, modal)
+        .await
+        .map_err(host_io_err)?;
+    manager.bind_modal(author_id, caller, &custom_id).await;
+    Ok(None)
+}
+
+/// Parses `host.open_modal` args: the author of the triggering interaction
+/// (the submission's routing key), the interaction id and token the modal
+/// opens as a response to, and the modal spec (`custom_id`, `title`,
+/// `components`). Ids accept a number or serenity's string form.
+fn parse_open_modal(args: Option<&Value>) -> Result<(u64, u64, String, Value), WireError> {
+    let obj = args.and_then(Value::as_object).ok_or_else(|| {
+        invalid_args("expected args object with `author_id`, `interaction_id`, `token`, `modal`")
+    })?;
+    let author_id = obj
+        .get("author_id")
+        .and_then(id_as_u64)
+        .ok_or_else(|| invalid_args("missing `author_id` (u64)"))?;
+    let interaction_id = obj
+        .get("interaction_id")
+        .and_then(id_as_u64)
+        .ok_or_else(|| invalid_args("missing `interaction_id` (u64)"))?;
+    let token = obj
+        .get("token")
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid_args("missing `token` (string)"))?
+        .to_string();
+    let modal = obj
+        .get("modal")
+        .cloned()
+        .ok_or_else(|| invalid_args("missing `modal` (object)"))?;
+    Ok((author_id, interaction_id, token, modal))
 }
 
 /// Runs one KV-backed host op against the seam and turns the outcome into a
@@ -1129,6 +1238,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+    use crate::plugin::ModalRouteError;
     use crate::plugin::RespawnPolicy;
 
     fn services(io: Option<Arc<dyn HostIo>>, config: Option<HostConfig>) -> HostServices {
@@ -1231,6 +1341,7 @@ mod tests {
 
         let resp = handle_host_call(
             7,
+            "hello",
             "host.defer",
             Some(&json!({ "interaction_id": 42, "token": "token-1" })),
             Some(&host),
@@ -1247,6 +1358,7 @@ mod tests {
 
         let resp = handle_host_call(
             7,
+            "hello",
             "host.defer",
             Some(&json!({ "interaction_id": 42 })),
             Some(&host),
@@ -1258,7 +1370,7 @@ mod tests {
 
     #[tokio::test]
     async fn defer_without_services_is_host_unavailable() {
-        let resp = handle_host_call(7, "host.defer", None, None, None).await;
+        let resp = handle_host_call(7, "hello", "host.defer", None, None, None).await;
         assert_err(resp, 7, "HostUnavailable");
     }
 
@@ -1275,6 +1387,7 @@ mod tests {
 
         let resp = handle_host_call(
             7,
+            "hello",
             "host.acknowledge",
             Some(&json!({ "interaction_id": 42, "token": "token-1" })),
             Some(&host),
@@ -1297,6 +1410,7 @@ mod tests {
 
         let resp = handle_host_call(
             7,
+            "hello",
             "host.send_message",
             Some(&json!({
                 "channel_id": 99,
@@ -1333,6 +1447,7 @@ mod tests {
 
         let resp = handle_host_call(
             7,
+            "hello",
             "host.send_message",
             Some(&json!({ "channel_id": 99 })),
             Some(&host),
@@ -1353,6 +1468,7 @@ mod tests {
 
         let resp = handle_host_call(
             7,
+            "hello",
             "host.send_message",
             Some(&json!({ "channel_id": 99, "content": "x", "data": "oops" })),
             Some(&host),
@@ -1379,6 +1495,7 @@ mod tests {
 
         let resp = handle_host_call(
             7,
+            "hello",
             "host.edit_message",
             Some(&json!({
                 "channel_id": 99,
@@ -1413,6 +1530,7 @@ mod tests {
 
         let resp = handle_host_call(
             7,
+            "hello",
             "host.edit_message",
             Some(&json!({
                 "channel_id": 99,
@@ -1440,6 +1558,7 @@ mod tests {
 
         let resp = handle_host_call(
             7,
+            "hello",
             "host.edit_message",
             Some(&json!({ "channel_id": 99, "message_id": 1234 })),
             Some(&host),
@@ -1456,6 +1575,7 @@ mod tests {
 
         let resp = handle_host_call(
             7,
+            "hello",
             "host.edit_message",
             Some(&json!({
                 "channel_id": 99,
@@ -1482,6 +1602,7 @@ mod tests {
 
         let resp = handle_host_call(
             7,
+            "hello",
             "host.edit_message",
             Some(&json!({
                 "channel_id": 99,
@@ -1502,6 +1623,7 @@ mod tests {
 
         let resp = handle_host_call(
             7,
+            "hello",
             "host.edit_message",
             Some(&json!({
                 "channel_id": 99,
@@ -1521,7 +1643,7 @@ mod tests {
     async fn get_config_returns_the_three_fields() {
         let host = services(None, Some(sample_config()));
 
-        let resp = handle_host_call(7, "host.get_config", None, Some(&host), None).await;
+        let resp = handle_host_call(7, "hello", "host.get_config", None, Some(&host), None).await;
         assert_eq!(
             assert_ok(resp, 7),
             Some(json!({
@@ -1536,7 +1658,7 @@ mod tests {
     async fn get_config_without_config_is_config_unavailable() {
         let host = services(Some(Arc::new(MockHostIo::new())), None);
 
-        let resp = handle_host_call(7, "host.get_config", None, Some(&host), None).await;
+        let resp = handle_host_call(7, "hello", "host.get_config", None, Some(&host), None).await;
         assert_err(resp, 7, "ConfigUnavailable");
     }
 
@@ -1546,7 +1668,7 @@ mod tests {
     async fn unknown_host_op_is_unknown_op() {
         let host = services(None, Some(sample_config()));
 
-        let resp = handle_host_call(7, "host.frobnicate", None, Some(&host), None).await;
+        let resp = handle_host_call(7, "hello", "host.frobnicate", None, Some(&host), None).await;
         let msg = assert_err(resp, 7, "UnknownOp");
         assert!(msg.contains("host.frobnicate"), "msg: {msg}");
     }
@@ -1555,7 +1677,7 @@ mod tests {
     async fn non_host_op_is_unknown_op() {
         let host = services(None, Some(sample_config()));
 
-        let resp = handle_host_call(7, "invoke", None, Some(&host), None).await;
+        let resp = handle_host_call(7, "hello", "invoke", None, Some(&host), None).await;
         assert_err(resp, 7, "UnknownOp");
     }
 
@@ -1571,6 +1693,7 @@ mod tests {
 
         let resp = handle_host_call(
             7,
+            "hello",
             "host.open_view",
             Some(&json!({ "channel_id": 99 })),
             Some(&host),
@@ -1587,6 +1710,7 @@ mod tests {
 
         let resp = handle_host_call(
             7,
+            "hello",
             "host.open_view",
             Some(&json!({ "channel_id": 99, "plugin": "hello", "command": 7 })),
             Some(&host),
@@ -1603,6 +1727,7 @@ mod tests {
 
         let resp = handle_host_call(
             7,
+            "hello",
             "host.open_view",
             Some(&json!({ "channel_id": 99, "plugin": "hello", "args": "nope" })),
             Some(&host),
@@ -1616,7 +1741,15 @@ mod tests {
     async fn open_view_without_io_is_host_unavailable() {
         let host = services(None, Some(sample_config()));
         let manager = PluginManager::new(None, RespawnPolicy::default());
-        let resp = handle_host_call(7, "host.open_view", None, Some(&host), Some(&manager)).await;
+        let resp = handle_host_call(
+            7,
+            "hello",
+            "host.open_view",
+            None,
+            Some(&host),
+            Some(&manager),
+        )
+        .await;
         assert_err(resp, 7, "HostUnavailable");
     }
 
@@ -1625,7 +1758,15 @@ mod tests {
         // io present so the io check passes; the engine check fires.
         let host = services(Some(Arc::new(MockHostIo::new())), Some(sample_config()));
         let manager = PluginManager::new(None, RespawnPolicy::default());
-        let resp = handle_host_call(7, "host.open_view", None, Some(&host), Some(&manager)).await;
+        let resp = handle_host_call(
+            7,
+            "hello",
+            "host.open_view",
+            None,
+            Some(&host),
+            Some(&manager),
+        )
+        .await;
         assert_err(resp, 7, "HostUnavailable");
     }
 
@@ -1633,7 +1774,7 @@ mod tests {
     async fn open_view_without_manager_is_host_unavailable() {
         // io and engine present so their checks pass; the manager check fires.
         let host = view_services(Some(Arc::new(MockHostIo::new())), Some(sample_config()));
-        let resp = handle_host_call(7, "host.open_view", None, Some(&host), None).await;
+        let resp = handle_host_call(7, "hello", "host.open_view", None, Some(&host), None).await;
         assert_err(resp, 7, "HostUnavailable");
     }
 
@@ -1643,6 +1784,7 @@ mod tests {
         let manager = PluginManager::new(None, RespawnPolicy::default());
         let resp = handle_host_call(
             7,
+            "hello",
             "host.open_view",
             Some(&json!({ "channel_id": 99, "plugin": "nope" })),
             Some(&host),
@@ -1650,6 +1792,225 @@ mod tests {
         )
         .await;
         assert_err(resp, 7, "PluginNotFound");
+    }
+
+    // ── open_modal ────────────────────────────────────────────────────────────
+    // The modal spec grammar is pwr-ext's: a label-wrapped input text is the
+    // smallest valid component. `style`, the length fields, and `required` are
+    // non-defaulted there, so the fixture carries them explicitly.
+
+    fn modal_spec() -> Value {
+        json!({
+            "custom_id": "hello:modal",
+            "title": "Tell us",
+            "components": [{
+                "type": 18,
+                "label": "Note",
+                "component": {
+                    "type": 4,
+                    "style": 1,
+                    "custom_id": "note",
+                    "min_length": null,
+                    "max_length": null,
+                    "required": true
+                }
+            }]
+        })
+    }
+
+    fn open_modal_args(modal: Value) -> Value {
+        json!({
+            "author_id": 7,
+            "interaction_id": 42,
+            "token": "token-1",
+            "modal": modal
+        })
+    }
+
+    #[tokio::test]
+    async fn open_modal_routes_through_the_seam() {
+        let mut mock = MockHostIo::new();
+        mock.expect_open_modal()
+            .with(eq(42_u64), eq("token-1"), eq(modal_spec()))
+            .times(1)
+            .returning(|_, _, _| Ok(()));
+        let host = services(Some(Arc::new(mock)), Some(sample_config()));
+        let manager = PluginManager::new(None, RespawnPolicy::default());
+
+        let resp = handle_host_call(
+            7,
+            "hello",
+            "host.open_modal",
+            Some(&open_modal_args(modal_spec())),
+            Some(&host),
+            Some(&manager),
+        )
+        .await;
+        assert_eq!(assert_ok(resp, 7), None);
+    }
+
+    #[tokio::test]
+    async fn open_modal_binds_the_caller_as_the_route_owner() {
+        let mut mock = MockHostIo::new();
+        mock.expect_open_modal()
+            .times(1)
+            .returning(|_, _, _| Ok(()));
+        let host = services(Some(Arc::new(mock)), Some(sample_config()));
+        let manager = PluginManager::new(None, RespawnPolicy::default());
+
+        let resp = handle_host_call(
+            7,
+            "zed",
+            "host.open_modal",
+            Some(&open_modal_args(modal_spec())),
+            Some(&host),
+            Some(&manager),
+        )
+        .await;
+        assert_eq!(assert_ok(resp, 7), None);
+
+        let binding = manager.take_modal(7).await.expect("route bound");
+        assert_eq!(
+            binding.owner, "zed",
+            "the host-stamped caller owns the route"
+        );
+        assert_eq!(binding.custom_id, "hello:modal");
+    }
+
+    #[tokio::test]
+    async fn open_modal_accepts_serenity_string_ids() {
+        let mut mock = MockHostIo::new();
+        mock.expect_open_modal()
+            .with(eq(42_u64), eq("token-1"), eq(modal_spec()))
+            .times(1)
+            .returning(|_, _, _| Ok(()));
+        let host = services(Some(Arc::new(mock)), Some(sample_config()));
+        let manager = PluginManager::new(None, RespawnPolicy::default());
+
+        let resp = handle_host_call(
+            7,
+            "hello",
+            "host.open_modal",
+            Some(&json!({
+                "author_id": "7",
+                "interaction_id": "42",
+                "token": "token-1",
+                "modal": modal_spec()
+            })),
+            Some(&host),
+            Some(&manager),
+        )
+        .await;
+        assert_eq!(assert_ok(resp, 7), None);
+        assert!(manager.take_modal(7).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn open_modal_io_failure_is_host_io_error_and_binds_no_route() {
+        let mut mock = MockHostIo::new();
+        mock.expect_open_modal().times(1).returning(|_, _, _| {
+            Err(HostError::Serenity(serenity::Error::Http(
+                serenity::HttpError::InvalidWebhook,
+            )))
+        });
+        let host = services(Some(Arc::new(mock)), Some(sample_config()));
+        let manager = PluginManager::new(None, RespawnPolicy::default());
+
+        let resp = handle_host_call(
+            7,
+            "hello",
+            "host.open_modal",
+            Some(&open_modal_args(modal_spec())),
+            Some(&host),
+            Some(&manager),
+        )
+        .await;
+        assert_err(resp, 7, "HostIoError");
+        assert_eq!(
+            manager.take_modal(7).await.unwrap_err(),
+            ModalRouteError::NoBinding(7),
+            "a failed open leaves no route behind"
+        );
+    }
+
+    #[tokio::test]
+    async fn open_modal_invalid_spec_is_invalid_args_before_the_seam() {
+        // No io expectations: any seam call panics the mock, so this also
+        // proves validation happens before the open is attempted.
+        let mock = MockHostIo::new();
+        let host = services(Some(Arc::new(mock)), Some(sample_config()));
+        let manager = PluginManager::new(None, RespawnPolicy::default());
+        let bad = json!({
+            "custom_id": "hello:modal",
+            "title": "T",
+            "components": [{ "type": 99 }]
+        });
+
+        let resp = handle_host_call(
+            7,
+            "hello",
+            "host.open_modal",
+            Some(&open_modal_args(bad)),
+            Some(&host),
+            Some(&manager),
+        )
+        .await;
+        assert_err(resp, 7, "InvalidArgs");
+    }
+
+    #[tokio::test]
+    async fn open_modal_missing_author_is_invalid_args() {
+        let mock = MockHostIo::new();
+        let host = services(Some(Arc::new(mock)), Some(sample_config()));
+        let manager = PluginManager::new(None, RespawnPolicy::default());
+
+        let resp = handle_host_call(
+            7,
+            "hello",
+            "host.open_modal",
+            Some(&json!({
+                "interaction_id": 42,
+                "token": "token-1",
+                "modal": modal_spec()
+            })),
+            Some(&host),
+            Some(&manager),
+        )
+        .await;
+        assert_err(resp, 7, "InvalidArgs");
+    }
+
+    #[tokio::test]
+    async fn open_modal_without_io_is_host_unavailable() {
+        let host = services(None, Some(sample_config()));
+        let manager = PluginManager::new(None, RespawnPolicy::default());
+        let resp = handle_host_call(
+            7,
+            "hello",
+            "host.open_modal",
+            Some(&open_modal_args(modal_spec())),
+            Some(&host),
+            Some(&manager),
+        )
+        .await;
+        assert_err(resp, 7, "HostUnavailable");
+    }
+
+    #[tokio::test]
+    async fn open_modal_without_manager_is_host_unavailable() {
+        // io present so its check passes; the manager check fires.
+        let mock = MockHostIo::new();
+        let host = services(Some(Arc::new(mock)), Some(sample_config()));
+        let resp = handle_host_call(
+            7,
+            "hello",
+            "host.open_modal",
+            Some(&open_modal_args(modal_spec())),
+            Some(&host),
+            None,
+        )
+        .await;
+        assert_err(resp, 7, "HostUnavailable");
     }
 
     // ── list_plugins ───────────────────────────────────────────────────────────
@@ -1666,7 +2027,8 @@ mod tests {
             .await
             .expect("spawn stubborn fixture");
 
-        let resp = handle_host_call(7, "host.list_plugins", None, None, Some(&manager)).await;
+        let resp =
+            handle_host_call(7, "hello", "host.list_plugins", None, None, Some(&manager)).await;
         assert_eq!(assert_ok(resp, 7), Some(json!({ "plugins": ["stubborn"] })));
 
         manager.unload("stubborn", &[]).await.expect("teardown");
@@ -1674,7 +2036,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_plugins_without_manager_is_host_unavailable() {
-        let resp = handle_host_call(7, "host.list_plugins", None, None, None).await;
+        let resp = handle_host_call(7, "hello", "host.list_plugins", None, None, None).await;
         assert_err(resp, 7, "HostUnavailable");
     }
 
@@ -1706,7 +2068,7 @@ mod tests {
             voice: None,
         };
 
-        let resp = handle_host_call(7, "host.stats", None, Some(&host), None).await;
+        let resp = handle_host_call(7, "hello", "host.stats", None, Some(&host), None).await;
         assert_eq!(
             assert_ok(resp, 7),
             Some(json!({
@@ -1725,13 +2087,13 @@ mod tests {
     async fn stats_before_attachment_is_host_unavailable() {
         let host = services(None, Some(sample_config()));
 
-        let resp = handle_host_call(7, "host.stats", None, Some(&host), None).await;
+        let resp = handle_host_call(7, "hello", "host.stats", None, Some(&host), None).await;
         assert_err(resp, 7, "HostUnavailable");
     }
 
     #[tokio::test]
     async fn stats_without_services_is_host_unavailable() {
-        let resp = handle_host_call(7, "host.stats", None, None, None).await;
+        let resp = handle_host_call(7, "hello", "host.stats", None, None, None).await;
         assert_err(resp, 7, "HostUnavailable");
     }
 
@@ -1755,7 +2117,7 @@ mod tests {
             voice: None,
         };
 
-        let resp = handle_host_call(7, "host.stats", None, Some(&host), None).await;
+        let resp = handle_host_call(7, "hello", "host.stats", None, Some(&host), None).await;
         let msg = assert_err(resp, 7, "StatsError");
         assert!(msg.contains("webhook"), "msg: {msg}");
     }
@@ -1797,6 +2159,7 @@ mod tests {
 
         let resp = handle_host_call(
             7,
+            "hello",
             "host.feed.get_settings",
             Some(&json!({ "guild_id": 42 })),
             Some(&host),
@@ -1836,6 +2199,7 @@ mod tests {
 
         let resp = handle_host_call(
             7,
+            "hello",
             "host.feed.update_settings",
             Some(&json!({ "guild_id": 42, "settings": settings })),
             Some(&host),
@@ -1849,6 +2213,7 @@ mod tests {
     async fn feed_settings_without_services_is_host_unavailable() {
         let resp = handle_host_call(
             7,
+            "hello",
             "host.feed.get_settings",
             Some(&json!({ "guild_id": 42 })),
             None,
@@ -1859,6 +2224,7 @@ mod tests {
 
         let resp = handle_host_call(
             7,
+            "hello",
             "host.feed.update_settings",
             Some(&json!({ "guild_id": 42, "settings": ServerSettings::default() })),
             None,
@@ -1874,6 +2240,7 @@ mod tests {
 
         let resp = handle_host_call(
             7,
+            "hello",
             "host.feed.get_settings",
             Some(&json!({ "guild_id": 42 })),
             Some(&host),
@@ -1888,7 +2255,15 @@ mod tests {
         let mock = MockFeedSettingsSource::new();
         let host = feed_services(Arc::new(mock));
 
-        let resp = handle_host_call(7, "host.feed.get_settings", None, Some(&host), None).await;
+        let resp = handle_host_call(
+            7,
+            "hello",
+            "host.feed.get_settings",
+            None,
+            Some(&host),
+            None,
+        )
+        .await;
         assert_err(resp, 7, "InvalidArgs");
     }
 
@@ -1899,6 +2274,7 @@ mod tests {
 
         let resp = handle_host_call(
             7,
+            "hello",
             "host.feed.update_settings",
             Some(&json!({ "guild_id": 42, "settings": "not-a-snapshot" })),
             Some(&host),
@@ -1923,6 +2299,7 @@ mod tests {
 
         let resp = handle_host_call(
             7,
+            "hello",
             "host.feed.get_settings",
             Some(&json!({ "guild_id": 42 })),
             Some(&host),
@@ -1944,6 +2321,7 @@ mod tests {
 
         let resp = handle_host_call(
             7,
+            "hello",
             "host.feed.get_settings",
             Some(&json!({ "guild_id": "42" })),
             Some(&host),
@@ -1987,6 +2365,7 @@ mod tests {
 
         let resp = handle_host_call(
             7,
+            "hello",
             "host.voice.get_settings",
             Some(&json!({ "guild_id": 42 })),
             Some(&host),
@@ -2026,6 +2405,7 @@ mod tests {
 
         let resp = handle_host_call(
             7,
+            "hello",
             "host.voice.update_settings",
             Some(&json!({ "guild_id": 42, "settings": settings })),
             Some(&host),
@@ -2039,6 +2419,7 @@ mod tests {
     async fn voice_settings_without_services_is_host_unavailable() {
         let resp = handle_host_call(
             7,
+            "hello",
             "host.voice.get_settings",
             Some(&json!({ "guild_id": 42 })),
             None,
@@ -2049,6 +2430,7 @@ mod tests {
 
         let resp = handle_host_call(
             7,
+            "hello",
             "host.voice.update_settings",
             Some(&json!({ "guild_id": 42, "settings": ServerSettings::default() })),
             None,
@@ -2064,6 +2446,7 @@ mod tests {
 
         let resp = handle_host_call(
             7,
+            "hello",
             "host.voice.get_settings",
             Some(&json!({ "guild_id": 42 })),
             Some(&host),
@@ -2078,7 +2461,15 @@ mod tests {
         let mock = MockVoiceSettingsSource::new();
         let host = voice_services(Arc::new(mock));
 
-        let resp = handle_host_call(7, "host.voice.get_settings", None, Some(&host), None).await;
+        let resp = handle_host_call(
+            7,
+            "hello",
+            "host.voice.get_settings",
+            None,
+            Some(&host),
+            None,
+        )
+        .await;
         assert_err(resp, 7, "InvalidArgs");
     }
 
@@ -2089,6 +2480,7 @@ mod tests {
 
         let resp = handle_host_call(
             7,
+            "hello",
             "host.voice.update_settings",
             Some(&json!({ "guild_id": 42, "settings": "not-a-snapshot" })),
             Some(&host),
@@ -2113,6 +2505,7 @@ mod tests {
 
         let resp = handle_host_call(
             7,
+            "hello",
             "host.voice.get_settings",
             Some(&json!({ "guild_id": 42 })),
             Some(&host),
@@ -2134,6 +2527,7 @@ mod tests {
 
         let resp = handle_host_call(
             7,
+            "hello",
             "host.voice.get_settings",
             Some(&json!({ "guild_id": "42" })),
             Some(&host),
@@ -2156,6 +2550,7 @@ mod tests {
 
         let resp = handle_host_call(
             7,
+            "hello",
             "host.kv.get",
             Some(&json!({ "namespace": "settings", "key": "theme" })),
             Some(&host),
@@ -2176,6 +2571,7 @@ mod tests {
 
         let resp = handle_host_call(
             7,
+            "hello",
             "host.kv.get",
             Some(&json!({ "namespace": "settings", "key": "theme" })),
             Some(&host),
@@ -2196,6 +2592,7 @@ mod tests {
 
         let resp = handle_host_call(
             7,
+            "hello",
             "host.kv.set",
             Some(&json!({
                 "namespace": "settings",
@@ -2220,6 +2617,7 @@ mod tests {
 
         let resp = handle_host_call(
             7,
+            "hello",
             "host.kv.delete",
             Some(&json!({ "namespace": "settings", "key": "theme" })),
             Some(&host),
@@ -2244,6 +2642,7 @@ mod tests {
 
         let resp = handle_host_call(
             7,
+            "hello",
             "host.kv.get",
             Some(&json!({ "namespace": "settings", "key": "theme" })),
             Some(&host),
@@ -2254,6 +2653,7 @@ mod tests {
 
         let resp = handle_host_call(
             7,
+            "hello",
             "host.kv.get",
             Some(&json!({ "namespace": "other", "key": "theme" })),
             Some(&host),
@@ -2270,6 +2670,7 @@ mod tests {
 
         let resp = handle_host_call(
             7,
+            "hello",
             "host.kv.get",
             Some(&json!({ "namespace": "settings" })),
             Some(&host),
@@ -2286,6 +2687,7 @@ mod tests {
 
         let resp = handle_host_call(
             7,
+            "hello",
             "host.kv.set",
             Some(&json!({ "namespace": "settings", "key": "theme" })),
             Some(&host),
@@ -2301,6 +2703,7 @@ mod tests {
 
         let resp = handle_host_call(
             7,
+            "hello",
             "host.kv.get",
             Some(&json!({ "namespace": "settings", "key": "theme" })),
             Some(&host),
@@ -2322,6 +2725,7 @@ mod tests {
 
         let resp = handle_host_call(
             7,
+            "hello",
             "host.kv.get",
             Some(&json!({ "namespace": "settings", "key": "theme" })),
             Some(&host),
@@ -2346,6 +2750,7 @@ mod tests {
 
         let resp = handle_host_call(
             7,
+            "hello",
             "host.send_message",
             Some(&json!({ "channel_id": 99, "content": "hi" })),
             Some(&host),

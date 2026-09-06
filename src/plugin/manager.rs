@@ -60,6 +60,8 @@ use crate::plugin::PluginError;
 use crate::plugin::PluginEventRouter;
 use crate::plugin::RunningPlugin;
 use crate::plugin::command::register_in_guild;
+use crate::plugin::interaction::DEFAULT_VIEW_TIMEOUT;
+use crate::plugin::modal::ModalRouter;
 
 /// Per-plugin health-check configuration.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -241,6 +243,10 @@ pub struct PluginManager {
     event_router: Option<Arc<PluginEventRouter>>,
     /// Respawn backoff/crash-loop policy.
     respawn_policy: RespawnPolicy,
+    /// Author-keyed routes for plugin-opened modals: a `host.open_modal`
+    /// binds the author to the calling session, and the author's later
+    /// submission rides the route back to that session.
+    pub(crate) modals: ModalRouter,
 }
 
 impl PluginManager {
@@ -255,6 +261,7 @@ impl PluginManager {
             event_bus: None,
             event_router: None,
             respawn_policy,
+            modals: ModalRouter::new(DEFAULT_VIEW_TIMEOUT),
         }
     }
 
@@ -432,6 +439,11 @@ impl PluginManager {
             }
         };
         let entry = entry?;
+        // The session is dying: a later author submission must not route to
+        // a process that never opened the modal (a respawned plugin has no
+        // in-memory correlation state). A respawned plugin rebinds on its
+        // next `host.open_modal`.
+        self.drop_modal_routes(name).await;
         entry.stop.store(true, Ordering::Relaxed);
         if let Some(http) = &self.http {
             for guild_id in guild_ids {

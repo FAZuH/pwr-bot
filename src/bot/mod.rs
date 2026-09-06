@@ -34,7 +34,9 @@ use poise::Framework;
 use poise::FrameworkOptions;
 use poise::serenity_prelude::*;
 use pwr_plugin_protocol::Manifest;
+use pwr_plugin_protocol::ViewSpec;
 use serde_json::Value;
+use serde_json::json;
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
 
@@ -727,8 +729,16 @@ impl BotEventHandler {
         .await;
     }
 
-    /// Routes a modal submit like a component interaction: acknowledges the
-    /// submit, then hands the interaction to the open view session for the
+    /// Routes a modal submit: a submission of a plugin-opened modal rides
+    /// the author route to the session that opened it, and that session's
+    /// answer renders as the submission's response — the interaction stays
+    /// unanswered until then, so the answer is the first response (the
+    /// plugin-session analogue of the host's modal flow, ADR-0007). A
+    /// consumed route bypasses the message-keyed route entirely: one
+    /// submission, one session.
+    ///
+    /// Everything else routes like a component interaction: acknowledge the
+    /// submit, then hand the interaction to the open view session for the
     /// message the modal was attached to.
     ///
     /// Modal submissions on Host-owned messages are skipped — the poise
@@ -740,6 +750,26 @@ impl BotEventHandler {
         if attached_message.is_some_and(|message| self.data.translate_layer.host_owned(message.id))
         {
             return;
+        }
+
+        // Plugin-opened modal: deliver first, so the route consumption
+        // decides who answers. A typed failure (no route, expired route,
+        // dead owner) falls through to the message-keyed route below.
+        let raw = serde_json::to_value(interaction).unwrap_or_default();
+        match self
+            .data
+            .plugin_manager
+            .deliver_modal_submission(interaction.user.id.get(), raw)
+            .await
+        {
+            Ok(spec) => {
+                self.render_modal_submission_response(interaction, &spec)
+                    .await;
+                return;
+            }
+            Err(error) => {
+                debug!("modal submit not owned by a plugin session: {error}");
+            }
         }
 
         if let Err(e) = interaction
@@ -765,6 +795,41 @@ impl BotEventHandler {
             "modal submit",
         )
         .await;
+    }
+
+    /// Renders a plugin's answer to its own modal submission as the
+    /// submission's response: an update-message carrying the answer's
+    /// create envelope through the edit-transport strip (the same
+    /// projection every edit sends). A submission opened from a component
+    /// click replaces that message; one opened from a command answers as a
+    /// fresh message, honoring the spec's ephemerality.
+    async fn render_modal_submission_response(
+        &self,
+        interaction: &ModalInteraction,
+        spec: &ViewSpec,
+    ) {
+        let kind = if interaction.message.is_some() { 7 } else { 4 };
+        let mut data = edit_body_for_transport(&spec.data);
+        if kind == 4 && spec.ephemeral {
+            let flags = data
+                .get("flags")
+                .and_then(Value::as_u64)
+                .unwrap_or(u64::from(MessageFlags::IS_COMPONENTS_V2.bits()));
+            data["flags"] = Value::from(flags | u64::from(MessageFlags::EPHEMERAL.bits()));
+        }
+        let body = json!({ "type": kind, "data": data });
+        if let Err(e) = self
+            .http
+            .create_interaction_response(
+                interaction.id,
+                interaction.token.as_str(),
+                &body,
+                Vec::new(),
+            )
+            .await
+        {
+            warn!("failed to answer modal submit {}: {e}", interaction.id);
+        }
     }
 }
 

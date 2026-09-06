@@ -16,6 +16,12 @@ pub const PLUGIN_NAME: &str = "hello";
 /// back in `view.interact` args to trigger the click path.
 pub const BUTTON_CUSTOM_ID: &str = "hello:click";
 
+/// Host→plugin op carrying a modal submission to the session that opened the
+/// modal: a [`Msg::Call`] whose args are the raw Discord modal interaction
+/// with the modal's `custom_id` hoisted to the top level, answered by the
+/// plugin with a correlated [`Msg::Resp`] (the `view.interact` shape).
+pub const MODAL_SUBMIT_OP: &str = "view.modal_submit";
+
 /// A message on the plugin wire, serialized as one compact JSON object per
 /// line. The `t` discriminator names the variant: `hello`, `call`, `resp`,
 /// `event`, `ping`, `pong`, `bye`.
@@ -212,6 +218,36 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&msg).unwrap(),
             r#"{"t":"call","id":3,"op":"host.fetch_user"}"#
+        );
+    }
+
+    #[test]
+    fn modal_submit_call_matches_wire_format() {
+        let msg = Msg::Call {
+            id: 9,
+            op: MODAL_SUBMIT_OP.into(),
+            cmd: None,
+            args: Some(json!({
+                "id": "1234567890",
+                "token": "submit-token",
+                "custom_id": "hello:modal",
+                "data": {
+                    "custom_id": "hello:modal",
+                    "components": [
+                        {"type": 18, "label": "Note", "component": {"type": 4, "custom_id": "note", "value": "hi"}}
+                    ],
+                },
+            })),
+        };
+        assert_eq!(
+            serde_json::to_string(&msg).unwrap(),
+            concat!(
+                r#"{"t":"call","id":9,"op":"view.modal_submit","args":{"custom_id":"hello:modal","#,
+                r#""data":{"components":[{"component":{"custom_id":"note","type":4,"value":"hi"},"#,
+                r#""label":"Note","type":18}],"custom_id":"hello:modal"},"#,
+                r#""id":"1234567890","token":"submit-token"}}"#
+            ),
+            "a modal submission rides a host→plugin call, not a new wire variant"
         );
     }
 

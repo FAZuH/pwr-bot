@@ -30,6 +30,16 @@ pub enum HostCap {
     KvDelete,
     /// Open another plugin's view (cross-plugin navigation).
     OpenView,
+    /// Open a modal in response to an interaction and receive the
+    /// author-keyed submission on the owning session as a correlated
+    /// `view.modal_submit` call. The open rides the interaction's
+    /// id+token pair, so the interaction must be unanswered — the open IS
+    /// the response (ADR-0007). Component clicks are acknowledged by the
+    /// host before the plugin sees them, so a modal opens from an
+    /// interaction the host has left unanswered (e.g. a submission of a
+    /// previously opened modal) until the click path learns to skip the
+    /// ack for modal-triggering actions.
+    OpenModal,
     /// Fetch host configuration (db url, data path, poll interval).
     GetConfig,
     /// List the names of all running plugins.
@@ -63,6 +73,7 @@ pub const ALL_CAPS: &[HostCap] = &[
     HostCap::KvSet,
     HostCap::KvDelete,
     HostCap::OpenView,
+    HostCap::OpenModal,
     HostCap::GetConfig,
     HostCap::ListPlugins,
     HostCap::Stats,
@@ -86,6 +97,7 @@ impl HostCap {
             HostCap::KvSet => "host.kv.set",
             HostCap::KvDelete => "host.kv.delete",
             HostCap::OpenView => "host.open_view",
+            HostCap::OpenModal => "host.open_modal",
             HostCap::GetConfig => "host.get_config",
             HostCap::ListPlugins => "host.list_plugins",
             HostCap::Stats => "host.stats",
@@ -162,7 +174,7 @@ mod tests {
 
     #[test]
     fn all_caps_is_exactly_the_v1_surface() {
-        assert_eq!(ALL_CAPS.len(), 15);
+        assert_eq!(ALL_CAPS.len(), 16);
         let mut seen = std::collections::HashSet::new();
         for cap in ALL_CAPS {
             assert!(seen.insert(*cap), "duplicate op in ALL_CAPS");

@@ -634,3 +634,172 @@ async fn host_kvdel_invoke_serves_kv_delete_through_the_seam() {
         other => panic!("expected ok resp with no data, got {other:?}"),
     }
 }
+
+/// The fixture's `host.openmodal` invoke issues a plugin→host
+/// `host.open_modal` call through the real stdio wire; the host opens the
+/// modal through the mocked seam and binds the author route to the calling
+/// session. A later submission from that author rides the route back to the
+/// fixture as a `view.modal_submit` call, and the fixture's echo view is the
+/// delivered spec. The route is one-shot: the second submission finds none.
+#[tokio::test]
+async fn open_modal_round_trips_the_submission_to_the_owning_session() {
+    let modal = json!({
+        "custom_id": "hello:modal",
+        "title": "Tell us",
+        "components": [{
+            "type": 18,
+            "label": "Note",
+            "component": {
+                "type": 4,
+                "style": 1,
+                "custom_id": "note",
+                "min_length": null,
+                "max_length": null,
+                "required": true
+            }
+        }]
+    });
+    let mut mock = MockHostIo::new();
+    mock.expect_open_modal()
+        .with(
+            mockall::predicate::eq(42_u64),
+            mockall::predicate::eq("token-1"),
+            mockall::predicate::eq(modal.clone()),
+        )
+        .times(1)
+        .returning(|_, _, _| Ok(()));
+    let manager = Arc::new(
+        PluginManager::new(None, RespawnPolicy::default())
+            .with_host_services(host_services(Arc::new(mock), None)),
+    );
+    let plugin = manager
+        .spawn("hello", probe_binary("hello"), None, &[], &[])
+        .await
+        .expect("spawn fixture");
+
+    let resp = plugin
+        .call(
+            "invoke",
+            Some("host.openmodal"),
+            Some(json!({
+                "author_id": 7,
+                "interaction_id": 42,
+                "token": "token-1",
+                "modal": modal
+            })),
+        )
+        .await
+        .expect("host.openmodal invoke answered");
+    match resp {
+        Msg::Resp {
+            id,
+            ok: true,
+            data: None,
+            error: None,
+        } => assert_eq!(id, 0),
+        other => panic!("expected ok resp with no data, got {other:?}"),
+    }
+
+    // The author submits: the raw ModalInteraction JSON rides the route to
+    // the fixture, which echoes the `note` input's value as its view.
+    let submission = json!({
+        "id": "999",
+        "token": "submit-token",
+        "application_id": "1",
+        "type": 5,
+        "data": {
+            "custom_id": "hello:modal",
+            "components": [{
+                "type": 18,
+                "label": "Note",
+                "component": {
+                    "type": 4,
+                    "style": 1,
+                    "custom_id": "note",
+                    "min_length": null,
+                    "max_length": null,
+                    "required": true,
+                    "value": "hi there"
+                }
+            }]
+        }
+    });
+    let spec = manager
+        .deliver_modal_submission(7, submission)
+        .await
+        .expect("submission delivered to the owning session");
+    assert_eq!(
+        spec.data["components"][0]["content"],
+        serde_json::json!("Modal submitted! note=hi there"),
+        "the fixture's echo view is the delivered spec"
+    );
+
+    // One-shot: the consumed route finds no binding for a second submission.
+    let error = manager
+        .deliver_modal_submission(7, json!({}))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(
+            error,
+            pwr_bot::plugin::ModalDeliveryError::Route(
+                pwr_bot::plugin::ModalRouteError::NoBinding(7)
+            )
+        ),
+        "second submission must not deliver: {error}"
+    );
+
+    manager.unload("hello", &[]).await.expect("unload fixture");
+}
+
+/// Unloading the owner drops its modal routes: a submission after the
+/// unload finds no binding and falls back to the message-keyed route
+/// instead of hanging or delivering to a dead session.
+#[tokio::test]
+async fn unloading_the_owner_drops_its_modal_routes() {
+    let mut mock = MockHostIo::new();
+    mock.expect_open_modal()
+        .times(1)
+        .returning(|_, _, _| Ok(()));
+    let manager = Arc::new(
+        PluginManager::new(None, RespawnPolicy::default())
+            .with_host_services(host_services(Arc::new(mock), None)),
+    );
+    let plugin = manager
+        .spawn("hello", probe_binary("hello"), None, &[], &[])
+        .await
+        .expect("spawn fixture");
+    plugin
+        .call(
+            "invoke",
+            Some("host.openmodal"),
+            Some(json!({
+                "author_id": 7,
+                "interaction_id": 42,
+                "token": "token-1",
+                "modal": {
+                    "custom_id": "hello:modal",
+                    "title": "Tell us",
+                    "components": []
+                }
+            })),
+        )
+        .await
+        .expect("host.openmodal invoke answered");
+
+    manager.unload("hello", &[]).await.expect("unload fixture");
+
+    let error = manager
+        .deliver_modal_submission(7, json!({}))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(
+            error,
+            pwr_bot::plugin::ModalDeliveryError::Route(
+                pwr_bot::plugin::ModalRouteError::NoBinding(7)
+            )
+        ),
+        "the route must die with the session: {error}"
+    );
+}

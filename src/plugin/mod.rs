@@ -32,6 +32,7 @@ pub mod host;
 pub mod install;
 pub mod interaction;
 pub mod manager;
+pub mod modal;
 pub mod view;
 
 use std::collections::HashMap;
@@ -76,6 +77,10 @@ pub use manager::HealthConfig;
 pub use manager::PluginManager;
 pub use manager::RespawnOutcome;
 pub use manager::RespawnPolicy;
+pub use modal::ModalBinding;
+pub use modal::ModalDeliveryError;
+pub use modal::ModalRouteError;
+pub use modal::ModalRouter;
 use pwr_plugin_protocol::ALL_CAPS;
 use pwr_plugin_protocol::API_VERSION;
 use pwr_plugin_protocol::CallIdSeq;
@@ -733,7 +738,7 @@ async fn dispatch(
             }
         }
         Msg::Call { id, op, args, .. } => {
-            let resp = host::handle_host_call(*id, op, args.as_ref(), host, manager).await;
+            let resp = host::handle_host_call(*id, name, op, args.as_ref(), host, manager).await;
             let mut guard = stdin.lock().await;
             let Some(mut pipe) = guard.take() else {
                 warn!("plugin {name} call `{op}` arrived after stdin closed");
@@ -841,7 +846,7 @@ mod tests {
         };
         assert_eq!(v, API_VERSION);
         assert_eq!(name, "host");
-        assert_eq!(caps.len(), 15, "every v1 host cap must be announced");
+        assert_eq!(caps.len(), 16, "every v1 host cap must be announced");
         assert!(caps.iter().any(|c| c == "host.defer"));
         assert!(caps.iter().any(|c| c == "host.kv.get"));
         assert!(caps.iter().any(|c| c == "host.get_config"));
@@ -850,6 +855,7 @@ mod tests {
         assert!(caps.iter().any(|c| c == "host.feed.get_settings"));
         assert!(caps.iter().any(|c| c == "host.voice.get_settings"));
         assert!(caps.iter().any(|c| c == "host.voice.update_settings"));
+        assert!(caps.iter().any(|c| c == "host.open_modal"));
     }
 
     // ── pong accounting (the health checker's liveness signal) ──────────────
