@@ -49,15 +49,19 @@ use pwr_plugin_protocol::Manifest;
 use pwr_plugin_protocol::Msg;
 use pwr_plugin_protocol::ServerSettings;
 use pwr_plugin_protocol::WireError;
+use pwr_plugin_support::HubPage;
+use pwr_plugin_support::Panel;
+use pwr_plugin_support::id_as_u64;
+use pwr_plugin_support::issue_host_call;
+use pwr_plugin_support::open_hub_args;
+use pwr_plugin_support::reply_err;
+use pwr_plugin_support::write_msg;
 use serde_json::Value;
 use serde_json::json;
 
 /// The plugin's name: the hello `name`, the hub's `host.open_view` target,
 /// and the handle the host keeps it under.
 const PLUGIN_NAME: &str = "feed-settings";
-
-/// The settings hub's plugin name, the `host.open_view` target for Back.
-const HUB_PLUGIN: &str = "settings";
 
 /// Custom ids for the panel's interactive components.
 const CUSTOM_ID_TOGGLE: &str = "feeds:toggle";
@@ -158,115 +162,26 @@ fn persist(model: &Model) -> Vec<Effect> {
     vec![Effect::Persist(model.settings.clone())]
 }
 
-// ── session state ─────────────────────────────────────────────────────────────
+// ── shared plumbing (crates/plugin/pwr-plugin-support) ────────────────────────
 
-/// One view session's state: the guild the panel edits plus the model. It
-/// rides the envelope's opaque `view` payload, which the host stores per
-/// message and echoes back on every interaction and on `view.timeout`.
-#[derive(Debug, Clone, PartialEq)]
-struct SessionState {
-    guild_id: u64,
-    model: Model,
-}
+/// How this panel plugs into the support crate's generic plumbing: the model
+/// a session carries, and the service RPC pair that loads and persists it.
+impl Panel for Model {
+    const GET_SETTINGS_OP: &'static str = "host.feed.get_settings";
+    const UPDATE_SETTINGS_OP: &'static str = "host.feed.update_settings";
 
-impl SessionState {
-    fn new(guild_id: u64, settings: ServerSettings) -> Self {
-        Self {
-            guild_id,
-            model: Model::new(settings),
-        }
+    fn from_settings(settings: ServerSettings) -> Self {
+        Model::new(settings)
     }
 
-    fn to_value(&self) -> Value {
-        json!({
-            "guild_id": self.guild_id,
-            "settings": self.model.settings,
-        })
-    }
-
-    /// Parses a host-echoed `view` value; `None` on a missing or malformed
-    /// payload.
-    fn from_value(value: Option<&Value>) -> Option<Self> {
-        let value = value?;
-        let guild_id = value.get("guild_id").and_then(id_as_u64)?;
-        let settings =
-            serde_json::from_value(value.get("settings").cloned().unwrap_or(Value::Null)).ok()?;
-        Some(Self {
-            guild_id,
-            model: Model::new(settings),
-        })
+    fn settings(&self) -> &ServerSettings {
+        &self.settings
     }
 }
 
-// ── pending host calls ─────────────────────────────────────────────────────────
-
-/// A plugin→host call in flight: the invoke id the reply must answer (when
-/// an interaction started the chain), and what to do once the host's resp
-/// arrives.
-#[derive(Debug, Clone, PartialEq)]
-enum Pending {
-    /// The `host.feed.get_settings` issued to load the model before the
-    /// first render.
-    LoadSettings { invoke_id: u64, guild_id: u64 },
-    /// The `host.feed.update_settings` a terminal exit issued before
-    /// returning to the hub. The channel the source interaction came from
-    /// and the hub page to open follow the persist.
-    Persist {
-        invoke_id: u64,
-        session: SessionState,
-        channel_id: Option<u64>,
-        hub_page: HubPage,
-    },
-    /// The `host.open_view` a completed persist issued for the hub.
-    OpenHub {
-        invoke_id: u64,
-        session: SessionState,
-    },
-    /// The `host.feed.update_settings` an expiry issued: nothing to answer,
-    /// the resp is only logged.
-    Expire,
-}
-
-impl Pending {
-    /// The host op this pending kind belongs to.
-    fn op(&self) -> &'static str {
-        match self {
-            Pending::LoadSettings { .. } => "host.feed.get_settings",
-            Pending::Persist { .. } => "host.feed.update_settings",
-            Pending::OpenHub { .. } => "host.open_view",
-            Pending::Expire => "host.feed.update_settings",
-        }
-    }
-}
-
-/// A plugin→host call: the pending kind its resp will resolve, and the
-/// call's args.
-struct HostCall {
-    pending: Pending,
-    args: Value,
-}
-
-impl HostCall {
-    fn new(pending: Pending, args: Value) -> Self {
-        Self { pending, args }
-    }
-}
-
-/// Which hub page the panel's About exit opens.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum HubPage {
-    Hub,
-    About,
-}
-
-impl HubPage {
-    fn name(self) -> &'static str {
-        match self {
-            HubPage::Hub => "hub",
-            HubPage::About => "about",
-        }
-    }
-}
+type SessionState = pwr_plugin_support::SessionState<Model>;
+type Pending = pwr_plugin_support::Pending<Model>;
+type HostCall = pwr_plugin_support::HostCall<Model>;
 
 // ── view rendering ────────────────────────────────────────────────────────────
 
@@ -428,14 +343,6 @@ fn manifest() -> Manifest {
     }
 }
 
-/// Reads a Discord id from a wire value: a number, or the string form
-/// serenity's ids serialize to.
-fn id_as_u64(value: &Value) -> Option<u64> {
-    value
-        .as_u64()
-        .or_else(|| value.as_str().and_then(|s| s.parse().ok()))
-}
-
 /// The `host.feed.get_settings` call args.
 fn get_settings_args(guild_id: u64) -> Value {
     json!({ "guild_id": guild_id })
@@ -444,64 +351,6 @@ fn get_settings_args(guild_id: u64) -> Value {
 /// The `host.feed.update_settings` call args persisting a snapshot.
 fn update_settings_args(guild_id: u64, settings: &ServerSettings) -> Value {
     json!({ "guild_id": guild_id, "settings": settings })
-}
-
-/// The `host.open_view` call args opening the settings hub on the given
-/// page: the panel's Back lands where the monolith's
-/// `Navigation::SettingsMain` did, and its About where
-/// `Navigation::SettingsAbout` did.
-fn open_hub_args(channel_id: u64, guild_id: u64, page: HubPage) -> Value {
-    json!({
-        "channel_id": channel_id,
-        "plugin": HUB_PLUGIN,
-        "command": HUB_PLUGIN,
-        "args": { "guild_id": guild_id, "page": page.name() },
-    })
-}
-
-/// Serializes `msg` to one JSON line, writes it, then flushes.
-fn write_msg(out: &mut impl Write, msg: &Msg) -> std::io::Result<()> {
-    let line = serde_json::to_string(msg).expect("serialize protocol message");
-    writeln!(out, "{line}")?;
-    out.flush()
-}
-
-/// Writes a `resp_err` answering `invoke_id` with the given error kind and
-/// message; returns whether the write succeeded.
-fn reply_err(out: &mut impl Write, invoke_id: u64, kind: &str, msg: impl Into<String>) -> bool {
-    let resp = Msg::resp_err(
-        invoke_id,
-        WireError {
-            kind: kind.into(),
-            msg: msg.into(),
-        },
-    );
-    write_msg(out, &resp).is_ok()
-}
-
-/// Issues a plugin→host call: assigns the next call id, records the pending
-/// kind its resp will resolve, and writes the `Msg::Call` line. Returns
-/// whether the write succeeded.
-fn issue_host_call(
-    out: &mut impl Write,
-    pending: &mut HashMap<u64, Pending>,
-    next_call_id: &mut u64,
-    call: HostCall,
-) -> bool {
-    *next_call_id += 1;
-    let HostCall {
-        pending: pending_kind,
-        args,
-    } = call;
-    let op = pending_kind.op();
-    pending.insert(*next_call_id, pending_kind);
-    let call_msg = Msg::Call {
-        id: *next_call_id,
-        op: op.into(),
-        cmd: None,
-        args: Some(args),
-    };
-    write_msg(out, &call_msg).is_ok()
 }
 
 /// Parses a `host.feed.get_settings` resp payload into a snapshot.
@@ -998,14 +847,6 @@ mod tests {
     // ── protocol args ───────────────────────────────────────────────────────
 
     #[test]
-    fn id_as_u64_accepts_numbers_and_strings() {
-        assert_eq!(id_as_u64(&json!(42)), Some(42));
-        assert_eq!(id_as_u64(&json!("42")), Some(42));
-        assert_eq!(id_as_u64(&json!("nope")), None);
-        assert_eq!(id_as_u64(&json!(null)), None);
-    }
-
-    #[test]
     fn get_and_update_args_carry_the_guild_and_snapshot() {
         assert_eq!(get_settings_args(7), json!({ "guild_id": 7 }));
         let settings = model().settings;
@@ -1014,19 +855,6 @@ mod tests {
         assert_eq!(
             serde_json::from_value::<ServerSettings>(args["settings"].clone()).unwrap(),
             settings
-        );
-    }
-
-    #[test]
-    fn open_hub_args_carry_channel_guild_and_page() {
-        assert_eq!(
-            open_hub_args(5, 42, HubPage::About),
-            json!({
-                "channel_id": 5,
-                "plugin": "settings",
-                "command": "settings",
-                "args": { "guild_id": 42, "page": "about" },
-            })
         );
     }
 

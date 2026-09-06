@@ -1,0 +1,12 @@
+[package]
+name = "pwr-plugin-support"
+version = "0.1.0"
+edition = "2024"
+authors = ["FAZuH <mail@fazuh.com>"]
+description = "Shared plugin-side plumbing for pwr-bot panel plugins: session state, host-call bookkeeping, wire writing, and hub navigation"
+license = "MIT"
+repository = "https://github.com/FAZuH/pwr-bot"
+
+[dependencies]
+pwr-plugin-protocol = { path = "../../pwr-plugin-protocol" }
+serde_json = "1.0.149"

@@ -1101,7 +1101,9 @@ fn stats_err(err: StatsError) -> WireError {
 /// Runs one feed-settings op against the seam and turns the outcome into a
 /// wire value: `Ok(data)` for a successful `resp_ok` (the settings snapshot
 /// for a read, `None` for a write), `Err(wire)` for a failed `resp_err`
-/// (`InvalidArgs` or `FeedSettingsError`).
+/// (`InvalidArgs` or `FeedSettingsError`). A cap outside the feed pair is a
+/// dispatch bug, so it answers `UnknownOp` rather than panicking the dispatch
+/// task.
 async fn feed_call(
     cap: HostCap,
     args: Option<&Value>,
@@ -1128,7 +1130,10 @@ async fn feed_call(
                 .map_err(feed_settings_err)?;
             Ok(None)
         }
-        _ => unreachable!("feed_call only receives feed-settings ops"),
+        other => Err(WireError {
+            kind: "UnknownOp".into(),
+            msg: format!("op `{}` is not a feed-settings op", other.as_str()),
+        }),
     }
 }
 
@@ -1142,12 +1147,16 @@ fn id_as_u64(value: &Value) -> Option<u64> {
 }
 
 /// Parses the `guild_id` (u64) shared by the `host.feed.*` and
-/// `host.voice.*` ops. Accepts a numeric id or serenity's string form.
+/// `host.voice.*` ops. Accepts a numeric id or serenity's string form. A
+/// present id that is neither is a wrong type, not a missing one.
 fn parse_guild_id(args: Option<&Value>) -> Result<u64, WireError> {
-    args.and_then(Value::as_object)
+    let Some(value) = args
+        .and_then(Value::as_object)
         .and_then(|obj| obj.get("guild_id"))
-        .and_then(id_as_u64)
-        .ok_or_else(|| invalid_args("missing `guild_id` (u64)"))
+    else {
+        return Err(invalid_args("missing `guild_id` (u64)"));
+    };
+    id_as_u64(value).ok_or_else(|| invalid_args("`guild_id` must be a u64 or its string form"))
 }
 
 /// Parses the `host.feed.update_settings` and `host.voice.update_settings`

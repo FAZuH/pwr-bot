@@ -1795,6 +1795,7 @@ version = "0.1.0"
 dependencies = [
  "pwr-ext",
  "pwr-plugin-protocol",
+ "pwr-plugin-support",
  "pwr-poise-components",
  "serde_json",
 ]
@@ -4337,6 +4338,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "pwr-plugin-support"
+version = "0.1.0"
+dependencies = [
+ "pwr-plugin-protocol",
+ "serde_json",
+]
+
+[[package]]
 name = "pwr-poise-components"
 version = "0.1.0"
 dependencies = [
@@ -6762,6 +6771,7 @@ version = "0.1.0"
 dependencies = [
  "pwr-ext",
  "pwr-plugin-protocol",
+ "pwr-plugin-support",
  "pwr-poise-components",
  "serde_json",
 ]
