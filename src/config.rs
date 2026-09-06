@@ -24,6 +24,7 @@ pub struct Config {
     pub plugins_dir: PathBuf,
     pub settings_plugin_path: PathBuf,
     pub feed_settings_plugin_path: PathBuf,
+    pub voice_settings_plugin_path: PathBuf,
     /// Core plugins the host spawns at startup, in order.
     pub core_plugins: Vec<CorePluginSpec>,
     pub features: Features,
@@ -113,6 +114,15 @@ impl Config {
                     .map(|dir| dir.join("feed-settings"))
                     .unwrap_or_else(|| self.data_path.join("feed-settings"))
             });
+        self.voice_settings_plugin_path = std::env::var("VOICE_SETTINGS_PLUGIN_PATH")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| {
+                std::env::current_exe()
+                    .ok()
+                    .and_then(|exe| exe.parent().map(|p| p.to_path_buf()))
+                    .map(|dir| dir.join("voice-settings"))
+                    .unwrap_or_else(|| self.data_path.join("voice-settings"))
+            });
         self.core_plugins = vec![
             CorePluginSpec {
                 name: "settings".to_string(),
@@ -121,6 +131,10 @@ impl Config {
             CorePluginSpec {
                 name: "feed-settings".to_string(),
                 path: self.feed_settings_plugin_path.clone(),
+            },
+            CorePluginSpec {
+                name: "voice-settings".to_string(),
+                path: self.voice_settings_plugin_path.clone(),
             },
         ];
 

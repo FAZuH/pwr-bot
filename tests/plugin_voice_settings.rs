@@ -1,19 +1,19 @@
-//! End-to-end tests for the feed settings panel plugin (#148, the
-//! panel-migration tracer bullet): the hub and the panel plugin are spawned
+//! End-to-end tests for the voice settings panel plugin (#149, the
+//! panel-migration's second panel): the hub and the panel plugin are spawned
 //! over the real stdio wire — no database, no Discord — through one plugin
-//! manager, like the two core plugins the host spawns at startup. The feed
+//! manager, like the two core plugins the host spawns at startup. The voice
 //! settings seam is served by a mockall mock of the host's
-//! [`FeedSettingsSource`] and the Discord I/O seam by a mock [`HostIo`].
+//! [`VoiceSettingsSource`] and the Discord I/O seam by a mock [`HostIo`].
 //!
 //! Assertions mirror the documented contract:
-//! - the hub's Feeds button (`settings:open:feed-settings`) opens the panel
+//! - the hub's Voice button (`settings:open:voice-settings`) opens the panel
 //!   plugin through `host.open_view`, forwarding the source `guild_id`;
 //! - the panel's invoke loads the guild's snapshot through
-//!   `host.feed.get_settings` and renders the monolith `/feed settings`
+//!   `host.voice.get_settings` and renders the monolith `/vc settings`
 //!   layout as Components V2;
 //! - a plain edit (toggle) re-renders without a host call;
 //! - Back and About persist the whole snapshot exactly once through
-//!   `host.feed.update_settings`, then re-open the hub (About asks for the
+//!   `host.voice.update_settings`, then re-open the hub (About asks for the
 //!   hub's About page by name through the invoke args);
 //! - the engine's `view.timeout` event persists the last snapshot once,
 //!   answering nothing;
@@ -26,8 +26,6 @@ use std::sync::Mutex;
 
 use async_trait::async_trait;
 use mockall::predicate::eq;
-use pwr_bot::plugin::FeedSettingsError;
-use pwr_bot::plugin::FeedSettingsSource;
 use pwr_bot::plugin::HostConfig;
 use pwr_bot::plugin::HostIo;
 use pwr_bot::plugin::HostServices;
@@ -38,9 +36,10 @@ use pwr_bot::plugin::PluginManager;
 use pwr_bot::plugin::RespawnPolicy;
 use pwr_bot::plugin::RunningPlugin;
 use pwr_bot::plugin::StatsHandle;
-use pwr_bot::plugin::host::MockFeedSettingsSource;
+use pwr_bot::plugin::VoiceSettingsError;
+use pwr_bot::plugin::VoiceSettingsSource;
 use pwr_bot::plugin::host::MockHostIo;
-use pwr_bot::service::error::ServiceError;
+use pwr_bot::plugin::host::MockVoiceSettingsSource;
 use pwr_plugin_protocol::Msg;
 use pwr_plugin_protocol::ServerSettings;
 use pwr_poise_components::IS_COMPONENTS_V2;
@@ -53,15 +52,12 @@ use probe::probe_binary;
 /// The guild the panels key their settings by.
 const GUILD_ID: u64 = 42;
 
-/// A settings snapshot with every feeds field set, so wire round trips are
+/// A settings snapshot with the voice section set, so wire round trips are
 /// observable end to end.
 fn sample_settings() -> ServerSettings {
     ServerSettings {
-        feeds: pwr_plugin_protocol::FeedsSettings {
+        voice: pwr_plugin_protocol::VoiceSettings {
             enabled: Some(true),
-            channel_id: Some("123456789".into()),
-            subscribe_role_id: Some("987654321".into()),
-            unsubscribe_role_id: None,
         },
         ..ServerSettings::default()
     }
@@ -103,11 +99,11 @@ impl KvStore for SharedKv {
 
 /// The services both core plugins share, like the host's one
 /// [`HostServices`] arc: the io seam posts placeholders and edits payloads,
-/// the engine tracks sessions, the kv store backs the hub, and the feed
+/// the engine tracks sessions, the kv store backs the hub, and the voice
 /// seam serves the panel's settings RPCs.
 fn shared_services(
     io: Arc<dyn HostIo>,
-    feeds: Arc<dyn FeedSettingsSource>,
+    voice: Arc<dyn VoiceSettingsSource>,
     engine: InteractionEngine<RunningPlugin>,
 ) -> Arc<HostServices> {
     Arc::new(HostServices {
@@ -120,8 +116,8 @@ fn shared_services(
         kv: Some(Arc::new(SharedKv::default())),
         engine: Some(Arc::new(engine)),
         stats: Arc::new(StatsHandle::default()),
-        feeds: Some(feeds),
-        voice: None,
+        feeds: None,
+        voice: Some(voice),
     })
 }
 
@@ -138,14 +134,14 @@ async fn spawn_core_plugins(
         .expect("spawn settings hub");
     let panel = manager
         .spawn(
-            "feed-settings",
-            probe_binary("feed-settings"),
+            "voice-settings",
+            probe_binary("voice-settings"),
             None,
             &[],
             &[],
         )
         .await
-        .expect("spawn feed-settings panel");
+        .expect("spawn voice-settings panel");
     (manager, hub, panel)
 }
 
@@ -168,6 +164,16 @@ fn assert_envelope(resp: &Msg, expected_id: u64) -> Value {
     }
 }
 
+/// The raw `data` of an ok resp, for content assertions.
+fn resp_data(resp: &Msg) -> Value {
+    match resp {
+        Msg::Resp {
+            data: Some(data), ..
+        } => data.clone(),
+        _ => panic!("expected ok envelope, got {resp:?}"),
+    }
+}
+
 /// The panel's status text display.
 fn panel_status(data: &Value) -> &str {
     data["data"]["components"][0]["components"][0]["content"]
@@ -175,18 +181,18 @@ fn panel_status(data: &Value) -> &str {
         .expect("status text display")
 }
 
-/// The hub's Feeds click, proven end to end: `host.open_view` resolves the
+/// The hub's Voice click, proven end to end: `host.open_view` resolves the
 /// panel through the manager, forwards the source `guild_id`, and the
-/// panel's invoke loads the guild's snapshot through the feed seam before
+/// panel's invoke loads the guild's snapshot through the voice seam before
 /// its first render — the io mock pins the placeholder post and the final
 /// edit of the panel onto the produced message.
 #[tokio::test]
-async fn hub_feeds_click_opens_the_panel_with_the_guild_settings() {
+async fn hub_voice_click_opens_the_panel_with_the_guild_settings() {
     let channel_id = 555_000_111_u64;
     let produced = 777_000_222_u64;
 
-    let mut feeds = MockFeedSettingsSource::new();
-    feeds
+    let mut voice = MockVoiceSettingsSource::new();
+    voice
         .expect_get_settings()
         .with(eq(GUILD_ID))
         .times(1)
@@ -203,7 +209,7 @@ async fn hub_feeds_click_opens_the_panel_with_the_guild_settings() {
             eq(produced),
             mockall::predicate::function(|data: &Value| {
                 data["components"][0]["components"][0]["content"]
-                    == json!("-# **Settings > Feeds**\n## Feed Subscription Settings\n\n> 🛈  Feed notifications are currently **active**. Notifications will be sent to <#123456789>")
+                    == json!("-# **Settings > Voice**\n## Voice Tracking Settings\n\n> 🛈  Voice tracking is **active**.")
             }),
         )
         .times(1)
@@ -211,7 +217,7 @@ async fn hub_feeds_click_opens_the_panel_with_the_guild_settings() {
 
     let (_manager, hub, _panel) = spawn_core_plugins(shared_services(
         Arc::new(io),
-        Arc::new(feeds),
+        Arc::new(voice),
         InteractionEngine::new(),
     ))
     .await;
@@ -220,20 +226,20 @@ async fn hub_feeds_click_opens_the_panel_with_the_guild_settings() {
         .await
         .expect("hub invoke answered");
 
-    // The Feeds click: the rewired config button rides the nav id, and the
+    // The Voice click: the rewired config button rides the nav id, and the
     // interaction carries the channel and guild like a real one does.
     let resp = hub
         .call(
             "view.interact",
             Some("settings"),
             Some(json!({
-                "custom_id": "settings:open:feed-settings",
+                "custom_id": "settings:open:voice-settings",
                 "channel_id": channel_id,
                 "guild_id": GUILD_ID,
             })),
         )
         .await
-        .expect("feeds click answered");
+        .expect("voice click answered");
 
     // The hub answers the click with its own envelope (the hub stays the
     // hub); the panel rendered onto the produced message — the edit mock
@@ -242,9 +248,64 @@ async fn hub_feeds_click_opens_the_panel_with_the_guild_settings() {
     assert_eq!(view["page"], json!("hub"));
 }
 
+/// The production interaction shape, pinned: the host merges a real
+/// interaction into the `view.interact` args, and serenity's ids ride that
+/// payload as strings. The same Voice click with string-form `channel_id`
+/// and `guild_id` opens the panel for the same guild — the hub's id parsing
+/// accepts numeric-or-string, so the forwarded invoke args and the
+/// placeholder post carry the numeric ids unchanged.
+#[tokio::test]
+async fn hub_voice_click_with_string_ids_opens_the_panel_with_the_guild_settings() {
+    let channel_id = 555_000_777_u64;
+    let produced = 777_000_888_u64;
+
+    let mut voice = MockVoiceSettingsSource::new();
+    voice
+        .expect_get_settings()
+        .with(eq(GUILD_ID))
+        .times(1)
+        .returning(|_| Ok(sample_settings()));
+
+    let mut io = MockHostIo::new();
+    io.expect_send_message()
+        .with(eq(channel_id), eq("Loading…"))
+        .times(1)
+        .returning(move |_, _| Ok(Some(json!({ "message_id": produced }))));
+    io.expect_edit_message()
+        .times(1)
+        .returning(|_, _, _| Ok(Some(json!({}))));
+
+    let (_manager, hub, _panel) = spawn_core_plugins(shared_services(
+        Arc::new(io),
+        Arc::new(voice),
+        InteractionEngine::new(),
+    ))
+    .await;
+
+    hub.call("invoke", Some("settings"), Some(json!({})))
+        .await
+        .expect("hub invoke answered");
+
+    let resp = hub
+        .call(
+            "view.interact",
+            Some("settings"),
+            Some(json!({
+                "custom_id": "settings:open:voice-settings",
+                "channel_id": channel_id.to_string(),
+                "guild_id": GUILD_ID.to_string(),
+            })),
+        )
+        .await
+        .expect("voice click answered");
+
+    let view = assert_envelope(&resp, 1);
+    assert_eq!(view["page"], json!("hub"));
+}
+
 /// The full edit loop, then Back: the toggle re-renders without a host call,
 /// Back persists the edited whole snapshot exactly once through
-/// `host.feed.update_settings`, then re-opens the hub beside the panel —
+/// `host.voice.update_settings`, then re-opens the hub beside the panel —
 /// the panel answers its own interaction with its own envelope, as every
 /// plugin→plugin navigation does.
 #[tokio::test]
@@ -252,15 +313,15 @@ async fn open_edit_and_back_persist_the_snapshot_once_and_reopen_the_hub() {
     let channel_id = 555_000_333_u64;
     let produced = 777_000_444_u64;
 
-    let mut feeds = MockFeedSettingsSource::new();
-    feeds
+    let mut voice = MockVoiceSettingsSource::new();
+    voice
         .expect_get_settings()
         .with(eq(GUILD_ID))
         .times(1)
         .returning(|_| Ok(sample_settings()));
     let mut toggled = sample_settings();
-    toggled.feeds.enabled = Some(false);
-    feeds
+    toggled.voice.enabled = Some(false);
+    voice
         .expect_update_settings()
         .with(eq(GUILD_ID), eq(toggled))
         .times(1)
@@ -277,7 +338,7 @@ async fn open_edit_and_back_persist_the_snapshot_once_and_reopen_the_hub() {
 
     let (_manager, _hub, panel) = spawn_core_plugins(shared_services(
         Arc::new(io),
-        Arc::new(feeds),
+        Arc::new(voice),
         InteractionEngine::new(),
     ))
     .await;
@@ -287,7 +348,7 @@ async fn open_edit_and_back_persist_the_snapshot_once_and_reopen_the_hub() {
     let resp = panel
         .call(
             "invoke",
-            Some("feed-settings"),
+            Some("voice-settings"),
             Some(json!({ "guild_id": GUILD_ID })),
         )
         .await
@@ -301,9 +362,9 @@ async fn open_edit_and_back_persist_the_snapshot_once_and_reopen_the_hub() {
     let resp = panel
         .call(
             "view.interact",
-            Some("feed-settings"),
+            Some("voice-settings"),
             Some(json!({
-                "custom_id": "feeds:toggle",
+                "custom_id": "voice:toggle",
                 "channel_id": channel_id,
                 "view": view,
             })),
@@ -319,9 +380,9 @@ async fn open_edit_and_back_persist_the_snapshot_once_and_reopen_the_hub() {
     let resp = panel
         .call(
             "view.interact",
-            Some("feed-settings"),
+            Some("voice-settings"),
             Some(json!({
-                "custom_id": "feeds:back",
+                "custom_id": "voice:back",
                 "channel_id": channel_id,
                 "view": view,
             })),
@@ -340,13 +401,13 @@ async fn about_persists_and_opens_the_hub_on_its_about_page() {
     let channel_id = 555_000_555_u64;
     let produced = 777_000_666_u64;
 
-    let mut feeds = MockFeedSettingsSource::new();
-    feeds
+    let mut voice = MockVoiceSettingsSource::new();
+    voice
         .expect_get_settings()
         .with(eq(GUILD_ID))
         .times(1)
         .returning(|_| Ok(sample_settings()));
-    feeds
+    voice
         .expect_update_settings()
         .with(eq(GUILD_ID), eq(sample_settings()))
         .times(1)
@@ -376,7 +437,7 @@ async fn about_persists_and_opens_the_hub_on_its_about_page() {
 
     let (_manager, _hub, panel) = spawn_core_plugins(shared_services(
         Arc::new(io),
-        Arc::new(feeds),
+        Arc::new(voice),
         InteractionEngine::new(),
     ))
     .await;
@@ -384,7 +445,7 @@ async fn about_persists_and_opens_the_hub_on_its_about_page() {
     let resp = panel
         .call(
             "invoke",
-            Some("feed-settings"),
+            Some("voice-settings"),
             Some(json!({ "guild_id": GUILD_ID })),
         )
         .await
@@ -394,9 +455,9 @@ async fn about_persists_and_opens_the_hub_on_its_about_page() {
     let resp = panel
         .call(
             "view.interact",
-            Some("feed-settings"),
+            Some("voice-settings"),
             Some(json!({
-                "custom_id": "feeds:about",
+                "custom_id": "voice:about",
                 "channel_id": channel_id,
                 "view": view,
             })),
@@ -410,8 +471,8 @@ async fn about_persists_and_opens_the_hub_on_its_about_page() {
 /// nothing: the engine pushes `view.timeout` with the session's state.
 #[tokio::test]
 async fn expiry_persists_the_last_snapshot_once() {
-    let mut feeds = MockFeedSettingsSource::new();
-    feeds
+    let mut voice = MockVoiceSettingsSource::new();
+    voice
         .expect_update_settings()
         .with(eq(GUILD_ID), eq(sample_settings()))
         .times(1)
@@ -419,7 +480,7 @@ async fn expiry_persists_the_last_snapshot_once() {
 
     let (_manager, _hub, panel) = spawn_core_plugins(shared_services(
         Arc::new(MockHostIo::new()),
-        Arc::new(feeds),
+        Arc::new(voice),
         InteractionEngine::new(),
     ))
     .await;
@@ -445,23 +506,19 @@ async fn expiry_persists_the_last_snapshot_once() {
 }
 
 /// A failed settings load fails the open with the host's typed error
-/// forwarded: the hub's Feeds button shows what the service said.
+/// forwarded: the hub's Voice button shows what the service said.
 #[tokio::test]
 async fn a_failed_load_fails_the_open_with_the_forwarded_error() {
-    let mut feeds = MockFeedSettingsSource::new();
-    feeds
+    let mut voice = MockVoiceSettingsSource::new();
+    voice
         .expect_get_settings()
         .with(eq(GUILD_ID))
         .times(1)
-        .returning(|_| {
-            Err(FeedSettingsError::Service(ServiceError::UnexpectedResult {
-                message: "guild gone".into(),
-            }))
-        });
+        .returning(|_| Err(VoiceSettingsError::Service(anyhow::anyhow!("guild gone"))));
 
     let (_manager, _hub, panel) = spawn_core_plugins(shared_services(
         Arc::new(MockHostIo::new()),
-        Arc::new(feeds),
+        Arc::new(voice),
         InteractionEngine::new(),
     ))
     .await;
@@ -469,7 +526,7 @@ async fn a_failed_load_fails_the_open_with_the_forwarded_error() {
     let resp = panel
         .call(
             "invoke",
-            Some("feed-settings"),
+            Some("voice-settings"),
             Some(json!({ "guild_id": GUILD_ID })),
         )
         .await
@@ -480,7 +537,7 @@ async fn a_failed_load_fails_the_open_with_the_forwarded_error() {
             error: Some(err),
             ..
         } => {
-            assert_eq!(err.kind, "FeedSettingsError");
+            assert_eq!(err.kind, "VoiceSettingsError");
             assert!(err.msg.contains("guild gone"), "msg: {}", err.msg);
         }
         _ => panic!("expected err resp, got {resp:?}"),
@@ -488,14 +545,4 @@ async fn a_failed_load_fails_the_open_with_the_forwarded_error() {
 
     let status = panel.stop().await.expect("graceful stop");
     assert_eq!(status.code(), Some(0), "clean exit after bye: {status}");
-}
-
-/// The raw `data` of an ok resp, for content assertions.
-fn resp_data(resp: &Msg) -> Value {
-    match resp {
-        Msg::Resp {
-            data: Some(data), ..
-        } => data.clone(),
-        _ => panic!("expected ok envelope, got {resp:?}"),
-    }
 }

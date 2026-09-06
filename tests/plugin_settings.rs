@@ -122,6 +122,7 @@ fn host_services(kv: Option<Arc<dyn KvStore>>) -> Arc<HostServices> {
         engine: None,
         stats: Arc::new(StatsHandle::default()),
         feeds: None,
+        voice: None,
     })
 }
 
@@ -144,6 +145,7 @@ fn view_host_services(
         engine: Some(Arc::new(engine)),
         stats: Arc::new(StatsHandle::default()),
         feeds: None,
+        voice: None,
     })
 }
 
@@ -168,6 +170,7 @@ fn stats_host_services(
         engine: Some(Arc::new(engine)),
         stats: Arc::new(handle),
         feeds: None,
+        voice: None,
     })
 }
 
@@ -246,11 +249,11 @@ fn assert_hub(data: &Value, enabled: &[bool; 3]) {
     assert_eq!(header["content"], json!("-# **Settings**"));
 
     let config_buttons = children[2]["components"].as_array().expect("config row");
-    // Feeds migrated (ADR-0009): its button opens the feed-settings panel;
-    // the others stay config stubs until their tickets land.
+    // Feeds and Voice migrated (ADR-0009): their buttons open the panel
+    // plugins; Welcome stays a config stub until its ticket lands.
     let config_ids = [
         "settings:open:feed-settings",
-        "settings:config:voice",
+        "settings:open:voice-settings",
         "settings:config:welcome",
     ];
     for (button, custom_id) in config_buttons.iter().zip(config_ids) {
@@ -716,7 +719,8 @@ fn assert_page(view: &Value, expected: &str) {
 
 /// A config button click answers the hub unchanged:
 /// routing to per-feature panels is future work, so the stub re-renders the
-/// current page without touching the model.
+/// current page without touching the model. Welcome is the one feature whose
+/// panel has not migrated (ADR-0009), so it is the stub this test clicks.
 #[tokio::test]
 async fn a_config_button_answers_the_hub_without_changing_the_model() {
     let plugin = spawn_settings(None).await;
@@ -730,7 +734,7 @@ async fn a_config_button_answers_the_hub_without_changing_the_model() {
         .call(
             "view.interact",
             Some("settings"),
-            Some(json!({ "custom_id": "settings:config:voice" })),
+            Some(json!({ "custom_id": "settings:config:welcome" })),
         )
         .await
         .expect("config click answered");

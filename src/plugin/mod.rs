@@ -59,9 +59,12 @@ pub use host::PgKvStore;
 pub use host::SerenityHostIo;
 pub use host::SerenityStatsSource;
 pub use host::ServiceFeedSettingsSource;
+pub use host::ServiceVoiceSettingsSource;
 pub use host::StatsError;
 pub use host::StatsHandle;
 pub use host::StatsSource;
+pub use host::VoiceSettingsError;
+pub use host::VoiceSettingsSource;
 pub use install::CatalogEntry;
 pub use install::PluginCatalog;
 pub use interaction::InteractionEngine;
@@ -838,13 +841,15 @@ mod tests {
         };
         assert_eq!(v, API_VERSION);
         assert_eq!(name, "host");
-        assert_eq!(caps.len(), 13, "every v1 host cap must be announced");
+        assert_eq!(caps.len(), 15, "every v1 host cap must be announced");
         assert!(caps.iter().any(|c| c == "host.defer"));
         assert!(caps.iter().any(|c| c == "host.kv.get"));
         assert!(caps.iter().any(|c| c == "host.get_config"));
         assert!(caps.iter().any(|c| c == "host.list_plugins"));
         assert!(caps.iter().any(|c| c == "host.stats"));
         assert!(caps.iter().any(|c| c == "host.feed.get_settings"));
+        assert!(caps.iter().any(|c| c == "host.voice.get_settings"));
+        assert!(caps.iter().any(|c| c == "host.voice.update_settings"));
     }
 
     // ── pong accounting (the health checker's liveness signal) ──────────────

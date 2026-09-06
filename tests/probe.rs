@@ -15,6 +15,7 @@ pub fn probe_binary(bin_name: &str) -> PathBuf {
         "hello" => option_env!("CARGO_BIN_EXE_hello"),
         "settings" => option_env!("CARGO_BIN_EXE_settings"),
         "feed-settings" => option_env!("CARGO_BIN_EXE_feed-settings"),
+        "voice-settings" => option_env!("CARGO_BIN_EXE_voice-settings"),
         "arg_echo_plugin" => option_env!("CARGO_BIN_EXE_arg_echo_plugin"),
         _ => None,
     };
@@ -42,6 +43,10 @@ pub fn probe_binary(bin_name: &str) -> PathBuf {
         ),
         "feed-settings" => concat!(
             "feed-settings not built; run `cargo build -p feed-settings` ",
+            "(or `cargo build --workspace`) first"
+        ),
+        "voice-settings" => concat!(
+            "voice-settings not built; run `cargo build -p voice-settings` ",
             "(or `cargo build --workspace`) first"
         ),
         "arg_echo_plugin" => concat!(

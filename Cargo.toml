@@ -5,6 +5,7 @@ members = [
     "crates/plugin/hello",
     "crates/plugin/settings",
     "crates/plugin/feed-settings",
+    "crates/plugin/voice-settings",
     "crates/preview",
 ]
 resolver = "2"

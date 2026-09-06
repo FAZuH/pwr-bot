@@ -40,6 +40,7 @@ use crate::plugin::reject_content_on_edit;
 use crate::plugin::validate_view_data;
 use crate::service::error::ServiceError;
 use crate::service::traits::FeedSubscriptionProvider;
+use crate::service::traits::VoiceTracker;
 
 /// The seam between plugin `host.*` ops and Discord. The real implementation
 /// wraps [`serenity::Http`]; tests use the mockall mock generated from this
@@ -415,6 +416,72 @@ impl FeedSettingsSource for ServiceFeedSettingsSource {
     }
 }
 
+/// An error from a [`VoiceSettingsSource`] operation.
+///
+/// The voice service pair returns `anyhow::Result` rather than
+/// `Result<_, ServiceError>` (the one asymmetry with the feed seam), so this
+/// carries the service's opaque error: `Display` renders the anyhow chain's
+/// top message, which is what crosses the wire as the [`WireError`] msg.
+#[derive(Debug, thiserror::Error)]
+pub enum VoiceSettingsError {
+    /// The voice service failed (database or voice-layer error).
+    #[error(transparent)]
+    Service(#[from] anyhow::Error),
+}
+
+/// The seam between the `host.voice.*` ops and the voice tracking service,
+/// mirroring `VoiceTracker::get_server_settings` /
+/// `update_server_settings` one-to-one (ADR-0010: ops are shaped by
+/// services). The real implementation wraps the service the host already
+/// holds; tests use the mockall mock generated from this trait.
+#[automock]
+#[async_trait]
+pub trait VoiceSettingsSource: Send + Sync {
+    /// Reads a guild's whole settings snapshot, as
+    /// `VoiceTracker::get_server_settings` does.
+    async fn get_settings(&self, guild_id: u64) -> Result<ServerSettings, VoiceSettingsError>;
+
+    /// Writes a guild's whole settings snapshot, as
+    /// `VoiceTracker::update_server_settings` does.
+    async fn update_settings(
+        &self,
+        guild_id: u64,
+        settings: ServerSettings,
+    ) -> Result<(), VoiceSettingsError>;
+}
+
+/// The real [`VoiceSettingsSource`]: a thin adapter over the voice tracking
+/// service the host holds at construction. No post-start attachment — the
+/// service Arc exists at `Bot::new`, so the field is wired once.
+pub struct ServiceVoiceSettingsSource {
+    service: Arc<dyn VoiceTracker>,
+}
+
+impl ServiceVoiceSettingsSource {
+    /// Wraps the host's voice tracking service.
+    pub fn new(service: Arc<dyn VoiceTracker>) -> Self {
+        Self { service }
+    }
+}
+
+#[async_trait]
+impl VoiceSettingsSource for ServiceVoiceSettingsSource {
+    async fn get_settings(&self, guild_id: u64) -> Result<ServerSettings, VoiceSettingsError> {
+        Ok(self.service.get_server_settings(guild_id).await?)
+    }
+
+    async fn update_settings(
+        &self,
+        guild_id: u64,
+        settings: ServerSettings,
+    ) -> Result<(), VoiceSettingsError> {
+        Ok(self
+            .service
+            .update_server_settings(guild_id, settings)
+            .await?)
+    }
+}
+
 /// What the host can serve a plugin: the Discord I/O seam, the config subset,
 /// the key-value store, the interaction engine used to open `host.open_view`
 /// sessions, and the live-stats handle. All are optional so a plugin can be
@@ -438,6 +505,9 @@ pub struct HostServices {
     /// Feed settings for the `host.feed.*` ops, mirroring the feed
     /// subscription service; absent when the host holds no feed service.
     pub feeds: Option<Arc<dyn FeedSettingsSource>>,
+    /// Voice settings for the `host.voice.*` ops, mirroring the voice
+    /// tracking service; absent when the host holds no voice service.
+    pub voice: Option<Arc<dyn VoiceSettingsSource>>,
 }
 
 /// Serves one plugin→host [`Msg::Call`], answering with the correlation-id
@@ -557,6 +627,24 @@ pub async fn handle_host_call(
                 return resp_err(id, "HostUnavailable", "feed settings are not configured");
             };
             match feed_call(cap, args, &*feeds).await {
+                Ok(data) => Msg::resp_ok(id, data),
+                Err(wire) => Msg::resp_err(id, wire),
+            }
+        }
+        HostCap::VoiceGetSettings => {
+            let Some(voice) = host.and_then(|host| host.voice.clone()) else {
+                return resp_err(id, "HostUnavailable", "voice settings are not configured");
+            };
+            match voice_call(cap, args, &*voice).await {
+                Ok(data) => Msg::resp_ok(id, data),
+                Err(wire) => Msg::resp_err(id, wire),
+            }
+        }
+        HostCap::VoiceUpdateSettings => {
+            let Some(voice) = host.and_then(|host| host.voice.clone()) else {
+                return resp_err(id, "HostUnavailable", "voice settings are not configured");
+            };
+            match voice_call(cap, args, &*voice).await {
                 Ok(data) => Msg::resp_ok(id, data),
                 Err(wire) => Msg::resp_err(id, wire),
             }
@@ -935,16 +1023,27 @@ async fn feed_call(
     }
 }
 
-/// Parses the `guild_id` (u64) shared by the `host.feed.*` ops.
+/// Reads a Discord id from a wire value: a number, or the string form
+/// serenity's ids serialize to — the same rule the plugins' id parsing uses,
+/// so the host accepts exactly what a plugin may legitimately send.
+fn id_as_u64(value: &Value) -> Option<u64> {
+    value
+        .as_u64()
+        .or_else(|| value.as_str().and_then(|s| s.parse().ok()))
+}
+
+/// Parses the `guild_id` (u64) shared by the `host.feed.*` and
+/// `host.voice.*` ops. Accepts a numeric id or serenity's string form.
 fn parse_guild_id(args: Option<&Value>) -> Result<u64, WireError> {
     args.and_then(Value::as_object)
         .and_then(|obj| obj.get("guild_id"))
-        .and_then(Value::as_u64)
+        .and_then(id_as_u64)
         .ok_or_else(|| invalid_args("missing `guild_id` (u64)"))
 }
 
-/// Parses the `host.feed.update_settings` args: `guild_id` (u64) plus the
-/// whole [`ServerSettings`] snapshot under `settings`.
+/// Parses the `host.feed.update_settings` and `host.voice.update_settings`
+/// args: `guild_id` (u64) plus the whole [`ServerSettings`] snapshot under
+/// `settings`.
 fn parse_update_settings(args: Option<&Value>) -> Result<(u64, ServerSettings), WireError> {
     let guild_id = parse_guild_id(args)?;
     let settings = args
@@ -960,6 +1059,53 @@ fn parse_update_settings(args: Option<&Value>) -> Result<(u64, ServerSettings), 
 fn feed_settings_err(err: FeedSettingsError) -> WireError {
     WireError {
         kind: "FeedSettingsError".into(),
+        msg: err.to_string(),
+    }
+}
+
+/// Runs one voice-settings op against the seam and turns the outcome into a
+/// wire value: `Ok(data)` for a successful `resp_ok` (the settings snapshot
+/// for a read, `None` for a write), `Err(wire)` for a failed `resp_err`
+/// (`InvalidArgs` or `VoiceSettingsError`). A cap outside the voice pair is a
+/// dispatch bug, so it answers `UnknownOp` rather than panicking the dispatch
+/// task.
+async fn voice_call(
+    cap: HostCap,
+    args: Option<&Value>,
+    voice: &dyn VoiceSettingsSource,
+) -> Result<Option<Value>, WireError> {
+    match cap {
+        HostCap::VoiceGetSettings => {
+            let guild_id = parse_guild_id(args)?;
+            let settings = voice
+                .get_settings(guild_id)
+                .await
+                .map_err(voice_settings_err)?;
+            let value = serde_json::to_value(&settings).map_err(|e| WireError {
+                kind: "VoiceSettingsError".into(),
+                msg: e.to_string(),
+            })?;
+            Ok(Some(value))
+        }
+        HostCap::VoiceUpdateSettings => {
+            let (guild_id, settings) = parse_update_settings(args)?;
+            voice
+                .update_settings(guild_id, settings)
+                .await
+                .map_err(voice_settings_err)?;
+            Ok(None)
+        }
+        other => Err(WireError {
+            kind: "UnknownOp".into(),
+            msg: format!("op `{}` is not a voice-settings op", other.as_str()),
+        }),
+    }
+}
+
+/// Maps a [`VoiceSettingsError`] to its wire error.
+fn voice_settings_err(err: VoiceSettingsError) -> WireError {
+    WireError {
+        kind: "VoiceSettingsError".into(),
         msg: err.to_string(),
     }
 }
@@ -993,6 +1139,7 @@ mod tests {
             engine: None,
             stats: Arc::new(StatsHandle::default()),
             feeds: None,
+            voice: None,
         }
     }
 
@@ -1008,6 +1155,7 @@ mod tests {
             engine: None,
             stats: Arc::new(StatsHandle::default()),
             feeds: None,
+            voice: None,
         }
     }
 
@@ -1021,6 +1169,7 @@ mod tests {
             engine: Some(Arc::new(InteractionEngine::new())),
             stats: Arc::new(StatsHandle::default()),
             feeds: None,
+            voice: None,
         }
     }
 
@@ -1554,6 +1703,7 @@ mod tests {
             engine: None,
             stats: Arc::new(handle),
             feeds: None,
+            voice: None,
         };
 
         let resp = handle_host_call(7, "host.stats", None, Some(&host), None).await;
@@ -1602,6 +1752,7 @@ mod tests {
             engine: None,
             stats: Arc::new(handle),
             feeds: None,
+            voice: None,
         };
 
         let resp = handle_host_call(7, "host.stats", None, Some(&host), None).await;
@@ -1631,6 +1782,7 @@ mod tests {
             engine: None,
             stats: Arc::new(StatsHandle::default()),
             feeds: Some(feeds),
+            voice: None,
         }
     }
 
@@ -1779,6 +1931,216 @@ mod tests {
         .await;
         let msg = assert_err(resp, 7, "FeedSettingsError");
         assert!(msg.contains("no such guild"), "msg: {msg}");
+    }
+
+    #[tokio::test]
+    async fn feed_settings_string_guild_id_parses() {
+        let mut mock = MockFeedSettingsSource::new();
+        mock.expect_get_settings()
+            .with(eq(42u64))
+            .times(1)
+            .returning(|_| Ok(sample_settings()));
+        let host = feed_services(Arc::new(mock));
+
+        let resp = handle_host_call(
+            7,
+            "host.feed.get_settings",
+            Some(&json!({ "guild_id": "42" })),
+            Some(&host),
+            None,
+        )
+        .await;
+        assert_ok(resp, 7);
+    }
+
+    // ── voice settings ────────────────────────────────────────────────────────
+
+    fn voice_sample_settings() -> ServerSettings {
+        ServerSettings {
+            voice: pwr_plugin_protocol::VoiceSettings {
+                enabled: Some(false),
+            },
+            ..ServerSettings::default()
+        }
+    }
+
+    fn voice_services(voice: Arc<dyn VoiceSettingsSource>) -> HostServices {
+        HostServices {
+            io: None,
+            config: Some(sample_config()),
+            kv: None,
+            engine: None,
+            stats: Arc::new(StatsHandle::default()),
+            feeds: None,
+            voice: Some(voice),
+        }
+    }
+
+    #[tokio::test]
+    async fn voice_get_settings_routes_through_the_seam() {
+        let mut mock = MockVoiceSettingsSource::new();
+        mock.expect_get_settings()
+            .with(eq(42u64))
+            .times(1)
+            .returning(|_| Ok(voice_sample_settings()));
+        let host = voice_services(Arc::new(mock));
+
+        let resp = handle_host_call(
+            7,
+            "host.voice.get_settings",
+            Some(&json!({ "guild_id": 42 })),
+            Some(&host),
+            None,
+        )
+        .await;
+        assert_eq!(
+            assert_ok(resp, 7),
+            Some(json!({
+                "feeds": {
+                    "enabled": null,
+                    "channel_id": null,
+                    "subscribe_role_id": null,
+                    "unsubscribe_role_id": null,
+                },
+                "voice": { "enabled": false },
+                "welcome": {
+                    "enabled": null,
+                    "channel_id": null,
+                    "primary_color": null,
+                    "template_id": null,
+                    "messages": null,
+                },
+            }))
+        );
+    }
+
+    #[tokio::test]
+    async fn voice_update_settings_routes_through_the_seam() {
+        let settings = voice_sample_settings();
+        let mut mock = MockVoiceSettingsSource::new();
+        mock.expect_update_settings()
+            .with(eq(42u64), eq(settings.clone()))
+            .times(1)
+            .returning(|_, _| Ok(()));
+        let host = voice_services(Arc::new(mock));
+
+        let resp = handle_host_call(
+            7,
+            "host.voice.update_settings",
+            Some(&json!({ "guild_id": 42, "settings": settings })),
+            Some(&host),
+            None,
+        )
+        .await;
+        assert_eq!(assert_ok(resp, 7), None);
+    }
+
+    #[tokio::test]
+    async fn voice_settings_without_services_is_host_unavailable() {
+        let resp = handle_host_call(
+            7,
+            "host.voice.get_settings",
+            Some(&json!({ "guild_id": 42 })),
+            None,
+            None,
+        )
+        .await;
+        assert_err(resp, 7, "HostUnavailable");
+
+        let resp = handle_host_call(
+            7,
+            "host.voice.update_settings",
+            Some(&json!({ "guild_id": 42, "settings": ServerSettings::default() })),
+            None,
+            None,
+        )
+        .await;
+        assert_err(resp, 7, "HostUnavailable");
+    }
+
+    #[tokio::test]
+    async fn voice_settings_without_source_is_host_unavailable() {
+        let host = services(None, Some(sample_config()));
+
+        let resp = handle_host_call(
+            7,
+            "host.voice.get_settings",
+            Some(&json!({ "guild_id": 42 })),
+            Some(&host),
+            None,
+        )
+        .await;
+        assert_err(resp, 7, "HostUnavailable");
+    }
+
+    #[tokio::test]
+    async fn voice_settings_missing_guild_id_is_invalid_args() {
+        let mock = MockVoiceSettingsSource::new();
+        let host = voice_services(Arc::new(mock));
+
+        let resp = handle_host_call(7, "host.voice.get_settings", None, Some(&host), None).await;
+        assert_err(resp, 7, "InvalidArgs");
+    }
+
+    #[tokio::test]
+    async fn voice_settings_malformed_snapshot_is_invalid_args() {
+        let mock = MockVoiceSettingsSource::new();
+        let host = voice_services(Arc::new(mock));
+
+        let resp = handle_host_call(
+            7,
+            "host.voice.update_settings",
+            Some(&json!({ "guild_id": 42, "settings": "not-a-snapshot" })),
+            Some(&host),
+            None,
+        )
+        .await;
+        assert_err(resp, 7, "InvalidArgs");
+    }
+
+    #[tokio::test]
+    async fn voice_settings_service_failure_is_voice_settings_error() {
+        let mut mock = MockVoiceSettingsSource::new();
+        mock.expect_get_settings()
+            .with(eq(42u64))
+            .times(1)
+            .returning(|_| {
+                Err(VoiceSettingsError::Service(anyhow::anyhow!(
+                    "no such guild"
+                )))
+            });
+        let host = voice_services(Arc::new(mock));
+
+        let resp = handle_host_call(
+            7,
+            "host.voice.get_settings",
+            Some(&json!({ "guild_id": 42 })),
+            Some(&host),
+            None,
+        )
+        .await;
+        let msg = assert_err(resp, 7, "VoiceSettingsError");
+        assert!(msg.contains("no such guild"), "msg: {msg}");
+    }
+
+    #[tokio::test]
+    async fn voice_settings_string_guild_id_parses() {
+        let mut mock = MockVoiceSettingsSource::new();
+        mock.expect_get_settings()
+            .with(eq(42u64))
+            .times(1)
+            .returning(|_| Ok(voice_sample_settings()));
+        let host = voice_services(Arc::new(mock));
+
+        let resp = handle_host_call(
+            7,
+            "host.voice.get_settings",
+            Some(&json!({ "guild_id": "42" })),
+            Some(&host),
+            None,
+        )
+        .await;
+        assert_ok(resp, 7);
     }
 
     // ── kv ────────────────────────────────────────────────────────────────────

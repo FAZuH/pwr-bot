@@ -25,8 +25,9 @@
 //!   to the hub, neither touching the model;
 //! - a `settings:config:<feature>` click is a navigation stub until that
 //!   feature's panel exists as a plugin: it re-renders the current page.
-//!   Feeds migrated (ADR-0009): its button rides the nav id
-//!   (`settings:open:feed-settings`) and opens the feed-settings panel;
+//!   Feeds and Voice migrated (ADR-0009): their buttons ride the nav id
+//!   (`settings:open:feed-settings`, `settings:open:voice-settings`) and
+//!   open the panel plugins;
 //! - a `settings:open:<plugin>` nav click issues `host.open_view` for the
 //!   target plugin (the settings hub's promise: navigate to any panel),
 //!   forwarding the source interaction's `guild_id` in the invoke args so
@@ -105,6 +106,7 @@ const CUSTOM_ID_OPEN_PREFIX: &str = "settings:open:";
 fn config_target(label: &str) -> Option<&'static str> {
     match label {
         "Feeds" => Some("feed-settings"),
+        "Voice" => Some("voice-settings"),
         _ => None,
     }
 }
@@ -1286,13 +1288,16 @@ mod tests {
             assert_eq!(button["style"], json!(2), "secondary like the original");
             assert_eq!(button["label"], json!(label));
         }
-        // Feeds migrated (ADR-0009): its button opens the feed-settings
-        // panel; the others stay config stubs until their tickets land.
+        // Feeds and Voice migrated (ADR-0009): their buttons open the panel
+        // plugins; Welcome stays a config stub until its ticket lands.
         assert_eq!(
             buttons[0]["custom_id"],
             json!("settings:open:feed-settings")
         );
-        assert_eq!(buttons[1]["custom_id"], json!("settings:config:voice"));
+        assert_eq!(
+            buttons[1]["custom_id"],
+            json!("settings:open:voice-settings")
+        );
         assert_eq!(buttons[2]["custom_id"], json!("settings:config:welcome"));
     }
 

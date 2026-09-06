@@ -83,6 +83,7 @@ async fn spawn_settings() -> Arc<RunningPlugin> {
                 engine: None,
                 stats: Arc::new(StatsHandle::default()),
                 feeds: None,
+                voice: None,
             })),
             None,
             None,

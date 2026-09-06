@@ -62,6 +62,7 @@ use crate::plugin::RunningPlugin;
 use crate::plugin::SerenityHostIo;
 use crate::plugin::SerenityStatsSource;
 use crate::plugin::ServiceFeedSettingsSource;
+use crate::plugin::ServiceVoiceSettingsSource;
 use crate::plugin::StatsHandle;
 use crate::plugin::VOICE_STATE_EVENT;
 use crate::plugin::command::PluginRoutes;
@@ -189,6 +190,9 @@ impl Bot {
             stats: stats_handle.clone(),
             feeds: Some(Arc::new(ServiceFeedSettingsSource::new(
                 service.feed_subscription.clone(),
+            ))),
+            voice: Some(Arc::new(ServiceVoiceSettingsSource::new(
+                service.voice_tracking.clone(),
             ))),
         });
         let plugin_manager = Arc::new(

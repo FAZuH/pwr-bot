@@ -42,6 +42,7 @@ fn host_services(io: Arc<dyn HostIo>, kv: Option<Arc<dyn KvStore>>) -> Arc<HostS
         engine: None,
         stats: Arc::new(StatsHandle::default()),
         feeds: None,
+        voice: None,
     })
 }
 
@@ -62,6 +63,7 @@ fn view_host_services(
         engine: Some(Arc::new(engine)),
         stats: Arc::new(StatsHandle::default()),
         feeds: None,
+        voice: None,
     })
 }
 

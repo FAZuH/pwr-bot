@@ -42,6 +42,12 @@ pub enum HostCap {
     /// Write a guild's feed settings snapshot, mirroring the feed service's
     /// `update_server_settings`.
     FeedUpdateSettings,
+    /// Read a guild's voice settings (the whole [`crate::ServerSettings`]
+    /// snapshot), mirroring the voice service's `get_server_settings`.
+    VoiceGetSettings,
+    /// Write a guild's voice settings snapshot, mirroring the voice service's
+    /// `update_server_settings`.
+    VoiceUpdateSettings,
 }
 
 /// Every op in the v1 host capability surface, in declaration order. The
@@ -62,6 +68,8 @@ pub const ALL_CAPS: &[HostCap] = &[
     HostCap::Stats,
     HostCap::FeedGetSettings,
     HostCap::FeedUpdateSettings,
+    HostCap::VoiceGetSettings,
+    HostCap::VoiceUpdateSettings,
 ];
 
 impl HostCap {
@@ -83,6 +91,8 @@ impl HostCap {
             HostCap::Stats => "host.stats",
             HostCap::FeedGetSettings => "host.feed.get_settings",
             HostCap::FeedUpdateSettings => "host.feed.update_settings",
+            HostCap::VoiceGetSettings => "host.voice.get_settings",
+            HostCap::VoiceUpdateSettings => "host.voice.update_settings",
         }
     }
 
@@ -152,7 +162,7 @@ mod tests {
 
     #[test]
     fn all_caps_is_exactly_the_v1_surface() {
-        assert_eq!(ALL_CAPS.len(), 13);
+        assert_eq!(ALL_CAPS.len(), 15);
         let mut seen = std::collections::HashSet::new();
         for cap in ALL_CAPS {
             assert!(seen.insert(*cap), "duplicate op in ALL_CAPS");
