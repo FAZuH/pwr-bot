@@ -16,6 +16,7 @@ pub fn probe_binary(bin_name: &str) -> PathBuf {
         "settings" => option_env!("CARGO_BIN_EXE_settings"),
         "feed-settings" => option_env!("CARGO_BIN_EXE_feed-settings"),
         "voice-settings" => option_env!("CARGO_BIN_EXE_voice-settings"),
+        "welcome-settings" => option_env!("CARGO_BIN_EXE_welcome-settings"),
         "arg_echo_plugin" => option_env!("CARGO_BIN_EXE_arg_echo_plugin"),
         _ => None,
     };

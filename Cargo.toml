@@ -6,6 +6,7 @@ members = [
     "crates/plugin/settings",
     "crates/plugin/feed-settings",
     "crates/plugin/voice-settings",
+    "crates/plugin/welcome-settings",
     "crates/plugin/pwr-plugin-support",
     "crates/preview",
 ]

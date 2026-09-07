@@ -122,6 +122,8 @@ fn shared_services(
         stats: Arc::new(StatsHandle::default()),
         feeds: Some(feeds),
         voice: None,
+        welcome: None,
+        previews: None,
     })
 }
 
@@ -205,9 +207,10 @@ async fn hub_feeds_click_opens_the_panel_with_the_guild_settings() {
                 data["components"][0]["components"][0]["content"]
                     == json!("-# **Settings > Feeds**\n## Feed Subscription Settings\n\n> 🛈  Feed notifications are currently **active**. Notifications will be sent to <#123456789>")
             }),
+            mockall::predicate::always(),
         )
         .times(1)
-        .returning(|_, _, _| Ok(Some(json!({}))));
+        .returning(|_, _, _, _| Ok(Some(json!({}))));
 
     let (_manager, hub, _panel) = spawn_core_plugins(shared_services(
         Arc::new(io),
@@ -273,7 +276,7 @@ async fn open_edit_and_back_persist_the_snapshot_once_and_reopen_the_hub() {
         .returning(move |_, _| Ok(Some(json!({ "message_id": produced }))));
     io.expect_edit_message()
         .times(1)
-        .returning(|_, _, _| Ok(Some(json!({}))));
+        .returning(|_, _, _, _| Ok(Some(json!({}))));
 
     let (_manager, _hub, panel) = spawn_core_plugins(shared_services(
         Arc::new(io),
@@ -370,9 +373,10 @@ async fn about_persists_and_opens_the_hub_on_its_about_page() {
                 text.as_str()
                     .is_some_and(|text| text.contains("Settings > About"))
             }),
+            mockall::predicate::always(),
         )
         .times(1)
-        .returning(|_, _, _| Ok(Some(json!({}))));
+        .returning(|_, _, _, _| Ok(Some(json!({}))));
 
     let (_manager, _hub, panel) = spawn_core_plugins(shared_services(
         Arc::new(io),

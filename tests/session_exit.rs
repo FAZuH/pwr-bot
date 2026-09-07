@@ -84,6 +84,8 @@ async fn spawn_settings() -> Arc<RunningPlugin> {
                 stats: Arc::new(StatsHandle::default()),
                 feeds: None,
                 voice: None,
+                welcome: None,
+                previews: None,
             })),
             None,
             None,
@@ -115,9 +117,10 @@ async fn the_adopted_message_answers_about_and_back() {
                     && data.get("tts").is_none()
                     && data.get("enforce_nonce").is_none()
             }),
+            mockall::predicate::always(),
         )
         .times(1)
-        .returning(move |_, _, _| Ok(Some(json!({ "message_id": message_id }))));
+        .returning(move |_, _, _, _| Ok(Some(json!({ "message_id": message_id }))));
 
     let engine = InteractionEngine::new();
     let plugin = spawn_settings().await;

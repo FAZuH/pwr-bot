@@ -123,6 +123,8 @@ fn host_services(kv: Option<Arc<dyn KvStore>>) -> Arc<HostServices> {
         stats: Arc::new(StatsHandle::default()),
         feeds: None,
         voice: None,
+        welcome: None,
+        previews: None,
     })
 }
 
@@ -146,6 +148,8 @@ fn view_host_services(
         stats: Arc::new(StatsHandle::default()),
         feeds: None,
         voice: None,
+        welcome: None,
+        previews: None,
     })
 }
 
@@ -171,6 +175,8 @@ fn stats_host_services(
         stats: Arc::new(handle),
         feeds: None,
         voice: None,
+        welcome: None,
+        previews: None,
     })
 }
 
@@ -249,12 +255,12 @@ fn assert_hub(data: &Value, enabled: &[bool; 3]) {
     assert_eq!(header["content"], json!("-# **Settings**"));
 
     let config_buttons = children[2]["components"].as_array().expect("config row");
-    // Feeds and Voice migrated (ADR-0009): their buttons open the panel
-    // plugins; Welcome stays a config stub until its ticket lands.
+    // All three features migrated (ADR-0009): their buttons open the panel
+    // plugins.
     let config_ids = [
         "settings:open:feed-settings",
         "settings:open:voice-settings",
-        "settings:config:welcome",
+        "settings:open:welcome-settings",
     ];
     for (button, custom_id) in config_buttons.iter().zip(config_ids) {
         assert_eq!(button["type"], json!(2));
@@ -510,9 +516,10 @@ async fn nav_click_opens_the_target_plugin_panel() {
                     "flags": 32768,
                 })
             }),
+            mockall::predicate::always(),
         )
         .times(1)
-        .returning(move |_, _, _| Ok(Some(json!({ "message_id": produced }))));
+        .returning(move |_, _, _, _| Ok(Some(json!({ "message_id": produced }))));
 
     let engine = InteractionEngine::new();
     let kv = SharedKv::new();
@@ -717,10 +724,12 @@ fn assert_page(view: &Value, expected: &str) {
     assert_eq!(view["page"], json!(expected), "session page");
 }
 
-/// A config button click answers the hub unchanged:
-/// routing to per-feature panels is future work, so the stub re-renders the
-/// current page without touching the model. Welcome is the one feature whose
-/// panel has not migrated (ADR-0009), so it is the stub this test clicks.
+/// A stale config-button click answers the hub unchanged: a hub message
+/// rendered before a feature's panel migrated still carries the old
+/// `settings:config:<feature>` id, so the hub re-renders the current page
+/// instead of erroring. No live view renders the id any more — every
+/// feature's button rides the nav id (ADR-0009) — so this pins only the
+/// defensive arm.
 #[tokio::test]
 async fn a_config_button_answers_the_hub_without_changing_the_model() {
     let plugin = spawn_settings(None).await;

@@ -74,13 +74,16 @@ pub trait HostIo: Send + Sync {
     /// sending, so create-only fields — `sticker_ids` above all, which the
     /// channel edit endpoint rejects with error 50080 even when the array
     /// is empty — are removed before the body reaches this seam. The
-    /// implementation sends what it receives verbatim. Returns the edited
-    /// message's id.
+    /// implementation sends what it receives verbatim. `attachments` are the
+    /// files the body's `attachments` declaration names (ADR-0012); an empty
+    /// list sends no files, which is what a body declaring none must carry.
+    /// Returns the edited message's id.
     async fn edit_message(
         &self,
         channel_id: u64,
         message_id: u64,
         data: Value,
+        attachments: Vec<serenity::CreateAttachment<'static>>,
     ) -> Result<Option<Value>, HostError>;
 
     /// Opens a modal as the response to the interaction `interaction_id`:
@@ -147,10 +150,16 @@ impl HostIo for SerenityHostIo {
         channel_id: u64,
         message_id: u64,
         data: Value,
+        attachments: Vec<serenity::CreateAttachment<'static>>,
     ) -> Result<Option<Value>, HostError> {
         let message = self
             .http
-            .edit_message(channel_id.into(), message_id.into(), &data, Vec::new())
+            .edit_message(
+                channel_id.into(),
+                message_id.into(),
+                &data,
+                attachments.into_iter().map(Into::into).collect(),
+            )
             .await?;
         Ok(Some(json!({ "message_id": message.id.get() })))
     }
@@ -512,6 +521,70 @@ impl VoiceSettingsSource for ServiceVoiceSettingsSource {
     }
 }
 
+/// An error from a [`WelcomeSettingsSource`] operation.
+#[derive(Debug, thiserror::Error)]
+pub enum WelcomeSettingsError {
+    /// The welcome settings failed (database or feed-layer error). Welcome
+    /// settings ride the same [`FeedSubscriptionProvider`] service the feed
+    /// panel persists through, so this mirrors [`FeedSettingsError`].
+    #[error(transparent)]
+    Service(#[from] ServiceError),
+}
+
+/// The seam between the `host.welcome.*` ops and the settings service,
+/// mirroring the monolith welcome panel's persistence through
+/// `FeedSubscriptionProvider::get_server_settings` / `update_server_settings`
+/// one-to-one (ADR-0010: ops are shaped by services). The real
+/// implementation wraps the service the host already holds; tests use the
+/// mockall mock generated from this trait.
+#[automock]
+#[async_trait]
+pub trait WelcomeSettingsSource: Send + Sync {
+    /// Reads a guild's whole settings snapshot, as
+    /// `FeedSubscriptionProvider::get_server_settings` does.
+    async fn get_settings(&self, guild_id: u64) -> Result<ServerSettings, WelcomeSettingsError>;
+
+    /// Writes a guild's whole settings snapshot, as
+    /// `FeedSubscriptionProvider::update_server_settings` does.
+    async fn update_settings(
+        &self,
+        guild_id: u64,
+        settings: ServerSettings,
+    ) -> Result<(), WelcomeSettingsError>;
+}
+
+/// The real [`WelcomeSettingsSource`]: a thin adapter over the feed
+/// subscription service the host holds at construction — the same service the
+/// monolith's welcome `EffectHandler` persists through.
+pub struct ServiceWelcomeSettingsSource {
+    service: Arc<dyn FeedSubscriptionProvider>,
+}
+
+impl ServiceWelcomeSettingsSource {
+    /// Wraps the host's feed subscription service.
+    pub fn new(service: Arc<dyn FeedSubscriptionProvider>) -> Self {
+        Self { service }
+    }
+}
+
+#[async_trait]
+impl WelcomeSettingsSource for ServiceWelcomeSettingsSource {
+    async fn get_settings(&self, guild_id: u64) -> Result<ServerSettings, WelcomeSettingsError> {
+        Ok(self.service.get_server_settings(guild_id).await?)
+    }
+
+    async fn update_settings(
+        &self,
+        guild_id: u64,
+        settings: ServerSettings,
+    ) -> Result<(), WelcomeSettingsError> {
+        Ok(self
+            .service
+            .update_server_settings(guild_id, settings)
+            .await?)
+    }
+}
+
 /// What the host can serve a plugin: the Discord I/O seam, the config subset,
 /// the key-value store, the interaction engine used to open `host.open_view`
 /// sessions, and the live-stats handle. All are optional so a plugin can be
@@ -538,6 +611,13 @@ pub struct HostServices {
     /// Voice settings for the `host.voice.*` ops, mirroring the voice
     /// tracking service; absent when the host holds no voice service.
     pub voice: Option<Arc<dyn VoiceSettingsSource>>,
+    /// Welcome settings for the `host.welcome.*` ops, mirroring the monolith
+    /// welcome panel's persistence (the feed subscription service); absent
+    /// when the host holds no welcome service.
+    pub welcome: Option<Arc<dyn WelcomeSettingsSource>>,
+    /// Fills the attachment slots a plugin envelope declares at transport
+    /// (ADR-0012); absent when the host holds no preview renderer.
+    pub previews: Option<Arc<crate::bot::gui::welcome::PreviewResolver>>,
 }
 
 /// Serves one plugin→host [`Msg::Call`], answering with the correlation-id
@@ -614,7 +694,15 @@ pub async fn handle_host_call(
                     "host plugin manager is not configured",
                 );
             };
-            match open_view_call(args, &*io, &engine, manager).await {
+            match open_view_call(
+                args,
+                &*io,
+                &engine,
+                manager,
+                host.and_then(|host| host.previews.as_deref()),
+            )
+            .await
+            {
                 Ok(data) => Msg::resp_ok(id, data),
                 Err(wire) => Msg::resp_err(id, wire),
             }
@@ -700,12 +788,32 @@ pub async fn handle_host_call(
                 Err(wire) => Msg::resp_err(id, wire),
             }
         }
+        HostCap::WelcomeGetSettings => {
+            let Some(welcome) = host.and_then(|host| host.welcome.clone()) else {
+                return resp_err(id, "HostUnavailable", "welcome settings are not configured");
+            };
+            match welcome_call(cap, args, &*welcome).await {
+                Ok(data) => Msg::resp_ok(id, data),
+                Err(wire) => Msg::resp_err(id, wire),
+            }
+        }
+        HostCap::WelcomeUpdateSettings => {
+            let Some(welcome) = host.and_then(|host| host.welcome.clone()) else {
+                return resp_err(id, "HostUnavailable", "welcome settings are not configured");
+            };
+            match welcome_call(cap, args, &*welcome).await {
+                Ok(data) => Msg::resp_ok(id, data),
+                Err(wire) => Msg::resp_err(id, wire),
+            }
+        }
     }
 }
 
 /// Runs one I/O-backed host op against the seam and turns the outcome into a
 /// wire value: `Ok(data)` for a successful `resp_ok`, `Err(wire)` for a
-/// failed `resp_err` (`InvalidArgs` or `HostIoError`).
+/// failed `resp_err` (`InvalidArgs` or `HostIoError`). A cap outside the I/O
+/// set is a dispatch bug, so it answers `UnknownOp` rather than panicking the
+/// dispatch task.
 async fn io_call(
     cap: HostCap,
     args: Option<&Value>,
@@ -735,11 +843,19 @@ async fn io_call(
         HostCap::EditMessage => {
             let (channel_id, message_id, data) = parse_edit_message(args)?;
             reject_content_on_edit(&data).map_err(WireError::from)?;
-            io.edit_message(channel_id, message_id, edit_body_for_transport(&data))
-                .await
-                .map_err(host_io_err)
+            io.edit_message(
+                channel_id,
+                message_id,
+                edit_body_for_transport(&data),
+                Vec::new(),
+            )
+            .await
+            .map_err(host_io_err)
         }
-        _ => unreachable!("io_call only receives I/O-backed ops"),
+        other => Err(WireError {
+            kind: "UnknownOp".into(),
+            msg: format!("op `{}` is not an I/O op", other.as_str()),
+        }),
     }
 }
 
@@ -753,8 +869,10 @@ async fn open_view_call(
     io: &dyn HostIo,
     engine: &InteractionEngine<RunningPlugin>,
     manager: &PluginManager,
+    previews: Option<&crate::bot::gui::welcome::PreviewResolver>,
 ) -> Result<Option<Value>, WireError> {
     let (channel_id, plugin_name, command, call_args) = parse_open_view(args)?;
+    let guild_id = call_args.get("guild_id").and_then(id_as_u64);
     let Some(target) = manager.get(&plugin_name).await else {
         return Err(WireError {
             kind: "PluginNotFound".into(),
@@ -795,8 +913,16 @@ async fn open_view_call(
             spec.clone(),
         )
         .await;
+    let (body, attachments) = match previews {
+        Some(previews) => {
+            previews
+                .resolve(edit_body_for_transport(&spec.data), guild_id)
+                .await
+        }
+        None => (edit_body_for_transport(&spec.data), Vec::new()),
+    };
     if let Err(e) = io
-        .edit_message(channel_id, message_id, edit_body_for_transport(&spec.data))
+        .edit_message(channel_id, message_id, body, attachments)
         .await
     {
         // The session is live on the placeholder, but the placeholder never
@@ -894,7 +1020,8 @@ fn parse_open_modal(args: Option<&Value>) -> Result<(u64, u64, String, Value), W
 /// wire value: `Ok(data)` for a successful `resp_ok`, `Err(wire)` for a
 /// failed `resp_err` (`InvalidArgs` or `KvStoreError`). An absent key is not
 /// an error: `host.kv.get` answers `{"value": null}` so the plugin can apply
-/// its default.
+/// its default. A cap outside the KV set is a dispatch bug, so it answers
+/// `UnknownOp` rather than panicking the dispatch task.
 async fn kv_call(
     cap: HostCap,
     args: Option<&Value>,
@@ -916,7 +1043,10 @@ async fn kv_call(
             kv.delete(&namespace, &key).await.map_err(kv_err)?;
             Ok(None)
         }
-        _ => unreachable!("kv_call only receives KV-backed ops"),
+        other => Err(WireError {
+            kind: "UnknownOp".into(),
+            msg: format!("op `{}` is not a KV op", other.as_str()),
+        }),
     }
 }
 
@@ -1146,8 +1276,8 @@ fn id_as_u64(value: &Value) -> Option<u64> {
         .or_else(|| value.as_str().and_then(|s| s.parse().ok()))
 }
 
-/// Parses the `guild_id` (u64) shared by the `host.feed.*` and
-/// `host.voice.*` ops. Accepts a numeric id or serenity's string form. A
+/// Parses the `guild_id` (u64) shared by the `host.feed.*`, `host.voice.*`,
+/// and `host.welcome.*` ops. Accepts a numeric id or serenity's string form. A
 /// present id that is neither is a wrong type, not a missing one.
 fn parse_guild_id(args: Option<&Value>) -> Result<u64, WireError> {
     let Some(value) = args
@@ -1159,9 +1289,9 @@ fn parse_guild_id(args: Option<&Value>) -> Result<u64, WireError> {
     id_as_u64(value).ok_or_else(|| invalid_args("`guild_id` must be a u64 or its string form"))
 }
 
-/// Parses the `host.feed.update_settings` and `host.voice.update_settings`
-/// args: `guild_id` (u64) plus the whole [`ServerSettings`] snapshot under
-/// `settings`.
+/// Parses the `host.feed.update_settings`, `host.voice.update_settings`, and
+/// `host.welcome.update_settings` args: `guild_id` (u64) plus the whole
+/// [`ServerSettings`] snapshot under `settings`.
 fn parse_update_settings(args: Option<&Value>) -> Result<(u64, ServerSettings), WireError> {
     let guild_id = parse_guild_id(args)?;
     let settings = args
@@ -1228,6 +1358,53 @@ fn voice_settings_err(err: VoiceSettingsError) -> WireError {
     }
 }
 
+/// Runs one welcome-settings op against the seam and turns the outcome into a
+/// wire value: `Ok(data)` for a successful `resp_ok` (the settings snapshot
+/// for a read, `None` for a write), `Err(wire)` for a failed `resp_err`
+/// (`InvalidArgs` or `WelcomeSettingsError`). A cap outside the welcome pair
+/// is a dispatch bug, so it answers `UnknownOp` rather than panicking the
+/// dispatch task.
+async fn welcome_call(
+    cap: HostCap,
+    args: Option<&Value>,
+    welcome: &dyn WelcomeSettingsSource,
+) -> Result<Option<Value>, WireError> {
+    match cap {
+        HostCap::WelcomeGetSettings => {
+            let guild_id = parse_guild_id(args)?;
+            let settings = welcome
+                .get_settings(guild_id)
+                .await
+                .map_err(welcome_settings_err)?;
+            let value = serde_json::to_value(&settings).map_err(|e| WireError {
+                kind: "WelcomeSettingsError".into(),
+                msg: e.to_string(),
+            })?;
+            Ok(Some(value))
+        }
+        HostCap::WelcomeUpdateSettings => {
+            let (guild_id, settings) = parse_update_settings(args)?;
+            welcome
+                .update_settings(guild_id, settings)
+                .await
+                .map_err(welcome_settings_err)?;
+            Ok(None)
+        }
+        other => Err(WireError {
+            kind: "UnknownOp".into(),
+            msg: format!("op `{}` is not a welcome-settings op", other.as_str()),
+        }),
+    }
+}
+
+/// Maps a [`WelcomeSettingsError`] to its wire error.
+fn welcome_settings_err(err: WelcomeSettingsError) -> WireError {
+    WireError {
+        kind: "WelcomeSettingsError".into(),
+        msg: err.to_string(),
+    }
+}
+
 fn resp_err(id: u64, kind: &str, msg: impl Into<String>) -> Msg {
     Msg::resp_err(
         id,
@@ -1242,6 +1419,7 @@ fn resp_err(id: u64, kind: &str, msg: impl Into<String>) -> Msg {
 mod tests {
     use std::time::Duration;
 
+    use mockall::predicate::always;
     use mockall::predicate::eq;
     use pwr_ext::prelude::CreateMessageDe;
     use serde_json::json;
@@ -1259,6 +1437,8 @@ mod tests {
             stats: Arc::new(StatsHandle::default()),
             feeds: None,
             voice: None,
+            welcome: None,
+            previews: None,
         }
     }
 
@@ -1275,6 +1455,8 @@ mod tests {
             stats: Arc::new(StatsHandle::default()),
             feeds: None,
             voice: None,
+            welcome: None,
+            previews: None,
         }
     }
 
@@ -1289,6 +1471,8 @@ mod tests {
             stats: Arc::new(StatsHandle::default()),
             feeds: None,
             voice: None,
+            welcome: None,
+            previews: None,
         }
     }
 
@@ -1497,9 +1681,10 @@ mod tests {
                 eq(99_u64),
                 eq(1234_u64),
                 eq(json!({ "components": [{ "type": 10, "content": "edited" }] })),
+                always(),
             )
             .times(1)
-            .returning(|_, _, _| Ok(Some(json!({ "message_id": 1234 }))));
+            .returning(|_, _, _, _| Ok(Some(json!({ "message_id": 1234 }))));
         let host = services(Some(Arc::new(mock)), Some(sample_config()));
 
         let resp = handle_host_call(
@@ -1532,9 +1717,10 @@ mod tests {
                     "components": [{ "type": 10, "content": "edited" }],
                     "flags": 32768,
                 })),
+                always(),
             )
             .times(1)
-            .returning(|_, _, _| Ok(Some(json!({ "message_id": 1234 }))));
+            .returning(|_, _, _, _| Ok(Some(json!({ "message_id": 1234 }))));
         let host = services(Some(Arc::new(mock)), Some(sample_config()));
 
         let resp = handle_host_call(
@@ -2075,6 +2261,8 @@ mod tests {
             stats: Arc::new(handle),
             feeds: None,
             voice: None,
+            welcome: None,
+            previews: None,
         };
 
         let resp = handle_host_call(7, "hello", "host.stats", None, Some(&host), None).await;
@@ -2124,6 +2312,8 @@ mod tests {
             stats: Arc::new(handle),
             feeds: None,
             voice: None,
+            welcome: None,
+            previews: None,
         };
 
         let resp = handle_host_call(7, "hello", "host.stats", None, Some(&host), None).await;
@@ -2154,6 +2344,22 @@ mod tests {
             stats: Arc::new(StatsHandle::default()),
             feeds: Some(feeds),
             voice: None,
+            welcome: None,
+            previews: None,
+        }
+    }
+
+    fn welcome_services(welcome: Arc<dyn WelcomeSettingsSource>) -> HostServices {
+        HostServices {
+            io: None,
+            config: Some(sample_config()),
+            kv: None,
+            engine: None,
+            stats: Arc::new(StatsHandle::default()),
+            feeds: None,
+            voice: None,
+            welcome: Some(welcome),
+            previews: None,
         }
     }
 
@@ -2360,6 +2566,8 @@ mod tests {
             stats: Arc::new(StatsHandle::default()),
             feeds: None,
             voice: Some(voice),
+            welcome: None,
+            previews: None,
         }
     }
 
@@ -2544,6 +2752,189 @@ mod tests {
         )
         .await;
         assert_ok(resp, 7);
+    }
+
+    // ── welcome settings ────────────────────────────────────────────────────
+
+    fn welcome_sample_settings() -> ServerSettings {
+        ServerSettings {
+            welcome: pwr_plugin_protocol::WelcomeSettings {
+                enabled: Some(true),
+                channel_id: Some("123456789".into()),
+                primary_color: Some("#5865F2".into()),
+                template_id: Some("1".into()),
+                messages: Some(vec!["hello {user}".into()]),
+            },
+            ..ServerSettings::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn welcome_get_settings_routes_through_the_seam() {
+        let mut mock = MockWelcomeSettingsSource::new();
+        mock.expect_get_settings()
+            .with(eq(42u64))
+            .times(1)
+            .returning(|_| Ok(welcome_sample_settings()));
+        let host = welcome_services(Arc::new(mock));
+
+        let resp = handle_host_call(
+            7,
+            "hello",
+            "host.welcome.get_settings",
+            Some(&json!({ "guild_id": 42 })),
+            Some(&host),
+            None,
+        )
+        .await;
+        assert_eq!(
+            assert_ok(resp, 7),
+            Some(json!({
+                "feeds": {
+                    "enabled": null,
+                    "channel_id": null,
+                    "subscribe_role_id": null,
+                    "unsubscribe_role_id": null,
+                },
+                "voice": { "enabled": null },
+                "welcome": {
+                    "enabled": true,
+                    "channel_id": "123456789",
+                    "primary_color": "#5865F2",
+                    "template_id": "1",
+                    "messages": ["hello {user}"],
+                },
+            }))
+        );
+    }
+
+    #[tokio::test]
+    async fn welcome_update_settings_routes_through_the_seam() {
+        let settings = welcome_sample_settings();
+        let mut mock = MockWelcomeSettingsSource::new();
+        mock.expect_update_settings()
+            .with(eq(42u64), eq(settings.clone()))
+            .times(1)
+            .returning(|_, _| Ok(()));
+        let host = welcome_services(Arc::new(mock));
+
+        let resp = handle_host_call(
+            7,
+            "hello",
+            "host.welcome.update_settings",
+            Some(&json!({ "guild_id": 42, "settings": settings })),
+            Some(&host),
+            None,
+        )
+        .await;
+        assert_eq!(assert_ok(resp, 7), None);
+    }
+
+    #[tokio::test]
+    async fn welcome_settings_without_services_is_host_unavailable() {
+        let resp = handle_host_call(
+            7,
+            "hello",
+            "host.welcome.get_settings",
+            Some(&json!({ "guild_id": 42 })),
+            None,
+            None,
+        )
+        .await;
+        assert_err(resp, 7, "HostUnavailable");
+
+        let resp = handle_host_call(
+            7,
+            "hello",
+            "host.welcome.update_settings",
+            Some(&json!({ "guild_id": 42, "settings": ServerSettings::default() })),
+            None,
+            None,
+        )
+        .await;
+        assert_err(resp, 7, "HostUnavailable");
+    }
+
+    #[tokio::test]
+    async fn welcome_settings_without_source_is_host_unavailable() {
+        let host = services(None, Some(sample_config()));
+
+        let resp = handle_host_call(
+            7,
+            "hello",
+            "host.welcome.get_settings",
+            Some(&json!({ "guild_id": 42 })),
+            Some(&host),
+            None,
+        )
+        .await;
+        assert_err(resp, 7, "HostUnavailable");
+    }
+
+    #[tokio::test]
+    async fn welcome_settings_service_failure_is_welcome_settings_error() {
+        let mut mock = MockWelcomeSettingsSource::new();
+        mock.expect_get_settings()
+            .with(eq(42u64))
+            .times(1)
+            .returning(|_| {
+                Err(WelcomeSettingsError::Service(
+                    ServiceError::UnexpectedResult {
+                        message: "no such guild".into(),
+                    },
+                ))
+            });
+        let host = welcome_services(Arc::new(mock));
+
+        let resp = handle_host_call(
+            7,
+            "hello",
+            "host.welcome.get_settings",
+            Some(&json!({ "guild_id": 42 })),
+            Some(&host),
+            None,
+        )
+        .await;
+        let msg = assert_err(resp, 7, "WelcomeSettingsError");
+        assert!(msg.contains("no such guild"), "msg: {msg}");
+    }
+
+    #[tokio::test]
+    async fn welcome_settings_string_guild_id_parses() {
+        let mut mock = MockWelcomeSettingsSource::new();
+        mock.expect_get_settings()
+            .with(eq(42u64))
+            .times(1)
+            .returning(|_| Ok(welcome_sample_settings()));
+        let host = welcome_services(Arc::new(mock));
+
+        let resp = handle_host_call(
+            7,
+            "hello",
+            "host.welcome.get_settings",
+            Some(&json!({ "guild_id": "42" })),
+            Some(&host),
+            None,
+        )
+        .await;
+        assert_ok(resp, 7);
+    }
+
+    #[tokio::test]
+    async fn welcome_settings_wrong_guild_id_type_is_invalid_args() {
+        let mock = MockWelcomeSettingsSource::new();
+        let host = welcome_services(Arc::new(mock));
+
+        let resp = handle_host_call(
+            7,
+            "hello",
+            "host.welcome.get_settings",
+            Some(&json!({ "guild_id": {"id": 42} })),
+            Some(&host),
+            None,
+        )
+        .await;
+        assert_err(resp, 7, "InvalidArgs");
     }
 
     // ── kv ────────────────────────────────────────────────────────────────────

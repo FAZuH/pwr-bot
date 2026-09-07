@@ -34,11 +34,11 @@ pub enum HostCap {
     /// author-keyed submission on the owning session as a correlated
     /// `view.modal_submit` call. The open rides the interaction's
     /// id+token pair, so the interaction must be unanswered — the open IS
-    /// the response (ADR-0007). Component clicks are acknowledged by the
-    /// host before the plugin sees them, so a modal opens from an
-    /// interaction the host has left unanswered (e.g. a submission of a
-    /// previously opened modal) until the click path learns to skip the
-    /// ack for modal-triggering actions.
+    /// the response (ADR-0007). The click path answers interactions with
+    /// the plugin's view reply (type 7) when it arrives in time and
+    /// otherwise falls back to ack + webhook edit, so an unanswered
+    /// interaction only survives when a plugin answers with an
+    /// `host.open_modal` effect — which is then the response itself.
     OpenModal,
     /// Fetch host configuration (db url, data path, poll interval).
     GetConfig,
@@ -58,6 +58,12 @@ pub enum HostCap {
     /// Write a guild's voice settings snapshot, mirroring the voice service's
     /// `update_server_settings`.
     VoiceUpdateSettings,
+    /// Read a guild's welcome settings (the whole [`crate::ServerSettings`]
+    /// snapshot), mirroring the welcome service's `get_server_settings`.
+    WelcomeGetSettings,
+    /// Write a guild's welcome settings snapshot, mirroring the welcome
+    /// service's `update_server_settings`.
+    WelcomeUpdateSettings,
 }
 
 /// Every op in the v1 host capability surface, in declaration order. The
@@ -81,6 +87,8 @@ pub const ALL_CAPS: &[HostCap] = &[
     HostCap::FeedUpdateSettings,
     HostCap::VoiceGetSettings,
     HostCap::VoiceUpdateSettings,
+    HostCap::WelcomeGetSettings,
+    HostCap::WelcomeUpdateSettings,
 ];
 
 impl HostCap {
@@ -105,6 +113,8 @@ impl HostCap {
             HostCap::FeedUpdateSettings => "host.feed.update_settings",
             HostCap::VoiceGetSettings => "host.voice.get_settings",
             HostCap::VoiceUpdateSettings => "host.voice.update_settings",
+            HostCap::WelcomeGetSettings => "host.welcome.get_settings",
+            HostCap::WelcomeUpdateSettings => "host.welcome.update_settings",
         }
     }
 
@@ -174,7 +184,7 @@ mod tests {
 
     #[test]
     fn all_caps_is_exactly_the_v1_surface() {
-        assert_eq!(ALL_CAPS.len(), 16);
+        assert_eq!(ALL_CAPS.len(), 18);
         let mut seen = std::collections::HashSet::new();
         for cap in ALL_CAPS {
             assert!(seen.insert(*cap), "duplicate op in ALL_CAPS");

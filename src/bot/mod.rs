@@ -17,6 +17,7 @@ pub mod view;
 
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::future::Future;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -33,6 +34,7 @@ use log::warn;
 use poise::Framework;
 use poise::FrameworkOptions;
 use poise::serenity_prelude::*;
+use pwr_plugin_protocol::MODAL_OPENED_KIND;
 use pwr_plugin_protocol::Manifest;
 use pwr_plugin_protocol::ViewSpec;
 use serde_json::Value;
@@ -65,6 +67,7 @@ use crate::plugin::SerenityHostIo;
 use crate::plugin::SerenityStatsSource;
 use crate::plugin::ServiceFeedSettingsSource;
 use crate::plugin::ServiceVoiceSettingsSource;
+use crate::plugin::ServiceWelcomeSettingsSource;
 use crate::plugin::StatsHandle;
 use crate::plugin::VOICE_STATE_EVENT;
 use crate::plugin::command::PluginRoutes;
@@ -101,6 +104,9 @@ pub struct Data {
     /// event handler skips their interactions and the Host acknowledges them
     /// exactly once. See [`crate::bot::translate`].
     pub translate_layer: Arc<TranslateLayer>,
+    /// Fills the attachment slots a plugin envelope declares at transport
+    /// (ADR-0012).
+    pub previews: Arc<crate::bot::gui::welcome::PreviewResolver>,
     pub start_time: Instant,
 }
 
@@ -184,6 +190,12 @@ impl Bot {
         // is attached below once the command count is known, and the real
         // gateway cache attaches in `start()` after the client is built.
         let stats_handle = Arc::new(StatsHandle::default());
+        // The welcome card renderer both the host ops and the view transports
+        // share: one generator for the process (ADR-0012).
+        let previews = Arc::new(crate::bot::gui::welcome::PreviewResolver::new(
+            service.feed_subscription.clone(),
+            Arc::new(crate::bot::command::welcome::image_generator::WelcomeImageGenerator::new()),
+        ));
         let host_services = Arc::new(HostServices {
             io: Some(Arc::new(SerenityHostIo::new(http.clone()))),
             config: Some(HostConfig::from(&*config)),
@@ -196,6 +208,10 @@ impl Bot {
             voice: Some(Arc::new(ServiceVoiceSettingsSource::new(
                 service.voice_tracking.clone(),
             ))),
+            welcome: Some(Arc::new(ServiceWelcomeSettingsSource::new(
+                service.feed_subscription.clone(),
+            ))),
+            previews: Some(previews.clone()),
         });
         let plugin_manager = Arc::new(
             PluginManager::new(Some(http.clone()), RespawnPolicy::default())
@@ -247,6 +263,7 @@ impl Bot {
             plugin_routes,
             core_manifests,
             translate_layer: Arc::new(TranslateLayer::new()),
+            previews: previews.clone(),
             start_time,
         });
 
@@ -409,6 +426,39 @@ fn plugin_commands(
         commands.extend(commands_from_manifest(&entry.manifest));
     }
     commands
+}
+
+/// What a plugin's answer to a view interaction means for the message it
+/// edits. See [`BotEventHandler::view_answer`].
+enum ViewAnswer {
+    /// The fresh render to send: the edit body, with its declared attachment
+    /// slots resolved, plus the files that declaration names (ADR-0012).
+    Render(Value, Vec<CreateAttachment<'static>>),
+    /// The plugin answered the interaction itself — it opened a modal as the
+    /// click's response (ADR-0011). The host sends nothing.
+    Answered,
+    /// Nothing to send: a stale view or a failed plugin session.
+    Nothing,
+}
+
+/// How long a plugin round trip may take before the host acknowledges the
+/// click to stay inside Discord's response window. Comfortably under the
+/// 3-second limit: the window covers the host's own HTTP round trip too.
+const ACK_FALLBACK_WINDOW: Duration = Duration::from_millis(2500);
+
+/// Races a plugin round trip against the click's response window: the
+/// trip's result when it beats the window, `None` when the window elapses
+/// first. The trip is borrowed, never cancelled — a slow trip keeps running
+/// (it holds the session lock) and the caller awaits it after the fallback.
+async fn within_ack_window<F: Future + Unpin>(
+    round_trip: &mut F,
+    window: Duration,
+) -> Option<F::Output> {
+    tokio::select! {
+        biased;
+        result = round_trip => Some(result),
+        () = tokio::time::sleep(window) => None,
+    }
 }
 
 /// Event handler for Discord gateway events.
@@ -654,6 +704,7 @@ impl BotEventHandler {
         custom_id: &str,
         interaction: Value,
         interaction_token: &str,
+        guild_id: Option<u64>,
         kind: &str,
     ) {
         let result = self
@@ -664,39 +715,73 @@ impl BotEventHandler {
             })
             .await;
 
+        if let ViewAnswer::Render(body, files) =
+            self.view_answer(result, message_id, guild_id, kind).await
+            && let Err(e) = self
+                .http
+                .edit_original_interaction_response(
+                    interaction_token,
+                    &body,
+                    files.into_iter().map(Into::into).collect(),
+                )
+                .await
+        {
+            warn!("failed to update message {message_id} after {kind}: {e}");
+        }
+    }
+
+    /// Decides what a plugin's answer to a view interaction means for the
+    /// message: the fresh render to send (its declared attachment slots
+    /// filled, ADR-0012), nothing because the plugin answered the
+    /// interaction itself, or nothing because the view is stale or the
+    /// session failed.
+    async fn view_answer(
+        &self,
+        result: Result<ViewSpec, InteractionError>,
+        message_id: MessageId,
+        guild_id: Option<u64>,
+        kind: &str,
+    ) -> ViewAnswer {
         match result {
+            // The plugin's payload is a create envelope: the edit transport
+            // strips the create-only fields Discord rejects on edit (error
+            // 50080 for `sticker_ids`) before the body is sent.
             Ok(spec) => {
-                // The plugin's payload is a create envelope: the edit
-                // transport strips the create-only fields Discord rejects on
-                // edit (error 50080 for `sticker_ids`) before sending, and
-                // the body rides the interaction webhook as raw JSON — the
-                // channel-message route cannot edit ephemeral replies.
-                let body = edit_body_for_transport(&spec.data);
-                if let Err(e) = self
-                    .http
-                    .edit_original_interaction_response(interaction_token, &body, Vec::new())
-                    .await
-                {
-                    warn!("failed to update message {message_id} after {kind}: {e}");
-                }
+                let (body, files) = self
+                    .data
+                    .previews
+                    .resolve(edit_body_for_transport(&spec.data), guild_id)
+                    .await;
+                ViewAnswer::Render(body, files)
+            }
+            // A modal trigger the plugin answered by opening the modal: the
+            // modal IS the response, so the host sends nothing and the
+            // panel stays as it was.
+            Err(InteractionError::PluginRejected { kind, .. }) if kind == MODAL_OPENED_KIND => {
+                debug!("plugin answered the interaction with a modal of its own");
+                ViewAnswer::Answered
             }
             Err(InteractionError::NoSession { .. }) => {
                 debug!("{kind} on message {message_id} without an open session");
+                ViewAnswer::Nothing
             }
             Err(InteractionError::Plugin(e)) => {
                 warn!("plugin session for message {message_id} failed: {e}");
                 if let Err(e) = self.data.plugin_engine.abandon(message_id).await {
                     warn!("failed to abandon session for message {message_id}: {e}");
                 }
+                ViewAnswer::Nothing
             }
             Err(e) => {
                 warn!("{kind} on message {message_id} failed: {e}");
+                ViewAnswer::Nothing
             }
         }
     }
 
-    /// Routes a component interaction: acknowledges the click, then hands the
-    /// interaction to the open view session.
+    /// Routes a component interaction: the plugin's fresh render answers the
+    /// click directly when the round trip beats Discord's response window,
+    /// and an acknowledge-plus-webhook-edit carries it when it does not.
     ///
     /// Messages owned by a live Host session are skipped — the Host loop
     /// owns both the routing and the acknowledgement there, so acking here
@@ -708,25 +793,98 @@ impl BotEventHandler {
             return;
         }
 
-        // Acknowledge the click before the plugin round trip: Discord
-        // requires a response within 3 seconds, and the interact call may
-        // take most of that window. Best-effort — a failed ack is logged,
-        // not fatal.
+        let guild_id = interaction.guild_id.map(GuildId::get);
+        let raw = serde_json::to_value(interaction).unwrap_or_default();
+        let round_trip = self.data.plugin_engine.interact_validated(
+            message_id,
+            &interaction.data.custom_id,
+            raw,
+            |data| validate_view_data(data).map_err(Into::into),
+        );
+        tokio::pin!(round_trip);
+
+        // Discord wants a response within 3 seconds. A round trip that beats
+        // the window answers with its render, so the panel updates in one
+        // step and a plugin that opened a modal itself (ADR-0011) is left to
+        // own the response. A slow trip acknowledges first; the round trip is
+        // polled, never cancelled — it holds the session lock — and its
+        // render follows through the interaction webhook.
+        let fast = within_ack_window(&mut round_trip, ACK_FALLBACK_WINDOW).await;
+
+        match fast {
+            Some(result) => match self
+                .view_answer(result, message_id, guild_id, "component interaction")
+                .await
+            {
+                ViewAnswer::Render(body, files) => {
+                    let response = json!({ "type": 7, "data": body });
+                    if let Err(e) = self
+                        .http
+                        .create_interaction_response(
+                            interaction.id,
+                            interaction.token.as_str(),
+                            &response,
+                            files.iter().cloned().map(Into::into).collect(),
+                        )
+                        .await
+                    {
+                        // The interaction was already answered by the plugin
+                        // (a modal opened mid-round-trip): fall back to the
+                        // webhook edit rather than leave a stale panel.
+                        debug!("failed to answer component interaction on {message_id}: {e}");
+                        self.edit_after_ack(message_id, interaction.token.as_str(), body, files)
+                            .await;
+                    }
+                }
+                ViewAnswer::Answered => {}
+                ViewAnswer::Nothing => self.ack_component(interaction, message_id).await,
+            },
+            None => {
+                self.ack_component(interaction, message_id).await;
+                let result = (&mut round_trip).await;
+                if let ViewAnswer::Render(body, files) = self
+                    .view_answer(result, message_id, guild_id, "component interaction")
+                    .await
+                {
+                    self.edit_after_ack(message_id, interaction.token.as_str(), body, files)
+                        .await;
+                }
+            }
+        }
+    }
+
+    /// Acknowledges a click without a visible reply, leaving the message for
+    /// a later webhook edit.
+    async fn ack_component(&self, interaction: &ComponentInteraction, message_id: MessageId) {
         if let Err(e) = interaction
             .create_response(&self.http, CreateInteractionResponse::Acknowledge)
             .await
         {
             warn!("failed to acknowledge component interaction on message {message_id}: {e}");
         }
+    }
 
-        self.route_view_interaction(
-            message_id,
-            &interaction.data.custom_id,
-            serde_json::to_value(interaction).unwrap_or_default(),
-            interaction.token.as_str(),
-            "component interaction",
-        )
-        .await;
+    /// Carries a render to a message whose interaction was already
+    /// acknowledged: the body rides the interaction webhook, the only edit
+    /// route that works for ephemeral responses too.
+    async fn edit_after_ack(
+        &self,
+        message_id: MessageId,
+        token: &str,
+        body: Value,
+        files: Vec<CreateAttachment<'static>>,
+    ) {
+        if let Err(e) = self
+            .http
+            .edit_original_interaction_response(
+                token,
+                &body,
+                files.into_iter().map(Into::into).collect(),
+            )
+            .await
+        {
+            warn!("failed to update message {message_id} after a component interaction: {e}");
+        }
     }
 
     /// Routes a modal submit: a submission of a plugin-opened modal rides
@@ -792,6 +950,7 @@ impl BotEventHandler {
             &interaction.data.custom_id,
             serde_json::to_value(interaction).unwrap_or_default(),
             interaction.token.as_str(),
+            interaction.guild_id.map(GuildId::get),
             "modal submit",
         )
         .await;
@@ -800,16 +959,24 @@ impl BotEventHandler {
     /// Renders a plugin's answer to its own modal submission as the
     /// submission's response: an update-message carrying the answer's
     /// create envelope through the edit-transport strip (the same
-    /// projection every edit sends). A submission opened from a component
-    /// click replaces that message; one opened from a command answers as a
-    /// fresh message, honoring the spec's ephemerality.
+    /// projection every edit sends) with its declared attachment slots
+    /// filled (ADR-0012). A submission opened from a component click replaces
+    /// that message; one opened from a command answers as a fresh message,
+    /// honoring the spec's ephemerality.
     async fn render_modal_submission_response(
         &self,
         interaction: &ModalInteraction,
         spec: &ViewSpec,
     ) {
         let kind = if interaction.message.is_some() { 7 } else { 4 };
-        let mut data = edit_body_for_transport(&spec.data);
+        let (mut data, files) = self
+            .data
+            .previews
+            .resolve(
+                edit_body_for_transport(&spec.data),
+                interaction.guild_id.map(GuildId::get),
+            )
+            .await;
         if kind == 4 && spec.ephemeral {
             let flags = data
                 .get("flags")
@@ -824,7 +991,7 @@ impl BotEventHandler {
                 interaction.id,
                 interaction.token.as_str(),
                 &body,
-                Vec::new(),
+                files.into_iter().map(Into::into).collect(),
             )
             .await
         {
@@ -1010,5 +1177,45 @@ mod tests {
             .collect();
 
         assert_eq!(names, ["alpha", "zeta", "bravo", "mike"]);
+    }
+
+    /// A round trip that beats the window resolves to its result.
+    #[tokio::test]
+    async fn a_fast_round_trip_beats_the_ack_window() {
+        let mut trip = Box::pin(async { "fast" });
+        assert_eq!(
+            within_ack_window(&mut trip, Duration::from_millis(50)).await,
+            Some("fast")
+        );
+    }
+
+    /// A slow round trip loses the window: the host learns it must ack.
+    #[tokio::test]
+    async fn a_slow_round_trip_loses_the_ack_window() {
+        let mut trip = Box::pin(async {
+            tokio::time::sleep(Duration::from_secs(60)).await;
+            "slow"
+        });
+        assert_eq!(
+            within_ack_window(&mut trip, Duration::from_millis(10)).await,
+            None
+        );
+    }
+
+    /// Losing the window does not cancel the round trip — it holds the
+    /// session lock, so abandoning it would deadlock every later click on
+    /// that panel. The still-running trip completes afterwards and its
+    /// result is collected by awaiting it again.
+    #[tokio::test]
+    async fn a_timed_out_round_trip_is_not_cancelled() {
+        let mut trip = Box::pin(async {
+            tokio::time::sleep(Duration::from_millis(30)).await;
+            "late"
+        });
+        assert_eq!(
+            within_ack_window(&mut trip, Duration::from_millis(10)).await,
+            None
+        );
+        assert_eq!((&mut trip).await, "late");
     }
 }

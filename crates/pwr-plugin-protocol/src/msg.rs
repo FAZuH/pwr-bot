@@ -22,6 +22,12 @@ pub const BUTTON_CUSTOM_ID: &str = "hello:click";
 /// plugin with a correlated [`Msg::Resp`] (the `view.interact` shape).
 pub const MODAL_SUBMIT_OP: &str = "view.modal_submit";
 
+/// WireError `kind` a plugin answers a modal-trigger click with: tells the
+/// host the plugin opened the modal as the click's response, so the host
+/// skips its own response — the modal IS the response. The host treats it as
+/// a benign, expected marker (debug log, no fallback edit).
+pub const MODAL_OPENED_KIND: &str = "ModalOpened";
+
 /// A message on the plugin wire, serialized as one compact JSON object per
 /// line. The `t` discriminator names the variant: `hello`, `call`, `resp`,
 /// `event`, `ping`, `pong`, `bye`.

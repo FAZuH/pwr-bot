@@ -36,6 +36,7 @@ pub use manifest::TaskDef;
 pub use msg::API_VERSION;
 pub use msg::BUTTON_CUSTOM_ID;
 pub use msg::CallIdSeq;
+pub use msg::MODAL_OPENED_KIND;
 pub use msg::MODAL_SUBMIT_OP;
 pub use msg::Msg;
 pub use msg::PLUGIN_NAME;

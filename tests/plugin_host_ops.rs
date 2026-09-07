@@ -43,6 +43,8 @@ fn host_services(io: Arc<dyn HostIo>, kv: Option<Arc<dyn KvStore>>) -> Arc<HostS
         stats: Arc::new(StatsHandle::default()),
         feeds: None,
         voice: None,
+        welcome: None,
+        previews: None,
     })
 }
 
@@ -64,6 +66,8 @@ fn view_host_services(
         stats: Arc::new(StatsHandle::default()),
         feeds: None,
         voice: None,
+        welcome: None,
+        previews: None,
     })
 }
 
@@ -178,9 +182,10 @@ async fn host_edit_invoke_serves_edit_message_through_the_seam() {
             mockall::predicate::eq(json!({
                 "components": [{ "type": 10, "content": "edited" }]
             })),
+            mockall::predicate::always(),
         )
         .times(1)
-        .returning(|_, _, _| Ok(Some(json!({ "message_id": 111_222_333 }))));
+        .returning(|_, _, _, _| Ok(Some(json!({ "message_id": 111_222_333 }))));
 
     let plugin = RunningPlugin::spawn_with(
         probe_binary("hello"),
@@ -253,9 +258,10 @@ async fn host_openview_opens_the_target_plugin_view_end_to_end() {
                     "flags": 32768,
                 })
             }),
+            mockall::predicate::always(),
         )
         .times(1)
-        .returning(move |_, _, _| Ok(Some(json!({ "message_id": produced }))));
+        .returning(move |_, _, _, _| Ok(Some(json!({ "message_id": produced }))));
 
     let engine = InteractionEngine::new();
     let services = view_host_services(Arc::new(mock), engine.clone());

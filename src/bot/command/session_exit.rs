@@ -158,6 +158,7 @@ pub async fn adopt_message_into_hub(
         channel_id.get(),
         message_id.get(),
         edit_body_for_transport(&spec.data),
+        Vec::new(),
     )
     .await?;
     engine

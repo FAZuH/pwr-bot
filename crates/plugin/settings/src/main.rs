@@ -25,9 +25,9 @@
 //!   to the hub, neither touching the model;
 //! - a `settings:config:<feature>` click is a navigation stub until that
 //!   feature's panel exists as a plugin: it re-renders the current page.
-//!   Feeds and Voice migrated (ADR-0009): their buttons ride the nav id
-//!   (`settings:open:feed-settings`, `settings:open:voice-settings`) and
-//!   open the panel plugins;
+//!   All three features migrated (ADR-0009): their buttons ride the nav id
+//!   (`settings:open:feed-settings`, `settings:open:voice-settings`,
+//!   `settings:open:welcome-settings`) and open the panel plugins;
 //! - a `settings:open:<plugin>` nav click issues `host.open_view` for the
 //!   target plugin (the settings hub's promise: navigate to any panel),
 //!   forwarding the source interaction's `guild_id` in the invoke args so
@@ -107,6 +107,7 @@ fn config_target(label: &str) -> Option<&'static str> {
     match label {
         "Feeds" => Some("feed-settings"),
         "Voice" => Some("voice-settings"),
+        "Welcome" => Some("welcome-settings"),
         _ => None,
     }
 }
@@ -466,7 +467,7 @@ fn view_data(model: &SettingsModel, nav: &NavTargets) -> Value {
             CreateSelectMenuOption::new(format!("{emoji} {label}"), *label)
         })
         .collect();
-    check_select_menu_options(&toggle_options);
+    check_select_menu_options(&toggle_options).expect("toggle options obey the select-menu law");
     let toggle_row =
         CreateContainerComponent::ActionRow(CreateActionRow::select_menu(CreateSelectMenu::new(
             CUSTOM_ID_TOGGLE,
@@ -493,7 +494,8 @@ fn view_data(model: &SettingsModel, nav: &NavTargets) -> Value {
                 }
             }
         }
-    };
+    }
+    .expect("spliced view obeys the component laws");
     serde_json::to_value(message).expect("settings hub view is serializable")
 }
 
@@ -555,11 +557,14 @@ fn nav_rows(nav: &NavTargets) -> Vec<CreateContainerComponent<'static>> {
         .map(|chunk| {
             let buttons: Vec<CreateButton<'static>> =
                 chunk.iter().map(|&target| nav_button(target)).collect();
-            CreateContainerComponent::ActionRow(component! {
-                action_row {
-                    { buttons }
+            CreateContainerComponent::ActionRow(
+                component! {
+                    action_row {
+                        { buttons }
+                    }
                 }
-            })
+                .expect("spliced row obeys the button law"),
+            )
         })
         .collect()
 }
@@ -1288,8 +1293,8 @@ mod tests {
             assert_eq!(button["style"], json!(2), "secondary like the original");
             assert_eq!(button["label"], json!(label));
         }
-        // Feeds and Voice migrated (ADR-0009): their buttons open the panel
-        // plugins; Welcome stays a config stub until its ticket lands.
+        // All three features migrated (ADR-0009): their buttons open the
+        // panel plugins.
         assert_eq!(
             buttons[0]["custom_id"],
             json!("settings:open:feed-settings")
@@ -1298,7 +1303,10 @@ mod tests {
             buttons[1]["custom_id"],
             json!("settings:open:voice-settings")
         );
-        assert_eq!(buttons[2]["custom_id"], json!("settings:config:welcome"));
+        assert_eq!(
+            buttons[2]["custom_id"],
+            json!("settings:open:welcome-settings")
+        );
     }
 
     #[test]
