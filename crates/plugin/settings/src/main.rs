@@ -23,11 +23,10 @@
 //!   panel with the live values (formatted like `/about`'s Stats section);
 //!   a failed op renders the fallback copy — `settings:about:back` returns
 //!   to the hub, neither touching the model;
-//! - a `settings:config:<feature>` click is a navigation stub until that
-//!   feature's panel exists as a plugin: it re-renders the current page.
-//!   All three features migrated (ADR-0009): their buttons ride the nav id
+//! - every per-feature config button rides the nav id
 //!   (`settings:open:feed-settings`, `settings:open:voice-settings`,
-//!   `settings:open:welcome-settings`) and open the panel plugins;
+//!   `settings:open:welcome-settings`) and opens the migrated panel plugin
+//!   (ADR-0009);
 //! - a `settings:open:<plugin>` nav click issues `host.open_view` for the
 //!   target plugin (the settings hub's promise: navigate to any panel),
 //!   forwarding the source interaction's `guild_id` in the invoke args so
@@ -80,37 +79,23 @@ const KV_NAMESPACE: &str = "settings";
 const KV_MODEL_KEY: &str = "model";
 
 /// Custom ids for the hub's interactive components.
-const CUSTOM_ID_CONFIG_PREFIX: &str = "settings:config:";
 const CUSTOM_ID_TOGGLE: &str = "settings:toggle";
 const CUSTOM_ID_ABOUT: &str = "settings:about";
 const CUSTOM_ID_ABOUT_BACK: &str = "settings:about:back";
 
 /// The configurable features, in the original hub's order: the label is both
-/// the button text and the select option value (as in the monolith UI), and
-/// the message is the toggle it applies.
-const FEATURES: [(&str, SettingsMsg); 3] = [
-    ("Feeds", SettingsMsg::Feeds),
-    ("Voice", SettingsMsg::Voice),
-    ("Welcome", SettingsMsg::Welcome),
+/// the button text and the select option value (as in the monolith UI), the
+/// message is the toggle it applies, and the target is the panel plugin the
+/// button opens through the nav id (`settings:open:<target>`).
+const FEATURES: [(&str, SettingsMsg, &str); 3] = [
+    ("Feeds", SettingsMsg::Feeds, "feed-settings"),
+    ("Voice", SettingsMsg::Voice, "voice-settings"),
+    ("Welcome", SettingsMsg::Welcome, "welcome-settings"),
 ];
 
 /// Custom id prefix for the nav button: the target plugin name follows the
 /// separator, so the hub can open any plugin's panel.
 const CUSTOM_ID_OPEN_PREFIX: &str = "settings:open:";
-
-/// The panel plugin a config button opens, when its panel has migrated
-/// (ADR-0009); `None` while the button is still a navigation stub. The
-/// button rides the nav id (`settings:open:<plugin>`), so the existing
-/// open-view arm serves it — the panel plugin receives the source
-/// interaction's `guild_id` through the forwarded args.
-fn config_target(label: &str) -> Option<&'static str> {
-    match label {
-        "Feeds" => Some("feed-settings"),
-        "Voice" => Some("voice-settings"),
-        "Welcome" => Some("welcome-settings"),
-        _ => None,
-    }
-}
 
 /// The nav button's target while discovery has not run or the host did not
 /// answer `host.list_plugins`: the hello-style fixture the integration tests
@@ -137,8 +122,7 @@ enum NavTargets {
 enum Pending {
     /// The `host.kv.get` issued to load the model before the first render.
     /// The page a panel asked the hub to open on rides the chain: the
-    /// monolith's `Navigation::Settings*` handoff lands the fresh session
-    /// there.
+    /// panel's Back/About handoff names it through its `page` invoke arg.
     Load(u64, Page),
     /// The `host.kv.set` issued to persist a toggled session model.
     Save(u64, ViewState),
@@ -334,8 +318,8 @@ fn feature_enabled(model: &SettingsModel, msg: SettingsMsg) -> bool {
 fn toggle_msg_for(label: &str) -> Option<SettingsMsg> {
     FEATURES
         .iter()
-        .find(|(name, _)| *name == label)
-        .map(|(_, msg)| *msg)
+        .find(|(name, _, _)| *name == label)
+        .map(|(_, msg, _)| *msg)
 }
 
 /// Info text under the Configure heading, verbatim from the original hub.
@@ -446,19 +430,15 @@ fn format_number(num: u64) -> String {
 fn view_data(model: &SettingsModel, nav: &NavTargets) -> Value {
     let config_buttons: Vec<CreateButton<'static>> = FEATURES
         .iter()
-        .map(|(label, _)| {
-            let custom_id = match config_target(label) {
-                Some(target) => format!("{CUSTOM_ID_OPEN_PREFIX}{target}"),
-                None => format!("{CUSTOM_ID_CONFIG_PREFIX}{}", label.to_lowercase()),
-            };
-            CreateButton::new(custom_id)
+        .map(|(label, _, target)| {
+            CreateButton::new(format!("{CUSTOM_ID_OPEN_PREFIX}{target}"))
                 .label(*label)
                 .style(ButtonStyle::Secondary)
         })
         .collect();
     let toggle_options: Vec<CreateSelectMenuOption<'static>> = FEATURES
         .iter()
-        .map(|(label, msg)| {
+        .map(|(label, msg, _)| {
             let emoji = if feature_enabled(model, *msg) {
                 "✅"
             } else {
@@ -611,19 +591,12 @@ fn reply_envelope(
     write_msg(out, &resp).is_ok()
 }
 
-/// The page a click needing no host call lands on: Back returns to the hub
-/// and a Configure stub keeps the current page. About is not here — it needs
-/// a `host.stats` call first. `None` when the custom id is none of those.
-fn page_swap(custom_id: Option<&str>, current: Page) -> Option<Page> {
+/// The page a click needing no host call lands on: Back returns to the hub.
+/// About is not here — it needs a `host.stats` call first. `None` when the
+/// custom id is neither.
+fn page_swap(custom_id: Option<&str>) -> Option<Page> {
     match custom_id {
         Some(CUSTOM_ID_ABOUT_BACK) => Some(Page::Hub),
-        Some(clicked)
-            if clicked
-                .strip_prefix(CUSTOM_ID_CONFIG_PREFIX)
-                .is_some_and(|target| !target.is_empty()) =>
-        {
-            Some(current)
-        }
         _ => None,
     }
 }
@@ -923,12 +896,10 @@ fn main() -> ExitCode {
                             // the op errors. The session swaps to the About
                             // page either way.
                             Some(HostCall::new(Pending::Stats(id, session), stats_args()))
-                        } else if let Some(next_page) = page_swap(custom_id, session.page) {
-                            // Pages needing no host call: Back swaps the
-                            // session's page; a Configure button is a
-                            // navigation stub until per-feature panels exist
-                            // as plugins — it re-renders the current page
-                            // rather than failing the interaction.
+                        } else if let Some(next_page) = page_swap(custom_id) {
+                            // The only host-call-free page swap left: Back
+                            // from About to the hub. Every Configure button
+                            // is a nav id handled above.
                             let state = ViewState {
                                 model: session.model,
                                 page: next_page,
@@ -1529,28 +1500,15 @@ mod tests {
     }
 
     #[test]
-    fn page_swap_routes_back_and_config_stubs() {
+    fn page_swap_routes_back_only() {
+        assert_eq!(page_swap(Some(CUSTOM_ID_ABOUT_BACK)), Some(Page::Hub));
         assert_eq!(
-            page_swap(Some(CUSTOM_ID_ABOUT_BACK), Page::About),
-            Some(Page::Hub)
-        );
-        assert_eq!(
-            page_swap(Some(CUSTOM_ID_ABOUT), Page::Hub),
+            page_swap(Some(CUSTOM_ID_ABOUT)),
             None,
             "About needs a host.stats call, so it is not a page swap"
         );
-        assert_eq!(
-            page_swap(Some("settings:config:feeds"), Page::About),
-            Some(Page::About),
-            "a stub keeps the current page"
-        );
-        assert_eq!(
-            page_swap(Some("settings:config:"), Page::Hub),
-            None,
-            "an empty target is not a config click"
-        );
-        assert_eq!(page_swap(Some(CUSTOM_ID_TOGGLE), Page::Hub), None);
-        assert_eq!(page_swap(None, Page::Hub), None);
+        assert_eq!(page_swap(Some(CUSTOM_ID_TOGGLE)), None);
+        assert_eq!(page_swap(None), None);
     }
 
     #[test]

@@ -37,15 +37,12 @@ pub mod effects;
 pub mod feature;
 pub mod feed_batch;
 pub mod feed_list;
-pub mod feed_settings;
 pub mod input;
 pub mod register;
 pub mod rt;
 pub mod unregister;
 pub mod voice_leaderboard;
-pub mod voice_settings;
 pub mod voice_stats;
-pub mod welcome;
 
 pub use effects::EffectHandler;
 pub use effects::NoopEffectHandler;

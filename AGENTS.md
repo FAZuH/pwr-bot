@@ -74,10 +74,9 @@ Pure, testable state mutations live in `src/update/<feature>.rs` as free
 `Effect` vocabularies and unit tests). Handlers in `src/bot/command/` parse
 Discord interactions into `Msg`s, and side effects execute only through the
 feature's `EffectHandler` adapter. See `docs/adr/0005-tea-gui-architecture.md`
-for the layering rules. Existing modules: `about`, `voice_settings`,
-`feed_batch`, `register`, `unregister`, `feed_settings`, `feed_list`,
-`voice_stats`, `voice_leaderboard`, `welcome_settings`, `plugins`,
-`pagination`.
+for the layering rules. Existing modules: `about`, `feed_batch`,
+`register`, `unregister`, `feed_list`, `voice_stats`,
+`voice_leaderboard`, `plugins`, `pagination`.
 
 - Place pure logic in `src/update/<feature>.rs` (Model, Msg, Effect, `update` fn, tests)
 - Handlers in `src/bot/command/` parse Discord interactions into `Msg`s, run `update`, and route returned `Effect`s to the feature's `EffectHandler` adapter (never execute effects inline)

@@ -56,6 +56,7 @@ use serde_json::Value;
 
 use crate::bot::Data;
 use crate::bot::command::Error;
+use crate::plugin::edit_body_for_transport;
 use crate::plugin::validate_view_data;
 
 /// A parsed `CreateCommand` blob, before poise mapping.
@@ -618,6 +619,73 @@ fn view_presentation(spec: &ViewSpec) -> ViewPresentation {
     }
 }
 
+/// Opens a plugin view from a slash interaction end to end: invoke the
+/// plugin for its spec, defer with the view's ephemerality, edit the
+/// deferred response with the spec payload (transport-stripped, with any
+/// declared attachment slots filled, ADR-0012), and register the engine
+/// session on the edited message's id. No placeholder message is ever sent.
+///
+/// Shared by [`plugin_slash_dispatch`] and the settings commands that
+/// deep-link a panel plugin without declaring slash commands of their own.
+/// `plugin_name` keys the manager lookup; `command` is the invoke command
+/// the plugin answers (for the panel plugins both are the plugin name).
+pub async fn open_plugin_view(
+    ctx: poise::Context<'_, Data, Error>,
+    plugin_name: &str,
+    command: &str,
+    args: Value,
+) -> Result<(), Error> {
+    let poise::Context::Application(app) = ctx else {
+        return Err(anyhow::anyhow!("open_plugin_view requires an application interaction").into());
+    };
+    let data = ctx.data();
+    let Some(plugin) = data.plugin_manager.get(plugin_name).await else {
+        return Err(anyhow::anyhow!("plugin `{plugin_name}` is not running").into());
+    };
+    // The interaction token outlives the context borrows below and is
+    // needed to edit the reply through the interaction-webhook route.
+    let interaction_token = app.interaction.token.as_str();
+    // Invoke the plugin before responding, so the deferred response can
+    // carry the view's ephemerality — Discord honors it on the first
+    // interaction response only.
+    let spec = data
+        .plugin_engine
+        .invoke(plugin.clone(), command, args)
+        .await?;
+    validate_view_data(&spec.data)?;
+    let presentation = view_presentation(&spec);
+    if presentation.ephemeral {
+        ctx.defer_ephemeral().await?;
+    } else {
+        ctx.defer().await?;
+    }
+    // Ephemeral responses cannot be edited via the channel-message route
+    // (`PATCH /channels/{id}/messages/{id}` returns Unknown Message for
+    // ephemeral messages); the interaction-webhook route is the only one
+    // that works, for both ephemeral and public responses. The deferred
+    // response carries no components, so no interaction can reach the
+    // session before it is registered from the edit's message id.
+    let (body, files) = data
+        .previews
+        .resolve(
+            edit_body_for_transport(&presentation.edit_body),
+            ctx.guild_id().map(serenity::GuildId::get),
+        )
+        .await;
+    let message = ctx
+        .http()
+        .edit_original_interaction_response(
+            interaction_token,
+            &body,
+            files.into_iter().map(Into::into).collect(),
+        )
+        .await?;
+    data.plugin_engine
+        .register(message.id, plugin, command, spec)
+        .await;
+    Ok(())
+}
+
 /// Routes a slash invocation to its owning plugin's view session.
 ///
 /// The invoked command name is looked up in the plugin route table built from
@@ -626,13 +694,7 @@ fn view_presentation(spec: &ViewSpec) -> ViewPresentation {
 /// command, so this guard keeps unregistered commands honest). The
 /// interaction's arguments are re-parsed against the command's schema
 /// ([`reparse_command_args`]) so the plugin receives the real payload instead
-/// of an empty object. The plugin handle comes from the manager, the initial
-/// render is invoke+defer+edit ([`view_presentation`]): invoke the plugin for
-/// its spec first (so the deferred response can carry `spec.ephemeral`),
-/// replace that response with the spec's raw data via a bare HTTP edit —
-/// `serenity::Component` is not `Deserialize`, so the spec cannot ride a typed
-/// `CreateReply` — then register the engine session on the edited message's
-/// id. No placeholder message is ever sent.
+/// of an empty object. The render itself is [`open_plugin_view`].
 fn plugin_slash_dispatch(
     ctx: poise::ApplicationContext<'_, Data, Error>,
 ) -> poise::BoxFuture<'_, Result<(), poise::FrameworkError<'_, Data, Error>>> {
@@ -651,53 +713,10 @@ fn plugin_slash_dispatch(
             Ok(args) => args,
             Err(error) => return Err(poise::FrameworkError::new_command(ctx.into(), error.into())),
         };
-        let data = ctx.framework.user_data();
-        let Some(plugin) = data.plugin_manager.get(plugin_name).await else {
-            return Err(poise::FrameworkError::new_command(
-                ctx.into(),
-                anyhow::anyhow!("plugin `{plugin_name}` is not running").into(),
-            ));
-        };
-        // The interaction token outlives the `Context` conversion below and is
-        // needed to edit the reply through the interaction-webhook route.
-        let interaction_token = ctx.interaction.token.as_str();
         let ctx: poise::Context<'_, Data, Error> = ctx.into();
-
-        // Invoke the plugin before responding, so the deferred response can
-        // carry the view's ephemerality — Discord honors it on the first
-        // interaction response only.
-        let spec = data
-            .plugin_engine
-            .invoke(plugin.clone(), command_name, args)
+        open_plugin_view(ctx, plugin_name, command_name, args)
             .await
-            .map_err(|error| poise::FrameworkError::new_command(ctx, error.into()))?;
-        validate_view_data(&spec.data)
-            .map_err(|error| poise::FrameworkError::new_command(ctx, error.into()))?;
-        let presentation = view_presentation(&spec);
-        if presentation.ephemeral {
-            ctx.defer_ephemeral().await
-        } else {
-            ctx.defer().await
-        }
-        .map_err(|error| poise::FrameworkError::new_command(ctx, error.into()))?;
-        // Ephemeral responses cannot be edited via the channel-message route
-        // (`PATCH /channels/{id}/messages/{id}` returns Unknown Message for
-        // ephemeral messages); the interaction-webhook route is the only one
-        // that works, for both ephemeral and public responses. The deferred
-        // response carries no components, so no interaction can reach the
-        // session before it is registered from the edit's message id.
-        let message = ctx
-            .http()
-            .edit_original_interaction_response(
-                interaction_token,
-                &presentation.edit_body,
-                Vec::new(),
-            )
-            .await
-            .map_err(|error| poise::FrameworkError::new_command(ctx, error.into()))?;
-        data.plugin_engine
-            .register(message.id, plugin, command_name, spec)
-            .await;
+            .map_err(|error| poise::FrameworkError::new_command(ctx, error))?;
         Ok(())
     })
 }

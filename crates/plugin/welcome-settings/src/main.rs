@@ -108,7 +108,7 @@ const VARIABLES_TEXT: &str = "### Template Variables\n> `{{ username }}` - User'
 /// The message cap, verbatim from the monolith's update logic.
 const MAX_MESSAGES: usize = 25;
 
-// ── the plugin's own update logic (mirrors src/update/welcome_settings.rs) ────
+// ── the plugin's own update logic (ported from src/update/welcome_settings.rs) ────
 
 /// The welcome settings model: the guild's whole [`ServerSettings`] snapshot
 /// plus the pending removal selection, as the monolith's
@@ -1349,7 +1349,7 @@ mod tests {
         indices.iter().copied().collect()
     }
 
-    // ── update logic (mirrors src/update/welcome_settings.rs) ───────────────
+    // ── update logic (ported from src/update/welcome_settings.rs) ───────────────
 
     #[test]
     fn toggling_enabled_persists_the_flip() {

@@ -19,8 +19,6 @@
 //!   hub — neither touches the model. The page rides the per-session `view`
 //!   payload, so concurrent hubs stay independent and every fresh invoke
 //!   opens the hub;
-//! - a `settings:config:<feature>` button re-renders the current page (the
-//!   panels it would open are not plugins yet);
 //! - a `settings:open:<plugin>` nav click issues `host.open_view`, opening
 //!   the target plugin's panel through the manager and interaction engine;
 //! - a second spawn sharing the same store renders the persisted model;
@@ -722,37 +720,6 @@ async fn about_click_renders_live_stats_from_the_host() {
 /// Asserts the envelope's `view` state names the given page.
 fn assert_page(view: &Value, expected: &str) {
     assert_eq!(view["page"], json!(expected), "session page");
-}
-
-/// A stale config-button click answers the hub unchanged: a hub message
-/// rendered before a feature's panel migrated still carries the old
-/// `settings:config:<feature>` id, so the hub re-renders the current page
-/// instead of erroring. No live view renders the id any more — every
-/// feature's button rides the nav id (ADR-0009) — so this pins only the
-/// defensive arm.
-#[tokio::test]
-async fn a_config_button_answers_the_hub_without_changing_the_model() {
-    let plugin = spawn_settings(None).await;
-
-    plugin
-        .call("invoke", Some("settings"), Some(json!({})))
-        .await
-        .expect("invoke answered");
-
-    let resp = plugin
-        .call(
-            "view.interact",
-            Some("settings"),
-            Some(json!({ "custom_id": "settings:config:welcome" })),
-        )
-        .await
-        .expect("config click answered");
-
-    let view = assert_envelope(&resp, 1);
-    assert_toggles(&view, false, false, false);
-
-    let status = plugin.stop().await.expect("graceful stop");
-    assert_eq!(status.code(), Some(0), "clean exit after bye: {status}");
 }
 
 /// Two concurrently open hubs keep independent session state: an About click

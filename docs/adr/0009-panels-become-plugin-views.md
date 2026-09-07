@@ -47,7 +47,8 @@ leave: about, feed list, feed batch, voice stats, and the voice
 leaderboard drive the `Host` loop, and the one-shot register and
 unregister run on the same `GuiFeature` shell. What happens to the
 runtime once no features remain is an open question. Whether to retire
-`GuiFeature` and `rt.rs`, and when, is not settled by this decision.
+`GuiFeature` and `rt.rs`, and when, is not settled by this decision
+(resolved by ADR-0013).
 
 The panels read and write per-service data, so service access must cross
 the process boundary. ADR-0010 records the RPC policy for that seam.

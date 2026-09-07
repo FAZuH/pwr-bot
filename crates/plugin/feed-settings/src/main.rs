@@ -77,7 +77,7 @@ const CHANNEL_TEXT: &str =
 const SUB_ROLE_TEXT: &str = "### Subscribe Permission\n\n> 🛈  Who can add new feeds to this server. Leave empty to allow users with \"Manage Server\" permission.";
 const UNSUB_ROLE_TEXT: &str = "### Unsubscribe Permission\n\n> 🛈  Who can remove feeds from this server. Leave empty to allow users with \"Manage Server\" permission.";
 
-// ── the plugin's own update logic (mirrors src/update/feed_settings.rs) ───────
+// ── the plugin's own update logic (ported from src/update/feed_settings.rs) ───────
 
 /// The feed settings model: the guild's whole [`ServerSettings`] snapshot,
 /// as the monolith's `FeedSettingsModel` held it.

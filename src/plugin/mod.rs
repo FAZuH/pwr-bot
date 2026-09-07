@@ -33,6 +33,7 @@ pub mod install;
 pub mod interaction;
 pub mod manager;
 pub mod modal;
+pub mod preview;
 pub mod view;
 
 use std::collections::HashMap;

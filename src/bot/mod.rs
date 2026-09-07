@@ -106,7 +106,7 @@ pub struct Data {
     pub translate_layer: Arc<TranslateLayer>,
     /// Fills the attachment slots a plugin envelope declares at transport
     /// (ADR-0012).
-    pub previews: Arc<crate::bot::gui::welcome::PreviewResolver>,
+    pub previews: Arc<crate::plugin::preview::PreviewResolver>,
     pub start_time: Instant,
 }
 
@@ -192,7 +192,7 @@ impl Bot {
         let stats_handle = Arc::new(StatsHandle::default());
         // The welcome card renderer both the host ops and the view transports
         // share: one generator for the process (ADR-0012).
-        let previews = Arc::new(crate::bot::gui::welcome::PreviewResolver::new(
+        let previews = Arc::new(crate::plugin::preview::PreviewResolver::new(
             service.feed_subscription.clone(),
             Arc::new(crate::bot::command::welcome::image_generator::WelcomeImageGenerator::new()),
         ));

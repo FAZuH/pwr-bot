@@ -59,7 +59,7 @@ Interactive views run on the Elm Architecture (TEA) in three layers with one-way
 |-------|----------|---------------|
 | Core | `src/update/<feature>.rs` | One `Model` per feature holding all session state, an exhaustive `Msg` enum, a data-only `Effect` enum, and a pure `update(msg, &mut model) -> Vec<Effect>`. Imports no serenity, tokio, diesel, or poise. |
 | Shell | `src/bot/gui/` | A sealed `GuiFeature` trait (pure `view`, `translate`, `update` via the core) plus the `Host` event loop: collectors, acknowledgement, and the reply handle. |
-| Adapter | Per feature, e.g. `src/bot/gui/voice_settings.rs` | One `EffectHandler` executing effects against services via `ctx.data().service`. Effect results return as `Msg`s (e.g. `SettingsPersisted`). |
+| Adapter | Per feature, e.g. `src/bot/gui/feed_list.rs` | One `EffectHandler` executing effects against services via `ctx.data().service`. Effect results return as `Msg`s (e.g. `SubscriptionsLoaded`). |
 
 The `sealed::Sealed` supertrait closes `GuiFeature` to external implementors — only `src/bot/gui/` may add features. One-shot commands (`register`, `unregister`) drive `view` + `update` directly without the Host. Snapshot tests in each feature pin the rendered component JSON.
 

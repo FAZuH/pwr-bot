@@ -21,12 +21,6 @@ pub enum Navigation {
     /// continues as a plugin view session. See
     /// [`crate::bot::command::session_exit`].
     SettingsMain,
-    /// Navigate to feed settings page
-    SettingsFeeds,
-    /// Navigate to voice settings page
-    SettingsVoice,
-    /// Navigate to welcome settings page
-    SettingsWelcome,
     /// Navigate to about page (within settings context)
     SettingsAbout,
 

@@ -8,9 +8,8 @@
 //! anyway, so a transient failure can leave a dead Back button behind.
 //!
 //! - **Hub handoff** ([`Navigation::SettingsMain`]): the Back button of
-//!   every Back-capable host feature (about, feed settings, voice settings,
-//!   welcome) exits to this target. The settings plugin renders its hub
-//!   [`ViewSpec`], the live message is morphed in place into that payload,
+//!   the About feature exits to this target. The settings plugin renders its
+//!   hub [`ViewSpec`], the live message is morphed in place into that payload,
 //!   and the message id is registered with the interaction engine — the
 //!   message continues its life as a plugin view session and the host run
 //!   ends. The Host session claim is already released by then: it drops with

@@ -617,7 +617,7 @@ pub struct HostServices {
     pub welcome: Option<Arc<dyn WelcomeSettingsSource>>,
     /// Fills the attachment slots a plugin envelope declares at transport
     /// (ADR-0012); absent when the host holds no preview renderer.
-    pub previews: Option<Arc<crate::bot::gui::welcome::PreviewResolver>>,
+    pub previews: Option<Arc<crate::plugin::preview::PreviewResolver>>,
 }
 
 /// Serves one plugin→host [`Msg::Call`], answering with the correlation-id
@@ -869,7 +869,7 @@ async fn open_view_call(
     io: &dyn HostIo,
     engine: &InteractionEngine<RunningPlugin>,
     manager: &PluginManager,
-    previews: Option<&crate::bot::gui::welcome::PreviewResolver>,
+    previews: Option<&crate::plugin::preview::PreviewResolver>,
 ) -> Result<Option<Value>, WireError> {
     let (channel_id, plugin_name, command, call_args) = parse_open_view(args)?;
     let guild_id = call_args.get("guild_id").and_then(id_as_u64);

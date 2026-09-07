@@ -63,7 +63,7 @@ const CUSTOM_ID_TOGGLE: &str = "voice:toggle";
 const CUSTOM_ID_BACK: &str = "voice:back";
 const CUSTOM_ID_ABOUT: &str = "voice:about";
 
-// ── the plugin's own update logic (mirrors src/update/voice_settings.rs) ─────
+// ── the plugin's own update logic (ported from src/update/voice_settings.rs) ─────
 
 /// The voice settings model: the guild's whole [`ServerSettings`] snapshot,
 /// as the monolith's `VoiceSettingsModel` held it.

@@ -34,13 +34,10 @@ use poise::ReplyHandle;
 use crate::bot::Data;
 use crate::bot::command::about::AboutHandler;
 use crate::bot::command::feed::list::FeedListHandler;
-use crate::bot::command::feed::settings::FeedSettingsHandler;
 use crate::bot::command::feed::subscribe::FeedSubscribeHandler;
 use crate::bot::command::feed::unsubscribe::FeedUnsubscribeHandler;
 use crate::bot::command::voice::leaderboard::VoiceLeaderboardHandler;
-use crate::bot::command::voice::settings::VoiceSettingsHandler;
 use crate::bot::command::voice::stats::VoiceStatsHandler;
-use crate::bot::command::welcome::WelcomeSettingsHandler;
 use crate::bot::navigation::Navigation;
 
 /// Trait for command modules (Cogs) that provide a set of Discord commands.
@@ -146,9 +143,6 @@ impl<'a> Router<'a> {
         use Navigation::*;
         let ctx = self.ctx;
         match target {
-            SettingsFeeds => Some(Box::new(FeedSettingsHandler::new(ctx))),
-            SettingsVoice => Some(Box::new(VoiceSettingsHandler::new(ctx))),
-            SettingsWelcome => Some(Box::new(WelcomeSettingsHandler::new(ctx))),
             SettingsAbout => Some(Box::new(AboutHandler::new(ctx))),
             FeedSubscriptions { send_into } => {
                 send_into.map(|send_into| Box::new(FeedListHandler::new(ctx, send_into)) as Box<_>)
@@ -359,14 +353,14 @@ mod tests {
         assert!(matches!(walk.back(), Popped::RootBack));
     }
 
-    /// Voice settings → About → Back: the marker closes the About frame and
+    /// Feed list → About → Back: the marker closes the About frame and
     /// the parent beneath it runs again, morphing the same message back.
     #[test]
     fn back_pops_one_level_to_the_parent() {
-        let mut walk = Walk::new(Navigation::SettingsVoice);
+        let mut walk = Walk::new(Navigation::FeedList(None));
         assert!(matches!(
             walk.opened(),
-            Popped::Run(Navigation::SettingsVoice)
+            Popped::Run(Navigation::FeedList(None))
         ));
         assert!(matches!(
             walk.pushed(Navigation::SettingsAbout),
@@ -374,7 +368,7 @@ mod tests {
         ));
         assert!(matches!(
             walk.back(),
-            Popped::Run(Navigation::SettingsVoice)
+            Popped::Run(Navigation::FeedList(None))
         ));
     }
 
@@ -383,16 +377,16 @@ mod tests {
     /// the session instead of looping on the parent.
     #[test]
     fn a_revealed_parent_stays_the_current_frame() {
-        let mut walk = Walk::new(Navigation::SettingsVoice);
+        let mut walk = Walk::new(Navigation::FeedList(None));
         walk.opened();
         walk.pushed(Navigation::SettingsAbout);
         assert!(matches!(
             walk.back(),
-            Popped::Run(Navigation::SettingsVoice)
+            Popped::Run(Navigation::FeedList(None))
         ));
         assert_eq!(
             walk.history.back(),
-            Some(&Navigation::SettingsVoice),
+            Some(&Navigation::FeedList(None)),
             "the revealed parent is still the current frame"
         );
         assert!(matches!(walk.back(), Popped::RootBack));
@@ -402,17 +396,26 @@ mod tests {
     /// frames in order rather than collapsing to the root.
     #[test]
     fn consecutive_backs_each_close_one_frame() {
-        let mut walk = Walk::new(Navigation::SettingsVoice);
+        let mut walk = Walk::new(Navigation::SettingsAbout);
         walk.opened();
-        walk.pushed(Navigation::SettingsFeeds);
-        walk.pushed(Navigation::SettingsWelcome);
+        walk.pushed(Navigation::FeedSubscribe {
+            links: "a".into(),
+            send_into: None,
+        });
+        walk.pushed(Navigation::FeedUnsubscribe {
+            links: "b".into(),
+            send_into: None,
+        });
         assert!(matches!(
             walk.back(),
-            Popped::Run(Navigation::SettingsFeeds)
+            Popped::Run(Navigation::FeedSubscribe {
+                links: _,
+                send_into: _,
+            })
         ));
         assert!(matches!(
             walk.back(),
-            Popped::Run(Navigation::SettingsVoice)
+            Popped::Run(Navigation::SettingsAbout)
         ));
     }
 
@@ -420,7 +423,7 @@ mod tests {
     /// the message morphs into the plugin hub and the host run ends.
     #[test]
     fn settings_main_is_the_hub_handoff() {
-        let mut walk = Walk::new(Navigation::SettingsVoice);
+        let mut walk = Walk::new(Navigation::SettingsAbout);
         walk.opened();
         assert!(matches!(
             walk.pushed(Navigation::SettingsMain),
@@ -433,11 +436,11 @@ mod tests {
     /// message the user is looking at stays up.
     #[test]
     fn ending_a_session_never_dismisses_the_message() {
-        let mut walk = Walk::new(Navigation::SettingsVoice);
+        let mut walk = Walk::new(Navigation::SettingsAbout);
         walk.opened();
         assert!(matches!(walk.pushed(Navigation::Exit), Popped::End));
 
-        let mut idle = Walk::new(Navigation::SettingsVoice);
+        let mut idle = Walk::new(Navigation::FeedList(None));
         idle.opened();
         assert!(matches!(
             pop_step(&mut idle.queue, &mut idle.history),
@@ -450,7 +453,7 @@ mod tests {
     /// navigating deeper cannot grow the walk without bound.
     #[test]
     fn history_is_capped_at_max_nav_history() {
-        let mut walk = Walk::new(Navigation::SettingsVoice);
+        let mut walk = Walk::new(Navigation::SettingsAbout);
         walk.opened();
         for step in 0..MAX_NAV_HISTORY {
             walk.pushed(Navigation::FeedSubscribe {

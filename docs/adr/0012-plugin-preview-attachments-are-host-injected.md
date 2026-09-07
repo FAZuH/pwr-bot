@@ -38,7 +38,8 @@ attachment slot by filename — the same declaration the monolith's
 - The host resolves the declaration where a plugin envelope reaches
   Discord: the click path's type-7 response and its webhook-edit
   fallbacks, the modal-submission response, and `host.open_view`'s final
-  edit. The resolver (`PreviewResolver`, `src/bot/gui/welcome.rs`) checks
+  edit. The resolver (`PreviewResolver`, `src/bot/gui/welcome.rs` — since
+  moved to `src/plugin/preview.rs` by the #152 retirement, ADR-0013) checks
   the declaration, loads the guild's settings through the service, renders
   the card, and returns the `CreateAttachment` list to send. A slot the
   host cannot fill — no guild, no settings, a failed render — is declared
