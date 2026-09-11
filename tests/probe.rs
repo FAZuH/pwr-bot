@@ -11,50 +11,31 @@ use std::path::PathBuf;
 /// fast path when the harness built it, otherwise the `debug` then `release`
 /// profile under the cargo target dir.
 pub fn probe_binary(bin_name: &str) -> PathBuf {
-    let env_hint = match bin_name {
-        "hello" => option_env!("CARGO_BIN_EXE_hello"),
-        "settings" => option_env!("CARGO_BIN_EXE_settings"),
-        "feed-settings" => option_env!("CARGO_BIN_EXE_feed-settings"),
-        "voice-settings" => option_env!("CARGO_BIN_EXE_voice-settings"),
-        "welcome-settings" => option_env!("CARGO_BIN_EXE_welcome-settings"),
-        "arg-echo-plugin" => option_env!("CARGO_BIN_EXE_arg-echo-plugin"),
-        _ => None,
-    };
-    if let Some(path) = env_hint {
+    if let Ok(path) = std::env::var(format!("CARGO_BIN_EXE_{bin_name}")) {
         return PathBuf::from(path);
     }
     let target = match option_env!("CARGO_TARGET_DIR") {
         Some(dir) => PathBuf::from(dir),
         None => PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target"),
     };
+    // `cargo test` does not produce plain bin artifacts for sibling
+    // packages, so build the missing fixture on demand.
+    let mut cmd = std::process::Command::new("cargo");
+    cmd.arg("build").current_dir(env!("CARGO_MANIFEST_DIR"));
+    if bin_name == "arg-echo-plugin" {
+        cmd.args(["--bin", "arg-echo-plugin"]);
+    } else {
+        cmd.args(["-p", bin_name]);
+    }
+    assert!(
+        cmd.status().is_ok_and(|s| s.success()),
+        "cargo build failed for fixture `{bin_name}`"
+    );
     for profile in ["debug", "release"] {
         let candidate = target.join(profile).join(bin_name);
         if candidate.exists() {
             return candidate;
         }
     }
-    let hint = match bin_name {
-        "hello" => concat!(
-            "test-plugin fixture not built; run `cargo build -p hello` ",
-            "(or `cargo build --workspace`) first"
-        ),
-        "settings" => concat!(
-            "settings not built; run `cargo build -p settings` ",
-            "(or `cargo build --workspace`) first"
-        ),
-        "feed-settings" => concat!(
-            "feed-settings not built; run `cargo build -p feed-settings` ",
-            "(or `cargo build --workspace`) first"
-        ),
-        "voice-settings" => concat!(
-            "voice-settings not built; run `cargo build -p voice-settings` ",
-            "(or `cargo build --workspace`) first"
-        ),
-        "arg-echo-plugin" => concat!(
-            "test-plugin fixture not built; run `cargo build -p pwr-bot ",
-            "--bin arg-echo-plugin` first"
-        ),
-        _ => "fixture not built; run `cargo build --workspace` first",
-    };
-    panic!("{hint}");
+    panic!("fixture `{bin_name}` still missing after cargo build");
 }
