@@ -15,6 +15,7 @@
 
 ### Fixed
 
+- Fixed settings hub failing with an internal error
 - Fixed gateway failing to start when both rustls providers are linked
 - Fixed bot panels failing to update after an action
 - Fixed plugin commands timing out before answering
