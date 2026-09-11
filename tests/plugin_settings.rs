@@ -524,7 +524,7 @@ async fn nav_click_opens_the_target_plugin_panel() {
     let services = view_host_services(Arc::new(mock), kv.clone(), engine.clone());
     let manager = Arc::new(PluginManager::new(None, RespawnPolicy::default()));
     manager
-        .spawn("arg-echo", probe_binary("arg_echo_plugin"), None, &[], &[])
+        .spawn("arg-echo", probe_binary("arg-echo-plugin"), None, &[], &[])
         .await
         .expect("spawn target plugin");
 
@@ -614,7 +614,7 @@ async fn nav_click_with_a_source_message_opens_the_panel_in_place() {
     let services = view_host_services(Arc::new(mock), kv.clone(), engine.clone());
     let manager = Arc::new(PluginManager::new(None, RespawnPolicy::default()));
     manager
-        .spawn("arg-echo", probe_binary("arg_echo_plugin"), None, &[], &[])
+        .spawn("arg-echo", probe_binary("arg-echo-plugin"), None, &[], &[])
         .await
         .expect("spawn target plugin");
 

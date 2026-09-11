@@ -267,7 +267,7 @@ async fn host_openview_opens_the_target_plugin_view_end_to_end() {
     let services = view_host_services(Arc::new(mock), engine.clone());
     let manager = Arc::new(PluginManager::new(None, RespawnPolicy::default()));
     manager
-        .spawn("arg-echo", probe_binary("arg_echo_plugin"), None, &[], &[])
+        .spawn("arg-echo", probe_binary("arg-echo-plugin"), None, &[], &[])
         .await
         .expect("spawn target plugin");
 
@@ -359,7 +359,7 @@ async fn host_openview_edits_the_source_message_in_place() {
     let services = view_host_services(Arc::new(mock), engine.clone());
     let manager = Arc::new(PluginManager::new(None, RespawnPolicy::default()));
     manager
-        .spawn("arg-echo", probe_binary("arg_echo_plugin"), None, &[], &[])
+        .spawn("arg-echo", probe_binary("arg-echo-plugin"), None, &[], &[])
         .await
         .expect("spawn target plugin");
 
@@ -429,7 +429,7 @@ async fn host_openview_accepts_a_string_message_id() {
     let services = view_host_services(Arc::new(mock), engine.clone());
     let manager = Arc::new(PluginManager::new(None, RespawnPolicy::default()));
     manager
-        .spawn("arg-echo", probe_binary("arg_echo_plugin"), None, &[], &[])
+        .spawn("arg-echo", probe_binary("arg-echo-plugin"), None, &[], &[])
         .await
         .expect("spawn target plugin");
 
@@ -482,7 +482,7 @@ async fn host_openview_rejects_malformed_view_before_sending_or_registering() {
     let services = view_host_services(Arc::new(mock), engine.clone());
     let manager = Arc::new(PluginManager::new(None, RespawnPolicy::default()));
     manager
-        .spawn("arg-echo", probe_binary("arg_echo_plugin"), None, &[], &[])
+        .spawn("arg-echo", probe_binary("arg-echo-plugin"), None, &[], &[])
         .await
         .expect("spawn target plugin");
     let caller = RunningPlugin::spawn_with(

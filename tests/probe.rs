@@ -1,7 +1,7 @@
 //! Locates built plugin binaries for the integration test suites.
 //!
 //! `CARGO_BIN_EXE_<name>` is only set when the harness built the binary
-//! itself (e.g. the root crate's own `arg_echo_plugin` fixture bin), so the
+//! itself (e.g. the root crate's own `arg-echo-plugin` fixture bin), so the
 //! host-side suites probe the workspace build output under `target/{profile}`
 //! like the per-suite copies this module replaces.
 
@@ -17,7 +17,7 @@ pub fn probe_binary(bin_name: &str) -> PathBuf {
         "feed-settings" => option_env!("CARGO_BIN_EXE_feed-settings"),
         "voice-settings" => option_env!("CARGO_BIN_EXE_voice-settings"),
         "welcome-settings" => option_env!("CARGO_BIN_EXE_welcome-settings"),
-        "arg_echo_plugin" => option_env!("CARGO_BIN_EXE_arg_echo_plugin"),
+        "arg-echo-plugin" => option_env!("CARGO_BIN_EXE_arg-echo-plugin"),
         _ => None,
     };
     if let Some(path) = env_hint {
@@ -50,9 +50,9 @@ pub fn probe_binary(bin_name: &str) -> PathBuf {
             "voice-settings not built; run `cargo build -p voice-settings` ",
             "(or `cargo build --workspace`) first"
         ),
-        "arg_echo_plugin" => concat!(
+        "arg-echo-plugin" => concat!(
             "test-plugin fixture not built; run `cargo build -p pwr-bot ",
-            "--bin arg_echo_plugin` first"
+            "--bin arg-echo-plugin` first"
         ),
         _ => "fixture not built; run `cargo build --workspace` first",
     };

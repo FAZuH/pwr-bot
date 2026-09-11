@@ -1,11 +1,11 @@
 //! Integration tests for dispatch's argument re-parse: a real
-//! `arg_echo_plugin` fixture subprocess echoes back the args of every
+//! `arg-echo-plugin` fixture subprocess echoes back the args of every
 //! `invoke` call, so these tests assert that the args a dispatch would
 //! produce actually reach the plugin over the wire. Pure stdio — no database.
 //!
 //! The canonical `hello` plugin renders a static view and cannot echo args,
 //! and the protocol crate is frozen, so this fixture lives in the host crate
-//! (`src/bin/arg_echo_plugin.rs`) and is built with the test binary.
+//! (`src/bin/arg-echo-plugin.rs`) and is built with the test binary.
 
 use std::sync::Arc;
 
@@ -70,9 +70,9 @@ fn parse_echoed_args(spec: &ViewSpec) -> Value {
 /// of the test) and the args the fixture echoed back.
 async fn echo_args(command: &str, args: Value) -> (Arc<RunningPlugin>, Value) {
     let plugin = Arc::new(
-        RunningPlugin::spawn(probe_binary("arg_echo_plugin"))
+        RunningPlugin::spawn(probe_binary("arg-echo-plugin"))
             .await
-            .expect("spawn arg_echo_plugin"),
+            .expect("spawn arg-echo-plugin"),
     );
     let engine = InteractionEngine::new();
     let spec = engine
