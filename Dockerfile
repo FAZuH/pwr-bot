@@ -1,4 +1,4 @@
-FROM rust:1.92-slim-bookworm AS build
+FROM rust:1.98.1-slim-bookworm AS build
 LABEL org.opencontainers.image.source="https://github.com/FAZuH/pwr-bot"
 
 # Required by openssl-sys and boring-sys2
