@@ -34,7 +34,8 @@
 //!   with the current envelope again. A panel's own Back/About handoff
 //!   names the page this hub lands on through the same args;
 //! - the nav row is built at runtime from the host's running plugins
-//!   (`host.list_plugins`), minus the settings plugin itself; a host
+//!   (`host.list_plugins`), minus the settings plugin itself and the three
+//!   panel plugins the config buttons already open; a host
 //!   without that cap — or a manager-less spawn — falls back to the
 //!   single default target;
 //! - every view reply is the full envelope `{"data", "ephemeral", "view"}`
@@ -105,7 +106,8 @@ const NAV_TARGET_DEFAULT: &str = "hello";
 /// The nav row's targets: discovered from the host's running plugins at the
 /// first view load. A `Fallback` renders the single default target; a
 /// `Discovered` list renders one "Open <name>" button per entry — an empty
-/// list renders no nav row at all (the #128 gate).
+/// list renders no nav row at all (the #128 gate), and the [`FEATURES`] panel
+/// targets are skipped at render (their buttons already ride the same ids).
 enum NavTargets {
     /// Discovery failed (no `host.list_plugins` cap, a manager-less spawn, or
     /// a malformed resp): fall back to [`NAV_TARGET_DEFAULT`].
@@ -520,7 +522,10 @@ fn about_view(stats: Option<&HostStats>) -> Value {
 /// no row at all (the hub never shows a dead button); a non-empty list renders
 /// one `Open <target>` button per target, chunked so the one-action-row
 /// five-button law is never violated — [`Vec::chunks`] never yields an empty
-/// chunk, so no row is drawn without a button. The container law caps a
+/// chunk, so no row is drawn without a button. Discovered targets that a
+/// config button already opens (the [`FEATURES`] panels) are skipped: a
+/// second button with the same `settings:open:<target>` id would make Discord
+/// reject the whole message. The container law caps a
 /// container at 40 children, so the edge is roughly 175 targets (5 literal
 /// children + `ceil(n/5)` rows); past that it fails loudly rather than
 /// silently, by design. Each row is authored with `component!` (D2) and
@@ -530,7 +535,11 @@ fn about_view(stats: Option<&HostStats>) -> Value {
 fn nav_rows(nav: &NavTargets) -> Vec<CreateContainerComponent<'static>> {
     let targets: Vec<&str> = match nav {
         NavTargets::Fallback => vec![NAV_TARGET_DEFAULT],
-        NavTargets::Discovered(targets) => targets.iter().map(String::as_str).collect(),
+        NavTargets::Discovered(targets) => targets
+            .iter()
+            .map(String::as_str)
+            .filter(|target| !FEATURES.iter().any(|(_, _, feature)| feature == target))
+            .collect(),
     };
     targets
         .chunks(5)
@@ -1329,6 +1338,44 @@ mod tests {
             5,
             "the nav row is dropped when no plugin runs"
         );
+    }
+
+    #[test]
+    fn panel_only_discovery_renders_no_nav_row() {
+        // The three panel plugins are the config buttons' own targets: nav
+        // buttons for them would duplicate the `settings:open:*` ids and
+        // Discord would reject the whole message
+        // (COMPONENT_CUSTOM_ID_DUPLICATED) — with only them running, the
+        // #128 gate drops the row entirely.
+        let nav = NavTargets::Discovered(
+            FEATURES
+                .iter()
+                .map(|(_, _, target)| target.to_string())
+                .collect(),
+        );
+        let data = view_data(&SettingsModel::default(), &nav);
+        let children = data["components"][0]["components"].as_array().unwrap();
+        assert_eq!(
+            children.len(),
+            5,
+            "the nav row is dropped when only the panel plugins run"
+        );
+    }
+
+    #[test]
+    fn nav_row_skips_panel_targets_but_keeps_other_plugins() {
+        let nav = NavTargets::Discovered(vec![
+            "hello".into(),
+            "feed-settings".into(),
+            "voice-settings".into(),
+            "welcome-settings".into(),
+        ]);
+        let data = view_data(&SettingsModel::default(), &nav);
+        let children = data["components"][0]["components"].as_array().unwrap();
+        assert_eq!(children.len(), 6, "exactly one nav row survives");
+        let buttons = children[5]["components"].as_array().unwrap();
+        assert_eq!(buttons.len(), 1, "only the plugin no config button opens");
+        assert_eq!(buttons[0]["custom_id"], json!("settings:open:hello"));
     }
 
     #[test]
