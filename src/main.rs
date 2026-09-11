@@ -28,6 +28,13 @@ use pwr_bot::task::voice_heartbeat::VoiceHeartbeatManager;
 #[tokio::main]
 async fn main() -> Result<()> {
     dotenv().ok();
+    // serenity's rustls_backend links the aws-lc-rs provider via
+    // reqwest/hyper-rustls while tokio-postgres-rustls is pinned to ring —
+    // both present means rustls 0.23 refuses to auto-pick and panics on the
+    // first TLS handshake. Pin ring explicitly (matches the repo pin).
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("no other rustls CryptoProvider installed yet");
 
     let init_start = Instant::now();
     let config = load_config().await?;

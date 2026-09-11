@@ -90,6 +90,10 @@ sha2 = "0.10.9"
 tempfile = "3.27.0"
 toml = "1.1.4"
 mockall = "0.13.1"
+# serenity's rustls_backend pulls the aws-lc-rs provider via reqwest while
+# tokio-postgres-rustls is pinned to ring; both present means rustls 0.23
+# refuses to auto-pick, so the binary must install ring explicitly (main.rs).
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 
 [dev-dependencies]
 httpmock = "0.7.0"
@@ -110,6 +114,5 @@ tokio-postgres = "0.7"
 # loudly instead of downgrading.
 # NOTE: verification against hostnames with underscores fails (webpki rules).
 tokio-postgres-rustls = { version = "0.14", default-features = false, features = ["ring", "native-certs"] }
-rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 rustls-native-certs = "0.8"
 tokio = { version = "1.49.0", features = ["sync"] }
