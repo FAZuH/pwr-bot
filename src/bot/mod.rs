@@ -344,9 +344,9 @@ impl Bot {
     ///
     /// The command list is the merge seam: the Cog commands first, then one
     /// routing command per core plugin manifest captured at spawn, then one
-    /// routing command per catalog plugin manifest — each group sorted by
-    /// plugin name for a stable order across restarts (see
-    /// [`plugin_commands`]) — so plugin commands are registered on the
+    /// routing command per catalog plugin manifest not itself a core plugin
+    /// — each group sorted by plugin name for a stable order across restarts
+    /// (see [`plugin_commands`]) — so plugin commands are registered on the
     /// framework before `Framework::builder().build()`.
     fn create_framework(
         config: &Config,
@@ -411,6 +411,12 @@ impl Bot {
 /// The plugin routing commands for the framework: core plugin manifests
 /// first, then catalog plugin manifests, each group sorted by plugin name
 /// so the assembled command order is stable across restarts.
+///
+/// A catalog entry whose plugin also runs as a core plugin contributes
+/// nothing: its commands come from the core manifest only. Registering both
+/// copies makes `set_commands` fail with Discord's
+/// `APPLICATION_COMMANDS_DUPLICATE_NAME`. Catalog entries for core plugins
+/// exist so `/plugins list` and the install/update sources see them.
 fn plugin_commands(
     core_manifests: &HashMap<String, Manifest>,
     catalog: &HashMap<String, CatalogEntry>,
@@ -424,6 +430,13 @@ fn plugin_commands(
     let mut entries: Vec<&CatalogEntry> = catalog.values().collect();
     entries.sort_by(|a, b| a.name.cmp(&b.name));
     for entry in entries {
+        if core_manifests.contains_key(&entry.name) {
+            warn!(
+                "skipping catalog commands for `{}`: it is a core plugin, its commands come from the core manifest",
+                entry.name
+            );
+            continue;
+        }
         commands.extend(commands_from_manifest(&entry.manifest));
     }
     commands
@@ -1185,6 +1198,39 @@ mod tests {
             .collect();
 
         assert_eq!(names, ["alpha", "zeta", "bravo", "mike"]);
+    }
+
+    /// A catalog entry for a plugin that also runs as a core plugin is
+    /// skipped: the core manifest is the only source for its commands, so
+    /// `set_commands` never sees the same command name twice.
+    #[test]
+    fn plugin_commands_skip_a_catalog_entry_that_duplicates_a_core_plugin() {
+        let core_manifests = HashMap::from([("settings".to_string(), manifest_named("settings"))]);
+        let catalog = HashMap::from([("settings".to_string(), entry_named("settings"))]);
+
+        let commands = plugin_commands(&core_manifests, &catalog);
+        let names: Vec<&str> = commands
+            .iter()
+            .map(|command| command.name.as_ref())
+            .collect();
+
+        assert_eq!(names, ["settings"]);
+    }
+
+    /// A catalog entry whose plugin is not a core plugin still contributes
+    /// its commands.
+    #[test]
+    fn plugin_commands_keep_a_catalog_entry_whose_plugin_is_not_core() {
+        let core_manifests = HashMap::from([("settings".to_string(), manifest_named("settings"))]);
+        let catalog = HashMap::from([("greet".to_string(), entry_named("greet"))]);
+
+        let commands = plugin_commands(&core_manifests, &catalog);
+        let names: Vec<&str> = commands
+            .iter()
+            .map(|command| command.name.as_ref())
+            .collect();
+
+        assert_eq!(names, ["settings", "greet"]);
     }
 
     /// A round trip that beats the window resolves to its result.
