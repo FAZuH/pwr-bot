@@ -12,6 +12,7 @@
 - The About panel now shows live server statistics
 - Back now returns to the settings hub from every panel
 - Bot panels now use Discord's newest message components
+- Panel views now open in the same message instead of posting a new one
 
 ### Fixed
 
