@@ -335,6 +335,83 @@ async fn open_edit_and_back_persist_the_snapshot_once_and_reopen_the_hub() {
     assert_eq!(view["guild_id"], json!(GUILD_ID));
 }
 
+/// Back with a source message replaces the panel's message with the hub in
+/// place: no placeholder is posted, the persist lands first, the hub's edit
+/// lands on the clicked message id, and the panel answers the `ViewMoved`
+/// marker instead of its own render (re-rendering would overwrite the hub
+/// the open just wrote).
+#[tokio::test]
+async fn back_with_a_source_message_reopens_the_hub_in_place() {
+    let channel_id = 555_000_777_u64;
+    let source = 777_000_888_u64;
+
+    let mut feeds = MockFeedSettingsSource::new();
+    feeds
+        .expect_get_settings()
+        .with(eq(GUILD_ID))
+        .times(1)
+        .returning(|_| Ok(sample_settings()));
+    feeds
+        .expect_update_settings()
+        .with(eq(GUILD_ID), eq(sample_settings()))
+        .times(1)
+        .returning(|_, _| Ok(()));
+
+    let mut io = MockHostIo::new();
+    io.expect_send_message().times(0);
+    io.expect_edit_message()
+        .with(
+            eq(channel_id),
+            eq(source),
+            mockall::predicate::always(),
+            mockall::predicate::always(),
+        )
+        .times(1)
+        .returning(move |_, _, _, _| Ok(Some(json!({ "message_id": source }))));
+
+    let (_manager, _hub, panel) = spawn_core_plugins(shared_services(
+        Arc::new(io),
+        Arc::new(feeds),
+        InteractionEngine::new(),
+    ))
+    .await;
+
+    let resp = panel
+        .call(
+            "invoke",
+            Some("feed-settings"),
+            Some(json!({ "guild_id": GUILD_ID })),
+        )
+        .await
+        .expect("panel invoke answered");
+    let view = assert_envelope(&resp, 0);
+
+    // Back: the click rides the source message, so the hub's open edits
+    // that message (the mock above pins the id) after the persist.
+    let resp = panel
+        .call(
+            "view.interact",
+            Some("feed-settings"),
+            Some(json!({
+                "custom_id": "feeds:back",
+                "channel_id": channel_id,
+                "message": { "id": source.to_string() },
+                "view": view,
+            })),
+        )
+        .await
+        .expect("back answered");
+
+    match resp {
+        Msg::Resp {
+            ok: false,
+            error: Some(error),
+            ..
+        } => assert_eq!(error.kind, "ViewMoved", "the panel hands the message over"),
+        other => panic!("expected the ViewMoved marker, got {other:?}"),
+    }
+}
+
 /// About persists once, then opens the hub on its About page: the page name
 /// rides the open_view invoke args the hub seeds its session from, exactly
 /// like the monolith's `Navigation::SettingsAbout` handoff.

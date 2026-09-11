@@ -860,10 +860,12 @@ async fn io_call(
 }
 
 /// Runs the `host.open_view` op end to end: resolves the target plugin from
-/// the manager, posts a placeholder through the io seam, renders the target's
-/// panel into an interaction-engine session on the produced message id, and
-/// edits the placeholder to the final payload. Returns the produced message
-/// id so the caller can route interactions on it.
+/// the manager, renders the target's panel into an interaction-engine
+/// session, and edits the message body. When the call carries a `message_id`
+/// (the in-place path) that message is the edit target and the session
+/// replaces whatever was open on it; otherwise a placeholder is posted
+/// through the io seam and the session opens on the produced id. Returns the
+/// message id the session opened on so the caller can route interactions.
 async fn open_view_call(
     args: Option<&Value>,
     io: &dyn HostIo,
@@ -871,7 +873,7 @@ async fn open_view_call(
     manager: &PluginManager,
     previews: Option<&crate::plugin::preview::PreviewResolver>,
 ) -> Result<Option<Value>, WireError> {
-    let (channel_id, plugin_name, command, call_args) = parse_open_view(args)?;
+    let (channel_id, plugin_name, command, call_args, message_id) = parse_open_view(args)?;
     let guild_id = call_args.get("guild_id").and_then(id_as_u64);
     let Some(target) = manager.get(&plugin_name).await else {
         return Err(WireError {
@@ -886,23 +888,21 @@ async fn open_view_call(
     if let Err(error) = validate_view_data(&spec.data) {
         return Err(error.into());
     }
-    let placeholder = io
-        .send_message(channel_id, "Loading…")
-        .await
-        .map_err(host_io_err)?;
-    let message_id = match placeholder {
-        Some(data) => data
-            .get("message_id")
-            .and_then(Value::as_u64)
-            .ok_or_else(|| WireError {
-                kind: "HostIoError".into(),
-                msg: "send_message resp carried no message id".into(),
-            })?,
+    let message_id = match message_id {
+        Some(message_id) => message_id,
         None => {
-            return Err(WireError {
-                kind: "HostIoError".into(),
-                msg: "send_message resp carried no message id".into(),
-            });
+            let placeholder = io
+                .send_message(channel_id, "Loading…")
+                .await
+                .map_err(host_io_err)?;
+            placeholder
+                .as_ref()
+                .and_then(|data| data.get("message_id"))
+                .and_then(Value::as_u64)
+                .ok_or_else(|| WireError {
+                    kind: "HostIoError".into(),
+                    msg: "send_message resp carried no message id".into(),
+                })?
         }
     };
     engine
@@ -1161,9 +1161,12 @@ fn parse_edit_message(args: Option<&Value>) -> Result<(u64, u64, Value), WireErr
 }
 
 /// Parses `host.open_view` args: the channel to post into, the target plugin
-/// name, the target command (defaults to the plugin name), and the invoke
-/// args forwarded to the target (defaults to `{}`).
-fn parse_open_view(args: Option<&Value>) -> Result<(u64, String, String, Value), WireError> {
+/// name, the target command (defaults to the plugin name), the invoke args
+/// forwarded to the target (defaults to `{}`), and the optional source
+/// message id to edit in place (absent: a fresh placeholder is posted).
+fn parse_open_view(
+    args: Option<&Value>,
+) -> Result<(u64, String, String, Value, Option<u64>), WireError> {
     let obj = args.and_then(Value::as_object).ok_or_else(|| {
         invalid_args("expected args object with `channel_id` (u64) and `plugin` (string)")
     })?;
@@ -1188,7 +1191,8 @@ fn parse_open_view(args: Option<&Value>) -> Result<(u64, String, String, Value),
         Some(args) if args.is_object() => args.clone(),
         Some(_) => return Err(invalid_args("`args` must be an object")),
     };
-    Ok((channel_id, plugin, command, call_args))
+    let message_id = obj.get("message_id").and_then(id_as_u64);
+    Ok((channel_id, plugin, command, call_args, message_id))
 }
 
 fn invalid_args(msg: &str) -> WireError {
@@ -1987,6 +1991,33 @@ mod tests {
         )
         .await;
         assert_err(resp, 7, "PluginNotFound");
+    }
+
+    #[test]
+    fn parse_open_view_message_id_accepts_number_string_and_absent() {
+        let (.., id) = parse_open_view(Some(&json!({
+            "channel_id": 99, "plugin": "hello", "message_id": 42
+        })))
+        .expect("number id parses");
+        assert_eq!(id, Some(42));
+
+        let (.., id) = parse_open_view(Some(&json!({
+            "channel_id": 99, "plugin": "hello", "message_id": "42"
+        })))
+        .expect("string id parses");
+        assert_eq!(id, Some(42));
+
+        let (.., id) = parse_open_view(Some(&json!({ "channel_id": 99, "plugin": "hello" })))
+            .expect("absent id parses");
+        assert_eq!(id, None, "no message_id means the placeholder flow");
+
+        // A present id that is not an id is the fallback path, not an error:
+        // the caller posts a placeholder instead of failing the op.
+        let (.., id) = parse_open_view(Some(&json!({
+            "channel_id": 99, "plugin": "hello", "message_id": "nope"
+        })))
+        .expect("malformed id parses");
+        assert_eq!(id, None);
     }
 
     // ── open_modal ────────────────────────────────────────────────────────────

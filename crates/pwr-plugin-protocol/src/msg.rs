@@ -28,6 +28,14 @@ pub const MODAL_SUBMIT_OP: &str = "view.modal_submit";
 /// a benign, expected marker (debug log, no fallback edit).
 pub const MODAL_OPENED_KIND: &str = "ModalOpened";
 
+/// WireError `kind` a plugin answers a nav click with after an in-place
+/// `host.open_view`: tells the host the click's message now shows the opened
+/// panel's view, so the host skips its own render — answering with the
+/// plugin's own envelope would overwrite the panel the open just wrote. The
+/// host treats it as a benign, expected marker (debug log, no fallback
+/// edit).
+pub const VIEW_MOVED_KIND: &str = "ViewMoved";
+
 /// A message on the plugin wire, serialized as one compact JSON object per
 /// line. The `t` discriminator names the variant: `hello`, `call`, `resp`,
 /// `event`, `ping`, `pong`, `bye`.

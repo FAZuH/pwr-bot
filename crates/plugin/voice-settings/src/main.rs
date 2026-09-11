@@ -43,6 +43,7 @@ use pwr_plugin_protocol::API_VERSION;
 use pwr_plugin_protocol::Manifest;
 use pwr_plugin_protocol::Msg;
 use pwr_plugin_protocol::ServerSettings;
+use pwr_plugin_protocol::VIEW_MOVED_KIND;
 use pwr_plugin_protocol::WireError;
 use pwr_plugin_support::HubPage;
 use pwr_plugin_support::Panel;
@@ -50,6 +51,7 @@ use pwr_plugin_support::id_as_u64;
 use pwr_plugin_support::issue_host_call;
 use pwr_plugin_support::open_hub_args;
 use pwr_plugin_support::reply_err;
+use pwr_plugin_support::source_message_id;
 use pwr_plugin_support::write_msg;
 use serde_json::Value;
 use serde_json::json;
@@ -358,6 +360,9 @@ fn main() -> ExitCode {
                             .as_ref()
                             .and_then(|a| a.get("channel_id"))
                             .and_then(id_as_u64);
+                        // The message the click fired on: Back/About edit it
+                        // in place instead of posting a fresh hub message.
+                        let message_id = source_message_id(args.as_ref());
                         let mut session = session;
                         let effects = update(msg, &mut session.model);
                         if effects.is_empty() {
@@ -377,6 +382,7 @@ fn main() -> ExitCode {
                                 invoke_id: id,
                                 session,
                                 channel_id,
+                                message_id,
                                 hub_page,
                             },
                             persist_args,
@@ -487,6 +493,7 @@ fn main() -> ExitCode {
                         invoke_id,
                         session,
                         channel_id,
+                        message_id,
                         hub_page,
                     } => {
                         // The persist left the session: a failure logs but
@@ -504,20 +511,37 @@ fn main() -> ExitCode {
                         };
                         let guild_id = session.guild_id;
                         let call = HostCall::new(
-                            Pending::OpenHub { invoke_id, session },
-                            open_hub_args(channel_id, guild_id, hub_page),
+                            Pending::OpenHub {
+                                invoke_id,
+                                session,
+                                message_id,
+                            },
+                            open_hub_args(channel_id, guild_id, hub_page, message_id),
                         );
                         if !issue_host_call(&mut out, &mut pending, &mut next_call_id, call) {
                             return ExitCode::FAILURE;
                         }
                     }
-                    Pending::OpenHub { invoke_id, session } => {
+                    Pending::OpenHub {
+                        invoke_id,
+                        session,
+                        message_id,
+                    } => {
                         if !ok {
                             eprintln!("host.open_view failed: {error:?}");
                         }
-                        // The panel keeps answering its own interactions;
-                        // the hub opens next to it, like every
-                        // plugin→plugin navigation.
+                        // In place: the open replaced this panel's message
+                        // with the hub, so answering with the panel's own
+                        // render would overwrite it — the host skips its
+                        // render on the marker kind. Without a source
+                        // message the hub opened next to the panel, which
+                        // keeps answering its own interactions.
+                        if ok && message_id.is_some() {
+                            if !reply_err(&mut out, invoke_id, VIEW_MOVED_KIND, "hub opened") {
+                                return ExitCode::FAILURE;
+                            }
+                            continue;
+                        }
                         if !reply_envelope(&mut out, invoke_id, &session) {
                             return ExitCode::FAILURE;
                         }
@@ -702,6 +726,7 @@ mod tests {
                 invoke_id: 0,
                 session: session.clone(),
                 channel_id: None,
+                message_id: None,
                 hub_page: HubPage::Hub,
             }
             .op(),
@@ -710,7 +735,8 @@ mod tests {
         assert_eq!(
             Pending::OpenHub {
                 invoke_id: 0,
-                session
+                session,
+                message_id: None,
             }
             .op(),
             "host.open_view"

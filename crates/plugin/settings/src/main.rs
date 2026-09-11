@@ -65,6 +65,7 @@ use pwr_plugin_protocol::CommandDef;
 use pwr_plugin_protocol::HostStats;
 use pwr_plugin_protocol::Manifest;
 use pwr_plugin_protocol::Msg;
+use pwr_plugin_protocol::VIEW_MOVED_KIND;
 use pwr_plugin_protocol::WireError;
 use serde_json::Value;
 use serde_json::json;
@@ -128,8 +129,11 @@ enum Pending {
     Load(u64, Page),
     /// The `host.kv.set` issued to persist a toggled session model.
     Save(u64, ViewState),
-    /// The `host.open_view` issued to open a target plugin's panel.
-    OpenView(u64, ViewState),
+    /// The `host.open_view` issued to open a target plugin's panel. The
+    /// optional id is the message the click fired on: when present, the
+    /// panel replaces that message and the resp answers with the
+    /// `ViewMoved` marker instead of the hub's own render.
+    OpenView(u64, Option<u64>, ViewState),
     /// The `host.list_plugins` issued to discover the nav row's targets.
     ListPlugins(u64, Page),
     /// The `host.stats` issued to render the About panel with live values.
@@ -659,19 +663,37 @@ fn kv_set_args(model: &SettingsModel) -> Value {
 
 /// The `host.open_view` call args opening the target plugin's panel: the
 /// channel the source interaction came from, the target name as both the
-/// plugin and the command, and the source guild's id when the interaction
-/// carried one — the panel plugins key their settings by guild.
-fn open_view_args(channel_id: u64, guild_id: Option<u64>, plugin: &str) -> Value {
+/// plugin and the command, the source guild's id when the interaction
+/// carried one — the panel plugins key their settings by guild — and the
+/// source message id when the interaction carried one, which makes the
+/// target panel replace that message instead of posting a fresh one.
+fn open_view_args(
+    channel_id: u64,
+    guild_id: Option<u64>,
+    plugin: &str,
+    message_id: Option<u64>,
+) -> Value {
     let mut invoke_args = serde_json::Map::new();
     if let Some(guild_id) = guild_id {
         invoke_args.insert("guild_id".into(), json!(guild_id));
     }
-    json!({
+    let mut args = json!({
         "channel_id": channel_id,
         "plugin": plugin,
         "command": plugin,
         "args": invoke_args,
-    })
+    });
+    if let Some(message_id) = message_id {
+        args["message_id"] = json!(message_id);
+    }
+    args
+}
+
+/// The source message the interaction fired on: serenity serializes the
+/// component interaction with its message, and the id as a string. `None`
+/// when the payload carries none, so the panel opens on a fresh message.
+fn source_message_id(args: Option<&Value>) -> Option<u64> {
+    args?.get("message")?.get("id").and_then(id_as_u64)
 }
 
 /// Reads a Discord id from a wire value: a number, or the string form
@@ -894,9 +916,10 @@ fn main() -> ExitCode {
                                 .as_ref()
                                 .and_then(|a| a.get("guild_id"))
                                 .and_then(id_as_u64);
+                            let message_id = source_message_id(args.as_ref());
                             Some(HostCall::new(
-                                Pending::OpenView(id, session),
-                                open_view_args(channel_id, guild_id, target),
+                                Pending::OpenView(id, message_id, session),
+                                open_view_args(channel_id, guild_id, target, message_id),
                             ))
                         } else if custom_id == Some(CUSTOM_ID_ABOUT) {
                             // About opens with live stats: one `host.stats`
@@ -1088,7 +1111,39 @@ fn main() -> ExitCode {
                             return ExitCode::FAILURE;
                         }
                     }
-                    Pending::Save(invoke_id, state) | Pending::OpenView(invoke_id, state) => {
+                    Pending::Save(invoke_id, state) | Pending::OpenView(invoke_id, None, state) => {
+                        if !answer_envelope(
+                            &mut out,
+                            invoke_id,
+                            ok,
+                            error,
+                            pending_kind,
+                            &state,
+                            &RenderCtx {
+                                nav: &nav,
+                                stats: stats.as_ref(),
+                            },
+                        ) {
+                            return ExitCode::FAILURE;
+                        }
+                    }
+                    Pending::OpenView(invoke_id, Some(_), state) => {
+                        // In place: the open replaced the hub's message with
+                        // the target panel, so answering with the hub's own
+                        // render would overwrite it — the host skips its
+                        // render on the marker kind. A failed open falls
+                        // back to the hub's render (nothing else changed).
+                        if ok {
+                            if !reply_err(
+                                &mut out,
+                                invoke_id,
+                                VIEW_MOVED_KIND,
+                                "panel opened in place",
+                            ) {
+                                return ExitCode::FAILURE;
+                            }
+                            continue;
+                        }
                         if !answer_envelope(
                             &mut out,
                             invoke_id,
@@ -1606,18 +1661,44 @@ mod tests {
 
     #[test]
     fn open_view_args_carry_channel_plugin_and_command() {
-        let args = open_view_args(987_654_321, None, "hello");
+        let args = open_view_args(987_654_321, None, "hello", None);
         assert_eq!(args["channel_id"], json!(987_654_321));
         assert_eq!(args["plugin"], json!("hello"));
         assert_eq!(args["command"], json!("hello"));
         assert_eq!(args["args"], json!({}), "no guild known: args stay empty");
+        assert_eq!(
+            args.get("message_id"),
+            None,
+            "no source message: the host posts a placeholder"
+        );
 
-        let args = open_view_args(1, Some(42), "feed-settings");
+        let args = open_view_args(1, Some(42), "feed-settings", None);
         assert_eq!(
             args["args"],
             json!({ "guild_id": 42 }),
             "a known guild rides the invoke args for panel plugins"
         );
+    }
+
+    #[test]
+    fn open_view_args_carry_the_source_message_for_an_in_place_open() {
+        let args = open_view_args(1, Some(42), "feed-settings", Some(777));
+        assert_eq!(args["message_id"], json!(777));
+    }
+
+    #[test]
+    fn source_message_id_reads_the_interaction_message() {
+        assert_eq!(
+            source_message_id(Some(&json!({ "message": { "id": "555" } }))),
+            Some(555),
+            "serenity serializes the source message id as a string"
+        );
+        assert_eq!(
+            source_message_id(Some(&json!({ "message": { "id": 555 } }))),
+            Some(555)
+        );
+        assert_eq!(source_message_id(Some(&json!({ "channel_id": "9" }))), None);
+        assert_eq!(source_message_id(None), None);
     }
 
     #[test]

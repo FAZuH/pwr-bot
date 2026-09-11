@@ -36,6 +36,7 @@ use poise::FrameworkOptions;
 use poise::serenity_prelude::*;
 use pwr_plugin_protocol::MODAL_OPENED_KIND;
 use pwr_plugin_protocol::Manifest;
+use pwr_plugin_protocol::VIEW_MOVED_KIND;
 use pwr_plugin_protocol::ViewSpec;
 use serde_json::Value;
 use serde_json::json;
@@ -760,6 +761,13 @@ impl BotEventHandler {
             Err(InteractionError::PluginRejected { kind, .. }) if kind == MODAL_OPENED_KIND => {
                 debug!("plugin answered the interaction with a modal of its own");
                 ViewAnswer::Answered
+            }
+            // A nav click the plugin answered with an in-place open_view: the
+            // click's message now shows the opened panel, so the host sends
+            // nothing — its own render would overwrite the panel.
+            Err(InteractionError::PluginRejected { kind, .. }) if kind == VIEW_MOVED_KIND => {
+                debug!("plugin moved the message to the opened panel's view");
+                ViewAnswer::Nothing
             }
             Err(InteractionError::NoSession { .. }) => {
                 debug!("{kind} on message {message_id} without an open session");

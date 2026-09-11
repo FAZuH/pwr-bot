@@ -97,12 +97,19 @@ pub enum Pending<P> {
         invoke_id: u64,
         session: SessionState<P>,
         channel_id: Option<u64>,
+        /// The message the interaction fired on: `open_hub_args` edits it in
+        /// place instead of posting a fresh hub message.
+        message_id: Option<u64>,
         hub_page: HubPage,
     },
     /// The `host.open_view` a completed persist issued for the hub.
     OpenHub {
         invoke_id: u64,
         session: SessionState<P>,
+        /// The in-place marker: a successful open replaced the source
+        /// message, so its resp answers `VIEW_MOVED_KIND` instead of the
+        /// panel's own render.
+        message_id: Option<u64>,
     },
     /// The settings-persist RPC an expiry issued: nothing to answer, the
     /// resp is only logged.
@@ -161,17 +168,35 @@ pub fn id_as_u64(value: &Value) -> Option<u64> {
         .or_else(|| value.as_str().and_then(|s| s.parse().ok()))
 }
 
+/// The source message the interaction fired on: serenity serializes
+/// component and modal interactions with the source message under
+/// `message`, and its id as a string. `None` when the payload carries no
+/// source message, so the caller opens the view on a fresh message.
+pub fn source_message_id(args: Option<&Value>) -> Option<u64> {
+    args?.get("message")?.get("id").and_then(id_as_u64)
+}
+
 /// The `host.open_view` call args opening the settings hub on the given
 /// page: the panel's Back lands where the monolith's
 /// `Navigation::SettingsMain` did, and its About where
-/// `Navigation::SettingsAbout` did.
-pub fn open_hub_args(channel_id: u64, guild_id: u64, page: HubPage) -> Value {
-    json!({
+/// `Navigation::SettingsAbout` did. When the interaction carried a source
+/// message id, the hub replaces that message instead of posting a fresh one.
+pub fn open_hub_args(
+    channel_id: u64,
+    guild_id: u64,
+    page: HubPage,
+    message_id: Option<u64>,
+) -> Value {
+    let mut args = json!({
         "channel_id": channel_id,
         "plugin": HUB_PLUGIN,
         "command": HUB_PLUGIN,
         "args": { "guild_id": guild_id, "page": page.name() },
-    })
+    });
+    if let Some(message_id) = message_id {
+        args["message_id"] = json!(message_id);
+    }
+    args
 }
 
 /// Serializes `msg` to one JSON line, writes it, then flushes.
@@ -234,7 +259,7 @@ mod tests {
     #[test]
     fn open_hub_args_carry_channel_guild_and_page() {
         assert_eq!(
-            open_hub_args(5, 42, HubPage::About),
+            open_hub_args(5, 42, HubPage::About, None),
             json!({
                 "channel_id": 5,
                 "plugin": "settings",
@@ -242,5 +267,39 @@ mod tests {
                 "args": { "guild_id": 42, "page": "about" },
             })
         );
+    }
+
+    #[test]
+    fn open_hub_args_edit_the_source_message_when_present() {
+        assert_eq!(
+            open_hub_args(5, 42, HubPage::Hub, Some(777)),
+            json!({
+                "channel_id": 5,
+                "plugin": "settings",
+                "command": "settings",
+                "args": { "guild_id": 42, "page": "hub" },
+                "message_id": 777,
+            })
+        );
+    }
+
+    #[test]
+    fn source_message_id_reads_the_serenity_interaction_shape() {
+        assert_eq!(
+            source_message_id(Some(&json!({ "message": { "id": "555" } }))),
+            Some(555),
+            "serenity serializes ids as strings"
+        );
+        assert_eq!(
+            source_message_id(Some(&json!({ "message": { "id": 555 } }))),
+            Some(555)
+        );
+        assert_eq!(source_message_id(Some(&json!({ "channel_id": "9" }))), None);
+        assert_eq!(
+            source_message_id(Some(&json!({ "message": Value::Null }))),
+            None,
+            "a modal submit without a message falls back to a fresh message"
+        );
+        assert_eq!(source_message_id(None), None);
     }
 }

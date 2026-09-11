@@ -328,6 +328,150 @@ async fn host_openview_opens_the_target_plugin_view_end_to_end() {
         .expect("stop target plugin");
 }
 
+/// The `host.openview` invoke with a `message_id` replaces the source
+/// message instead of posting a placeholder: no `send_message` on the seam,
+/// the target session registered on the source id (replacing whatever view
+/// was open there), and the edit carries the rendered panel to that id.
+#[tokio::test]
+async fn host_openview_edits_the_source_message_in_place() {
+    let channel_id = 987_654_321_u64;
+    let source = 555_666_777_u64;
+    let mut mock = MockHostIo::new();
+    mock.expect_send_message().times(0);
+    mock.expect_edit_message()
+        .with(
+            mockall::predicate::eq(channel_id),
+            mockall::predicate::eq(source),
+            mockall::predicate::function(|data: &serde_json::Value| {
+                data == &json!({
+                    "attachments": [],
+                    "components": [{"content": "{}", "type": 10}],
+                    "embeds": [],
+                    "flags": 32768,
+                })
+            }),
+            mockall::predicate::always(),
+        )
+        .times(1)
+        .returning(move |_, _, _, _| Ok(Some(json!({ "message_id": source }))));
+
+    let engine = InteractionEngine::new();
+    let services = view_host_services(Arc::new(mock), engine.clone());
+    let manager = Arc::new(PluginManager::new(None, RespawnPolicy::default()));
+    manager
+        .spawn("arg-echo", probe_binary("arg_echo_plugin"), None, &[], &[])
+        .await
+        .expect("spawn target plugin");
+
+    let caller = RunningPlugin::spawn_with(
+        probe_binary("hello"),
+        Some(services),
+        Some(manager.clone()),
+        None,
+    )
+    .await
+    .expect("spawn caller plugin");
+    let resp = caller
+        .call(
+            "invoke",
+            Some("host.openview"),
+            Some(json!({
+                "channel_id": channel_id,
+                "plugin": "arg-echo",
+                "command": "arg-echo",
+                "args": {},
+                "message_id": source,
+            })),
+        )
+        .await
+        .expect("host.openview invoke answered");
+    caller.stop().await.expect("stop caller");
+
+    match resp {
+        Msg::Resp {
+            ok: true,
+            data: Some(data),
+            error: None,
+            ..
+        } => assert_eq!(data, json!({ "message_id": source })),
+        other => panic!("expected ok resp echoing the source message id, got {other:?}"),
+    }
+
+    let message_id = serenity::MessageId::new(source);
+    assert!(
+        engine.has_session(message_id).await,
+        "the source message carries the target's session"
+    );
+    manager
+        .unload("arg-echo", &[])
+        .await
+        .expect("stop target plugin");
+}
+
+/// A `message_id` serenity serialized as a string is the same in-place open.
+#[tokio::test]
+async fn host_openview_accepts_a_string_message_id() {
+    let channel_id = 987_654_321_u64;
+    let source = 555_666_777_u64;
+    let mut mock = MockHostIo::new();
+    mock.expect_send_message().times(0);
+    mock.expect_edit_message()
+        .with(
+            mockall::predicate::eq(channel_id),
+            mockall::predicate::eq(source),
+            mockall::predicate::always(),
+            mockall::predicate::always(),
+        )
+        .times(1)
+        .returning(move |_, _, _, _| Ok(Some(json!({ "message_id": source }))));
+
+    let engine = InteractionEngine::new();
+    let services = view_host_services(Arc::new(mock), engine.clone());
+    let manager = Arc::new(PluginManager::new(None, RespawnPolicy::default()));
+    manager
+        .spawn("arg-echo", probe_binary("arg_echo_plugin"), None, &[], &[])
+        .await
+        .expect("spawn target plugin");
+
+    let caller = RunningPlugin::spawn_with(
+        probe_binary("hello"),
+        Some(services),
+        Some(manager.clone()),
+        None,
+    )
+    .await
+    .expect("spawn caller plugin");
+    let resp = caller
+        .call(
+            "invoke",
+            Some("host.openview"),
+            Some(json!({
+                "channel_id": channel_id,
+                "plugin": "arg-echo",
+                "command": "arg-echo",
+                "args": {},
+                "message_id": source.to_string(),
+            })),
+        )
+        .await
+        .expect("host.openview invoke answered");
+    caller.stop().await.expect("stop caller");
+
+    match resp {
+        Msg::Resp {
+            ok: true,
+            data: Some(data),
+            error: None,
+            ..
+        } => assert_eq!(data, json!({ "message_id": source })),
+        other => panic!("expected ok resp echoing the source message id, got {other:?}"),
+    }
+    manager
+        .unload("arg-echo", &[])
+        .await
+        .expect("stop target plugin");
+}
+
 #[tokio::test]
 async fn host_openview_rejects_malformed_view_before_sending_or_registering() {
     let mut mock = MockHostIo::new();

@@ -65,11 +65,13 @@ use pwr_plugin_protocol::MODAL_SUBMIT_OP;
 use pwr_plugin_protocol::Manifest;
 use pwr_plugin_protocol::Msg;
 use pwr_plugin_protocol::ServerSettings;
+use pwr_plugin_protocol::VIEW_MOVED_KIND;
 use pwr_plugin_protocol::WireError;
 use pwr_plugin_support::HubPage;
 use pwr_plugin_support::id_as_u64;
 use pwr_plugin_support::open_hub_args;
 use pwr_plugin_support::reply_err;
+use pwr_plugin_support::source_message_id;
 use pwr_plugin_support::write_msg;
 use serde_json::Value;
 use serde_json::json;
@@ -297,6 +299,9 @@ enum Pending {
         session: SessionState,
         msg: PanelMsg,
         channel_id: Option<u64>,
+        /// The message the click fired on: Back/About edit it in place
+        /// instead of posting a fresh hub message.
+        message_id: Option<u64>,
         hub_page: HubPage,
     },
     /// The persist a mutating click or modal submission issued; its resp
@@ -308,11 +313,13 @@ enum Pending {
     },
     /// The `host.open_view` a `Back`/`About` issued; its resp answers with
     /// the panel (the hub opens beside it, like every plugin→plugin
-    /// navigation).
+    /// navigation) — or, when the open replaced the source message, with the
+    /// [`VIEW_MOVED_KIND`] marker so the host skips its own render.
     OpenHub {
         invoke_id: u64,
         session: SessionState,
         settings: ServerSettings,
+        message_id: Option<u64>,
     },
     /// The `host.open_modal` a modal trigger issued; its resp answers the
     /// click with [`MODAL_OPENED_KIND`] so the host skips its own response.
@@ -958,6 +965,7 @@ fn main() -> ExitCode {
                                 .as_ref()
                                 .and_then(|a| a.get("channel_id"))
                                 .and_then(id_as_u64);
+                            let message_id = source_message_id(args.as_ref());
                             let guild_id = session.guild_id;
                             Some(HostCall::new(
                                 Pending::Interact {
@@ -965,6 +973,7 @@ fn main() -> ExitCode {
                                     session,
                                     msg,
                                     channel_id,
+                                    message_id,
                                     hub_page,
                                 },
                                 get_settings_args(guild_id),
@@ -1127,6 +1136,7 @@ fn main() -> ExitCode {
                         session,
                         msg,
                         channel_id,
+                        message_id,
                         hub_page,
                     } => {
                         if !ok {
@@ -1176,8 +1186,9 @@ fn main() -> ExitCode {
                                         invoke_id,
                                         session,
                                         settings: model.settings,
+                                        message_id,
                                     },
-                                    open_hub_args(channel_id, guild_id, hub_page),
+                                    open_hub_args(channel_id, guild_id, hub_page, message_id),
                                 ))
                             }
                             [] => {
@@ -1278,13 +1289,23 @@ fn main() -> ExitCode {
                         invoke_id,
                         session,
                         settings,
+                        message_id,
                     } => {
                         if !ok {
                             eprintln!("host.open_view failed: {error:?}");
                         }
-                        // The panel keeps answering its own interactions;
-                        // the hub opens next to it, like every
-                        // plugin→plugin navigation.
+                        // In place: the open replaced this panel's message
+                        // with the hub, so answering with the panel's own
+                        // render would overwrite it — the host skips its
+                        // render on the marker kind. Without a source
+                        // message the hub opened next to the panel, which
+                        // keeps answering its own interactions.
+                        if ok && message_id.is_some() {
+                            if !reply_err(&mut out, invoke_id, VIEW_MOVED_KIND, "hub opened") {
+                                return ExitCode::FAILURE;
+                            }
+                            continue;
+                        }
                         if !reply_panel(&mut out, invoke_id, &session, &settings) {
                             return ExitCode::FAILURE;
                         }
@@ -1915,6 +1936,7 @@ mod tests {
                 session: session.clone(),
                 msg: PanelMsg::ToggleEnabled,
                 channel_id: None,
+                message_id: None,
                 hub_page: HubPage::Hub,
             }
             .op(),
@@ -1934,6 +1956,7 @@ mod tests {
                 invoke_id: 0,
                 session: session.clone(),
                 settings: ServerSettings::default(),
+                message_id: None,
             }
             .op(),
             "host.open_view"

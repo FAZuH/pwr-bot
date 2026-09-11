@@ -581,6 +581,102 @@ async fn nav_click_opens_the_target_plugin_panel() {
         .expect("stop target plugin");
 }
 
+/// A nav click carrying the source message opens the panel in place: no
+/// placeholder is posted, the target's session replaces the hub's on the
+/// clicked message, the edit lands on that message id, and the hub answers
+/// the interaction with the `ViewMoved` marker instead of re-rendering
+/// itself (its render would overwrite the panel the open just wrote).
+#[tokio::test]
+async fn nav_click_with_a_source_message_opens_the_panel_in_place() {
+    let channel_id = 987_654_321_u64;
+    let source = 555_666_777_u64;
+    let mut mock = MockHostIo::new();
+    mock.expect_send_message().times(0);
+    mock.expect_edit_message()
+        .with(
+            mockall::predicate::eq(channel_id),
+            mockall::predicate::eq(source),
+            mockall::predicate::function(|data: &serde_json::Value| {
+                data == &json!({
+                    "attachments": [],
+                    "components": [{"content": "{}", "type": 10}],
+                    "embeds": [],
+                    "flags": 32768,
+                })
+            }),
+            mockall::predicate::always(),
+        )
+        .times(1)
+        .returning(move |_, _, _, _| Ok(Some(json!({ "message_id": source }))));
+
+    let engine = InteractionEngine::new();
+    let kv = SharedKv::new();
+    let services = view_host_services(Arc::new(mock), kv.clone(), engine.clone());
+    let manager = Arc::new(PluginManager::new(None, RespawnPolicy::default()));
+    manager
+        .spawn("arg-echo", probe_binary("arg_echo_plugin"), None, &[], &[])
+        .await
+        .expect("spawn target plugin");
+
+    let settings = RunningPlugin::spawn_with(
+        probe_binary("settings"),
+        Some(services),
+        Some(manager.clone()),
+        None,
+    )
+    .await
+    .expect("spawn settings plugin");
+    settings
+        .call("invoke", Some("settings"), Some(json!({})))
+        .await
+        .expect("invoke answered");
+
+    let resp = settings
+        .call(
+            "view.interact",
+            Some("settings"),
+            Some(json!({
+                "custom_id": "settings:open:arg-echo",
+                "channel_id": channel_id,
+                "message": { "id": source.to_string() },
+            })),
+        )
+        .await
+        .expect("nav click answered");
+    settings.stop().await.expect("graceful stop");
+
+    match resp {
+        Msg::Resp {
+            ok: false,
+            error: Some(error),
+            ..
+        } => {
+            assert_eq!(error.kind, "ViewMoved", "the hub hands the message over");
+        }
+        other => panic!("expected the ViewMoved marker, got {other:?}"),
+    }
+
+    let message_id = serenity::MessageId::new(source);
+    assert!(
+        engine.has_session(message_id).await,
+        "the clicked message now carries the target's session"
+    );
+    let follow_up = engine
+        .interact_validated(message_id, "arg-echo", json!({}), |data| {
+            pwr_bot::plugin::validate_view_data(data).map_err(Into::into)
+        })
+        .await
+        .expect("clicks on the moved message route to the target plugin");
+    assert_eq!(
+        follow_up.data["components"][0]["content"],
+        "{\"custom_id\":\"arg-echo\",\"view\":{\"last_args\":{}}}"
+    );
+    manager
+        .unload("arg-echo", &[])
+        .await
+        .expect("stop target plugin");
+}
+
 /// The About click answers with the plugin-side About panel (a v2 container
 /// holding a section with a link-button accessory) after one `host.stats`
 /// round trip — which fails on a spawn without a stats source, so the

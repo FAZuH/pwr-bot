@@ -40,6 +40,7 @@ pub use msg::MODAL_OPENED_KIND;
 pub use msg::MODAL_SUBMIT_OP;
 pub use msg::Msg;
 pub use msg::PLUGIN_NAME;
+pub use msg::VIEW_MOVED_KIND;
 pub use msg::WireError;
 pub use settings::FeedsSettings;
 pub use settings::ServerSettings;
