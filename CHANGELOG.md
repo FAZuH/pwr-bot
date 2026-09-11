@@ -15,6 +15,7 @@
 
 ### Fixed
 
+- Fixed gateway failing to start when both rustls providers are linked
 - Fixed bot panels failing to update after an action
 - Fixed plugin commands timing out before answering
 - Fixed commands hanging with a thinking spinner after an error
