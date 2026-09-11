@@ -8,7 +8,7 @@ license = "MIT"
 repository = "https://github.com/FAZuH/pwr-bot"
 
 [dependencies]
-pwr-ext = { path = "../../../../pwr-ext", features = ["macros"] }
+pwr-ext = { git = "https://github.com/FAZuH/pwr-ext", branch = "main", features = ["macros"] }
 pwr-plugin-protocol = { path = "../../pwr-plugin-protocol" }
 pwr-plugin-support = { path = "../pwr-plugin-support" }
 serde_json = "1.0.149"

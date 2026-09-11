@@ -33,3 +33,5 @@ target
 #.idea/
 .opencode/
 docker-compose.override.yml
+
+.cargo/

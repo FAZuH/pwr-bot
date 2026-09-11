@@ -4310,6 +4310,7 @@ dependencies = [
 [[package]]
 name = "pwr-ext"
 version = "0.1.0"
+source = "git+https://github.com/FAZuH/pwr-ext?branch=main#60e2a93e3e29ce5e168ed68d4c6282204b54dc09"
 dependencies = [
  "pwr-ext-macros",
  "serde",
@@ -4321,6 +4322,7 @@ dependencies = [
 [[package]]
 name = "pwr-ext-macros"
 version = "0.1.0"
+source = "git+https://github.com/FAZuH/pwr-ext?branch=main#60e2a93e3e29ce5e168ed68d4c6282204b54dc09"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4369,6 +4371,7 @@ dependencies = [
 [[package]]
 name = "pwr-viewgen"
 version = "0.1.0"
+source = "git+https://github.com/FAZuH/pwr-viewgen?branch=main#d6a2a273aae77d2517857ee7a57f5a6703066763"
 dependencies = [
  "chromiumoxide",
  "chrono",
