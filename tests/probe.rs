@@ -18,8 +18,9 @@ pub fn probe_binary(bin_name: &str) -> PathBuf {
         Some(dir) => PathBuf::from(dir),
         None => PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target"),
     };
-    // `cargo test` does not produce plain bin artifacts for sibling
-    // packages, so build the missing fixture on demand.
+    // `cargo test` does not rebuild plain bin artifacts for sibling
+    // packages: build the fixture so fresh checkouts have it and edited
+    // fixtures never run stale.
     let mut cmd = std::process::Command::new("cargo");
     cmd.arg("build").current_dir(env!("CARGO_MANIFEST_DIR"));
     if bin_name == "arg-echo-plugin" {
@@ -37,5 +38,5 @@ pub fn probe_binary(bin_name: &str) -> PathBuf {
             return candidate;
         }
     }
-    panic!("fixture `{bin_name}` still missing after cargo build");
+    panic!("fixture `{bin_name}` missing after cargo build");
 }
