@@ -19,13 +19,13 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo build --release && \
     rm -rf src crates
 
-# Build app
+# Build app (and plugin binaries the image ships)
 COPY ./assets ./assets
 COPY ./src ./src
 COPY ./crates ./crates
 COPY ./migrations ./migrations
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    cargo build --release
+    cargo build --release --workspace
 
 FROM debian:bookworm-slim AS app
 RUN apt-get update && apt-get install -y libfontconfig1 libpq5 && rm -rf /var/lib/apt/lists/*
