@@ -34,8 +34,8 @@ const MAX_REDIRECTS: usize = 5;
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// A download body larger than this is rejected before it is fully read;
-/// a plugin binary should never approach 64 MiB.
-const MAX_DOWNLOAD_BYTES: u64 = 64 * 1024 * 1024;
+/// a plugin binary should never approach 128 MiB.
+const MAX_DOWNLOAD_BYTES: u64 = 128 * 1024 * 1024;
 
 /// One pinned plugin in the catalog: name, https download url, the sha256
 /// the binary must match, and the plugin's manifest. The manifest is
