@@ -1,10 +1,9 @@
 //! Subscriber that tracks voice channel state changes.
 
-use std::collections::HashMap;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use anyhow::Result;
-use chrono::DateTime;
 use chrono::Utc;
 use log::debug;
 use poise::serenity_prelude::ChannelId;
@@ -15,20 +14,11 @@ use crate::event::VoiceStateEvent;
 use crate::service::Services;
 use crate::subscriber::Subscriber;
 
-/// Tracks active voice sessions with their join times.
-#[derive(Clone, Debug)]
-#[allow(dead_code)]
-struct ActiveSession {
-    user_id: u64,
-    guild_id: u64,
-    channel_id: u64,
-    join_time: DateTime<Utc>,
-}
-
 /// Subscriber that tracks voice channel state changes.
 pub struct VoiceStateSubscriber {
     pub services: Arc<Services>,
-    active_sessions: Mutex<HashMap<String, ActiveSession>>,
+    /// Live voice session ids; the DB row is the source of truth.
+    active_sessions: Mutex<HashSet<String>>,
 }
 
 impl VoiceStateSubscriber {
@@ -36,7 +26,7 @@ impl VoiceStateSubscriber {
     pub fn new(services: Arc<Services>) -> Self {
         Self {
             services,
-            active_sessions: Mutex::new(HashMap::new()),
+            active_sessions: Mutex::new(HashSet::new()),
         }
     }
 
@@ -80,7 +70,7 @@ impl VoiceStateSubscriber {
         let sessions = self.active_sessions.lock().await;
 
         // Only track if not already tracked
-        if sessions.contains_key(session_id) {
+        if sessions.contains(session_id) {
             return Ok(());
         }
 
@@ -91,16 +81,9 @@ impl VoiceStateSubscriber {
         // Re-check after await: another task may have inserted this session while we were
         // closing orphaned sessions (e.g. concurrent VoiceStateUpdate on gateway reconnect).
         let mut sessions = self.active_sessions.lock().await;
-        if sessions.contains_key(session_id) {
+        if sessions.contains(session_id) {
             return Ok(());
         }
-
-        let session = ActiveSession {
-            user_id,
-            guild_id,
-            channel_id,
-            join_time: now,
-        };
 
         // Insert into database
         let model = VoiceSessionsEntity {
@@ -114,7 +97,7 @@ impl VoiceStateSubscriber {
         };
 
         self.services.voice_tracking.insert(&model).await?;
-        sessions.insert(session_id.to_string(), session);
+        sessions.insert(session_id.to_string());
 
         debug!(
             "Started tracking existing user {user_id} in voice channel {channel_id} (guild {guild_id})"
@@ -139,24 +122,14 @@ impl VoiceStateSubscriber {
         let session_id = event.new.session_id.to_string();
 
         // Skip if already tracking this session (prevents duplicates on gateway reconnects)
-        if self.active_sessions.lock().await.contains_key(&session_id) {
+        if self.active_sessions.lock().await.contains(&session_id) {
             return Ok(());
         }
 
         // Close any orphaned active sessions before creating a new one
         self.close_orphaned_sessions(user_id, guild_id).await?;
 
-        let session = ActiveSession {
-            user_id,
-            guild_id,
-            channel_id: channel_id.get(),
-            join_time,
-        };
-
-        self.active_sessions
-            .lock()
-            .await
-            .insert(session_id, session);
+        self.active_sessions.lock().await.insert(session_id);
 
         let model = VoiceSessionsEntity {
             user_id,
@@ -256,17 +229,7 @@ impl VoiceStateSubscriber {
         }
 
         // Start new session
-        let session = ActiveSession {
-            user_id,
-            guild_id,
-            channel_id: new_channel_id.get(),
-            join_time: now,
-        };
-
-        self.active_sessions
-            .lock()
-            .await
-            .insert(new_session_id, session);
+        self.active_sessions.lock().await.insert(new_session_id);
 
         let model = VoiceSessionsEntity {
             user_id,
@@ -391,24 +354,17 @@ mod tests {
         assert!(result.is_ok());
 
         let sessions = sub.active_sessions.lock().await;
-        assert!(sessions.contains_key("session1"));
+        assert!(sessions.contains("session1"));
     }
 
     #[tokio::test]
     #[serial_test::serial]
     async fn handle_leave_logic() {
         let sub = create_mock_subscriber().await.unwrap();
-        let join_time = Utc::now();
-        let session = ActiveSession {
-            user_id: 123,
-            guild_id: 456,
-            channel_id: 789,
-            join_time,
-        };
         sub.active_sessions
             .lock()
             .await
-            .insert("session1".to_string(), session);
+            .insert("session1".to_string());
 
         let old_state = create_voice_state(123, Some(456), Some(789), "session1");
         let event = VoiceStateEvent {
@@ -420,24 +376,17 @@ mod tests {
         assert!(result.is_ok());
 
         let sessions = sub.active_sessions.lock().await;
-        assert!(!sessions.contains_key("session1"));
+        assert!(!sessions.contains("session1"));
     }
 
     #[tokio::test]
     #[serial_test::serial]
     async fn handle_move_logic() {
         let sub = create_mock_subscriber().await.unwrap();
-        let join_time = Utc::now();
-        let session = ActiveSession {
-            user_id: 123,
-            guild_id: 456,
-            channel_id: 781,
-            join_time,
-        };
         sub.active_sessions
             .lock()
             .await
-            .insert("session1".to_string(), session);
+            .insert("session1".to_string());
 
         let old_state = create_voice_state(123, Some(456), Some(781), "session1");
         let new_state = create_voice_state(123, Some(456), Some(782), "session1");
@@ -452,9 +401,7 @@ mod tests {
         assert!(result.is_ok());
 
         let sessions = sub.active_sessions.lock().await;
-        assert!(sessions.contains_key("session1"));
-        assert_ne!(sessions.get("session1").unwrap().join_time, join_time);
-        assert_eq!(sessions.get("session1").unwrap().channel_id, 782);
+        assert!(sessions.contains("session1"));
     }
 
     #[tokio::test]
@@ -468,10 +415,7 @@ mod tests {
 
         // Verify session is tracked in memory
         let sessions = sub.active_sessions.lock().await;
-        assert!(sessions.contains_key("session1"));
-        assert_eq!(sessions.get("session1").unwrap().user_id, 123);
-        assert_eq!(sessions.get("session1").unwrap().guild_id, 456);
-        assert_eq!(sessions.get("session1").unwrap().channel_id, 789);
+        assert!(sessions.contains("session1"));
     }
 
     #[tokio::test]
@@ -484,21 +428,15 @@ mod tests {
             .await
             .unwrap();
 
-        let first_join_time = {
-            let sessions = sub.active_sessions.lock().await;
-            sessions.get("session1").unwrap().join_time
-        };
-
         // Try to track same user again (should not create duplicate)
         sub.track_existing_user(123, 456, 789, "session1")
             .await
             .unwrap();
 
-        // Verify still only one session and join_time hasn't changed
+        // Verify still only one session tracked
         let sessions = sub.active_sessions.lock().await;
-        assert!(sessions.contains_key("session1"));
+        assert!(sessions.contains("session1"));
         assert_eq!(sessions.len(), 1);
-        assert_eq!(sessions.get("session1").unwrap().join_time, first_join_time);
     }
 
     #[tokio::test]
