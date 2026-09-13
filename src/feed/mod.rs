@@ -91,12 +91,6 @@ impl BasePlatform {
     }
 }
 
-#[non_exhaustive]
-pub enum PlatformResult {
-    FeedSource(FeedSource),
-    FeedItem(FeedItem),
-}
-
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct FeedItem {
     /// Identifier for this feed item.
