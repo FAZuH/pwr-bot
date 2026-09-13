@@ -18,14 +18,6 @@ macro_rules! impl_table_base {
                 Ok(())
             }
 
-            async fn drop_table(&self) -> Result<(), DatabaseError> {
-                let mut conn = self.pool.get().await?;
-                diesel::sql_query(concat!("DROP TABLE IF EXISTS ", stringify!($table)))
-                    .execute(&mut conn)
-                    .await?;
-                Ok(())
-            }
-
             async fn delete_all(&self) -> Result<(), DatabaseError> {
                 let mut conn = self.pool.get().await?;
                 diesel::delete($table).execute(&mut conn).await?;
