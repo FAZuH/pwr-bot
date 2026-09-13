@@ -2407,6 +2407,7 @@ version = "0.1.0"
 dependencies = [
  "pwr-ext",
  "pwr-plugin-protocol",
+ "pwr-plugin-support",
  "serde_json",
  "tokio",
 ]
@@ -4284,6 +4285,7 @@ dependencies = [
  "postgresql_embedded",
  "pwr-ext",
  "pwr-plugin-protocol",
+ "pwr-plugin-support",
  "pwr-poise-components",
  "pwr-viewgen",
  "resvg",
@@ -5383,6 +5385,7 @@ version = "0.1.0"
 dependencies = [
  "pwr-ext",
  "pwr-plugin-protocol",
+ "pwr-plugin-support",
  "pwr-poise-components",
  "serde_json",
 ]
