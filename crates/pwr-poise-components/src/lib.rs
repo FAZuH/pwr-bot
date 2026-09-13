@@ -15,7 +15,6 @@
 use pwr_ext::prelude::CreateButtonDe;
 use pwr_ext::prelude::CreateComponentDe;
 use pwr_ext::prelude::CreateSelectMenuDe;
-use pwr_ext::prelude::CreateSelectMenuOptionDe;
 use pwr_ext::view;
 use pwr_ext::view_support::ButtonStyle;
 use pwr_ext::view_support::CreateActionRow;
@@ -25,9 +24,6 @@ use pwr_ext::view_support::CreateContainerComponent;
 use pwr_ext::view_support::CreateSection;
 use pwr_ext::view_support::CreateSectionAccessory;
 use pwr_ext::view_support::CreateSectionComponent;
-use pwr_ext::view_support::CreateSelectMenu;
-use pwr_ext::view_support::CreateSelectMenuKind;
-use pwr_ext::view_support::CreateSelectMenuOption;
 use serde_json::Value;
 
 /// A button component: Discord type 2, style 1 (primary).
@@ -37,47 +33,6 @@ pub fn button(custom_id: impl Into<String>, label: impl Into<String>) -> Value {
     first_component(view! {
         action_row { button { custom_id: custom_id, label: label, style: ButtonStyle::Primary } }
     })
-}
-
-/// A button with an explicit style. Discord styles are `1..=5`.
-///
-/// Style 5 preserves this helper's historical payload contract: it includes
-/// both the supplied `custom_id` and style `5`. Use [`button_link`] for a
-/// Discord link-button payload.
-///
-/// # Panics
-///
-/// Panics if `style` is outside `1..=5`.
-pub fn button_with_style(
-    custom_id: impl Into<String>,
-    label: impl Into<String>,
-    style: u8,
-) -> Value {
-    assert!(
-        (1..=5).contains(&style),
-        "button style must be 1..=5, got {style}"
-    );
-    let custom_id = custom_id.into();
-    let label = label.into();
-    let style = match style {
-        1 => ButtonStyle::Primary,
-        2 => ButtonStyle::Secondary,
-        3 => ButtonStyle::Success,
-        4 => ButtonStyle::Danger,
-        5 => ButtonStyle::Unknown(5),
-        _ => unreachable!(),
-    };
-    first_component(view! {
-        action_row { button { custom_id: custom_id, label: label, style: style } }
-    })
-}
-
-/// A link-style button: Discord type 2, style 5. Link buttons carry a `url`
-/// and no `custom_id`.
-pub fn button_link(url: impl Into<String>, label: impl Into<String>) -> Value {
-    let url = url.into();
-    let label = label.into();
-    first_component(view! { action_row { button { url: url, label: label } } })
 }
 
 /// An action row: the container every message component must sit in.
@@ -107,58 +62,6 @@ pub fn action_row(children: impl IntoIterator<Item = Value>) -> Value {
     let mut output = serde_json::to_value(row).unwrap();
     remove_false_disabled(&mut output);
     output
-}
-
-/// A string-select dropdown: Discord type 3.
-///
-/// # Panics
-///
-/// Panics if an option is not a valid serialized select-menu option.
-pub fn string_select(
-    custom_id: impl Into<String>,
-    options: impl IntoIterator<Item = Value>,
-) -> Value {
-    let options = options
-        .into_iter()
-        .map(|option| {
-            let parsed: CreateSelectMenuOptionDe<'static> = serde_json::from_value(option).unwrap();
-            CreateSelectMenuOption::from(parsed)
-        })
-        .collect::<Vec<_>>();
-    serde_json::to_value(CreateSelectMenu::new(
-        custom_id.into(),
-        CreateSelectMenuKind::String {
-            options: options.into(),
-        },
-    ))
-    .unwrap()
-}
-
-/// A select option: `label` is shown to the user, `value` is what the
-/// interaction carries back.
-pub fn select_option(label: impl Into<String>, value: impl Into<String>) -> Value {
-    serde_json::to_value(CreateSelectMenuOption::new(label.into(), value.into())).unwrap()
-}
-
-/// Adds a `description` to an option built by [`select_option`].
-///
-/// # Panics
-///
-/// Panics if `option` is not a valid serialized select-menu option.
-pub fn select_option_with_description(option: Value, description: impl Into<String>) -> Value {
-    let parsed: CreateSelectMenuOptionDe<'static> = serde_json::from_value(option).unwrap();
-    serde_json::to_value(CreateSelectMenuOption::from(parsed).description(description.into()))
-        .unwrap()
-}
-
-/// Marks an option built by [`select_option`] as pre-selected.
-///
-/// # Panics
-///
-/// Panics if `option` is not a valid serialized select-menu option.
-pub fn with_default(option: Value, default: bool) -> Value {
-    let parsed: CreateSelectMenuOptionDe<'static> = serde_json::from_value(option).unwrap();
-    serde_json::to_value(CreateSelectMenuOption::from(parsed).default_selection(default)).unwrap()
 }
 
 /// The Discord message flag marking a payload as Components V2: every visible
@@ -329,17 +232,6 @@ impl PaginationAction {
             Self::Current => "current",
         }
     }
-
-    fn parse(value: &str) -> Option<Self> {
-        match value {
-            "first" => Some(Self::First),
-            "prev" => Some(Self::Prev),
-            "next" => Some(Self::Next),
-            "last" => Some(Self::Last),
-            "current" => Some(Self::Current),
-            _ => None,
-        }
-    }
 }
 
 /// State-independent pagination data. The page is always in `1..=page_count`.
@@ -367,18 +259,6 @@ impl Pagination {
             per_page,
         }
     }
-
-    /// Applies a navigation action without owning or changing caller state.
-    pub fn transition(self, action: PaginationAction) -> Self {
-        let page = match action {
-            PaginationAction::First => 1,
-            PaginationAction::Prev => self.page.saturating_sub(1).max(1),
-            PaginationAction::Next => self.page.saturating_add(1).min(self.page_count),
-            PaginationAction::Last => self.page_count,
-            PaginationAction::Current => self.page,
-        };
-        Self { page, ..self }
-    }
 }
 
 /// Builds a stable custom ID for a pagination control.
@@ -395,24 +275,10 @@ pub fn pagination_custom_id(prefix: &str, action: PaginationAction) -> String {
     id
 }
 
-/// Parses an ID produced by [`pagination_custom_id`]. Prefixes may contain
-/// colons; the final pagination marker remains the protocol boundary.
-pub fn parse_pagination_custom_id(id: &str) -> Option<(&str, PaginationAction)> {
-    if id.len() > 100 {
-        return None;
-    }
-    let (prefix, action) = id.rsplit_once(":pagination:")?;
-    if prefix.is_empty() {
-        None
-    } else {
-        Some((prefix, PaginationAction::parse(action)?))
-    }
-}
-
 /// Builds a Components V2 container containing the page indicator and stable
 /// first/previous/next/last controls. The caller owns `Pagination` in its
-/// `ViewSpec.view` envelope and uses [`Pagination::transition`] after parsing
-/// the clicked ID. This component does not depend on host view traits.
+/// `ViewSpec.view` envelope and applies navigation to it after parsing the
+/// clicked ID. This component does not depend on host view traits.
 pub fn pagination(
     items: usize,
     page: u32,
@@ -490,32 +356,6 @@ mod tests {
     }
 
     #[test]
-    fn button_with_style_carries_the_given_style() {
-        assert_eq!(
-            serde_json::to_string(&button_with_style("btn", "Click", 4)).unwrap(),
-            r#"{"custom_id":"btn","label":"Click","style":4,"type":2}"#
-        );
-    }
-
-    #[test]
-    fn button_with_style_five_preserves_the_legacy_custom_id_contract() {
-        assert_eq!(
-            serde_json::to_string(&button_with_style("legacy", "Legacy", 5)).unwrap(),
-            r#"{"custom_id":"legacy","label":"Legacy","style":5,"type":2}"#
-        );
-    }
-
-    #[test]
-    fn button_link_requires_url_and_omits_custom_id() {
-        let link = button_link("https://example.com", "Docs");
-        assert_eq!(
-            serde_json::to_string(&link).unwrap(),
-            r#"{"label":"Docs","style":5,"type":2,"url":"https://example.com"}"#
-        );
-        assert!(link.get("custom_id").is_none());
-    }
-
-    #[test]
     fn action_row_wraps_its_children() {
         let child = button("btn", "Click");
         let row = action_row([child.clone()]);
@@ -528,41 +368,6 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&action_row(Vec::<Value>::new())).unwrap(),
             r#"{"components":[],"type":1}"#
-        );
-    }
-
-    #[test]
-    fn string_select_emits_the_discord_shape() {
-        let option = select_option("A", "a");
-        let select = string_select("sel", [option.clone()]);
-        assert_eq!(select["type"], 3);
-        assert_eq!(select["custom_id"], "sel");
-        assert_eq!(select["options"][0], option);
-    }
-
-    #[test]
-    fn select_option_carries_label_and_value() {
-        assert_eq!(
-            serde_json::to_string(&select_option("A", "a")).unwrap(),
-            r#"{"label":"A","value":"a"}"#
-        );
-    }
-
-    #[test]
-    fn select_option_with_description_adds_description() {
-        let option = select_option_with_description(select_option("A", "a"), "first");
-        assert_eq!(
-            serde_json::to_string(&option).unwrap(),
-            r#"{"description":"first","label":"A","value":"a"}"#
-        );
-    }
-
-    #[test]
-    fn with_default_marks_the_option() {
-        let option = with_default(select_option("A", "a"), true);
-        assert_eq!(
-            serde_json::to_string(&option).unwrap(),
-            r#"{"default":true,"label":"A","value":"a"}"#
         );
     }
 
@@ -664,39 +469,11 @@ mod tests {
     }
 
     #[test]
-    fn pagination_transitions_stop_at_both_boundaries() {
-        let first = Pagination::new(250, 10, 10);
-        assert_eq!(first.transition(PaginationAction::First).page, 1);
-        assert_eq!(first.transition(PaginationAction::Prev).page, 9);
-        assert_eq!(first.transition(PaginationAction::Next).page, 11);
-        assert_eq!(first.transition(PaginationAction::Last).page, 25);
+    fn pagination_custom_ids_are_stable_and_length_capped() {
         assert_eq!(
-            Pagination::new(250, 1, 10)
-                .transition(PaginationAction::Prev)
-                .page,
-            1
+            pagination_custom_id("settings:feeds", PaginationAction::Next),
+            "settings:feeds:pagination:next"
         );
-        assert_eq!(
-            Pagination::new(250, 25, 10)
-                .transition(PaginationAction::Next)
-                .page,
-            25
-        );
-    }
-
-    #[test]
-    fn pagination_custom_ids_round_trip_and_reject_invalid_ids() {
-        let id = pagination_custom_id("settings:feeds", PaginationAction::Next);
-        assert_eq!(id, "settings:feeds:pagination:next");
-        assert_eq!(
-            parse_pagination_custom_id(&id),
-            Some(("settings:feeds", PaginationAction::Next))
-        );
-        assert_eq!(
-            parse_pagination_custom_id("settings:feeds:pagination:jump"),
-            None
-        );
-        assert_eq!(parse_pagination_custom_id("pagination:next"), None);
         assert_eq!(
             pagination_custom_id(&"x".repeat(84), PaginationAction::Next).len(),
             100
@@ -708,19 +485,14 @@ mod tests {
             ))
             .is_err()
         );
-        let current = pagination_custom_id(&"x".repeat(81), PaginationAction::Current);
-        assert_eq!(current.len(), 100);
-        let (prefix, action) = parse_pagination_custom_id(&current).unwrap();
-        assert_eq!(prefix, "x".repeat(81));
-        assert_eq!(action, PaginationAction::Current);
         assert_eq!(
-            parse_pagination_custom_id(&format!("{}:pagination:next", "x".repeat(85))),
-            None
+            pagination_custom_id(&"x".repeat(81), PaginationAction::Current).len(),
+            100
         );
-        let utf8_prefix = "é".repeat(40);
-        let utf8_id = pagination_custom_id(&utf8_prefix, PaginationAction::Current);
-        assert_eq!(utf8_id.len(), 99);
-        assert_eq!(parse_pagination_custom_id(&utf8_id).unwrap().0, utf8_prefix);
+        assert_eq!(
+            pagination_custom_id(&"é".repeat(40), PaginationAction::Current).len(),
+            99
+        );
     }
 
     #[test]
