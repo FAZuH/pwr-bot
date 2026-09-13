@@ -120,11 +120,6 @@ impl<'a> Router<'a> {
         queue.push_back(next);
     }
 
-    /// Returns the newest queued target without removing it.
-    pub async fn peek_navigation(&self) -> Option<Navigation> {
-        self.nav_queue.lock().await.back().cloned()
-    }
-
     pub async fn set_reply_handle(&self, new_reply: ReplyHandle<'a>) {
         *self.reply_handle.lock().await = Some(new_reply)
     }
