@@ -12,7 +12,6 @@ in the repository root. The bot reads the file at startup.
 | `DB_PASS` | PostgreSQL password. | `pwr_bot` |
 | `DB_USER` | PostgreSQL username. | `pwr_bot` |
 | `DB_NAME` | PostgreSQL database name. | `pwr_bot` |
-| `DATABASE_PASSWORD` | PostgreSQL password for the Docker Compose database service. | `password` |
 | `LOGS_PATH` | Directory for log files. | `./logs` |
 | `DATA_PATH` | Directory for data files. | `./data` |
 | `PLUGINS_TOML` | Plugin catalog file. See [Plugin catalog](plugins.md). | `$DATA_PATH/plugins.toml` |
