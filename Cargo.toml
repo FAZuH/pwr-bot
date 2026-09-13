@@ -16,6 +16,7 @@ resolver = "2"
 pwr-ext = { git = "https://github.com/FAZuH/pwr-ext", branch = "main", features = ["macros"] }
 pwr-viewgen = { git = "https://github.com/FAZuH/pwr-viewgen", branch = "main" }
 pwr-plugin-protocol = { path = "crates/pwr-plugin-protocol" }
+pwr-plugin-support = { path = "crates/plugin/pwr-plugin-support" }
 pwr-poise-components = { path = "crates/pwr-poise-components" }
 
 [package]
@@ -59,6 +60,7 @@ dotenv = "0.15.0"
 poise = { git = "https://github.com/serenity-rs/poise", branch = "serenity-next" }
 pwr-ext.workspace = true
 pwr-plugin-protocol.workspace = true
+pwr-plugin-support.workspace = true
 pwr-poise-components.workspace = true
 serde = "1.0.228"
 serde_json = "1.0.149"

@@ -36,7 +36,6 @@
 //! `tests/plugin_hello_world.rs`).
 
 use std::io::BufRead;
-use std::io::Write;
 use std::process::ExitCode;
 
 use pwr_ext::view;
@@ -49,6 +48,7 @@ use pwr_plugin_protocol::Msg;
 use pwr_plugin_protocol::PLUGIN_NAME;
 use pwr_plugin_protocol::TaskDef;
 use pwr_plugin_protocol::WireError;
+use pwr_plugin_support::write_msg;
 use serde_json::Value;
 use serde_json::json;
 
@@ -98,15 +98,6 @@ fn manifest() -> Manifest {
         }],
         api_version: API_VERSION,
     }
-}
-
-/// Serializes `msg` to one JSON line, writes it, then flushes. Every protocol
-/// line must end with `\n` and be flushed before the host can read it — piped
-/// stdout is block-buffered, unlike the test harness's `send_line`.
-fn write_msg(out: &mut impl Write, msg: &Msg) -> std::io::Result<()> {
-    let line = serde_json::to_string(msg).expect("serialize protocol message");
-    writeln!(out, "{line}")?;
-    out.flush()
 }
 
 /// Renders a panic payload for the stderr diagnostics line: `&str` and

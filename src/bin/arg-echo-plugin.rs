@@ -10,7 +10,6 @@
 //! assertion; the protocol crate is frozen, so this fixture lives here.
 
 use std::io::BufRead;
-use std::io::Write;
 use std::process::ExitCode;
 
 use pwr_ext::view;
@@ -19,19 +18,12 @@ use pwr_plugin_protocol::CommandDef;
 use pwr_plugin_protocol::Manifest;
 use pwr_plugin_protocol::Msg;
 use pwr_plugin_protocol::WireError;
+use pwr_plugin_support::write_msg;
 use serde_json::Value;
 use serde_json::json;
 
 /// The plugin's hello name and the command it serves.
 const PLUGIN_NAME: &str = "arg-echo";
-
-/// Serializes `msg` to one JSON line, writes it, then flushes. Every protocol
-/// line must end with `\n` and be flushed before the host can read it.
-fn write_msg(out: &mut impl Write, msg: &Msg) -> std::io::Result<()> {
-    let line = serde_json::to_string(msg).expect("serialize protocol message");
-    writeln!(out, "{line}")?;
-    out.flush()
-}
 
 /// The echoed view: the args JSON as the text of a text display inside the
 /// `components_v2` root, which sets the V2 flag and emits no legacy content.
