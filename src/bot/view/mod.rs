@@ -70,19 +70,6 @@ impl<T: Action> ActionRegistry<T> {
         RegisteredAction { id, label }
     }
 
-    /// Registers an action using given id, and returns a [`RegisteredAction`] for building Discord components.
-    ///
-    /// If an action is already registered with the same id, the action will be updated, and the
-    /// old action is returned.
-    pub fn register_with_id(&mut self, id: &str, action: T) -> Option<RegisteredAction> {
-        self.actions
-            .insert(id.to_string(), action)
-            .map(|old| RegisteredAction {
-                id: id.to_string(),
-                label: old.label(),
-            })
-    }
-
     /// Retrieves an action associated with a given `custom_id`.
     pub fn get(&self, id: &str) -> Option<&T> {
         self.actions.get(id)
@@ -118,11 +105,6 @@ impl RegisteredAction {
     /// Converts the registered action into a Discord select menu.
     pub fn as_select<'a>(self, kind: CreateSelectMenuKind<'a>) -> CreateSelectMenu<'a> {
         CreateSelectMenu::new(self.id, kind)
-    }
-
-    /// Converts the registered action into a Discord select menu option.
-    pub fn as_select_option(self) -> CreateSelectMenuOption<'static> {
-        CreateSelectMenuOption::new(self.label, self.id)
     }
 }
 
