@@ -168,15 +168,6 @@ impl VoiceStatsModel {
         self.total_time() / self.data.user_activity.len() as i64
     }
 
-    /// Finds the most active day.
-    pub fn most_active_day(&self) -> Option<(chrono::NaiveDate, i64)> {
-        self.data
-            .user_activity
-            .iter()
-            .max_by_key(|a| a.total_seconds)
-            .map(|a| (a.day, a.total_seconds))
-    }
-
     /// Calculates the current streak (consecutive days with activity up to today).
     pub fn current_streak(&self) -> u32 {
         if self.data.user_activity.is_empty() {
@@ -221,16 +212,6 @@ impl VoiceStatsModel {
     /// The daily user activity (user mode only).
     pub fn user_activity(&self) -> &[VoiceDailyActivity] {
         &self.data.user_activity
-    }
-
-    /// Gets the maximum value for guild stats (for scaling).
-    pub fn max_guild_stat_value(&self) -> i64 {
-        self.data
-            .guild_stats
-            .iter()
-            .map(|s| s.value)
-            .max()
-            .unwrap_or(0)
     }
 
     /// Gets the total for guild user-count stats.
