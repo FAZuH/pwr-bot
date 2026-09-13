@@ -1,15 +1,11 @@
 //! Image generation for welcome cards.
 
-use std::io::Cursor;
-
 use anyhow::Result;
-use base64::Engine as _;
-use base64::engine::general_purpose::STANDARD as BASE64;
-use image::DynamicImage;
-use image::imageops::FilterType;
 use minijinja::Environment;
 use serde::Deserialize;
 use serde::Serialize;
+
+use crate::bot::utils;
 
 const AVATAR_SIZE: u32 = 128; // Adjust based on templates, using a larger one is safe
 
@@ -87,25 +83,7 @@ impl WelcomeImageGenerator {
     }
 
     pub async fn download_avatar(&self, url: &str) -> Result<String> {
-        let response = self.http_client.get(url).send().await?;
-        if !response.status().is_success() {
-            return Err(anyhow::anyhow!(
-                "Failed to download avatar: {}",
-                response.status()
-            ));
-        }
-        let bytes = response.bytes().await?;
-        let img = image::load_from_memory(&bytes)?;
-        Ok(self.process_avatar_to_b64(&img))
-    }
-
-    fn process_avatar_to_b64(&self, img: &DynamicImage) -> String {
-        let resized = img.resize_exact(AVATAR_SIZE, AVATAR_SIZE, FilterType::Lanczos3);
-        let mut cursor = Cursor::new(Vec::new());
-        resized
-            .write_to(&mut cursor, image::ImageFormat::Png)
-            .unwrap();
-        BASE64.encode(cursor.into_inner())
+        utils::download_avatar(&self.http_client, url, AVATAR_SIZE).await
     }
 
     pub async fn generate_card(&self, mut data: WelcomeCardData) -> Result<Vec<u8>> {
