@@ -279,37 +279,9 @@ mod tests {
     use super::*;
     use crate::bot::gui::cycle;
     use crate::bot::view::ActionRegistry;
+    use crate::bot::view::normalize_custom_ids;
     use crate::entity::FeedEntity;
     use crate::entity::FeedItemEntity;
-
-    /// Rewrites every `custom_id` of the shape `Type:timestamp:counter` to a
-    /// stable sentinel `id:Type`, so the rendered shape is reproducible across
-    /// runs while still pinning kind/label/style/prefix/order.
-    fn normalize_custom_ids(value: &mut serde_json::Value) {
-        match value {
-            serde_json::Value::Object(map) => {
-                if let Some(serde_json::Value::String(cid)) = map.get("custom_id") {
-                    let parts: Vec<&str> = cid.split(':').collect();
-                    if parts.len() == 3
-                        && parts[1].chars().all(|c| c.is_ascii_digit())
-                        && parts[2].chars().all(|c| c.is_ascii_digit())
-                    {
-                        let replacement = json!(format!("id:{}", parts[0]));
-                        map.insert("custom_id".to_string(), replacement);
-                    }
-                }
-                for v in map.values_mut() {
-                    normalize_custom_ids(v);
-                }
-            }
-            serde_json::Value::Array(arr) => {
-                for v in arr {
-                    normalize_custom_ids(v);
-                }
-            }
-            _ => {}
-        }
-    }
 
     fn make_sub(name: &str, url: &str) -> Subscription {
         Subscription {
