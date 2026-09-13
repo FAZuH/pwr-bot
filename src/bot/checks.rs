@@ -30,18 +30,12 @@ pub async fn is_author_guild_admin(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-/// Checks if the command author is the bot owner.
-pub fn is_bot_owner(ctx: Context<'_>) -> Result<(), Error> {
+/// Whether the command author is the bot owner: a query form of the owner
+/// check for commands that change their reply instead of erroring.
+pub fn author_is_bot_owner(ctx: Context<'_>) -> bool {
     let author = ctx.author().id;
     let owners = &ctx.framework().options().owners;
-
-    if !owners.contains(&author) {
-        Err(BotError::PermissionDenied(
-            "You need `Manage Server` or `Administrator` permission to perform this action."
-                .to_string(),
-        ))?
-    };
-    Ok(())
+    owners.contains(&author)
 }
 
 /// Checks if the command author has any of the required roles.
@@ -56,23 +50,6 @@ pub async fn check_author_roles<'a>(
     Ok(check_permissions_inner(
         &member.roles,
         &required_role_ids.into(),
-        false,
-    )?)
-}
-
-/// Checks author roles without revealing which specific role is required.
-pub async fn check_author_roles_silent<'a>(
-    ctx: Context<'_>,
-    required_role_ids: impl Into<Cow<'a, [RoleId]>>,
-) -> Result<(), Error> {
-    let member = ctx
-        .author_member()
-        .await
-        .ok_or(BotError::GuildOnlyCommand)?;
-    Ok(check_permissions_inner(
-        &member.roles,
-        &required_role_ids.into(),
-        true,
     )?)
 }
 
@@ -80,15 +57,11 @@ pub async fn check_author_roles_silent<'a>(
 fn check_permissions_inner(
     user_roles: &[RoleId],
     required_role_ids: &[RoleId],
-    silent: bool,
 ) -> Result<(), BotError> {
     if let Some(id) = required_role_ids.iter().find(|id| !user_roles.contains(id)) {
-        let msg = if silent {
-            "You do not have the required roles to perform this action.".to_string()
-        } else {
-            format!("You need the <@&{id}> role to perform this action.")
-        };
-        return Err(BotError::PermissionDenied(msg));
+        return Err(BotError::PermissionDenied(format!(
+            "You need the <@&{id}> role to perform this action."
+        )));
     }
     Ok(())
 }
@@ -101,14 +74,14 @@ mod tests {
     fn check_permissions_with_required_role() {
         let role_id = RoleId::new(123);
         let user_roles = vec![role_id];
-        let result = check_permissions_inner(&user_roles, &[RoleId::new(123)], true);
+        let result = check_permissions_inner(&user_roles, &[RoleId::new(123)]);
         assert!(result.is_ok());
     }
 
     #[test]
     fn check_permissions_without_required_role_fails() {
         let user_roles = vec![RoleId::new(456)];
-        let result = check_permissions_inner(&user_roles, &[RoleId::new(123)], true);
+        let result = check_permissions_inner(&user_roles, &[RoleId::new(123)]);
         assert!(result.is_err());
     }
 }

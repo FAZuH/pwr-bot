@@ -257,15 +257,6 @@ impl VoiceTrackingService {
             .await?)
     }
 
-    pub async fn get_voice_user_count(
-        &self,
-        _guild_id: impl Into<u64>,
-        _from: &DateTime<Utc>,
-        _until: &DateTime<Utc>,
-    ) -> anyhow::Result<u32> {
-        todo!()
-    }
-
     /// Update leave_time for a specific session (heartbeat mechanism)
     pub async fn update_session_leave_time(
         &self,

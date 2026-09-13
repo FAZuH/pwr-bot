@@ -37,3 +37,21 @@ impl Event for VoiceStateEvent {
         self
     }
 }
+
+/// Event emitted by a plugin to the host, broadcast on the event bus so host
+/// subscribers can react instead of the event being dropped.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct PluginEvent {
+    /// The plugin that emitted the event.
+    pub plugin: String,
+    /// Event name, e.g. `settings.saved`.
+    pub name: String,
+    /// Opaque event payload.
+    pub data: Option<serde_json::Value>,
+}
+
+impl Event for PluginEvent {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}

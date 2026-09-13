@@ -18,14 +18,6 @@ macro_rules! impl_table_base {
                 Ok(())
             }
 
-            async fn drop_table(&self) -> Result<(), DatabaseError> {
-                let mut conn = self.pool.get().await?;
-                diesel::sql_query(concat!("DROP TABLE IF EXISTS ", stringify!($table)))
-                    .execute(&mut conn)
-                    .await?;
-                Ok(())
-            }
-
             async fn delete_all(&self) -> Result<(), DatabaseError> {
                 let mut conn = self.pool.get().await?;
                 diesel::delete($table).execute(&mut conn).await?;
@@ -1220,5 +1212,131 @@ impl BotMetaRepository for PgBotMetaRepo {
         .await
         .map(|r| r > 0)
         .unwrap_or(false)
+    }
+}
+
+// ============================================================================
+// PgPluginKvRepo
+// ============================================================================
+
+/// Postgres-backed `PluginKvRepository` implementation.
+#[derive(Clone)]
+pub struct PgPluginKvRepo {
+    pool: DbPool,
+}
+
+impl PgPluginKvRepo {
+    pub fn new(pool: DbPool) -> Self {
+        Self { pool }
+    }
+}
+
+impl_table_base!(PgPluginKvRepo, plugin_kv::table);
+
+#[async_trait::async_trait]
+impl PluginKvRepository for PgPluginKvRepo {
+    async fn get(&self, namespace: &str, key: &str) -> Result<Option<String>, DatabaseError> {
+        let mut conn = self.pool.get().await?;
+        Ok(plugin_kv::table
+            .filter(plugin_kv::namespace.eq(namespace))
+            .filter(plugin_kv::key.eq(key))
+            .select(plugin_kv::value)
+            .first(&mut conn)
+            .await
+            .optional()?)
+    }
+
+    async fn set(&self, namespace: &str, key: &str, value: &str) -> Result<(), DatabaseError> {
+        let mut conn = self.pool.get().await?;
+        diesel::insert_into(plugin_kv::table)
+            .values((
+                plugin_kv::namespace.eq(namespace),
+                plugin_kv::key.eq(key),
+                plugin_kv::value.eq(value),
+            ))
+            .on_conflict((plugin_kv::namespace, plugin_kv::key))
+            .do_update()
+            .set((
+                plugin_kv::value.eq(value),
+                plugin_kv::updated_at.eq(diesel::dsl::now),
+            ))
+            .execute(&mut conn)
+            .await?;
+        Ok(())
+    }
+
+    async fn delete(&self, namespace: &str, key: &str) -> Result<(), DatabaseError> {
+        let mut conn = self.pool.get().await?;
+        diesel::delete(
+            plugin_kv::table
+                .filter(plugin_kv::namespace.eq(namespace))
+                .filter(plugin_kv::key.eq(key)),
+        )
+        .execute(&mut conn)
+        .await?;
+        Ok(())
+    }
+}
+
+// ============================================================================
+// PgGuildPluginRepo
+// ============================================================================
+
+/// Postgres-backed `GuildPluginRepository` implementation.
+#[derive(Clone)]
+pub struct PgGuildPluginRepo {
+    pool: DbPool,
+}
+
+impl PgGuildPluginRepo {
+    pub fn new(pool: DbPool) -> Self {
+        Self { pool }
+    }
+}
+
+impl_table_base!(PgGuildPluginRepo, guild_plugins::table);
+
+#[async_trait::async_trait]
+impl GuildPluginRepository for PgGuildPluginRepo {
+    async fn list_for_guild(&self, guild_id: u64) -> Result<Vec<GuildPluginEntity>, DatabaseError> {
+        let mut conn = self.pool.get().await?;
+        Ok(guild_plugins::table
+            .filter(guild_plugins::guild_id.eq(DbU64::from(guild_id)))
+            .select(GuildPluginEntity::as_select())
+            .load(&mut conn)
+            .await?)
+    }
+
+    async fn set_enabled(
+        &self,
+        guild_id: u64,
+        plugin_name: &str,
+        enabled: bool,
+    ) -> Result<(), DatabaseError> {
+        let mut conn = self.pool.get().await?;
+        diesel::insert_into(guild_plugins::table)
+            .values((
+                guild_plugins::guild_id.eq(DbU64::from(guild_id)),
+                guild_plugins::plugin_name.eq(plugin_name),
+                guild_plugins::enabled.eq(enabled),
+            ))
+            .on_conflict((guild_plugins::guild_id, guild_plugins::plugin_name))
+            .do_update()
+            .set(guild_plugins::enabled.eq(enabled))
+            .execute(&mut conn)
+            .await?;
+        Ok(())
+    }
+
+    async fn delete(&self, guild_id: u64, plugin_name: &str) -> Result<(), DatabaseError> {
+        let mut conn = self.pool.get().await?;
+        diesel::delete(
+            guild_plugins::table
+                .filter(guild_plugins::guild_id.eq(DbU64::from(guild_id)))
+                .filter(guild_plugins::plugin_name.eq(plugin_name)),
+        )
+        .execute(&mut conn)
+        .await?;
+        Ok(())
     }
 }

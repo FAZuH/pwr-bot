@@ -1,0 +1,958 @@
+//! Plugin runtime: spawns plugin subprocesses and speaks the wire protocol
+//! over JSON-Lines stdio.
+//!
+//! A plugin is a standalone executable exchanging [`Msg`] values with the
+//! host: one compact JSON object per line on stdout, terminated by `\n`.
+//! stdout carries only protocol lines; stderr is the free logging channel and
+//! is forwarded into the host's `log` output.
+//!
+//! Spawn flow: the plugin announces `hello` first, the host validates it
+//! (version plus `host.*` caps, rejecting before any work) and answers with
+//! its own `hello` as the ack. Calls then flow host→plugin, correlated by
+//! monotonic ids; each `resp` is matched to its waiting call through a
+//! oneshot channel. Events flow host→plugin as one-way pushes; the
+//! interaction engine pushes `view.timeout` when a view session is
+//! abandoned. When the plugin's stdout closes or the wire corrupts,
+//! every in-flight call fails with a `PluginDied` wire error and the reaper
+//! task reaps the child via `wait()`.
+//!
+//! Lifecycle beyond spawn/call/stop lives in [`manager`]: health checks,
+//! unload, crash respawn, and binary swap over a map of [`RunningPlugin`]
+//! handles. External install from a pinned catalog lives in [`install`];
+//! KV storage ([`PgKvStore`]) and per-guild enablement (`guild_plugins`)
+//! ship with the plugin system. Dropping a
+//! [`RunningPlugin`] SIGKILLs its whole process group via the `Drop` impl,
+//! so unloading a plugin is drop-and-forget; graceful unload is
+//! [`RunningPlugin::stop`].
+
+pub mod command;
+pub mod error;
+pub mod events;
+pub mod host;
+pub mod install;
+pub mod interaction;
+pub mod manager;
+pub mod modal;
+pub mod preview;
+pub mod view;
+
+use std::collections::HashMap;
+use std::path::Path;
+use std::process::ExitStatus;
+use std::process::Stdio;
+use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
+use std::time::Duration;
+
+pub use error::InstallError;
+pub use error::PluginError;
+pub use events::PluginEventRouter;
+pub use events::VOICE_STATE_EVENT;
+pub use host::FeedSettingsError;
+pub use host::FeedSettingsSource;
+pub use host::HostConfig;
+pub use host::HostError;
+pub use host::HostIo;
+pub use host::HostServices;
+pub use host::KvError;
+pub use host::KvStore;
+pub use host::PgKvStore;
+pub use host::SerenityHostIo;
+pub use host::SerenityStatsSource;
+pub use host::ServiceFeedSettingsSource;
+pub use host::ServiceVoiceSettingsSource;
+pub use host::ServiceWelcomeSettingsSource;
+pub use host::StatsError;
+pub use host::StatsHandle;
+pub use host::StatsSource;
+pub use host::VoiceSettingsError;
+pub use host::VoiceSettingsSource;
+pub use host::WelcomeSettingsError;
+pub use host::WelcomeSettingsSource;
+pub use install::CatalogEntry;
+pub use install::PluginCatalog;
+pub use interaction::InteractionEngine;
+pub use interaction::InteractionError;
+use log::debug;
+use log::info;
+use log::warn;
+pub use manager::HealthConfig;
+pub use manager::PluginManager;
+pub use manager::RespawnOutcome;
+pub use manager::RespawnPolicy;
+pub use modal::ModalBinding;
+pub use modal::ModalDeliveryError;
+pub use modal::ModalRouteError;
+pub use modal::ModalRouter;
+use pwr_plugin_protocol::ALL_CAPS;
+use pwr_plugin_protocol::API_VERSION;
+use pwr_plugin_protocol::CallIdSeq;
+use pwr_plugin_protocol::Manifest;
+use pwr_plugin_protocol::Msg;
+use pwr_plugin_protocol::WireError;
+use pwr_plugin_protocol::validate_caps;
+use serde_json::Value;
+use tokio::io::AsyncBufReadExt;
+use tokio::io::AsyncWriteExt;
+use tokio::io::BufReader;
+use tokio::process::Child;
+use tokio::process::ChildStderr;
+use tokio::process::ChildStdin;
+use tokio::process::ChildStdout;
+use tokio::process::Command;
+use tokio::sync::Mutex;
+use tokio::sync::oneshot;
+use tokio::sync::watch;
+pub use view::ViewValidationError;
+pub use view::edit_body_for_transport;
+pub use view::reject_content_beside_v2;
+pub use view::reject_content_on_edit;
+pub use view::validate_view_data;
+
+use crate::event::PluginEvent;
+use crate::event::event_bus::EventBus;
+
+/// How long the host waits for the plugin's `hello` after spawn.
+const HELLO_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// How long a [`RunningPlugin::call`] waits for its correlated `resp`.
+const CALL_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// How long [`RunningPlugin::stop`] waits for the plugin to exit after `bye`
+/// before escalating: SIGTERM to the process group, another [`STOP_TIMEOUT`]
+/// grace, then SIGKILL to the group.
+const STOP_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// A running plugin subprocess: owns the stdio pipes, the reader/waiter
+/// tasks, and call correlation.
+pub struct RunningPlugin {
+    /// Plugin identity announced in its hello, e.g. `hello`.
+    name: String,
+    /// The plugin's manifest, validated and stored at handshake when its
+    /// hello carried one; `None` for old hellos without the field.
+    manifest: Option<Manifest>,
+    /// Writer to the plugin's stdin. `None` once stopped: dropping the handle
+    /// closes the pipe, and the plugin treats stdin EOF as exit.
+    stdin: Arc<Mutex<Option<ChildStdin>>>,
+    /// In-flight calls: correlation id -> the oneshot awaiting its resp.
+    inflight: Arc<Mutex<HashMap<u64, oneshot::Sender<Msg>>>>,
+    /// Host-side monotonic call-id source.
+    ids: Mutex<CallIdSeq>,
+    /// The child handle; taken by the waiter task once the plugin dies.
+    child: Arc<Mutex<Option<Child>>>,
+    /// The plugin's process group id: its own pid, since plugins spawn with
+    /// `process_group(0)`. Stored separately from the child handle so
+    /// teardown can signal the whole group even after the reaper took the
+    /// child (e.g. the leader died but a descendant ignored SIGTERM).
+    #[cfg(unix)]
+    pgid: u32,
+    /// The plugin's exit status, published by the waiter task.
+    exit: watch::Receiver<Option<ExitStatus>>,
+    /// Total `pong`s received since spawn, incremented by the reader task.
+    /// Liveness accounting for the health checker.
+    pongs: Arc<AtomicU64>,
+}
+
+impl RunningPlugin {
+    /// Spawns the plugin binary at `path`, runs the hello handshake
+    /// (validate version + caps, then ack with the host's hello), and returns
+    /// a handle ready for calls. A rejected handshake kills the child before
+    /// any work happens. Host services are absent, so `host.*` calls answer
+    /// `HostUnavailable` / `ConfigUnavailable`.
+    pub async fn spawn(path: impl AsRef<Path>) -> Result<RunningPlugin, PluginError> {
+        Self::spawn_with(path, None, None, None).await
+    }
+
+    /// Spawns the plugin binary like [`RunningPlugin::spawn`], but wires the
+    /// given host services (Discord I/O seam + config subset) and plugin
+    /// manager (for `host.open_view` target resolution) into the reader, so
+    /// plugin→host `host.*` calls can be served, and the given event bus
+    /// (if any) so plugin→host `Msg::Event`s are broadcast on it instead of
+    /// being dropped.
+    pub async fn spawn_with(
+        path: impl AsRef<Path>,
+        host: Option<Arc<HostServices>>,
+        manager: Option<Arc<PluginManager>>,
+        event_bus: Option<Arc<EventBus>>,
+    ) -> Result<RunningPlugin, PluginError> {
+        let path = path.as_ref();
+        let label = path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .unwrap_or("plugin")
+            .to_string();
+
+        let mut command = Command::new(path);
+        command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+        #[cfg(unix)]
+        command.process_group(0);
+
+        let mut child = command.spawn().map_err(|source| PluginError::Spawn {
+            path: path.to_path_buf(),
+            source,
+        })?;
+        #[cfg(unix)]
+        let pgid = child.id().expect("spawned child has a pid");
+
+        let mut stdin = child.stdin.take().expect("piped stdin");
+        let stdout = child.stdout.take().expect("piped stdout");
+        let stderr = child.stderr.take().expect("piped stderr");
+        let mut reader = BufReader::new(stdout);
+
+        // Handshake: the plugin announces itself first.
+        let hello = match read_hello(&label, &mut reader).await {
+            Ok(hello) => hello,
+            Err(reason) => return Err(reject(child, reason).await),
+        };
+        let hello = match serde_json::from_str::<Msg>(hello.trim()) {
+            Ok(msg) => msg,
+            Err(e) => {
+                return Err(reject(
+                    child,
+                    PluginError::HelloLost {
+                        name: label,
+                        detail: format!("invalid hello json: {e}"),
+                    },
+                )
+                .await);
+            }
+        };
+        let Msg::Hello {
+            v,
+            name,
+            caps,
+            manifest,
+        } = hello
+        else {
+            return Err(reject(
+                child,
+                PluginError::HelloLost {
+                    name: label,
+                    detail: format!("first message was not a hello: {hello:?}"),
+                },
+            )
+            .await);
+        };
+        if let Err(reason) = validate_hello(&name, v, &caps) {
+            return Err(reject(child, reason).await);
+        }
+        let manifest = match manifest {
+            Some(manifest) => {
+                if let Err(e) = manifest.validate() {
+                    return Err(reject(
+                        child,
+                        PluginError::Manifest {
+                            name: name.clone(),
+                            detail: e.to_string(),
+                        },
+                    )
+                    .await);
+                }
+                if manifest.name != name {
+                    return Err(reject(
+                        child,
+                        PluginError::Manifest {
+                            name: name.clone(),
+                            detail: format!(
+                                "manifest names itself `{}`, hello says `{name}`",
+                                manifest.name
+                            ),
+                        },
+                    )
+                    .await);
+                }
+                Some(manifest)
+            }
+            None => None,
+        };
+
+        // Acknowledge with the host's own hello (nushell-style both-sides
+        // hello). Config values are not part of the ack — the `host.get_config`
+        // call op serves them later.
+        if let Err(source) = write_line(&mut stdin, &host_hello()).await {
+            return Err(reject(
+                child,
+                PluginError::Io {
+                    name: name.clone(),
+                    source,
+                },
+            )
+            .await);
+        }
+
+        let stdin = Arc::new(Mutex::new(Some(stdin)));
+        let child = Arc::new(Mutex::new(Some(child)));
+        let inflight = Arc::new(Mutex::new(HashMap::new()));
+        let (exit_tx, exit_rx) = watch::channel(None);
+        let (died_tx, died_rx) = oneshot::channel();
+        let pongs = Arc::new(AtomicU64::new(0));
+
+        tokio::spawn(run_stderr(stderr, name.clone()));
+        tokio::spawn(run_reader(
+            reader,
+            inflight.clone(),
+            pongs.clone(),
+            name.clone(),
+            died_tx,
+            stdin.clone(),
+            host,
+            manager,
+            event_bus,
+        ));
+        tokio::spawn(run_reaper(child.clone(), exit_tx, died_rx, name.clone()));
+
+        Ok(RunningPlugin {
+            name,
+            manifest,
+            stdin,
+            inflight,
+            ids: Mutex::new(CallIdSeq::new()),
+            child,
+            #[cfg(unix)]
+            pgid,
+            exit: exit_rx,
+            pongs,
+        })
+    }
+
+    /// Sends a `call` and awaits the correlated `resp`. The call fails with
+    /// [`PluginError::CallTimeout`] if the plugin does not answer in time, or
+    /// with a `PluginDied` wire error if the plugin dies while in flight.
+    pub async fn call(
+        &self,
+        op: &str,
+        cmd: Option<&str>,
+        args: Option<Value>,
+    ) -> Result<Msg, PluginError> {
+        let id = self.ids.lock().await.next_id();
+        let (tx, rx) = oneshot::channel();
+        self.inflight.lock().await.insert(id, tx);
+
+        let msg = Msg::Call {
+            id,
+            op: op.to_string(),
+            cmd: cmd.map(str::to_string),
+            args,
+        };
+        {
+            let mut stdin = self.stdin.lock().await;
+            match stdin.as_mut() {
+                Some(stdin) => {
+                    if let Err(source) = write_line(stdin, &msg).await {
+                        self.inflight.lock().await.remove(&id);
+                        return Err(PluginError::Io {
+                            name: self.name.clone(),
+                            source,
+                        });
+                    }
+                }
+                None => {
+                    self.inflight.lock().await.remove(&id);
+                    return Err(PluginError::NotRunning {
+                        name: self.name.clone(),
+                    });
+                }
+            }
+        }
+
+        match tokio::time::timeout(CALL_TIMEOUT, rx).await {
+            Ok(Ok(msg)) => Ok(msg),
+            // The sender was dropped without a response — the plugin died
+            // while the call was in flight.
+            Ok(Err(_)) => Err(PluginError::PluginDied {
+                name: self.name.clone(),
+            }),
+            Err(_) => {
+                self.inflight.lock().await.remove(&id);
+                Err(PluginError::CallTimeout {
+                    name: self.name.clone(),
+                    op: op.to_string(),
+                    timeout: CALL_TIMEOUT,
+                })
+            }
+        }
+    }
+
+    /// Pushes a one-way event to the plugin (e.g. `view.timeout` on session
+    /// abandonment), without awaiting a reply. Fails with
+    /// [`PluginError::NotRunning`] if the plugin is stopped, or
+    /// [`PluginError::Io`] if the write fails.
+    pub async fn send_event(&self, name: &str, data: Option<Value>) -> Result<(), PluginError> {
+        let msg = Msg::Event {
+            name: name.to_string(),
+            data,
+        };
+        let mut stdin = self.stdin.lock().await;
+        match stdin.as_mut() {
+            Some(stdin) => write_line(stdin, &msg)
+                .await
+                .map_err(|source| PluginError::Io {
+                    name: self.name.clone(),
+                    source,
+                }),
+            None => Err(PluginError::NotRunning {
+                name: self.name.clone(),
+            }),
+        }
+    }
+
+    /// Sends a liveness `ping`; the plugin answers with `pong` (no
+    /// correlation id). Fails with [`PluginError::NotRunning`] if the plugin
+    /// is stopped, or [`PluginError::Io`] if the write fails.
+    pub async fn ping(&self) -> Result<(), PluginError> {
+        let mut stdin = self.stdin.lock().await;
+        match stdin.as_mut() {
+            Some(stdin) => write_line(stdin, &Msg::Ping)
+                .await
+                .map_err(|source| PluginError::Io {
+                    name: self.name.clone(),
+                    source,
+                }),
+            None => Err(PluginError::NotRunning {
+                name: self.name.clone(),
+            }),
+        }
+    }
+
+    /// Gracefully stops the plugin: sends `bye`, closes stdin (EOF), and
+    /// waits up to [`STOP_TIMEOUT`] for a clean exit. If the plugin does not
+    /// comply, SIGTERM is sent to the whole process group — the plugin is
+    /// the group leader (`process_group(0)` at spawn), so any descendants
+    /// share the group and the one signal reaches them all. After another
+    /// [`STOP_TIMEOUT`] grace, SIGKILL finishes the group. Returns the final
+    /// exit status.
+    ///
+    /// `stop()` always returns within a bounded time. A plugin that neither
+    /// exits cleanly nor dies from the group signals within the grace
+    /// periods yields [`PluginError::StopTimeout`] instead of a hang. The
+    /// reaper task owns the final `wait()` on the child; `stop()` only waits
+    /// on the published exit status. The group signals use the pgid stored
+    /// at spawn, so they reach the group even after the reaper took the
+    /// child (the leader died while a descendant outlived it).
+    pub async fn stop(&self) -> Result<ExitStatus, PluginError> {
+        {
+            let mut stdin = self.stdin.lock().await;
+            if let Some(stdin) = stdin.as_mut()
+                && let Err(e) = write_line(stdin, &Msg::Bye).await
+            {
+                // The plugin may already be gone; the wait below reports
+                // the real outcome.
+                warn!("failed to send bye to plugin {}: {e}", self.name);
+            }
+        }
+        // EOF: the plugin exits on stdin EOF even without bye.
+        drop(self.stdin.lock().await.take());
+
+        match tokio::time::timeout(STOP_TIMEOUT, self.wait_for_exit()).await {
+            Ok(status) => status,
+            Err(_) => {
+                warn!(
+                    "plugin {} did not exit within {STOP_TIMEOUT:?}, sending SIGTERM to the group",
+                    self.name
+                );
+                // SIGTERM the whole group; the reaper publishes the exit
+                // status once the group leader dies.
+                #[cfg(unix)]
+                kill_group(self.pgid, libc::SIGTERM);
+                match tokio::time::timeout(STOP_TIMEOUT, self.wait_for_exit()).await {
+                    Ok(status) => status,
+                    Err(_) => {
+                        warn!(
+                            "plugin {} survived SIGTERM for {STOP_TIMEOUT:?}; SIGKILL to the group",
+                            self.name
+                        );
+                        #[cfg(unix)]
+                        kill_group(self.pgid, libc::SIGKILL);
+                        // Bounded final wait: if the kill (or the reaper)
+                        // has not published an exit status in time, report
+                        // it instead of hanging on a child the reaper may
+                        // never reap.
+                        tokio::time::timeout(STOP_TIMEOUT, self.wait_for_exit())
+                            .await
+                            .map_err(|_| PluginError::StopTimeout {
+                                name: self.name.clone(),
+                                timeout: STOP_TIMEOUT,
+                            })?
+                    }
+                }
+            }
+        }
+    }
+
+    /// The plugin's exit status once it has exited; `None` while it runs.
+    pub fn exit_status(&self) -> Option<ExitStatus> {
+        *self.exit.borrow()
+    }
+
+    /// The child process id, if the child has not yet been reaped.
+    pub async fn pid(&self) -> Option<u32> {
+        self.child
+            .lock()
+            .await
+            .as_ref()
+            .and_then(|child| child.id())
+    }
+
+    /// Total `pong`s received since spawn, for liveness accounting.
+    pub fn pongs_received(&self) -> u64 {
+        self.pongs.load(Ordering::Relaxed)
+    }
+
+    /// The plugin's validated manifest, when its hello carried one.
+    pub fn manifest(&self) -> Option<&Manifest> {
+        self.manifest.as_ref()
+    }
+
+    /// Awaits the plugin's exit status, published by the waiter task once the
+    /// child is reaped.
+    async fn wait_for_exit(&self) -> Result<ExitStatus, PluginError> {
+        let mut exit = self.exit.clone();
+        loop {
+            if let Some(status) = *exit.borrow() {
+                return Ok(status);
+            }
+            if exit.changed().await.is_err() {
+                // The waiter task ended without a status: nothing more comes.
+                return Err(PluginError::PluginDied {
+                    name: self.name.clone(),
+                });
+            }
+        }
+    }
+}
+
+impl Drop for RunningPlugin {
+    /// Kills the process group on drop so a discarded handle never orphans
+    /// it or its descendants. The child is wrapped in an
+    /// `Arc<Mutex<Option<Child>>>` shared with the reaper task, so tokio's
+    /// `kill_on_drop` cannot fire once that `Arc` stays alive — the plugin
+    /// would keep running with nobody to stop it. The group SIGKILL reaches
+    /// the whole group (the plugin is the leader, `process_group(0)` at
+    /// spawn); `start_kill` covers the child itself in case the group is
+    /// already gone. The reaper reaps the corpse; graceful unload is
+    /// [`RunningPlugin::stop`]. Errors are ignored: the process may already
+    /// be gone, or the reaper may be reaping it concurrently.
+    fn drop(&mut self) {
+        let Ok(mut guard) = self.child.try_lock() else {
+            return;
+        };
+        if let Some(mut child) = guard.take() {
+            #[cfg(unix)]
+            kill_group(self.pgid, libc::SIGKILL);
+            child.start_kill().ok();
+        }
+    }
+}
+
+/// The host's own hello, sent as the ack after a valid plugin hello. Config
+/// values are not part of the ack — the `host.get_config` call op serves them
+/// later.
+fn host_hello() -> Msg {
+    Msg::Hello {
+        v: API_VERSION,
+        name: "host".into(),
+        caps: ALL_CAPS
+            .iter()
+            .map(|cap| cap.as_str().to_string())
+            .collect(),
+        manifest: None,
+    }
+}
+
+/// Validates a plugin's hello before any work happens: the version must match
+/// and every declared `host.*` cap must be in the v1 surface. Rejection is
+/// decided here, before any other message is exchanged.
+fn validate_hello(name: &str, v: u32, caps: &[String]) -> Result<(), PluginError> {
+    if v != API_VERSION {
+        return Err(PluginError::VersionMismatch {
+            name: name.to_string(),
+            got: v,
+            expected: API_VERSION,
+        });
+    }
+    validate_caps(caps).map_err(PluginError::Caps)?;
+    Ok(())
+}
+
+/// Writes one protocol message to the plugin's stdin as a JSON line. Every
+/// write is compact JSON + `\n` + flush: the plugin side block-buffers piped
+/// stdout, and a missed flush deadlocks the handshake.
+async fn write_line(stdin: &mut ChildStdin, msg: &Msg) -> std::io::Result<()> {
+    let mut line = serde_json::to_string(msg).expect("serialize protocol message");
+    line.push('\n');
+    stdin.write_all(line.as_bytes()).await?;
+    stdin.flush().await
+}
+
+/// Reads the plugin's first stdout line (its hello) within [`HELLO_TIMEOUT`].
+async fn read_hello(
+    label: &str,
+    reader: &mut BufReader<ChildStdout>,
+) -> Result<String, PluginError> {
+    let mut line = String::new();
+    match tokio::time::timeout(HELLO_TIMEOUT, reader.read_line(&mut line)).await {
+        Err(_) => Err(PluginError::HelloTimeout {
+            name: label.to_string(),
+            timeout: HELLO_TIMEOUT,
+        }),
+        Ok(Err(source)) => Err(PluginError::Io {
+            name: label.to_string(),
+            source,
+        }),
+        Ok(Ok(0)) => Err(PluginError::HelloLost {
+            name: label.to_string(),
+            detail: "stdout closed before the hello".into(),
+        }),
+        Ok(Ok(_)) => Ok(line),
+    }
+}
+
+/// Kills and reaps the child after a rejected handshake, then hands back the
+/// rejection reason.
+async fn reject(mut child: Child, reason: PluginError) -> PluginError {
+    #[cfg(unix)]
+    if let Some(pgid) = child.id() {
+        kill_group(pgid, libc::SIGKILL);
+    }
+    child.start_kill().ok();
+    let _ = child.wait().await;
+    reason
+}
+
+/// Sends `sig` to the process group `pgid`. Plugins spawn with
+/// `process_group(0)`, so the child's pid is its group id and every
+/// descendant shares the group. Errors are ignored: the group may already
+/// be gone (ESRCH), or the signal may be denied (EPERM).
+#[cfg(unix)]
+fn kill_group(pgid: u32, sig: libc::c_int) {
+    let group = -(pgid as libc::pid_t);
+    // SAFETY: `group` is a process group this host spawned (the plugin's own
+    // pid as its leader) and `sig` is a standard teardown signal; the call
+    // has no pointer or memory-safety preconditions.
+    unsafe {
+        libc::kill(group, sig);
+    }
+}
+
+/// Forwards the plugin's stderr (its free logging channel) into the host's
+/// logs. Draining the pipe also prevents the plugin blocking on a full pipe
+/// buffer.
+async fn run_stderr(stderr: ChildStderr, name: String) {
+    let mut lines = BufReader::new(stderr).lines();
+    loop {
+        match lines.next_line().await {
+            Ok(Some(line)) => info!("[plugin {name}] {line}"),
+            Ok(None) => break,
+            Err(e) => {
+                warn!("plugin {name} stderr read error: {e}");
+                break;
+            }
+        }
+    }
+}
+
+/// Reads the plugin's stdout lines and dispatches them by message type. EOF
+/// or a decode error is the death signal: every in-flight call fails with a
+/// `PluginDied` wire error and the waiter task is notified to reap the child.
+/// The host services and plugin manager serve plugin→host `host.*` calls.
+#[allow(clippy::too_many_arguments)] // private reader loop; parameters mirror the protocol roles
+async fn run_reader(
+    mut reader: BufReader<ChildStdout>,
+    inflight: Arc<Mutex<HashMap<u64, oneshot::Sender<Msg>>>>,
+    pongs: Arc<AtomicU64>,
+    name: String,
+    died: oneshot::Sender<()>,
+    stdin: Arc<Mutex<Option<ChildStdin>>>,
+    host: Option<Arc<HostServices>>,
+    manager: Option<Arc<PluginManager>>,
+    event_bus: Option<Arc<EventBus>>,
+) {
+    let mut line = String::new();
+    loop {
+        line.clear();
+        match reader.read_line(&mut line).await {
+            Ok(0) => break, // EOF: the plugin's stdout closed.
+            Ok(_) => match serde_json::from_str::<Msg>(&line) {
+                Ok(msg) => {
+                    dispatch(
+                        &msg,
+                        &inflight,
+                        &pongs,
+                        &name,
+                        &stdin,
+                        host.as_deref(),
+                        manager.as_deref(),
+                        event_bus.as_deref(),
+                    )
+                    .await
+                }
+                Err(e) => {
+                    warn!("plugin {name} wrote an invalid protocol line, treating as death: {e}");
+                    break;
+                }
+            },
+            Err(e) => {
+                warn!("plugin {name} stdout read error, treating as death: {e}");
+                break;
+            }
+        }
+    }
+
+    let pending: Vec<(u64, oneshot::Sender<Msg>)> = inflight.lock().await.drain().collect();
+    for (id, tx) in pending {
+        let _ = tx.send(Msg::resp_err(
+            id,
+            WireError {
+                kind: "PluginDied".into(),
+                msg: format!("plugin {name} died"),
+            },
+        ));
+    }
+    let _ = died.send(());
+}
+
+/// Routes one plugin message. `resp`s are matched to their waiting call by
+/// id; plugin→host `host.*` calls are served through the host services (and
+/// the plugin manager for `host.open_view` targets) and answered on the
+/// plugin's stdin; plugin→host events are logged and, when an event bus is
+/// wired, broadcast on it so host subscribers (e.g. the bot's internal bus)
+/// see them instead of them being dropped.
+#[allow(clippy::too_many_arguments)] // private dispatch; parameters mirror the protocol roles
+async fn dispatch(
+    msg: &Msg,
+    inflight: &Arc<Mutex<HashMap<u64, oneshot::Sender<Msg>>>>,
+    pongs: &Arc<AtomicU64>,
+    name: &str,
+    stdin: &Arc<Mutex<Option<ChildStdin>>>,
+    host: Option<&HostServices>,
+    manager: Option<&PluginManager>,
+    event_bus: Option<&EventBus>,
+) {
+    match msg {
+        Msg::Resp { id, .. } => {
+            if let Some(tx) = inflight.lock().await.remove(id) {
+                let _ = tx.send(msg.clone());
+            } else {
+                debug!("plugin {name} answered id {id} which has no waiting call");
+            }
+        }
+        Msg::Call { id, op, args, .. } => {
+            let resp = host::handle_host_call(*id, name, op, args.as_ref(), host, manager).await;
+            let mut guard = stdin.lock().await;
+            let Some(mut pipe) = guard.take() else {
+                warn!("plugin {name} call `{op}` arrived after stdin closed");
+                return;
+            };
+            drop(guard);
+            if let Err(e) = write_line(&mut pipe, &resp).await {
+                warn!("plugin {name} call `{op}` failed to answer: {e}");
+            }
+            *stdin.lock().await = Some(pipe);
+        }
+        Msg::Event { name: event, data } => {
+            info!("plugin {name} emitted event `{event}`");
+            if let Some(bus) = event_bus {
+                bus.publish(PluginEvent {
+                    plugin: name.to_string(),
+                    name: event.clone(),
+                    data: data.clone(),
+                });
+            }
+        }
+        Msg::Pong => {
+            pongs.fetch_add(1, Ordering::Relaxed);
+        }
+        Msg::Hello { .. } | Msg::Ping | Msg::Bye => {
+            warn!("plugin {name} sent unexpected message {msg:?}");
+        }
+    }
+}
+
+/// Awaits the death signal from the reader task, then reaps the child via
+/// `wait()` and publishes the exit status. Status 0 is logged as a clean
+/// exit; anything else (including signal death) as a crash.
+async fn run_reaper(
+    child: Arc<Mutex<Option<Child>>>,
+    exit: watch::Sender<Option<ExitStatus>>,
+    died: oneshot::Receiver<()>,
+    name: String,
+) {
+    let _ = died.await;
+    let child = child.lock().await.take();
+    let Some(mut child) = child else {
+        warn!("plugin {name} was reaped without a child handle");
+        let _ = exit.send(None);
+        return;
+    };
+    match child.wait().await {
+        Ok(status) => {
+            if status.code() == Some(0) {
+                info!("plugin {name} exited cleanly: {status}");
+            } else {
+                warn!("plugin {name} crashed: {status}");
+            }
+            let _ = exit.send(Some(status));
+        }
+        Err(e) => {
+            warn!("failed to wait for plugin {name}: {e}");
+            let _ = exit.send(None);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use pwr_plugin_protocol::CapsError;
+
+    use super::*;
+
+    // ── hello validation (the reject-before-work decision) ─────────────────
+
+    #[test]
+    fn valid_hello_is_accepted() {
+        let caps = vec!["command:hello".into(), "host.kv.get".into()];
+        assert!(validate_hello("hello", API_VERSION, &caps).is_ok());
+    }
+
+    #[test]
+    fn version_mismatch_is_rejected_before_any_work() {
+        let err = validate_hello("hello", 2, &[]).unwrap_err();
+        assert!(matches!(
+            err,
+            PluginError::VersionMismatch {
+                got: 2,
+                expected: API_VERSION,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn unknown_host_cap_is_rejected() {
+        let err = validate_hello("hello", API_VERSION, &["host.frobnicate".into()]).unwrap_err();
+        assert!(matches!(
+            err,
+            PluginError::Caps(CapsError { ref op }) if op == "host.frobnicate"
+        ));
+    }
+
+    // ── the host ack hello ──────────────────────────────────────────────────
+
+    #[test]
+    fn host_hello_announces_the_full_cap_surface() {
+        let Msg::Hello { v, name, caps, .. } = host_hello() else {
+            panic!("host ack must be a hello")
+        };
+        assert_eq!(v, API_VERSION);
+        assert_eq!(name, "host");
+        assert_eq!(caps.len(), 18, "every v1 host cap must be announced");
+        assert!(caps.iter().any(|c| c == "host.defer"));
+        assert!(caps.iter().any(|c| c == "host.kv.get"));
+        assert!(caps.iter().any(|c| c == "host.get_config"));
+        assert!(caps.iter().any(|c| c == "host.list_plugins"));
+        assert!(caps.iter().any(|c| c == "host.stats"));
+        assert!(caps.iter().any(|c| c == "host.feed.get_settings"));
+        assert!(caps.iter().any(|c| c == "host.voice.get_settings"));
+        assert!(caps.iter().any(|c| c == "host.voice.update_settings"));
+        assert!(caps.iter().any(|c| c == "host.welcome.get_settings"));
+        assert!(caps.iter().any(|c| c == "host.welcome.update_settings"));
+        assert!(caps.iter().any(|c| c == "host.open_modal"));
+    }
+
+    // ── pong accounting (the health checker's liveness signal) ──────────────
+
+    #[tokio::test]
+    async fn pong_increments_the_liveness_counter() {
+        let inflight = Arc::new(Mutex::new(HashMap::new()));
+        let pongs = Arc::new(AtomicU64::new(0));
+        let stdin = Arc::new(Mutex::new(None::<ChildStdin>));
+        dispatch(
+            &Msg::Pong,
+            &inflight,
+            &pongs,
+            "hello",
+            &stdin,
+            None,
+            None,
+            None,
+        )
+        .await;
+        assert_eq!(pongs.load(Ordering::Relaxed), 1);
+    }
+
+    // ── plugin→host event broadcast ────────────────────────────────────────
+
+    #[tokio::test]
+    async fn plugin_event_is_broadcast_on_the_event_bus() {
+        let bus = Arc::new(EventBus::new());
+        let seen = Arc::new(tokio::sync::Mutex::new(Vec::<PluginEvent>::new()));
+        bus.register_callback({
+            let seen = seen.clone();
+            move |event: PluginEvent| {
+                let seen = seen.clone();
+                async move {
+                    seen.lock().await.push(event);
+                    Ok(())
+                }
+            }
+        });
+        let inflight = Arc::new(Mutex::new(HashMap::new()));
+        let pongs = Arc::new(AtomicU64::new(0));
+        let stdin = Arc::new(Mutex::new(None::<ChildStdin>));
+        let msg = Msg::Event {
+            name: "settings.saved".into(),
+            data: Some(serde_json::json!({"guild_id": "1"})),
+        };
+        dispatch(
+            &msg,
+            &inflight,
+            &pongs,
+            "settings",
+            &stdin,
+            None,
+            None,
+            Some(&bus),
+        )
+        .await;
+
+        // `publish` runs the callback on a spawned task; poll until it lands.
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            if !seen.lock().await.is_empty() {
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the broadcast never reached the bus"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+
+        let seen = seen.lock().await;
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].plugin, "settings");
+        assert_eq!(seen[0].name, "settings.saved");
+        assert_eq!(seen[0].data, Some(serde_json::json!({"guild_id": "1"})));
+    }
+
+    #[tokio::test]
+    async fn plugin_event_without_a_bus_is_logged_but_not_broadcast() {
+        let inflight = Arc::new(Mutex::new(HashMap::new()));
+        let pongs = Arc::new(AtomicU64::new(0));
+        let stdin = Arc::new(Mutex::new(None::<ChildStdin>));
+        let msg = Msg::Event {
+            name: "settings.saved".into(),
+            data: None,
+        };
+        dispatch(
+            &msg, &inflight, &pongs, "settings", &stdin, None, None, None,
+        )
+        .await;
+        assert!(inflight.lock().await.is_empty());
+    }
+}

@@ -13,8 +13,12 @@ pub mod event;
 pub mod feed;
 pub mod logging;
 pub mod macros;
+pub mod plugin;
 pub mod repo;
 pub mod service;
 pub mod subscriber;
 pub mod task;
 pub mod update;
+
+#[cfg(test)]
+pub(crate) mod test_helpers;

@@ -69,7 +69,7 @@ dev_desc lint "Run linter with \"cargo clippy --workspace --all-targets --all-fe
 
 cmd_test() {
     inf "Running tests..."
-    cargo test --workspace --all-targets --all-features
+    cargo test --workspace --all-targets --all-features --no-fail-fast
     scs "Tests completed"
 }
 dev_desc test "Run tests with \"cargo test --workspace --all-targets --all-features\""

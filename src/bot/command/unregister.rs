@@ -1,6 +1,11 @@
 //! Admin unregister command.
 
 use crate::bot::command::prelude::*;
+use crate::bot::gui::feature::GuiFeature;
+use crate::bot::gui::unregister::UnregisterFeature;
+use crate::bot::view::ActionRegistry;
+use crate::update::unregister::UnregisterModel;
+use crate::update::unregister::UnregisterMsg;
 
 /// Unregisters server slash commands
 ///
@@ -17,67 +22,23 @@ pub async fn command(ctx: Context<'_>) -> Result<(), Error> {
 
     let start_time = std::time::Instant::now();
 
-    let mut initial_view = CommandUnregistrationView::new();
-    let msg = ctx.send(initial_view.create_reply()).await?;
+    let mut model = UnregisterModel::new();
+    let msg = ctx.send(build_unregister_reply(&model)).await?;
 
     guild_id.set_commands(ctx.http(), &[]).await?;
 
     let duration_ms = start_time.elapsed().as_millis() as u64;
-    let mut complete_view = CommandUnregistrationView::new().complete(duration_ms);
-    msg.edit(ctx, complete_view.create_reply()).await?;
+    UnregisterFeature::update(UnregisterMsg::Unregistered { duration_ms }, &mut model);
+    msg.edit(ctx, build_unregister_reply(&model)).await?;
 
     Ok(())
 }
 
-/// View for command unregistration status.
-pub struct CommandUnregistrationView {
-    /// Whether unregistration is complete
-    is_complete: bool,
-    /// Time taken in milliseconds (if complete)
-    duration_ms: Option<u64>,
-}
-
-impl CommandUnregistrationView {
-    /// Creates a new unregistration view.
-    pub fn new() -> Self {
-        Self {
-            is_complete: false,
-            duration_ms: None,
-        }
-    }
-
-    /// Marks the unregistration as complete with duration.
-    pub fn complete(mut self, duration_ms: u64) -> Self {
-        self.is_complete = true;
-        self.duration_ms = Some(duration_ms);
-        self
-    }
-
-    pub fn create_response(&mut self) -> ResponseKind<'_> {
-        let title = if self.is_complete {
-            "Command Unregistration Complete"
-        } else {
-            "Unregistering Commands"
-        };
-
-        let status_text = if self.is_complete {
-            format!(
-                "### {}\nSuccessfully unregistered all commands in {}ms",
-                title,
-                self.duration_ms.unwrap_or(0)
-            )
-        } else {
-            format!("### {title}\nUnregistering all server commands...")
-        };
-
-        let container = CreateComponent::Container(CreateContainer::new(vec![
-            CreateContainerComponent::TextDisplay(CreateTextDisplay::new(status_text)),
-        ]));
-
-        vec![container].into()
-    }
-
-    pub fn create_reply(&mut self) -> poise::CreateReply<'_> {
-        self.create_response().into()
-    }
+/// Builds the unregistration status reply for the given model.
+fn build_unregister_reply(model: &UnregisterModel) -> poise::CreateReply<'_> {
+    let mut registry = ActionRegistry::new();
+    let components = UnregisterFeature::view(model, &mut registry);
+    poise::CreateReply::new()
+        .flags(MessageFlags::IS_COMPONENTS_V2)
+        .components(components)
 }

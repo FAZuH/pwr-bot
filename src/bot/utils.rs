@@ -1,5 +1,12 @@
 //! Utility functions for bot commands.
 
+use std::io::Cursor;
+
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64;
+use image::DynamicImage;
+use image::imageops::FilterType;
+
 use crate::bot::error::BotError;
 
 /// Maximum number of URLs allowed per subscription request.
@@ -55,6 +62,51 @@ pub fn validate_url_count(urls: &[&str]) -> Result<(), BotError> {
         });
     }
     Ok(())
+}
+
+/// Gets the current process memory usage in megabytes.
+pub fn process_memory_mb() -> f64 {
+    use sysinfo::System;
+    use sysinfo::get_current_pid;
+
+    let mut s = System::new_all();
+    s.refresh_all();
+
+    if let Ok(pid) = get_current_pid()
+        && let Some(process) = s.process(pid)
+    {
+        return process.memory() as f64 / (1024.0 * 1024.0);
+    }
+
+    0.0
+}
+
+/// Downloads an avatar and returns it as a base64 PNG resized to `size` pixels.
+pub async fn download_avatar(
+    http_client: &wreq::Client,
+    url: &str,
+    size: u32,
+) -> anyhow::Result<String> {
+    let response = http_client.get(url).send().await?;
+    if !response.status().is_success() {
+        return Err(anyhow::anyhow!(
+            "Failed to download avatar: {}",
+            response.status()
+        ));
+    }
+    let bytes = response.bytes().await?;
+    let img = image::load_from_memory(&bytes)?;
+    Ok(avatar_to_b64(&img, size))
+}
+
+/// Resizes an avatar to `size` pixels and encodes it as a base64 PNG.
+pub fn avatar_to_b64(img: &DynamicImage, size: u32) -> String {
+    let resized = img.resize_exact(size, size, FilterType::Lanczos3);
+    let mut cursor = Cursor::new(Vec::new());
+    resized
+        .write_to(&mut cursor, image::ImageFormat::Png)
+        .unwrap();
+    BASE64.encode(cursor.into_inner())
 }
 
 #[cfg(test)]

@@ -12,19 +12,38 @@ function extractSection(lines, headIdx) {
   return out.join("\n").trim();
 }
 
+// Where to insert a section when the file has no `## ` heading at all: after
+// a leading `# Title` and any blank lines, or at the top for blank files.
+function insertionIndex(lines) {
+  let i = 0;
+  while (i < lines.length && lines[i].trim() === "") i++;
+  if (i === lines.length) return 0;
+  if (/^#\s+\S/.test(lines[i])) {
+    i++;
+    while (i < lines.length && lines[i].trim() === "") i++;
+  }
+  return i;
+}
+
 function materialize(changelog, { version, date }) {
   const input = String(changelog);
-  const lines = input.split("\n");
-  const head = lines.findIndex((line) => /^## /.test(line));
-  if (head === -1) return { changelog: input, body: "" };
-  if (!/^## \[Unreleased\]\s*$/.test(lines[head])) {
-    return { changelog: input, body: extractSection(lines, head) };
-  }
   if (!version) throw new Error("missing version to materialize [Unreleased] section");
+
+  const lines = input.split("\n");
+  let head = lines.findIndex((line) => /^## /.test(line));
+
+  // No topmost `## [Unreleased]` section: insert an empty one so the body is
+  // never stale (a previous release's notes) and never completely empty.
+  if (head === -1 || !/^## \[Unreleased\]\s*$/.test(lines[head])) {
+    const at = head === -1 ? insertionIndex(lines) : head;
+    lines.splice(at, 0, "## [Unreleased]", "");
+    head = at;
+  }
+
   const renamed = lines.slice();
   renamed[head] = `## ${stripPrefix(version)} (${date})`;
-  const fresh = [...renamed.slice(0, head), "## [Unreleased]", "", ...renamed.slice(head)];
-  return { changelog: fresh.join("\n"), body: extractSection(fresh, head + 2) };
+  while (renamed.length && renamed[renamed.length - 1] === "") renamed.pop();
+  return { changelog: renamed.join("\n"), body: extractSection(renamed, head) };
 }
 
 if (require.main === module) {

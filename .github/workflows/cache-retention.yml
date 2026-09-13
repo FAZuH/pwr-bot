@@ -1,0 +1,47 @@
+name: Cache Retention
+
+on:
+  schedule:
+    - cron: '37 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+
+jobs:
+  janitor:
+    name: Prune Actions Caches and Stale Artifacts
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Prune caches (keep newest 5)
+        run: |
+          mapfile -t CACHE_IDS < <(gh api "repos/${{ github.repository }}/actions/caches?per_page=100&sort=created-at&direction=desc" --jq '.actions_caches[].id')
+          COUNT=${#CACHE_IDS[@]}
+          echo "Found $COUNT cache entries (keeping newest 5)"
+          for i in "${!CACHE_IDS[@]}"; do
+            if [ "$i" -lt 5 ]; then
+              echo "Keeping cache ${CACHE_IDS[$i]}"
+              continue
+            fi
+            if gh api -X DELETE "repos/${{ github.repository }}/actions/caches/${CACHE_IDS[$i]}" 2>/dev/null; then
+              echo "Deleted cache ${CACHE_IDS[$i]}"
+            else
+              echo "::warning::Cache ${CACHE_IDS[$i]} could not be deleted (may already be gone)"
+            fi
+          done
+
+      - name: Delete artifacts older than 7 days
+        run: |
+          CUTOFF=$(date -u -d '7 days ago' '+%Y-%m-%dT%H:%M:%SZ')
+          mapfile -t STALE_IDS < <(gh api "repos/${{ github.repository }}/actions/artifacts?per_page=100" --jq ".artifacts[] | select(.expired == false and .created_at < \"${CUTOFF}\") | .id")
+          COUNT=${#STALE_IDS[@]}
+          echo "Found $COUNT non-expired artifacts created before $CUTOFF"
+          for ID in "${STALE_IDS[@]}"; do
+            if gh api -X DELETE "repos/${{ github.repository }}/actions/artifacts/${ID}" 2>/dev/null; then
+              echo "Deleted artifact ${ID}"
+            else
+              echo "::warning::Artifact ${ID} could not be deleted (may already be gone)"
+            fi
+          done

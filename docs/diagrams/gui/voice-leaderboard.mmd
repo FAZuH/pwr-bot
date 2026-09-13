@@ -1,0 +1,68 @@
+---
+config:
+  layout: elk
+  class:
+    hideEmptyMembersBox: true
+---
+classDiagram
+    direction LR
+    class GuiFeature { <<Trait>> }
+    class VoiceLeaderboardFeature
+    class Host~F,H~
+    class EffectHandler { <<Trait>> }
+    class VoiceLeaderboardEffectHandler
+    class VoiceLeaderboardModel
+    class VoiceLeaderboardMsg {
+        <<enumeration>>
+        Start
+        Expired
+        EntriesLoaded
+        ChangeTimeRange
+        ToggleMode
+        SetTargetUser
+        Pagination
+        ImageRendered
+    }
+    class VoiceLeaderboardEffect {
+        <<enumeration>>
+        QueryLeaderboard
+        RenderImage
+    }
+    class VoiceLeaderboardAction {
+        <<enumeration>>
+        Base
+        TimeRange
+        ToggleMode
+        SelectUser
+    }
+    class PaginationAction {
+        <<enumeration>>
+        First
+        Prev
+        Next
+        Last
+        Page
+    }
+    class VoiceTracker { <<Trait>> }
+    class LeaderboardImageBuilder
+    class Http
+    class ActionRegistry
+    class ViewChannel
+    class Router
+
+    GuiFeature <|.. VoiceLeaderboardFeature
+    Host --> VoiceLeaderboardFeature : F
+    Host --> VoiceLeaderboardEffectHandler : H
+    VoiceLeaderboardEffectHandler ..|> EffectHandler
+    VoiceLeaderboardFeature ..> VoiceLeaderboardModel : Model
+    VoiceLeaderboardFeature ..> VoiceLeaderboardMsg : Msg
+    VoiceLeaderboardFeature ..> VoiceLeaderboardEffect : Effect
+    VoiceLeaderboardFeature ..> VoiceLeaderboardAction : Action
+    VoiceLeaderboardAction o-- PaginationAction : Base variant wraps
+    VoiceLeaderboardMsg *-- PaginationAction : Pagination variant
+    VoiceLeaderboardEffectHandler --> VoiceTracker : entries
+    VoiceLeaderboardEffectHandler --> LeaderboardImageBuilder : jpg
+    LeaderboardImageBuilder --> Http
+    Host --> ViewChannel : collects events
+    Host --> ActionRegistry : custom_ids
+    Host --> Router : navigate

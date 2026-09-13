@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use log::info;
+use log::warn;
 
 use crate::error::AppError;
 
@@ -19,8 +20,25 @@ pub struct Config {
     pub admin_id: String,
     pub data_path: PathBuf,
     pub logs_path: PathBuf,
+    pub plugins_toml: PathBuf,
+    pub plugins_dir: PathBuf,
+    pub settings_plugin_path: PathBuf,
+    pub feed_settings_plugin_path: PathBuf,
+    pub voice_settings_plugin_path: PathBuf,
+    pub welcome_settings_plugin_path: PathBuf,
+    /// Core plugins the host spawns at startup, in order.
+    pub core_plugins: Vec<CorePluginSpec>,
     pub features: Features,
     pub version: String,
+}
+
+/// One core plugin the host spawns at startup: its name and binary path.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CorePluginSpec {
+    /// Plugin name, e.g. `settings`.
+    pub name: String,
+    /// Binary path to spawn.
+    pub path: PathBuf,
 }
 
 /// Feature flags for optional bot components.
@@ -66,6 +84,73 @@ impl Config {
 
         self.data_path = self.get_dirpath_mustexist("DATA_PATH", "./data")?;
         self.logs_path = self.get_dirpath_mustexist("LOGS_PATH", "./logs")?;
+        self.plugins_toml = std::env::var("PLUGINS_TOML")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| self.data_path.join("plugins.toml"));
+        self.plugins_dir = std::env::var("PLUGINS_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| self.data_path.join("plugins"));
+        std::fs::create_dir_all(&self.plugins_dir).unwrap_or_else(|e| {
+            warn!(
+                "failed to create plugins dir `{}`: {e}",
+                self.plugins_dir.display()
+            );
+        });
+
+        self.settings_plugin_path = std::env::var("SETTINGS_PLUGIN_PATH")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| {
+                std::env::current_exe()
+                    .ok()
+                    .and_then(|exe| exe.parent().map(|p| p.to_path_buf()))
+                    .map(|dir| dir.join("settings"))
+                    .unwrap_or_else(|| self.data_path.join("settings"))
+            });
+        self.feed_settings_plugin_path = std::env::var("FEED_SETTINGS_PLUGIN_PATH")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| {
+                std::env::current_exe()
+                    .ok()
+                    .and_then(|exe| exe.parent().map(|p| p.to_path_buf()))
+                    .map(|dir| dir.join("feed-settings"))
+                    .unwrap_or_else(|| self.data_path.join("feed-settings"))
+            });
+        self.voice_settings_plugin_path = std::env::var("VOICE_SETTINGS_PLUGIN_PATH")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| {
+                std::env::current_exe()
+                    .ok()
+                    .and_then(|exe| exe.parent().map(|p| p.to_path_buf()))
+                    .map(|dir| dir.join("voice-settings"))
+                    .unwrap_or_else(|| self.data_path.join("voice-settings"))
+            });
+        self.welcome_settings_plugin_path = std::env::var("WELCOME_SETTINGS_PLUGIN_PATH")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| {
+                std::env::current_exe()
+                    .ok()
+                    .and_then(|exe| exe.parent().map(|p| p.to_path_buf()))
+                    .map(|dir| dir.join("welcome-settings"))
+                    .unwrap_or_else(|| self.data_path.join("welcome-settings"))
+            });
+        self.core_plugins = vec![
+            CorePluginSpec {
+                name: "settings".to_string(),
+                path: self.settings_plugin_path.clone(),
+            },
+            CorePluginSpec {
+                name: "feed-settings".to_string(),
+                path: self.feed_settings_plugin_path.clone(),
+            },
+            CorePluginSpec {
+                name: "voice-settings".to_string(),
+                path: self.voice_settings_plugin_path.clone(),
+            },
+            CorePluginSpec {
+                name: "welcome-settings".to_string(),
+                path: self.welcome_settings_plugin_path.clone(),
+            },
+        ];
 
         self.features = Features {
             voice_tracking: parse_bool_env("ENABLE_VOICE_TRACKING", true),

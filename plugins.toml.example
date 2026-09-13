@@ -1,0 +1,36 @@
+# pwr-bot plugin catalog — example template.
+#
+# Copy this file to your data directory as `plugins.toml` (the default
+# location is `$DATA_PATH/plugins.toml`; override it with `PLUGINS_TOML`)
+# and edit the entries. Replace the placeholder `url` and `sha256` with
+# values for your own hosted plugin binaries.
+#
+# Each `[[plugins]]` entry pins one plugin binary:
+#
+#   name         Plugin name; also the installed binary's file name. The
+#                manifest's own `name` must match this.
+#   url          https download URL of the plugin binary.
+#   sha256       Expected sha256 of the binary: 64 lowercase hex chars.
+#                `/plugins swap <name>` verifies the download against it.
+#   manifest     The plugin's manifest as a JSON string (single-quoted
+#                literal below). The host registers the plugin's slash
+#                commands from it before the binary is ever installed.
+#   auto_enable  Optional (default false). When true, the plugin is enabled
+#                in every guild unless a guild disables it with
+#                `/plugins disable <name>`.
+#
+# A missing or invalid catalog does not stop the bot: plugin commands stay
+# absent, the failure is logged, and the bot owner sees the exact path and
+# cause in `/plugins list`.
+
+# The entry below is illustrative: it matches the canonical test plugin from
+# tests/plugin_manager_lifecycle.rs, whose manifest registers a recurring
+# one-second task (`tick`, command `hello.tick`). Point `url` and `sha256`
+# at a real hosted binary before use.
+
+[[plugins]]
+name = "hello"
+url = "https://example.com/plugins/hello"
+sha256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+manifest = '{"name":"hello","description":"Canonical test plugin","version":"0.1.0","commands":[{"create_command":{"name":"hello","description":"Say hello from a plugin"}}],"event_handlers":["view.timeout"],"tasks":[{"name":"tick","interval_secs":1,"command":"hello.tick"}],"api_version":1}'
+auto_enable = false

@@ -1,0 +1,18 @@
+[package]
+name = "voice-settings"
+version = "0.1.0"
+edition = "2024"
+authors = ["FAZuH <mail@fazuh.com>"]
+description = "The voice settings panel plugin for pwr-bot: per-guild voice tracking settings served as a plugin view"
+license = "MIT"
+repository = "https://github.com/FAZuH/pwr-bot"
+
+[dependencies]
+pwr-ext = { git = "https://github.com/FAZuH/pwr-ext", branch = "main", features = ["macros"] }
+pwr-plugin-protocol = { path = "../../pwr-plugin-protocol" }
+pwr-plugin-support = { path = "../pwr-plugin-support" }
+serde_json = "1.0.149"
+
+[dev-dependencies]
+# Only the tests read `IS_COMPONENTS_V2`; production is `view!`-authored.
+pwr-poise-components = { path = "../../pwr-poise-components" }

@@ -8,6 +8,11 @@ on:
         required: false
         type: string
         default: ''
+      artifact-pattern:
+        description: 'Glob selecting uploaded artifacts to download as release assets; defaults to <binary-name>-*'
+        required: false
+        type: string
+        default: ''
       platforms:
         description: 'Build targets: multi (all 4) or linux (x64 only)'
         required: false
@@ -20,6 +25,11 @@ on:
         default: true
       publish-crates:
         description: 'Whether to publish to crates.io'
+        required: false
+        type: boolean
+        default: false
+      run-build:
+        description: 'Run the build stage (build.yml) even when build-binaries is false'
         required: false
         type: boolean
         default: false
@@ -95,11 +105,11 @@ jobs:
   build:
     name: Build Binaries
     needs: [changelog, patch-version]
-    if: ${{ needs.changelog.outputs.skipped != 'true' && inputs.build-binaries }}
+    if: ${{ needs.changelog.outputs.skipped != 'true' && (inputs.build-binaries || inputs.run-build) }}
     uses: ./.github/workflows/build.yml
     with:
       cargo-build-args: '--release --all-features --all-targets'
-      upload-binary: true
+      upload-binary: ${{ inputs.build-binaries }}
       release: true
       require-patched-cargo: true
 
@@ -121,11 +131,11 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Download patched Cargo.toml
-        uses: actions/download-artifact@v4
-        with:
-          name: patched-cargo-toml
-          path: .
+      - name: Restore patched manifests
+        env:
+          MANIFESTS_B64: ${{ needs.patch-version.outputs.manifests_b64 }}
+        run: |
+          printf '%s' "$MANIFESTS_B64" | base64 -d | tar xzf -
 
       - name: Install Rust Toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -145,7 +155,7 @@ jobs:
 
   publish-changelog:
     name: Publish Changelog Commit
-    needs: [changelog, build, publish-crates]
+    needs: [changelog, patch-version, build, publish-crates]
     if: |
       always() && 
       needs.changelog.outputs.skipped != 'true' && 
@@ -171,11 +181,11 @@ jobs:
           LATEST_TAG=$(git tag -l 'v*' --sort=-version:refname | head -1)
           echo "{\"version\":\"${LATEST_TAG:-v0.0.0}\"}" > version.json
 
-      - name: Download patched Cargo.toml
-        uses: actions/download-artifact@v4
-        with:
-          name: patched-cargo-toml
-          path: .
+      - name: Restore patched manifests
+        env:
+          MANIFESTS_B64: ${{ needs.patch-version.outputs.manifests_b64 }}
+        run: |
+          printf '%s' "$MANIFESTS_B64" | base64 -d | tar xzf -
 
       - name: Stage patched files
         run: |
@@ -256,18 +266,15 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-          pattern: ${{ inputs.binary-name }}-*
+          pattern: ${{ inputs.artifact-pattern || format('{0}-*', inputs.binary-name) }}
 
       - name: Prepare Release Files
         if: ${{ inputs.build-binaries }}
+        # Copy every downloaded binary artifact into the release folder.
+        # Supports any number of binaries; single-binary projects are unaffected.
         run: |
           mkdir -p release
-          cp artifacts/${{ inputs.binary-name }}-linux-x64/${{ inputs.binary-name }}-linux-x64 release/
-          if [[ "${{ inputs.platforms }}" != "linux" ]]; then
-            cp artifacts/${{ inputs.binary-name }}-windows-x64.exe/${{ inputs.binary-name }}-windows-x64.exe release/
-            cp artifacts/${{ inputs.binary-name }}-macos-x64/${{ inputs.binary-name }}-macos-x64 release/
-            cp artifacts/${{ inputs.binary-name }}-macos-arm64/${{ inputs.binary-name }}-macos-arm64 release/
-          fi
+          find artifacts -mindepth 2 -maxdepth 2 -type f -exec cp {} release/ \;
 
       - name: Create Release
         id: release
@@ -282,7 +289,7 @@ jobs:
         with:
           webhook-url: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
           embed-color: "9498256"
-          embed-title: "${{ inputs.binary-name }} ${{ needs.publish-changelog.outputs.tag }}"
+          embed-title: "${{ github.event.repository.name }} ${{ needs.publish-changelog.outputs.tag }}"
           embed-description: ${{ env.RELEASE_BODY }}
           embed-url: ${{ steps.release.outputs.url }}
           embed-timestamp: ${{ github.event.head_commit.timestamp }}

@@ -6,11 +6,18 @@ use std::time::Instant;
 
 use crate::bot::checks::check_author_roles;
 use crate::bot::command::prelude::*;
+use crate::bot::gui::Host;
+use crate::bot::gui::effects::NoopEffectHandler;
+use crate::bot::gui::feed_batch::FeedBatchFeature;
 use crate::entity::SubscriberEntity;
 use crate::entity::SubscriberType;
 use crate::service::feed_subscription::SubscribeResult;
 use crate::service::feed_subscription::SubscriberTarget;
 use crate::service::feed_subscription::UnsubscribeResult;
+use crate::update::feed_batch::FeedBatchEffect;
+use crate::update::feed_batch::FeedBatchModel;
+use crate::update::feed_batch::FeedBatchMsg;
+use crate::update::feed_batch::FeedBatchPhase;
 
 pub mod list;
 pub mod settings;
@@ -125,9 +132,10 @@ async fn process_subscription_batch(
 ) -> Result<(), Error> {
     let mut states: Vec<String> = vec!["⏳ Processing...".to_string(); urls.len()];
     let mut last_send = Instant::now();
-    let mut handler: Option<FeedSubscriptionBatchHandler> = None;
+    let mut final_model: Option<FeedBatchModel> = None;
     let ctx = coordinator.context();
     let service = ctx.data().service.feed_subscription.clone();
+    let subscriber_type = subscriber.r#type;
 
     for (i, url) in urls.iter().enumerate() {
         let result_str = if is_subscribe {
@@ -146,35 +154,39 @@ async fn process_subscription_batch(
 
         let is_final = i + 1 == urls.len();
         if last_send.elapsed().as_secs() > UPDATE_INTERVAL_SECS || is_final {
-            let batch_handler = FeedSubscriptionBatchHandler {
-                states: states.clone(),
-                is_final,
-                subscriber_type: subscriber.r#type,
-            };
-
-            // To render without waiting for interaction, we could run the engine for 0 seconds
-            let mut engine = ViewEngine::new(
-                *ctx,
-                batch_handler,
-                Duration::from_millis(1),
-                coordinator.clone(),
-            );
-
-            if !is_final {
-                // Just render and exit since it's an intermediate step
-                engine.run().await?;
+            if is_final {
+                final_model = Some(FeedBatchModel::new(
+                    states.clone(),
+                    FeedBatchPhase::Done,
+                    subscriber_type,
+                ));
             } else {
-                handler = Some(engine.handler); // take it back for the final loop
+                // Render the intermediate progress without waiting for an
+                // interaction (matches the old 1 ms engine run).
+                let model =
+                    FeedBatchModel::new(states.clone(), FeedBatchPhase::Confirm, subscriber_type);
+                let mut engine = Host::<FeedBatchFeature, _>::new(
+                    *ctx,
+                    model,
+                    NoopEffectHandler::<FeedBatchEffect, FeedBatchMsg>::new(),
+                    Duration::from_millis(1),
+                    coordinator.clone(),
+                );
+                engine.run().await?;
             }
             last_send = Instant::now();
         }
     }
 
-    // Listen for "View Subscriptions" button click after final message
-    if let Some(handler) = handler {
-        let mut engine =
-            ViewEngine::new(*ctx, handler, Duration::from_secs(120), coordinator.clone());
-
+    // Listen for "View Subscriptions" button click after the final message.
+    if let Some(model) = final_model {
+        let mut engine = Host::<FeedBatchFeature, _>::new(
+            *ctx,
+            model,
+            NoopEffectHandler::<FeedBatchEffect, FeedBatchMsg>::new(),
+            Duration::from_secs(120),
+            coordinator.clone(),
+        );
         engine.run().await?;
     }
     Ok(())
@@ -253,72 +265,6 @@ async fn get_or_create_subscriber(
         .feed_subscription
         .get_or_create_subscriber(&target)
         .await?)
-}
-
-action_enum! { FeedSubscriptionBatchAction {
-    #[label = "View Subscriptions"]
-    ViewSubscriptions,
-} }
-
-pub struct FeedSubscriptionBatchHandler {
-    pub states: Vec<String>,
-    pub is_final: bool,
-    subscriber_type: SubscriberType,
-}
-
-#[async_trait::async_trait]
-impl ViewHandler for FeedSubscriptionBatchHandler {
-    type Action = FeedSubscriptionBatchAction;
-    async fn handle(
-        &mut self,
-        ctx: ViewContext<'_, FeedSubscriptionBatchAction>,
-    ) -> Result<ViewCmd, Error> {
-        use FeedSubscriptionBatchAction as Action;
-        match ctx.action() {
-            Action::ViewSubscriptions => {
-                // Convert subscriber type back to SendInto
-                let send_into = match self.subscriber_type {
-                    SubscriberType::Guild => SendInto::Server,
-                    SubscriberType::Dm => SendInto::DM,
-                };
-                ctx.coordinator
-                    .navigate(Navigation::FeedList(Some(send_into)))
-                    .await;
-                Ok(ViewCmd::Exit)
-            }
-        }
-    }
-}
-
-impl ViewRender for FeedSubscriptionBatchHandler {
-    type Action = FeedSubscriptionBatchAction;
-    fn render(
-        &self,
-        registry: &mut ActionRegistry<FeedSubscriptionBatchAction>,
-    ) -> ResponseKind<'_> {
-        let text_components: Vec<CreateContainerComponent> = self
-            .states
-            .iter()
-            .map(|s| CreateContainerComponent::TextDisplay(CreateTextDisplay::new(s.clone())))
-            .collect();
-
-        let mut components = vec![CreateComponent::Container(CreateContainer::new(
-            text_components,
-        ))];
-
-        if self.is_final {
-            let nav_button = registry
-                .register(FeedSubscriptionBatchAction::ViewSubscriptions)
-                .as_button()
-                .style(ButtonStyle::Secondary);
-
-            components.push(CreateComponent::ActionRow(CreateActionRow::Buttons(
-                vec![nav_button].into(),
-            )));
-        }
-
-        components.into()
-    }
 }
 
 #[cfg(test)]

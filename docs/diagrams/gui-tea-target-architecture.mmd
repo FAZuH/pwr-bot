@@ -1,0 +1,36 @@
+flowchart LR
+    subgraph CORE["core - src/update (pure, no IO)"]
+        direction TB
+        M[("Model")]
+        UPD["update"]
+    end
+    subgraph SHELL["shell - src/bot/gui"]
+        direction TB
+        HOST["Host loop"]
+        X["translate custom_id to Msg"]
+        VIEW["view"]
+    end
+    subgraph ADAPT["adapters"]
+        EH["EffectHandler"]
+        SVC["Services / repos"]
+        IMG["Image generators"]
+    end
+    DISC["Discord API"]
+    DB[("PostgreSQL")]
+    PLUGIN["plugin InteractionEngine (unchanged)"]
+
+    HOST --> X
+    X -->|"Msg"| UPD
+    UPD -->|"Vec of Effect"| EH
+    EH --> SVC
+    SVC --> DB
+    EH --> IMG
+    SVC -.->|"result Msg"| UPD
+    IMG -.->|"result Msg"| UPD
+    UPD --> M
+    VIEW --> M
+    HOST --> VIEW
+    VIEW -->|"edit message"| DISC
+    EH -->|"send / attach"| DISC
+    HOST -->|"collect interactions"| DISC
+    PLUGIN -.->|"separate runtime"| DISC

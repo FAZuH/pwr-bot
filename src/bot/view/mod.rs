@@ -1,73 +1,34 @@
-//! Discord Components V2 view system.
+//! Interaction-collection substrate for the TEA host runtime.
 //!
-//! Provides traits and utilities for building interactive UI components using a
-//! View-Handler pattern. This system manages the lifecycle of Discord message
-//! components (buttons, select menus) and handles user interactions via an event loop.
+//! This module holds the shared UI plumbing used by the [`GuiFeature`] shells
+//! in [`crate::bot::gui`] and executed by the [`Host`](crate::bot::gui::rt::Host)
+//! event loop: action registration with `Type:timestamp:counter` custom ids,
+//! select-menu value extraction, and the background
+//! [`ViewChannel`] collectors that feed Discord interactions into the loop.
 //!
-//! ### Architecture Overview
-//! The system is built around three core traits:
-//! - [`Action`]: An enum representing all possible user interactions in the view.
-//! - [`ViewRender`]: Defines how to translate state into Discord components/embeds.
-//! - [`ViewHandler`]: Contains the business logic and state mutations for each action.
+//! Pure rendering and state transitions live elsewhere: a feature's `view`
+//! maps `&Model` to components, and the pure core in `crate::update`
+//! owns the state math. This module never renders and never mutates feature
+//! state.
 //!
-//! These are orchestrated by the [`ViewEngine`], which runs an async event loop
-//! processing interactions, manual events, and timeouts.
+//! [`GuiFeature`]: crate::bot::gui::feature::GuiFeature
 
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
 use futures::StreamExt;
-use poise::CreateReply;
 use poise::serenity_prelude::*;
 use tokio::sync::RwLock;
 use tokio::sync::mpsc;
 
 use crate::bot::command::Context;
-use crate::bot::command::Error;
-use crate::bot::command::prelude::Router;
 
 /// Type alias for a thread-safe, shared handle to a Discord message.
 type EventMessage<T> = (Option<T>, ViewEvent);
 type Registry<T> = Arc<RwLock<ActionRegistry<T>>>;
 
 pub mod pagination;
-
-// ── Response Content ───────────────────────────────────────────────────────────────
-
-/// Enum representing the type of response content.
-///
-/// This abstracts over whether a view is rendering a set of components (buttons/selects)
-/// or a single embed.
-pub enum ResponseKind<'a> {
-    /// A set of message components (Buttons, Select Menus).
-    Component(Vec<CreateComponent<'a>>),
-    /// A single Discord embed.
-    Embed(Box<CreateEmbed<'a>>),
-}
-
-impl<'a> From<Vec<CreateComponent<'a>>> for ResponseKind<'a> {
-    fn from(value: Vec<CreateComponent<'a>>) -> Self {
-        ResponseKind::Component(value)
-    }
-}
-
-impl<'a> From<CreateEmbed<'a>> for ResponseKind<'a> {
-    fn from(value: CreateEmbed<'a>) -> Self {
-        ResponseKind::Embed(Box::new(value))
-    }
-}
-
-impl<'a> From<ResponseKind<'a>> for CreateReply<'a> {
-    fn from(value: ResponseKind<'a>) -> Self {
-        match value {
-            ResponseKind::Component(components) => CreateReply::new()
-                .flags(MessageFlags::IS_COMPONENTS_V2)
-                .components(components),
-            ResponseKind::Embed(embed) => CreateReply::new().embed(*embed),
-        }
-    }
-}
 
 // ── Actions ───────────────────────────────────────────────────────────────
 
@@ -109,25 +70,12 @@ impl<T: Action> ActionRegistry<T> {
         RegisteredAction { id, label }
     }
 
-    /// Registers an action using given id, and returns a [`RegisteredAction`] for building Discord components.
-    ///
-    /// If an action is already registered with the same id, the action will be updated, and the
-    /// old action is returned.
-    pub fn register_with_id(&mut self, id: &str, action: T) -> Option<RegisteredAction> {
-        self.actions
-            .insert(id.to_string(), action)
-            .map(|old| RegisteredAction {
-                id: id.to_string(),
-                label: old.label(),
-            })
-    }
-
     /// Retrieves an action associated with a given `custom_id`.
     pub fn get(&self, id: &str) -> Option<&T> {
         self.actions.get(id)
     }
 
-    /// Clears all registered actions. Called by [`ViewEngine`] before re-rendering.
+    /// Clears all registered actions. Called by the host before re-rendering.
     pub fn clear(&mut self) {
         self.actions.clear();
     }
@@ -158,30 +106,9 @@ impl RegisteredAction {
     pub fn as_select<'a>(self, kind: CreateSelectMenuKind<'a>) -> CreateSelectMenu<'a> {
         CreateSelectMenu::new(self.id, kind)
     }
-
-    /// Converts the registered action into a Discord select menu option.
-    pub fn as_select_option(self) -> CreateSelectMenuOption<'static> {
-        CreateSelectMenuOption::new(self.label, self.id)
-    }
 }
 
 // ── View Enums ───────────────────────────────────────────────────────────────
-
-/// Returned by [`ViewHandler::handle`] to control the engine loop.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ViewCmd {
-    /// Re-render the view and update the Discord message.
-    Render,
-    /// Render once then exit the view loop immediately.
-    RenderOnce,
-    /// Exit the view loop immediately.
-    Exit,
-    /// Continue the loop without re-rendering.
-    Continue,
-    /// The interaction was already responded to (e.g. a modal was opened).
-    /// The engine will skip auto-acknowledgement.
-    AlreadyResponded,
-}
 
 /// Values extracted from a select menu interaction.
 #[derive(Debug, Clone)]
@@ -192,14 +119,7 @@ pub enum SelectValues {
     User(Vec<UserId>),
 }
 
-/// A synthetic event used for automated GUI testing.
-#[derive(Debug, Clone)]
-pub enum SyntheticEvent {
-    Button,
-    Select(SelectValues),
-}
-
-/// An event that wakes up the [`ViewEngine`] loop.
+/// An event that wakes up the host loop.
 #[derive(Debug, Clone)]
 pub enum ViewEvent {
     /// A component interaction (button click, select menu choice).
@@ -210,42 +130,10 @@ pub enum ViewEvent {
     Message(Message),
     /// A reaction to a listened message.
     Reaction(Reaction),
-    /// An async event triggered via [`ViewContext::spawn`].
+    /// An async event delivered back to the loop.
     Async,
     /// The view loop timed out.
     Timeout,
-    /// A synthetic event injected by the test framework.
-    Synthetic(SyntheticEvent),
-}
-
-// ── View Sender ───────────────────────────────────────────────────────────────
-
-/// Trait for sending events to a running [`ViewEngine`].
-pub trait ViewSender<T: Action>: Send + Sync {
-    fn send(&self, message: EventMessage<T>);
-}
-
-impl<T: Action> ViewSender<T> for mpsc::UnboundedSender<EventMessage<T>> {
-    fn send(&self, message: EventMessage<T>) {
-        let _ = self.send(message);
-    }
-}
-
-/// Maps child actions of type `C` to parent actions of type `P`.
-///
-/// Enables the delegation pattern where a child view's interactions are
-/// forwarded to the parent's action enum.
-pub struct MappedViewSender<C: Action, P: Action> {
-    parent_tx: Arc<dyn ViewSender<P>>,
-    wrap: fn(Option<C>) -> Option<P>,
-}
-
-impl<C: Action, P: Action> ViewSender<C> for MappedViewSender<C, P> {
-    fn send(&self, message: EventMessage<C>) {
-        let (action, event) = message;
-        let new_action = (self.wrap)(action);
-        self.parent_tx.send((new_action, event));
-    }
 }
 
 // ── ViewChannel ───────────────────────────────────────────────────────────────
@@ -286,10 +174,6 @@ impl<T: Action + Send + Sync + 'static> ViewChannel<T> {
             registry,
             config,
         }
-    }
-
-    pub fn sender(&self) -> Arc<dyn ViewSender<T>> {
-        Arc::new(self.tx.clone())
     }
 
     pub async fn recv(&mut self) -> Option<EventMessage<T>> {
@@ -381,324 +265,34 @@ impl<T: Action + Send + Sync + 'static> ViewChannel<T> {
         }
     }
 }
-// ── ViewContext ───────────────────────────────────────────────────────────────
 
-/// Passed to [`ViewHandler::handle`] for every non-timeout event.
-///
-/// Consolidates the Poise context, the event (action + interaction), the async
-/// sender, and the shared coordinator into a single parameter.
-pub struct ViewContext<'a, T: Action> {
-    /// Poise command context.
-    pub poise: Context<'a>,
-    // None for Modal, Message, Reaction
-    pub action: Option<T>,
-    /// The event that triggered this handler call, including the action and
-    /// any associated Discord interaction.
-    pub event: ViewEvent,
-    /// Sender for dispatching further events back to the engine loop.
-    pub tx: Arc<dyn ViewSender<T>>,
-    /// Shared coordinator — provides access to the reply handle and nav state.
-    pub coordinator: Arc<Router<'a>>,
-}
-
-impl<'a, T: Action + 'static> ViewContext<'a, T> {
-    /// Returns a reference to the action that triggered this call.
-    pub fn action(&self) -> &T {
-        self.action
-            .as_ref()
-            .expect("ViewContext::action called on a Timeout event")
-    }
-
-    /// Extracts select-menu values from the event, if any.
-    pub fn select_values(&self) -> Option<SelectValues> {
-        use ComponentInteractionDataKind::*;
-        match &self.event {
-            ViewEvent::Component(interaction) => match &interaction.data.kind {
-                StringSelect { values } => Some(SelectValues::String(values.to_vec())),
-                ChannelSelect { values } => Some(SelectValues::Channel(
-                    values.iter().copied().map(GenericChannelId::from).collect(),
-                )),
-                RoleSelect { values } => Some(SelectValues::Role(values.to_vec())),
-                UserSelect { values } => Some(SelectValues::User(values.to_vec())),
-                _ => None,
-            },
-            ViewEvent::Synthetic(SyntheticEvent::Select(values)) => Some(values.clone()),
-            _ => None,
-        }
-    }
-
-    /// Returns string-select values, if this event was a string select.
-    pub fn string_select_values(&self) -> Option<Vec<String>> {
-        match self.select_values()? {
-            SelectValues::String(v) => Some(v),
-            _ => None,
-        }
-    }
-
-    /// Returns channel-select values, if this event was a channel select.
-    pub fn channel_select_values(&self) -> Option<Vec<GenericChannelId>> {
-        match self.select_values()? {
-            SelectValues::Channel(v) => Some(v),
-            _ => None,
-        }
-    }
-
-    /// Returns role-select values, if this event was a role select.
-    pub fn role_select_values(&self) -> Option<Vec<RoleId>> {
-        match self.select_values()? {
-            SelectValues::Role(v) => Some(v),
-            _ => None,
-        }
-    }
-
-    /// Returns user-select values, if this event was a user select.
-    pub fn user_select_values(&self) -> Option<Vec<UserId>> {
-        match self.select_values()? {
-            SelectValues::User(v) => Some(v),
-            _ => None,
-        }
-    }
-
-    /// Creates a child context that maps child actions into the parent's action type.
-    pub fn map<C: Action + Send + 'static>(
-        &self,
-        action: C,
-        wrap: fn(Option<C>) -> Option<T>,
-    ) -> ViewContext<'a, C> {
-        ViewContext {
-            poise: self.poise,
-            action: Some(action),
-            event: self.event.clone(),
-            tx: Arc::new(MappedViewSender {
-                parent_tx: self.tx.clone(),
-                wrap,
-            }),
-            coordinator: self.coordinator.clone(),
-        }
-    }
-
-    /// Spawns an async task that sends an action back to the engine on completion.
-    pub fn spawn<F>(&self, future: F)
-    where
-        F: std::future::Future<Output = Option<T>> + Send + 'static,
-    {
-        let tx = self.tx.clone();
-        tokio::spawn(async move {
-            if let Some(action) = future.await {
-                tx.send((Some(action), ViewEvent::Async));
+/// Rewrites every `custom_id` of the shape `Type:timestamp:counter` to a
+/// stable sentinel `id:Type`, so the rendered shape is reproducible across
+/// runs while still pinning kind/label/style/prefix/order.
+#[cfg(test)]
+pub(crate) fn normalize_custom_ids(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(map) => {
+            if let Some(serde_json::Value::String(cid)) = map.get("custom_id") {
+                let parts: Vec<&str> = cid.split(':').collect();
+                if parts.len() == 3
+                    && parts[1].chars().all(|c| c.is_ascii_digit())
+                    && parts[2].chars().all(|c| c.is_ascii_digit())
+                {
+                    let replacement = serde_json::json!(format!("id:{}", parts[0]));
+                    map.insert("custom_id".to_string(), replacement);
+                }
             }
-        });
-    }
-
-    pub async fn spawn_modal_component<M: poise::Modal + Send>(
-        &self,
-        modal_consumer: impl FnOnce(M) -> T + Send + 'static,
-    ) {
-        if let ViewEvent::Component(ref interaction) = self.event {
-            let i = interaction.clone();
-            let ctx = self.poise.serenity_context().clone();
-
-            self.spawn(async move {
-                poise::execute_modal_on_component_interaction::<M>(&ctx, i, None, None)
-                    .await
-                    .ok()
-                    .flatten()
-                    .map(modal_consumer)
-            });
-        }
-    }
-}
-
-/// Defines how a view translates its state into Discord components or an embed.
-pub trait ViewRender {
-    type Action: Action;
-    fn render(&self, registry: &mut ActionRegistry<Self::Action>) -> ResponseKind<'_>;
-
-    fn create_reply(&self, registry: &mut ActionRegistry<Self::Action>) -> CreateReply<'_> {
-        self.render(registry).into()
-    }
-}
-
-/// Manages state and processes interactions for a view.
-#[async_trait::async_trait]
-pub trait ViewHandler: Send + Sync {
-    type Action: Action;
-    /// Handles a non-timeout event.
-    ///
-    /// Receives the full [`ViewContext`] containing the event, action, sender,
-    /// and coordinator. Returns a [`ViewCmd`] controlling the engine loop.
-    async fn handle(&mut self, ctx: ViewContext<'_, Self::Action>) -> Result<ViewCmd, Error>;
-
-    /// Called when the view loop times out waiting for user input.
-    async fn on_timeout(&mut self) -> Result<ViewCmd, Error> {
-        Ok(ViewCmd::Exit)
-    }
-
-    /// The channel config this view sets
-    fn channel_config(&self) -> ViewChannelConfig {
-        ViewChannelConfig::default()
-    }
-}
-
-/// The engine that drives the entire View lifecycle.
-///
-/// The `ViewEngine` performs the following cycle:
-/// 1. Calls `render()` to display the initial UI.
-/// 2. Enters a `tokio::select!` loop waiting for Discord interactions or async events.
-/// 3. Matches interactions back to [`Action`] variants using the [`ActionRegistry`].
-/// 4. Dispatches the action to the [`ViewHandler`].
-/// 5. Reacts to the returned [`ViewCmd`] (Render, Exit, etc.).
-pub struct ViewEngine<'a, T, H>
-where
-    T: Action + Send + Sync + 'static,
-    H: ViewHandler<Action = T> + ViewRender<Action = T>,
-{
-    /// The combined handler and renderer.
-    pub handler: H,
-    /// Whether the engine should auto-acknowledge component interactions.
-    should_acknowledge: bool,
-    /// Poise command context.
-    ctx: Context<'a>,
-    /// Registry for mapping custom IDs to actions.
-    registry: Registry<T>,
-    /// Inactivity timeout for the interaction collector.
-    timeout: Duration,
-    /// Shared handle to the active message.
-    coordinator: Arc<Router<'a>>,
-}
-
-impl<'a, T, H> ViewEngine<'a, T, H>
-where
-    T: Action + Send + Sync + 'static,
-    H: ViewHandler<Action = T> + ViewRender<Action = T>,
-{
-    pub fn new(
-        ctx: Context<'a>,
-        handler: H,
-        timeout: Duration,
-        coordinator: Arc<Router<'a>>,
-    ) -> Self {
-        Self {
-            ctx,
-            handler,
-            registry: Arc::new(RwLock::new(ActionRegistry::new())),
-            timeout,
-            should_acknowledge: true,
-            coordinator,
-        }
-    }
-
-    /// Sets whether the engine auto-acknowledges component interactions.
-    /// Set to `false` when the handler opens a modal and responds manually.
-    pub fn acknowledge(mut self, should_acknowledge: bool) -> Self {
-        self.should_acknowledge = should_acknowledge;
-        self
-    }
-
-    /// Starts the interactive event loop.
-    pub async fn run(&mut self) -> Result<(), Error> {
-        let mut channel = ViewChannel::new(self.handler.channel_config(), self.registry.clone());
-        self.render_view().await?;
-
-        let msg_id = {
-            let lock = self.coordinator.reply_handle().await;
-            lock.as_ref()
-                .expect("reply_handle must exist after render_view")
-                .message()
-                .await?
-                .id
-        };
-
-        channel.start(
-            &self.ctx,
-            msg_id,
-            self.ctx.author().id,
-            self.ctx.channel_id(),
-            self.timeout,
-        );
-
-        let poise = self.ctx;
-        let coordinator = self.coordinator.clone();
-        let tx_arc = channel.sender();
-
-        use ViewCmd::*;
-        while let Some((action, event)) = channel.recv().await {
-            let cmd = match event {
-                ViewEvent::Timeout => self.handler.on_timeout().await?,
-                ViewEvent::Component(ref interaction) => {
-                    let Some(action) = action else {
-                        if self.should_acknowledge {
-                            interaction
-                                .create_response(
-                                    poise.http(),
-                                    CreateInteractionResponse::Acknowledge,
-                                )
-                                .await
-                                .ok();
-                        }
-                        continue;
-                    };
-                    // need to acknowledge after handle
-                    let raw = interaction.clone();
-                    let view_ctx = ViewContext {
-                        action: Some(action),
-                        poise,
-                        event,
-                        tx: tx_arc.clone(),
-                        coordinator: coordinator.clone(),
-                    };
-                    let cmd = self.handler.handle(view_ctx).await?;
-                    if self.should_acknowledge && !matches!(cmd, AlreadyResponded) {
-                        raw.create_response(poise.http(), CreateInteractionResponse::Acknowledge)
-                            .await
-                            .ok();
-                    }
-                    cmd
-                }
-                other => {
-                    let view_ctx = ViewContext {
-                        action,
-                        poise,
-                        event: other,
-                        tx: tx_arc.clone(),
-                        coordinator: coordinator.clone(),
-                    };
-                    self.handler.handle(view_ctx).await?
-                }
-            };
-
-            match cmd {
-                Render => {
-                    self.render_view().await?;
-                }
-                RenderOnce => {
-                    self.render_view().await?;
-                    break;
-                }
-                Exit => break,
-                Continue | AlreadyResponded => {}
+            for v in map.values_mut() {
+                normalize_custom_ids(v);
             }
         }
-
-        Ok(())
-    }
-
-    /// Re-renders the view, editing the existing message or sending a new one.
-    async fn render_view(&self) -> Result<(), Error> {
-        let mut registry = self.registry.write().await;
-        registry.clear();
-        let reply = self.handler.create_reply(&mut registry);
-
-        let existing = { self.coordinator.reply_handle().await.as_ref().cloned() };
-
-        if let Some(handle) = existing {
-            handle.edit(self.ctx, reply).await?;
-        } else {
-            let handle = self.ctx.send(reply).await?;
-            self.coordinator.set_reply_handle(handle).await;
+        serde_json::Value::Array(arr) => {
+            for v in arr {
+                normalize_custom_ids(v);
+            }
         }
-
-        Ok(())
+        _ => {}
     }
 }
 
@@ -739,5 +333,16 @@ mod tests {
 
         let id2 = registry.register(TestAction::Second);
         assert_ne!(id1, id2);
+    }
+
+    #[test]
+    fn action_registry_resolves_registered_ids_and_rejects_unknown_ids() {
+        let mut registry = ActionRegistry::<TestAction>::new();
+        let registered = registry.register(TestAction::First);
+
+        assert_eq!(registry.get(&registered.id), Some(&TestAction::First));
+        // A custom id from a stale or foreign view never resolves: the host
+        // acks the interaction and continues instead of translating a message.
+        assert_eq!(registry.get("TestAction:0:999"), None);
     }
 }

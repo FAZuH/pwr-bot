@@ -1,13 +1,15 @@
 //! Error handling for Discord bot commands.
 
+use std::sync::atomic::Ordering;
+
 use log::error;
-use poise::CreateReply;
 use poise::FrameworkError;
 use poise::serenity_prelude::*;
 
 use crate::bot::Data;
 use crate::bot::Error;
 use crate::bot::error::BotError;
+use crate::bot::reply::text_reply;
 use crate::error::AppError;
 use crate::service::error::ServiceError;
 
@@ -70,18 +72,29 @@ impl ErrorHandler {
         }
     }
 
-    /// Sends an error message as a Components V2 container.
+    /// Delivers an error message as a Components V2 container: edits the
+    /// original response when the interaction already has an initial response
+    /// (deferred or already replied), sends a reply otherwise. Editing keeps
+    /// one message per command and preserves the initial response's
+    /// ephemerality — the error lands in the same place the payload would
+    /// have.
     async fn send_component(ctx: &poise::Context<'_, Data, Error>, message: &str) {
-        let components = vec![CreateComponent::Container(CreateContainer::new(vec![
-            CreateContainerComponent::TextDisplay(CreateTextDisplay::new(message)),
-        ]))];
-
-        let _ = ctx
-            .send(
-                CreateReply::default()
-                    .flags(MessageFlags::IS_COMPONENTS_V2)
-                    .components(components),
-            )
-            .await;
+        let poise::Context::Application(app) = ctx else {
+            let _ = ctx.send(text_reply(message)).await;
+            return;
+        };
+        if app.has_sent_initial_response.load(Ordering::SeqCst) {
+            let edit =
+                text_reply(message).to_slash_initial_response_edit(EditInteractionResponse::new());
+            if let Err(e) = app
+                .interaction
+                .edit_response(&app.serenity_context().http, edit)
+                .await
+            {
+                error!("failed to edit the error response into the original response: {e}");
+            }
+        } else {
+            let _ = ctx.send(text_reply(message)).await;
+        }
     }
 }

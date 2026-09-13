@@ -69,7 +69,7 @@ impl DiscordGuildSubscriber {
         let channel_id_str = settings
             .feeds
             .channel_id
-            .ok_or_else(|| anyhow::anyhow!("No channel configured for guild {}", &sub.target_id))?;
+            .ok_or_else(|| anyhow::anyhow!("No channel configured for guild {}", sub.target_id))?;
 
         let channel_id = ChannelId::from_str(&channel_id_str)?;
 

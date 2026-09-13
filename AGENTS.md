@@ -57,31 +57,29 @@ impl Cog for Cogs {
 }
 ```
 
-## UI Views (ViewEngine)
+## UI Views (TEA host runtime)
 
-Interactive views live in `src/bot/view/` (formerly `src/bot/views.rs`).
+Interactive views follow the Elm Architecture (see `docs/adr/0005-tea-gui-architecture.md`):
 
-- `ViewRender` and `ViewHandler` use **associated types**: `type Action: Action`
-- `ViewEngine<T, H>` requires `H: ViewHandler<Action = T> + ViewRender<Action = T>`
-- `ViewEvent` is non-generic; `ViewContext` carries `action: Option<T>` separately
-- See `.opencode/skills/ui-views/SKILL.md` for full patterns
+- **Core** `src/update/<feature>.rs` — pure `fn update(msg, &mut model) -> Vec<Effect>`; imports no serenity/tokio/diesel/poise (image bytes OK, serenity types not)
+- **Shell** `src/bot/gui/` — sealed `GuiFeature` trait (pure `view`, `translate`, `attachments`, `open_modal` hook) + `Host` event loop in `rt.rs`
+- **Adapters** — per-feature `EffectHandler` impls executing effects against `ctx.data().service`
+- Interaction substrate (Action, ActionRegistry, SelectValues, ViewChannel, ViewEvent) lives in `src/bot/view/` — the collectors the Host runs on
+- Snapshot tests in each feature pin rendered component JSON (custom_id timestamps normalized) — run them when touching any view
 
 ## Business Logic (Update Pattern)
 
-Pure, testable state mutations follow the TEA `Update` trait in `src/update/mod.rs`:
+Pure, testable state mutations live in `src/update/<feature>.rs` as free
+`fn update(msg, &mut Model) -> Vec<Effect>` functions (plus `Model`, `Msg`,
+`Effect` vocabularies and unit tests). Handlers in `src/bot/command/` parse
+Discord interactions into `Msg`s, and side effects execute only through the
+feature's `EffectHandler` adapter. See `docs/adr/0005-tea-gui-architecture.md`
+for the layering rules. Existing modules: `about`, `feed_batch`,
+`register`, `unregister`, `feed_list`, `voice_stats`,
+`voice_leaderboard`, `plugins`, `pagination`.
 
-```rust
-pub trait Update {
-    type Model;
-    type Msg;
-    type Cmd;
-    fn update(msg: Self::Msg, model: &mut Self::Model) -> Self::Cmd;
-}
-```
-
-- Place pure logic in `src/update/<feature>.rs` (Msg, Model, Cmd, Update impl, tests)
-- Handlers in `src/bot/command/` parse Discord interactions, call `Update::update()`, then execute side effects (DB queries, image generation) based on the returned `Cmd`
-- See existing modules: `voice_leaderboard`, `voice_stats`, `feed_list`, `welcome_settings`, `feed_settings`, `settings_main`
+- Place pure logic in `src/update/<feature>.rs` (Model, Msg, Effect, `update` fn, tests)
+- Handlers in `src/bot/command/` parse Discord interactions into `Msg`s, run `update`, and route returned `Effect`s to the feature's `EffectHandler` adapter (never execute effects inline)
 
 ## Database
 

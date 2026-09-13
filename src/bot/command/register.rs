@@ -3,6 +3,11 @@
 use poise::samples::create_application_commands;
 
 use crate::bot::command::prelude::*;
+use crate::bot::gui::feature::GuiFeature;
+use crate::bot::gui::register::RegisterFeature;
+use crate::bot::view::ActionRegistry;
+use crate::update::register::RegisterModel;
+use crate::update::register::RegisterMsg;
 
 /// Registers server slash commands
 ///
@@ -22,74 +27,23 @@ pub async fn command(ctx: Context<'_>) -> Result<(), Error> {
 
     let start_time = std::time::Instant::now();
 
-    let mut initial_view = CommandRegistrationView::new(num_commands);
-    let msg = ctx.send(initial_view.create_reply()).await?;
+    let mut model = RegisterModel::new(num_commands);
+    let msg = ctx.send(build_register_reply(&model)).await?;
 
     guild_id.set_commands(ctx.http(), &create_commands).await?;
 
     let duration_ms = start_time.elapsed().as_millis() as u64;
-    let mut complete_view = CommandRegistrationView::new(num_commands).complete(duration_ms);
-    msg.edit(ctx, complete_view.create_reply()).await?;
+    RegisterFeature::update(RegisterMsg::Registered { duration_ms }, &mut model);
+    msg.edit(ctx, build_register_reply(&model)).await?;
 
     Ok(())
 }
 
-/// View for command registration status.
-pub struct CommandRegistrationView {
-    /// Number of commands being registered
-    num_commands: usize,
-    /// Whether registration is complete
-    is_complete: bool,
-    /// Time taken in milliseconds (if complete)
-    duration_ms: Option<u64>,
-}
-
-impl CommandRegistrationView {
-    /// Creates a new registration view.
-    pub fn new(num_commands: usize) -> Self {
-        Self {
-            num_commands,
-            is_complete: false,
-            duration_ms: None,
-        }
-    }
-
-    /// Marks the registration as complete with duration.
-    pub fn complete(mut self, duration_ms: u64) -> Self {
-        self.is_complete = true;
-        self.duration_ms = Some(duration_ms);
-        self
-    }
-
-    pub fn create_response(&mut self) -> ResponseKind<'_> {
-        let title = if self.is_complete {
-            "Command Registration Complete"
-        } else {
-            "Registering Commands"
-        };
-
-        let status_text = if self.is_complete {
-            format!(
-                "### {}\nSuccessfully registered {} commands in {}ms",
-                title,
-                self.num_commands,
-                self.duration_ms.unwrap_or(0)
-            )
-        } else {
-            format!(
-                "### {}\nRegistering {} server commands...",
-                title, self.num_commands
-            )
-        };
-
-        let container = CreateComponent::Container(CreateContainer::new(vec![
-            CreateContainerComponent::TextDisplay(CreateTextDisplay::new(status_text)),
-        ]));
-
-        vec![container].into()
-    }
-
-    pub fn create_reply(&mut self) -> poise::CreateReply<'_> {
-        self.create_response().into()
-    }
+/// Builds the registration status reply for the given model.
+fn build_register_reply(model: &RegisterModel) -> poise::CreateReply<'_> {
+    let mut registry = ActionRegistry::new();
+    let components = RegisterFeature::view(model, &mut registry);
+    poise::CreateReply::new()
+        .flags(MessageFlags::IS_COMPONENTS_V2)
+        .components(components)
 }

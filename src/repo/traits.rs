@@ -13,8 +13,6 @@ use crate::repo::error::DatabaseError;
 pub trait TableBase: Send + Sync {
     /// Creates the table if it does not exist.
     async fn create_table(&self) -> Result<(), DatabaseError>;
-    /// Drops the table. Use with extreme caution.
-    async fn drop_table(&self) -> Result<(), DatabaseError>;
     /// Deletes all rows from the table.
     async fn delete_all(&self) -> Result<(), DatabaseError>;
 }
@@ -236,6 +234,37 @@ pub trait BotMetaRepository: CrudTable<BotMetaEntity, String> + Send + Sync {
     async fn table_exists(&self) -> bool;
 }
 
+/// Operations for the `plugin_kv` table: per-namespace string key-value
+/// storage served to plugins via `host.kv.*`. The composite primary key
+/// (namespace, key) does not fit [`CrudTable`].
+#[async_trait]
+pub trait PluginKvRepository: TableBase + Send + Sync {
+    /// Returns the value for a key in a namespace, or `None` when unset.
+    async fn get(&self, namespace: &str, key: &str) -> Result<Option<String>, DatabaseError>;
+    /// Upserts the value for a key in a namespace.
+    async fn set(&self, namespace: &str, key: &str, value: &str) -> Result<(), DatabaseError>;
+    /// Deletes a key in a namespace. No-op when the key is absent.
+    async fn delete(&self, namespace: &str, key: &str) -> Result<(), DatabaseError>;
+}
+
+/// Operations for the `guild_plugins` table: per-guild plugin enable/disable
+/// state. The composite primary key (guild_id, plugin_name) does not fit
+/// [`CrudTable`].
+#[async_trait]
+pub trait GuildPluginRepository: TableBase + Send + Sync {
+    /// Returns the enable/disable state of every plugin in a guild.
+    async fn list_for_guild(&self, guild_id: u64) -> Result<Vec<GuildPluginEntity>, DatabaseError>;
+    /// Upserts the enable/disable state of a plugin in a guild.
+    async fn set_enabled(
+        &self,
+        guild_id: u64,
+        plugin_name: &str,
+        enabled: bool,
+    ) -> Result<(), DatabaseError>;
+    /// Deletes the state row for a plugin in a guild. No-op when absent.
+    async fn delete(&self, guild_id: u64, plugin_name: &str) -> Result<(), DatabaseError>;
+}
+
 /// Factory trait providing access to individual repository handles.
 ///
 /// Each method clones the underlying pool-backed handle and returns
@@ -248,4 +277,6 @@ pub trait Repos: Send + Sync {
     fn server_settings(&self) -> Box<dyn ServerSettingsRepository + Send + Sync>;
     fn voice_sessions(&self) -> Box<dyn VoiceSessionsRepository + Send + Sync>;
     fn bot_meta(&self) -> Box<dyn BotMetaRepository + Send + Sync>;
+    fn plugin_kv(&self) -> Box<dyn PluginKvRepository + Send + Sync>;
+    fn guild_plugins(&self) -> Box<dyn GuildPluginRepository + Send + Sync>;
 }

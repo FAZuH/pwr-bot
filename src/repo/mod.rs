@@ -5,10 +5,10 @@ pub mod postgres;
 pub mod schema;
 pub mod traits;
 
+use anyhow::Context;
 use diesel::Connection;
 use diesel_async::AsyncPgConnection;
 use diesel_async::pooled_connection::AsyncDieselConnectionManager;
-use diesel_async::pooled_connection::deadpool::Object;
 use diesel_async::pooled_connection::deadpool::Pool;
 use diesel_migrations::EmbeddedMigrations;
 use diesel_migrations::MigrationHarness;
@@ -20,7 +20,6 @@ use crate::repo::postgres::*;
 use crate::repo::traits::*;
 
 pub type DbPool = Pool<AsyncPgConnection>;
-pub type DbConn = Object<AsyncPgConnection>;
 
 const MIGRATIONS: EmbeddedMigrations = embed_migrations!("migrations");
 
@@ -37,6 +36,8 @@ pub struct PgRepos {
     pub server_settings: PgServerSettingsRepo,
     pub voice_sessions: PgVoiceSessionsRepo,
     pub bot_meta: PgBotMetaRepo,
+    pub plugin_kv: PgPluginKvRepo,
+    pub guild_plugins: PgGuildPluginRepo,
 
     pool: DbPool,
     db_url: String,
@@ -58,6 +59,8 @@ impl PgRepos {
             server_settings: PgServerSettingsRepo::new(pool.clone()),
             voice_sessions: PgVoiceSessionsRepo::new(pool.clone()),
             bot_meta: PgBotMetaRepo::new(pool.clone()),
+            plugin_kv: PgPluginKvRepo::new(pool.clone()),
+            guild_plugins: PgGuildPluginRepo::new(pool.clone()),
             pool,
             db_url,
         })
@@ -70,24 +73,14 @@ impl PgRepos {
     pub async fn run_migrations(&self) -> anyhow::Result<()> {
         let db_url = self.db_url.clone();
         task::spawn_blocking(move || {
-            let mut conn =
-                diesel::PgConnection::establish(&db_url).expect("failed to connect for migrations");
+            let mut conn = diesel::PgConnection::establish(&db_url)
+                .context("connecting to the database for migrations")?;
             conn.run_pending_migrations(MIGRATIONS)
-                .expect("failed to run migrations");
+                .map_err(anyhow::Error::from_boxed)
+                .context("running pending database migrations")?;
+            Ok(())
         })
-        .await?;
-        Ok(())
-    }
-
-    pub async fn drop_all_tables(&self) -> anyhow::Result<()> {
-        self.feed.drop_table().await?;
-        self.feed_item.drop_table().await?;
-        self.subscriber.drop_table().await?;
-        self.feed_subscription.drop_table().await?;
-        self.server_settings.drop_table().await?;
-        self.voice_sessions.drop_table().await?;
-        self.bot_meta.drop_table().await?;
-        Ok(())
+        .await?
     }
 
     pub async fn delete_all_tables(&self) -> anyhow::Result<()> {
@@ -98,6 +91,8 @@ impl PgRepos {
         self.server_settings.delete_all().await?;
         self.voice_sessions.delete_all().await?;
         self.bot_meta.delete_all().await?;
+        self.plugin_kv.delete_all().await?;
+        self.guild_plugins.delete_all().await?;
         Ok(())
     }
 }
@@ -129,5 +124,13 @@ impl Repos for PgRepos {
 
     fn bot_meta(&self) -> Box<dyn BotMetaRepository + Send + Sync> {
         Box::new(self.bot_meta.clone())
+    }
+
+    fn plugin_kv(&self) -> Box<dyn PluginKvRepository + Send + Sync> {
+        Box::new(self.plugin_kv.clone())
+    }
+
+    fn guild_plugins(&self) -> Box<dyn GuildPluginRepository + Send + Sync> {
+        Box::new(self.guild_plugins.clone())
     }
 }
