@@ -21,7 +21,7 @@ pwr-plugin-protocol.workspace = true
 # default-features = false keeps pwr-viewgen's `png` (chromiumoxide) and
 # `cli` features out of this crate's normal build graph; the `png` feature
 # above is the only path that turns rendering on.
-pwr-viewgen = { git = "https://github.com/FAZuH/pwr-viewgen", branch = "main", default-features = false }
+pwr-viewgen = { git = "https://github.com/FAZuH/pwr-viewgen", tag = "v0.1.0", default-features = false }
 serde_json = "1.0.149"
 
 [dev-dependencies]
