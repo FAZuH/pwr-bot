@@ -13,8 +13,8 @@ members = [
 resolver = "2"
 
 [workspace.dependencies]
-pwr-ext = { git = "https://github.com/FAZuH/pwr-ext", branch = "main", features = ["macros"] }
-pwr-viewgen = { git = "https://github.com/FAZuH/pwr-viewgen", branch = "main" }
+pwr-ext = { git = "https://github.com/FAZuH/pwr-ext", tag = "v0.1.0", features = ["macros"] }
+pwr-viewgen = { git = "https://github.com/FAZuH/pwr-viewgen", tag = "v0.1.0" }
 pwr-plugin-protocol = { path = "crates/pwr-plugin-protocol" }
 pwr-plugin-support = { path = "crates/plugin/pwr-plugin-support" }
 pwr-poise-components = { path = "crates/pwr-poise-components" }
