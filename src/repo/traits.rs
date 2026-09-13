@@ -13,8 +13,6 @@ use crate::repo::error::DatabaseError;
 pub trait TableBase: Send + Sync {
     /// Creates the table if it does not exist.
     async fn create_table(&self) -> Result<(), DatabaseError>;
-    /// Drops the table. Use with extreme caution.
-    async fn drop_table(&self) -> Result<(), DatabaseError>;
     /// Deletes all rows from the table.
     async fn delete_all(&self) -> Result<(), DatabaseError>;
 }

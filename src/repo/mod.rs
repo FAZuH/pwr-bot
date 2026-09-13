@@ -9,7 +9,6 @@ use anyhow::Context;
 use diesel::Connection;
 use diesel_async::AsyncPgConnection;
 use diesel_async::pooled_connection::AsyncDieselConnectionManager;
-use diesel_async::pooled_connection::deadpool::Object;
 use diesel_async::pooled_connection::deadpool::Pool;
 use diesel_migrations::EmbeddedMigrations;
 use diesel_migrations::MigrationHarness;
@@ -21,7 +20,6 @@ use crate::repo::postgres::*;
 use crate::repo::traits::*;
 
 pub type DbPool = Pool<AsyncPgConnection>;
-pub type DbConn = Object<AsyncPgConnection>;
 
 const MIGRATIONS: EmbeddedMigrations = embed_migrations!("migrations");
 
@@ -83,19 +81,6 @@ impl PgRepos {
             Ok(())
         })
         .await?
-    }
-
-    pub async fn drop_all_tables(&self) -> anyhow::Result<()> {
-        self.feed.drop_table().await?;
-        self.feed_item.drop_table().await?;
-        self.subscriber.drop_table().await?;
-        self.feed_subscription.drop_table().await?;
-        self.server_settings.drop_table().await?;
-        self.voice_sessions.drop_table().await?;
-        self.bot_meta.drop_table().await?;
-        self.plugin_kv.drop_table().await?;
-        self.guild_plugins.drop_table().await?;
-        Ok(())
     }
 
     pub async fn delete_all_tables(&self) -> anyhow::Result<()> {
