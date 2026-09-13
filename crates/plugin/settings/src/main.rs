@@ -67,6 +67,10 @@ use pwr_plugin_protocol::Manifest;
 use pwr_plugin_protocol::Msg;
 use pwr_plugin_protocol::VIEW_MOVED_KIND;
 use pwr_plugin_protocol::WireError;
+use pwr_plugin_support::id_as_u64;
+use pwr_plugin_support::reply_err;
+use pwr_plugin_support::source_message_id;
+use pwr_plugin_support::write_msg;
 use serde_json::Value;
 use serde_json::json;
 
@@ -689,21 +693,6 @@ fn open_view_args(
     args
 }
 
-/// The source message the interaction fired on: serenity serializes the
-/// component interaction with its message, and the id as a string. `None`
-/// when the payload carries none, so the panel opens on a fresh message.
-fn source_message_id(args: Option<&Value>) -> Option<u64> {
-    args?.get("message")?.get("id").and_then(id_as_u64)
-}
-
-/// Reads a Discord id from a wire value: a number, or the string form
-/// serenity's ids serialize to.
-fn id_as_u64(value: &Value) -> Option<u64> {
-    value
-        .as_u64()
-        .or_else(|| value.as_str().and_then(|s| s.parse().ok()))
-}
-
 /// The `host.stats` call args: the op takes none.
 fn stats_args() -> Value {
     json!({})
@@ -713,28 +702,6 @@ fn stats_args() -> Value {
 /// payload, so the caller keeps its last known snapshot.
 fn parse_stats(data: Option<&Value>) -> Option<HostStats> {
     serde_json::from_value(data?.clone()).ok()
-}
-
-/// Serializes `msg` to one JSON line, writes it, then flushes. Every protocol
-/// line must end with `\n` and be flushed before the host can read it — piped
-/// stdout is block-buffered.
-fn write_msg(out: &mut impl Write, msg: &Msg) -> std::io::Result<()> {
-    let line = serde_json::to_string(msg).expect("serialize protocol message");
-    writeln!(out, "{line}")?;
-    out.flush()
-}
-
-/// Writes a `resp_err` answering `invoke_id` with the given error kind and
-/// message; returns whether the write succeeded.
-fn reply_err(out: &mut impl Write, invoke_id: u64, kind: &str, msg: impl Into<String>) -> bool {
-    let resp = Msg::resp_err(
-        invoke_id,
-        WireError {
-            kind: kind.into(),
-            msg: msg.into(),
-        },
-    );
-    write_msg(out, &resp).is_ok()
 }
 
 /// Issues a plugin→host call: assigns the next call id, records the pending
@@ -1684,33 +1651,6 @@ mod tests {
     fn open_view_args_carry_the_source_message_for_an_in_place_open() {
         let args = open_view_args(1, Some(42), "feed-settings", Some(777));
         assert_eq!(args["message_id"], json!(777));
-    }
-
-    #[test]
-    fn source_message_id_reads_the_interaction_message() {
-        assert_eq!(
-            source_message_id(Some(&json!({ "message": { "id": "555" } }))),
-            Some(555),
-            "serenity serializes the source message id as a string"
-        );
-        assert_eq!(
-            source_message_id(Some(&json!({ "message": { "id": 555 } }))),
-            Some(555)
-        );
-        assert_eq!(source_message_id(Some(&json!({ "channel_id": "9" }))), None);
-        assert_eq!(source_message_id(None), None);
-    }
-
-    #[test]
-    fn id_as_u64_accepts_numbers_and_string_ids() {
-        assert_eq!(id_as_u64(&json!(42)), Some(42));
-        assert_eq!(
-            id_as_u64(&json!("42")),
-            Some(42),
-            "serenity ids serialize as strings"
-        );
-        assert_eq!(id_as_u64(&json!("nope")), None);
-        assert_eq!(id_as_u64(&json!(null)), None);
     }
 
     #[test]
