@@ -1,9 +1,10 @@
 # Discord Setup
 
-Create a Discord application, invite the bot to your server, and register
-its slash commands. You do this once per application. The bot reads the
-values below from the environment file. See
-[Configuration](configuration.md) for the variable names.
+Create a Discord application and invite the bot to your server. You do
+this once per application. The bot reads the values below from the
+environment file. See [Configuration](configuration.md) for the variable
+names. To register slash commands after the bot runs, see
+[Command Registration](../README.md#command-registration).
 
 ## Create the application
 
@@ -20,18 +21,8 @@ values below from the environment file. See
 
 ## Command Registration
 
-After the bot runs and joins your server, register the slash commands:
-
-1. In a channel the bot can see, type `!register_owner`.
-2. The bot responds with buttons.
-3. Click **Register in guild** (immediate) or **Register globally** (can take up to one hour).
-
-> [!note]
-> The `!register_owner` command needs your Discord user ID to match `ADMIN_ID` in the environment file.
->
-> Users in other servers with the "Administrator" or "Manage Server" permission can run `!register` or `!unregister`.
-
-<img width="617" height="91" alt="image" src="https://github.com/user-attachments/assets/c0f508aa-e373-4df7-a574-01183eee4a98" />
+After the bot runs and joins your server, register the slash commands.
+See [Command Registration](../README.md#command-registration) in the README.
 
 ## Related
 
