@@ -23,7 +23,7 @@ use serde::Deserialize;
 use sha2::Digest;
 use sha2::Sha256;
 use tempfile::NamedTempFile;
-use wreq::Url;
+use url::Url;
 
 use crate::plugin::InstallError;
 
@@ -125,9 +125,9 @@ pub fn download_client() -> wreq::Client {
 /// `https_only` flag is the second layer.
 pub fn redirect_policy() -> wreq::redirect::Policy {
     wreq::redirect::Policy::custom(|attempt| {
-        if attempt.previous().len() > MAX_REDIRECTS {
+        if attempt.previous.len() > MAX_REDIRECTS {
             attempt.error("too many redirects")
-        } else if attempt.url().scheme() != "https" {
+        } else if attempt.uri.scheme().is_none_or(|s| s.as_str() != "https") {
             attempt.stop()
         } else {
             attempt.follow()
