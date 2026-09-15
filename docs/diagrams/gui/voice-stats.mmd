@@ -1,0 +1,61 @@
+---
+config:
+  layout: elk
+  class:
+    hideEmptyMembersBox: true
+---
+classDiagram
+    direction LR
+    class GuiFeature { <<Trait>> }
+    class VoiceStatsFeature
+    class Host~F,H~
+    class EffectHandler { <<Trait>> }
+    class VoiceStatsEffectHandler
+    class VoiceStatsModel
+    class VoiceStatsMsg {
+        <<enumeration>>
+        Start
+        Expired
+        ChangeTimeRange
+        ChangeStatType
+        ToggleDataMode
+        SetUser
+        StatsLoaded
+        ImageRendered
+    }
+    class VoiceStatsEffect {
+        <<enumeration>>
+        QueryStats
+        RenderImage
+    }
+    class VoiceStatsAction {
+        <<enumeration>>
+        TimeYearly
+        TimeMonthly
+        TimeWeekly
+        TimeHourly
+        StatUniqueUsers
+        StatTotalTime
+        StatAverageTime
+        ToggleDataMode
+        SelectUser
+    }
+    class VoiceTracker { <<Trait>> }
+    class Http
+    class ActionRegistry
+    class ViewChannel
+    class Router
+
+    GuiFeature <|.. VoiceStatsFeature
+    Host --> VoiceStatsFeature : F
+    Host --> VoiceStatsEffectHandler : H
+    VoiceStatsEffectHandler ..|> EffectHandler
+    VoiceStatsFeature ..> VoiceStatsModel : Model
+    VoiceStatsFeature ..> VoiceStatsMsg : Msg
+    VoiceStatsFeature ..> VoiceStatsEffect : Effect
+    VoiceStatsFeature ..> VoiceStatsAction : Action
+    VoiceStatsEffectHandler --> VoiceTracker : stats queries
+    VoiceStatsEffectHandler --> Http : chart render
+    Host --> ViewChannel : collects events
+    Host --> ActionRegistry : custom_ids
+    Host --> Router : navigate

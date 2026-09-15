@@ -120,7 +120,7 @@ Published on <t:{}>
                     CreateUnfurledMediaItem::new(feed_info.logo_url.clone()),
                 )),
             )),
-            CreateContainerComponent::Separator(CreateSeparator::new(false)),
+            CreateContainerComponent::Separator(CreateSeparator::new().divider(false)),
             CreateContainerComponent::MediaGallery(CreateMediaGallery::new(vec![
                 CreateMediaGalleryItem::new(CreateUnfurledMediaItem::new(feed.cover_url.clone())),
             ])),

@@ -9,6 +9,7 @@ use std::vec::Vec;
 use async_trait::async_trait;
 use chrono::DateTime;
 use chrono::Utc;
+use mockall::automock;
 
 use crate::bot::command::voice::GuildStatType;
 use crate::entity::*;
@@ -22,6 +23,7 @@ use crate::service::feed_subscription::UnsubscribeResult;
 use crate::service::internal::DatabaseDump;
 
 /// Logic for managing feed subscriptions (AniList, MangaDex, Comick).
+#[automock]
 #[async_trait]
 pub trait FeedSubscriptionProvider: Send + Sync {
     /// Subscribes a user or guild to a feed by its URL.

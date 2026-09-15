@@ -23,6 +23,8 @@ use crate::repo::schema::bot_meta;
 use crate::repo::schema::feed_items;
 use crate::repo::schema::feed_subscriptions;
 use crate::repo::schema::feeds;
+use crate::repo::schema::guild_plugins;
+use crate::repo::schema::plugin_kv;
 use crate::repo::schema::server_settings;
 use crate::repo::schema::subscribers;
 use crate::repo::schema::voice_sessions;
@@ -230,52 +232,20 @@ pub struct FeedSubscriptionEntity {
 #[diesel(table_name = server_settings)]
 #[diesel(primary_key(guild_id))]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-#[derive(Serialize, Deserialize, Default, Clone, Debug)]
+#[derive(Serialize, Deserialize)]
 pub struct ServerSettingsEntity {
     pub guild_id: DbU64,
     pub settings: Json<ServerSettings>,
 }
 
-#[derive(Serialize, Deserialize, Default, Clone, Debug)]
-pub struct ServerSettings {
-    #[serde(default)]
-    pub feeds: FeedsSettings,
-    #[serde(default)]
-    pub voice: VoiceSettings,
-    #[serde(default)]
-    pub welcome: WelcomeSettings,
-}
-
-#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
-pub struct WelcomeSettings {
-    #[serde(default)]
-    pub enabled: Option<bool>,
-    #[serde(default)]
-    pub channel_id: Option<String>,
-    #[serde(default)]
-    pub primary_color: Option<String>,
-    #[serde(default)]
-    pub template_id: Option<String>,
-    #[serde(default)]
-    pub messages: Option<Vec<String>>,
-}
-
-#[derive(Serialize, Deserialize, Default, Clone, Debug)]
-pub struct FeedsSettings {
-    #[serde(default)]
-    pub enabled: Option<bool>,
-    #[serde(default)]
-    pub channel_id: Option<String>,
-    #[serde(default)]
-    pub subscribe_role_id: Option<String>,
-    #[serde(default)]
-    pub unsubscribe_role_id: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Default, Clone, Debug)]
-pub struct VoiceSettings {
-    pub enabled: Option<bool>,
-}
+// The settings payload structs moved to `pwr-plugin-protocol/src/settings.rs`
+// so the shared wire contract owns the shape both sides serialize (ADR-0010).
+// Re-exported here to keep every in-crate import stable; the diesel coupling
+// stays in `ServerSettingsEntity` above.
+pub use pwr_plugin_protocol::FeedsSettings;
+pub use pwr_plugin_protocol::ServerSettings;
+pub use pwr_plugin_protocol::VoiceSettings;
+pub use pwr_plugin_protocol::WelcomeSettings;
 
 /// Diesel-compatible struct for voice_sessions queries.
 #[derive(Queryable, Selectable)]
@@ -412,7 +382,7 @@ pub struct VoiceLeaderboardOpt {
 }
 
 /// Daily voice activity aggregation for a specific user.
-#[derive(QueryableByName, Serialize, Deserialize, Default, Clone, Debug)]
+#[derive(QueryableByName, Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
 pub struct VoiceDailyActivity {
     #[diesel(sql_type = diesel::sql_types::Date)]
     pub day: chrono::NaiveDate,
@@ -421,7 +391,7 @@ pub struct VoiceDailyActivity {
 }
 
 /// Guild daily statistics aggregation.
-#[derive(QueryableByName, Serialize, Deserialize, Default, Clone, Debug)]
+#[derive(QueryableByName, Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
 pub struct GuildDailyStats {
     #[diesel(sql_type = diesel::sql_types::Date)]
     pub day: chrono::NaiveDate,
@@ -458,4 +428,36 @@ impl From<BotMetaKey> for String {
     fn from(value: BotMetaKey) -> Self {
         String::from(&value)
     }
+}
+
+/// A string value stored under a plugin's key-value namespace.
+///
+/// Namespaces partition keys between plugins (e.g. the settings plugin reads
+/// and writes under the `settings` namespace), so plugins never collide. This
+/// is the persisted-row shape for the KV store, consumed when #113 wires the
+/// production `PgKvStore` and settings reads.
+#[derive(Queryable, Selectable, Insertable, Identifiable)]
+#[diesel(table_name = plugin_kv)]
+#[diesel(primary_key(namespace, key))]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+#[derive(Serialize, Deserialize, Default, Clone, Debug)]
+pub struct PluginKvEntity {
+    pub namespace: String,
+    pub key: String,
+    pub value: String,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// The per-guild enable/disable state of a plugin.
+///
+/// Wired to command registration in #113; this layer only persists the flag.
+#[derive(Queryable, Selectable, Insertable, Identifiable)]
+#[diesel(table_name = guild_plugins)]
+#[diesel(primary_key(guild_id, plugin_name))]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+#[derive(Serialize, Deserialize, Default, Clone, Debug)]
+pub struct GuildPluginEntity {
+    pub guild_id: DbU64,
+    pub plugin_name: String,
+    pub enabled: bool,
 }

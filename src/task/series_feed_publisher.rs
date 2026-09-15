@@ -33,10 +33,7 @@ impl SeriesFeedPublisher {
         event_bus: Arc<EventBus>,
         poll_interval: Duration,
     ) -> Arc<Self> {
-        info!(
-            "Initializing FeedPublisher with poll interval {:?}",
-            poll_interval
-        );
+        info!("Initializing FeedPublisher with poll interval {poll_interval:?}");
         Arc::new(Self {
             service,
             event_bus,
@@ -72,7 +69,7 @@ impl SeriesFeedPublisher {
                     break;
                 }
                 if let Err(e) = self.check_updates().await {
-                    error!("Error checking updates: {}", e);
+                    error!("Error checking updates: {e}");
                 }
             }
         });
@@ -170,7 +167,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_feed_interval_calculation() {
+    fn feed_interval_calculation() {
         assert_eq!(
             SeriesFeedPublisher::calculate_feed_interval(10, &Duration::from_secs(60)),
             Duration::from_secs(6)

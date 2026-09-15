@@ -95,7 +95,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_extract_domain() {
+    fn extract_domain() {
         assert_eq!(
             Platforms::extract_domain("https://example.com/foo/bar"),
             "example.com"

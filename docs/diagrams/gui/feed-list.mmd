@@ -1,0 +1,75 @@
+---
+config:
+  layout: elk
+  class:
+    hideEmptyMembersBox: true
+---
+classDiagram
+    direction LR
+    class GuiFeature { <<Trait>> }
+    class FeedListFeature
+    class Host~F,H~
+    class EffectHandler { <<Trait>> }
+    class FeedListEffectHandler
+    class FeedListModel
+    class FeedListMsg {
+        <<enumeration>>
+        Start
+        Expired
+        Edit
+        View
+        ToggleUnsub
+        Save
+        Pagination
+        Saved
+        SubscriptionsLoaded
+    }
+    class FeedListEffect {
+        <<enumeration>>
+        QuerySubscriptions
+        SaveUnsubscribes
+    }
+    class FeedListAction {
+        <<enumeration>>
+        Base
+        Edit
+        View
+        Unsubscribe
+        UndoUnsub
+        Save
+    }
+    class PaginationAction {
+        <<enumeration>>
+        First
+        Prev
+        Next
+        Last
+        Page
+    }
+    class FeedListViewState {
+        <<enumeration>>
+        View
+        Edit
+    }
+    class Subscription
+    class FeedSubscriptionProvider { <<Trait>> }
+    class ActionRegistry
+    class ViewChannel
+    class Router
+
+    GuiFeature <|.. FeedListFeature
+    Host --> FeedListFeature : F
+    Host --> FeedListEffectHandler : H
+    FeedListEffectHandler ..|> EffectHandler
+    FeedListFeature ..> FeedListModel : Model
+    FeedListFeature ..> FeedListMsg : Msg
+    FeedListFeature ..> FeedListEffect : Effect
+    FeedListFeature ..> FeedListAction : Action
+    FeedListAction o-- PaginationAction : Base variant wraps
+    FeedListModel *-- FeedListViewState
+    FeedListModel *-- Subscription
+    FeedListMsg *-- PaginationAction : Pagination variant
+    FeedListEffectHandler --> FeedSubscriptionProvider : query · save unsubscribes
+    Host --> ViewChannel : collects events
+    Host --> ActionRegistry : custom_ids
+    Host --> Router : navigate

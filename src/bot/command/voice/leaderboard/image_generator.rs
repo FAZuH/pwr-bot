@@ -1,21 +1,16 @@
 //! Image generation for voice leaderboard.
 
 use std::collections::HashMap;
-use std::io::Cursor;
 use std::time::Instant;
 
 use anyhow::Result;
-use base64::Engine as _;
-use base64::engine::general_purpose::STANDARD as BASE64;
-use image::DynamicImage;
-use image::imageops::FilterType;
 use log::trace;
 use minijinja::Environment;
 use minijinja::context;
 use serde::Serialize;
 
 use crate::bot::command::voice::leaderboard::image_builder::LeaderboardEntry;
-use crate::bot::utils::format_duration;
+use crate::bot::utils;
 
 const IMAGE_WIDTH: u32 = 500;
 const IMAGE_HEIGHT_PER_ENTRY: u32 = 64;
@@ -80,25 +75,7 @@ impl LeaderboardImageGenerator {
     }
 
     pub async fn download_avatar(&self, url: &str) -> Result<String> {
-        let response = self.http_client.get(url).send().await?;
-        if !response.status().is_success() {
-            return Err(anyhow::anyhow!(
-                "Failed to download avatar: {}",
-                response.status()
-            ));
-        }
-        let bytes = response.bytes().await?;
-        let img = image::load_from_memory(&bytes)?;
-        Ok(self.process_avatar_to_b64(&img))
-    }
-
-    fn process_avatar_to_b64(&self, img: &DynamicImage) -> String {
-        let resized = img.resize_exact(AVATAR_SIZE, AVATAR_SIZE, FilterType::Lanczos3);
-        let mut cursor = Cursor::new(Vec::new());
-        resized
-            .write_to(&mut cursor, image::ImageFormat::Png)
-            .unwrap();
-        BASE64.encode(cursor.into_inner())
+        utils::download_avatar(&self.http_client, url, AVATAR_SIZE).await
     }
 
     pub async fn generate_leaderboard(&mut self, entries: &[LeaderboardEntry]) -> Result<Vec<u8>> {
@@ -109,7 +86,7 @@ impl LeaderboardImageGenerator {
             if let Some(img) = &entry.avatar_image
                 && !self.avatar_cache.contains_key(&entry.avatar_url)
             {
-                let b64 = self.process_avatar_to_b64(img);
+                let b64 = utils::avatar_to_b64(img, AVATAR_SIZE);
                 self.avatar_cache.insert(entry.avatar_url.clone(), b64);
             }
         }
@@ -152,7 +129,7 @@ impl LeaderboardImageGenerator {
                     rank: entry.rank,
                     rank_color,
                     name: entry.display_name.clone(), // Minijinja auto-escapes HTML/XML by default
-                    duration: format_duration(entry.duration_seconds),
+                    duration: utils::format_duration(entry.duration_seconds),
                     card_y: y + 2,
                     progress_width,
                     progress_color,

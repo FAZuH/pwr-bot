@@ -13,7 +13,6 @@ use governor::clock::QuantaClock;
 use governor::state::InMemoryState;
 use governor::state::direct::NotKeyed;
 use log::debug;
-use log::info;
 use log::warn;
 use serde_json::Map;
 use serde_json::Value;
@@ -22,6 +21,7 @@ use wreq::header::HeaderMap;
 use wreq::header::HeaderValue;
 use wreq::header::USER_AGENT;
 
+use super::send_json;
 use crate::feed::BasePlatform;
 use crate::feed::FeedItem;
 use crate::feed::FeedSource;
@@ -256,27 +256,18 @@ impl MangaDexPlatform {
         Ok(())
     }
 
-    async fn send(&self, request: wreq::RequestBuilder) -> Result<wreq::Response, wreq::Error> {
-        if self.limiter.check().is_err() {
-            info!("Source {} is ratelimited. Waiting...", self.base.info.name);
-        }
-        self.limiter.until_ready().await;
-
-        let req = request.build()?;
-        debug!("Making request to: {}", req.url());
-        self.client.execute(req).await
-    }
-
     async fn send_get_json(
         &self,
         request: wreq::RequestBuilder,
     ) -> Result<serde_json::Value, FeedError> {
-        let response = self.send(request).await?;
-
-        let body = response.text().await?;
-        let resp: serde_json::Value = serde_json::from_str(&body)?;
-        self.check_resp_errors(&resp)?;
-        Ok(resp)
+        send_json(
+            &self.client,
+            &self.limiter,
+            &self.base.info.name,
+            request,
+            |resp| self.check_resp_errors(resp),
+        )
+        .await
     }
 }
 

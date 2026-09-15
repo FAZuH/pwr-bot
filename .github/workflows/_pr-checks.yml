@@ -1,0 +1,59 @@
+name: PR Checks
+
+on:
+  workflow_call:
+    inputs:
+      apt-deps:
+        description: 'apt packages to install'
+        required: false
+        type: string
+        default: ''
+      verify-publish:
+        description: 'Run cargo publish --dry-run to validate publishability'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  run:
+    name: Run Rust Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Set up Nightly Rust
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt
+
+      - name: Set up Stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "ci"
+          add-job-id-key: false
+
+      - name: Install dependencies
+        if: ${{ inputs.apt-deps != '' }}
+        run: sudo apt-get update && sudo apt-get install -y ${{ inputs.apt-deps }}
+
+      - name: Check Format
+        run: cargo +nightly fmt --all -- --check
+
+      - name: Lint with Clippy
+        run: cargo clippy --all-features --all-targets --no-deps -- -D warnings
+
+      - name: Run Tests
+        run: cargo test --workspace --all-features --no-fail-fast
+
+      - name: Verify Package (dry-run)
+        if: ${{ inputs.verify-publish }}
+        run: cargo publish --dry-run --allow-dirty

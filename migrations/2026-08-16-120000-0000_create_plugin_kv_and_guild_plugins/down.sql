@@ -1,0 +1,2 @@
+DROP TABLE IF EXISTS guild_plugins;
+DROP TABLE IF EXISTS plugin_kv;

@@ -64,16 +64,16 @@ macro_rules! with_data {
     };
 }
 
-/// Generates boilerplate for a Controller implementation.
+/// Generates boilerplate for a Handler implementation.
 ///
-/// This macro creates a controller struct with context field, constructor,
-/// and Controller trait implementation with the run method signature.
+/// This macro creates a handler struct with context field, constructor,
+/// and Handler trait implementation with the run method signature.
 ///
 /// # Syntax
 ///
 /// ```rust,ignore
-/// controller! {
-///     pub struct MyController<'a> {
+/// handler! {
+///     pub struct MyHandler<'a> {
 ///         field1: Type1,
 ///         field2: Type2,
 ///     }
@@ -83,28 +83,28 @@ macro_rules! with_data {
 /// # Example
 ///
 /// ```rust,ignore
-/// use pwr_bot::controller;
+/// use pwr_bot::handler;
 /// use pwr_bot::bot::navigation::NavigationResult;
 ///
-/// controller! {
-///     pub struct MySettingsController<'a> {}
+/// handler! {
+///     pub struct MySettingsHandler<'a> {}
 /// }
 ///
 /// // Then implement the run method:
 /// #[async_trait::async_trait]
-/// impl Controller for MySettingsController<'_> {
+/// impl Handler for MySettingsHandler<'_> {
 ///     async fn run(&mut self, coordinator: std::sync::Arc<Coordinator<'_, S>>) -> Result<(), Error> {
 ///         let ctx = *coordinator.context();
 ///         ctx.defer().await?;
 ///         
-///         // Controller logic here
+///         // Handler logic here
 ///         
 ///         Ok(NavigationResult::Exit)
 ///     }
 /// }
 /// ```
 #[macro_export]
-macro_rules! controller {
+macro_rules! handler {
     (
         $(#[$meta:meta])*
         $vis:vis struct $name:ident<$lt:lifetime> {
@@ -125,7 +125,7 @@ macro_rules! controller {
         }
 
         impl<$lt> $name<$lt> {
-            /// Creates a new controller instance.
+            /// Creates a new handler instance.
             pub fn new(
                 ctx: $crate::bot::command::Context<$lt>,
                 $($field: $field_type),*

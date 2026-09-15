@@ -1,0 +1,224 @@
+name: Patch Version
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: 'Version string to patch into Cargo.toml'
+        required: false
+        type: string
+        default: ''
+      publish-crates:
+        description: 'Whether to publish workspace members to crates.io'
+        required: false
+        type: boolean
+        default: false
+    outputs:
+      version:
+        description: 'The version that was patched'
+        value: ${{ jobs.patch.outputs.version }}
+      packages:
+        description: 'Space-separated list of package names to publish'
+        value: ${{ jobs.patch.outputs.packages }}
+      manifests_b64:
+        description: 'Base64 gzip tar of the patched manifests (Cargo.toml, Cargo.lock, crates/**/Cargo.toml)'
+        value: ${{ jobs.patch.outputs.manifests_b64 }}
+
+jobs:
+  patch:
+    name: Patch Cargo.toml Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.set-version.outputs.version }}
+      packages: ${{ steps.workspace.outputs.packages }}
+      manifests_b64: ${{ steps.encode-manifests.outputs.manifests_b64 }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Fetch All Tags
+        run: git fetch --tags --force origin '+refs/tags/*:refs/tags/*'
+
+      - name: Determine version
+        id: set-version
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            LATEST_TAG=$(git tag -l 'v*' --sort=-version:refname | head -1)
+            VERSION="${LATEST_TAG:-}"
+            if [ -z "$VERSION" ]; then
+              VERSION=$(grep '^version = ' Cargo.toml | head -n1 | sed 's/version = "\(.*\)"/\1/')
+            fi
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Patching version: $VERSION"
+
+      - name: Patch root Cargo.toml
+        run: |
+          VERSION=${{ steps.set-version.outputs.version }}
+          VERSION=${VERSION#v}
+          sed -i "0,/^version = \".*\"/{s/^version = \".*\"/version = \"$VERSION\"/}" Cargo.toml
+
+      - name: Patch workspace members
+        id: workspace
+        run: |
+          ROOT_NAME=$(grep '^name = ' Cargo.toml | head -1 | sed 's/name = "\(.*\)"/\1/')
+
+          if [[ "${{ inputs.publish-crates }}" != "true" ]]; then
+            echo "Crates are not published — patching root package only"
+            echo "packages=$ROOT_NAME" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if ! grep -q '^\[workspace\]' Cargo.toml; then
+            echo "No workspace section found — skipping member patching"
+            echo "packages=$ROOT_NAME" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          VERSION=${{ steps.set-version.outputs.version }}
+          VERSION=${VERSION#v}
+
+          # Find workspace member directories (convention: listed under crates/)
+          MEMBERS=$(find crates -maxdepth 2 -name Cargo.toml -exec dirname {} \; | sed 's|^crates/||' | sort -u)
+          if [ -z "$MEMBERS" ]; then
+            echo "No workspace members found under crates/"
+            echo "packages=$ROOT_NAME" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Detect changed and stale members
+          TAGS=$(git tag -l 'v*' --sort=-version:refname)
+          TAG_COUNT=$(echo "$TAGS" | grep -c . || true)
+          if [ "$TAG_COUNT" -lt 1 ]; then
+            CHANGED="$MEMBERS"
+            echo "No previous tag found — bumping all members"
+          else
+            PREV_TAG=$(echo "$TAGS" | head -1)
+            echo "Previous tag: $PREV_TAG"
+
+            # Detect members with file changes since last tag
+            CHANGED=""
+            for member in $MEMBERS; do
+              if git diff --name-only "$PREV_TAG"..HEAD -- "crates/$member/" | grep -q .; then
+                CHANGED="$CHANGED $member"
+              fi
+            done
+
+            # Detect stale members (unchanged in git but version matches crates.io)
+            for member in $MEMBERS; do
+              if echo " $CHANGED " | grep -q " $member "; then
+                continue
+              fi
+              PKG=$(grep '^name = ' "crates/$member/Cargo.toml" | head -1 | sed 's/name = "\(.*\)"/\1/')
+              CURRENT=$(grep '^version = ' "crates/$member/Cargo.toml" | head -1 | sed 's/version = "\(.*\)"/\1/')
+              PUBLISHED=$(cargo search "$PKG" 2>/dev/null | grep "^${PKG} = " | sed 's/^[^=]*= "\(.*\)".*$/\1/' || true)
+              if [ -n "$PUBLISHED" ] && [ "$CURRENT" = "$PUBLISHED" ]; then
+                echo "  $member: stale ($CURRENT matches crates.io, source differs) — forcing patch bump"
+                CHANGED="$CHANGED $member"
+              fi
+            done
+          fi
+
+          # Build packages list and output it (even when member list is empty)
+          PACKAGES="$ROOT_NAME"
+          for member in $CHANGED; do
+            PKG=$(grep '^name = ' "crates/$member/Cargo.toml" | head -1 | sed 's/name = "\(.*\)"/\1/')
+            PACKAGES="$PACKAGES $PKG"
+          done
+          echo "packages=$PACKAGES" >> "$GITHUB_OUTPUT"
+          echo "Publishing packages: $PACKAGES"
+
+          if [ -z "$CHANGED" ]; then
+            echo "No member changes detected — root only"
+            exit 0
+          fi
+
+          echo "members=$CHANGED" >> "$GITHUB_OUTPUT"
+          echo "Patching changed members: $CHANGED"
+
+          for member in $CHANGED; do
+            CURRENT=$(grep '^version = ' "crates/$member/Cargo.toml" | head -n1 | sed 's/version = "\(.*\)"/\1/')
+            BUMP="patch"
+
+            if [ -n "$PREV_TAG" ]; then
+              while IFS= read -r commit; do
+                if echo "$commit" | grep -q '^chore!(major)'; then
+                  BUMP="major"; break
+                elif echo "$commit" | grep -q '^chore!(minor)'; then
+                  BUMP="minor"
+                fi
+              done < <(git log "$PREV_TAG..HEAD" --no-merges --format="%s" -- "crates/$member/")
+            fi
+
+            MAJOR=$(echo "$CURRENT" | cut -d. -f1)
+            MINOR=$(echo "$CURRENT" | cut -d. -f2)
+            PATCH=$(echo "$CURRENT" | cut -d. -f3)
+            case "$BUMP" in
+              major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+              minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+              patch) PATCH=$((PATCH + 1)) ;;
+            esac
+            MEMBER_VERSION="$MAJOR.$MINOR.$PATCH"
+
+            echo "  crates/$member: $CURRENT -> $MEMBER_VERSION ($BUMP)"
+            sed -i "0,/^version = \".*\"/{s/^version = \".*\"/version = \"$MEMBER_VERSION\"/}" "crates/$member/Cargo.toml"
+
+            # Update workspace dependency in [workspace.dependencies] (section-aware)
+            PKG=$(grep '^name = ' "crates/$member/Cargo.toml" | head -1 | sed 's/name = "\(.*\)"/\1/')
+            echo "  Updating workspace dependency: $PKG -> $MEMBER_VERSION"
+            awk -v pkg="$PKG" -v ver="$MEMBER_VERSION" '
+              $1 == "[workspace.dependencies]" { in_ws = 1; print; next }
+              in_ws && /^\[/ { in_ws = 0 }
+              in_ws && $1 == pkg {
+                sub(/version = "[^"]*"/, "version = \"" ver "\"")
+              }
+              1
+            ' Cargo.toml > Cargo.toml.tmp && mv Cargo.toml.tmp Cargo.toml
+          done
+
+          # Verify workspace deps match member versions after patching
+          echo "Verifying workspace dependency consistency..."
+          for member in $CHANGED; do
+            PKG=$(grep '^name = ' "crates/$member/Cargo.toml" | head -1 | sed 's/name = "\(.*\)"/\1/')
+            MEMVER=$(grep '^version = ' "crates/$member/Cargo.toml" | head -1 | sed 's/version = "\(.*\)"/\1/')
+            WSVER=$(awk -v pkg="$PKG" '\
+              $1 == "[workspace.dependencies]" { in_ws = 1; next } \
+              in_ws && /^\[/ { in_ws = 0; next } \
+              in_ws && $1 == pkg { match($0, /version = "([^"]+)"/, a); print a[1]; exit } \
+            ' Cargo.toml)
+            if [ "$MEMVER" != "$WSVER" ]; then
+              echo "::error::Version mismatch: $PKG member=$MEMVER workspace=$WSVER"
+              exit 1
+            fi
+            echo "  $PKG: $MEMVER ✓"
+          done
+
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Regenerate Cargo.lock
+        run: cargo generate-lockfile
+
+      - name: Encode patched manifests
+        id: encode-manifests
+        run: |
+          find crates -name Cargo.toml 2>/dev/null | sort > /tmp/member-tomls.txt
+          tar czf /tmp/patched-manifests.tar.gz Cargo.toml Cargo.lock --files-from /tmp/member-tomls.txt
+          B64=$(base64 -w0 /tmp/patched-manifests.tar.gz)
+          echo "manifests_b64=$B64" >> "$GITHUB_OUTPUT"
+          echo "Encoded $(wc -c < /tmp/patched-manifests.tar.gz) bytes gzipped (${#B64} chars b64)"
+
+      - name: Upload patched manifests
+        uses: actions/upload-artifact@v4
+        with:
+          name: patched-cargo-toml
+          path: |
+            Cargo.toml
+            Cargo.lock
+            crates/**/Cargo.toml
+          retention-days: 3

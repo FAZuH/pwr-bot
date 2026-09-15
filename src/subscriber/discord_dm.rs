@@ -62,7 +62,7 @@ impl DiscordDmSubscriber {
     ) -> anyhow::Result<()> {
         let user_id = UserId::from_str(&sub.target_id)?;
 
-        debug!("Fetching user id `{}`.", user_id);
+        debug!("Fetching user id `{user_id}`.");
         let user = self.bot.http.get_user(user_id).await?;
 
         debug!("Fetched user id `{}` ({}). Sending DM.", user_id, user.name);

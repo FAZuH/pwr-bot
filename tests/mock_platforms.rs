@@ -19,7 +19,7 @@ fn get_response(filename: &str) -> String {
 }
 
 #[tokio::test]
-async fn test_anilist_fetch_source() {
+async fn anilist_fetch_source() {
     let server = MockServer::start();
     let mut platform = AniListPlatform::new();
     platform.base.info.api_url = server.url("");
@@ -54,7 +54,7 @@ async fn test_anilist_fetch_source() {
 }
 
 #[tokio::test]
-async fn test_anilist_fetch_latest() {
+async fn anilist_fetch_latest() {
     let server = MockServer::start();
     let mut platform = AniListPlatform::new();
     platform.base.info.api_url = server.url("");
@@ -81,7 +81,7 @@ async fn test_anilist_fetch_latest() {
 }
 
 #[tokio::test]
-async fn test_mangadex_fetch_source() {
+async fn mangadex_fetch_source() {
     let server = MockServer::start();
     let mut platform = MangaDexPlatform::new();
     platform.base.info.api_url = server.url("");
@@ -90,7 +90,7 @@ async fn test_mangadex_fetch_source() {
     let source_id = "0e017a08-835a-4cbe-ba63-576d5010a5a0";
 
     let mock = server.mock(|when, then| {
-        when.method(GET).path(format!("/manga/{}", source_id));
+        when.method(GET).path(format!("/manga/{source_id}"));
         then.status(200)
             .header("content-type", "application/json")
             .body(response_body);
@@ -113,7 +113,7 @@ async fn test_mangadex_fetch_source() {
 }
 
 #[tokio::test]
-async fn test_mangadex_fetch_latest() {
+async fn mangadex_fetch_latest() {
     let server = MockServer::start();
     let mut platform = MangaDexPlatform::new();
     platform.base.info.api_url = server.url("");
@@ -122,7 +122,7 @@ async fn test_mangadex_fetch_latest() {
     let items_id = "0e017a08-835a-4cbe-ba63-576d5010a5a0";
 
     let mock = server.mock(|when, then| {
-        when.method(GET).path(format!("/manga/{}/feed", items_id));
+        when.method(GET).path(format!("/manga/{items_id}/feed"));
         then.status(200)
             .header("content-type", "application/json")
             .body(response_body);
@@ -140,7 +140,7 @@ async fn test_mangadex_fetch_latest() {
 }
 
 #[tokio::test]
-async fn test_comick_fetch_source() {
+async fn comick_fetch_source() {
     let server = MockServer::start();
     let mut platform = ComickPlatform::new();
     platform.base.info.api_url = server.url("");
@@ -149,7 +149,7 @@ async fn test_comick_fetch_source() {
     let slug = "02-tonikaku-kawaii";
 
     let mock = server.mock(|when, then| {
-        when.method(GET).path(format!("/comic/{}", slug));
+        when.method(GET).path(format!("/comic/{slug}"));
         then.status(200)
             .header("content-type", "application/json")
             .body(response_body);
@@ -168,7 +168,7 @@ async fn test_comick_fetch_source() {
 }
 
 #[tokio::test]
-async fn test_comick_fetch_latest() {
+async fn comick_fetch_latest() {
     let server = MockServer::start();
     let mut platform = ComickPlatform::new();
     platform.base.info.api_url = server.url("");
@@ -177,7 +177,7 @@ async fn test_comick_fetch_latest() {
     let hid = "DqrXZDbr";
 
     let mock = server.mock(|when, then| {
-        when.method(GET).path(format!("/comic/{}/chapters", hid));
+        when.method(GET).path(format!("/comic/{hid}/chapters"));
         then.status(200)
             .header("content-type", "application/json")
             .body(response_body);

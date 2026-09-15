@@ -103,7 +103,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_event_bus() {
+    async fn event_bus() {
         let bus = EventBus::new();
         let counter = Arc::new(AtomicI32::new(0));
         let counter_clone = counter.clone();

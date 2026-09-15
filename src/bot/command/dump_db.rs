@@ -11,8 +11,16 @@ pub async fn command(ctx: Context<'_>) -> Result<(), Error> {
     ctx.defer().await?;
     let dump = ctx.data().service.internal.dump_database().await?;
 
+    let container = CreateContainer::new(vec![
+        CreateContainerComponent::TextDisplay(CreateTextDisplay::new("Database dump:")),
+        CreateContainerComponent::File(file_component("feeds.json")),
+        CreateContainerComponent::File(file_component("feed_versions.json")),
+        CreateContainerComponent::File(file_component("subscribers.json")),
+        CreateContainerComponent::File(file_component("subscriptions.json")),
+    ]);
     let reply = CreateReply::default()
-        .content("Database dump:")
+        .flags(MessageFlags::IS_COMPONENTS_V2)
+        .components(vec![CreateComponent::Container(container)])
         .attachment(CreateAttachment::bytes(
             serde_json::to_string_pretty(&dump.feeds)?,
             "feeds.json",
@@ -32,4 +40,13 @@ pub async fn command(ctx: Context<'_>) -> Result<(), Error> {
 
     ctx.send(reply).await?;
     Ok(())
+}
+
+/// The Components V2 file component referencing an uploaded attachment by its
+/// filename — without it, a Components V2 message uploads the file but never
+/// displays it.
+fn file_component(filename: &'static str) -> CreateFile<'static> {
+    CreateFile::new(CreateUnfurledMediaItem::new(format!(
+        "attachment://{filename}"
+    )))
 }

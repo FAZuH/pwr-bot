@@ -1,0 +1,33 @@
+sequenceDiagram
+    participant D as Discord
+    participant H as Host (src/bot/gui)
+    participant U as update (src/update/feed_list)
+    participant A as EffectHandler
+    participant DB as Service / PostgreSQL
+
+    D->>H: /feed command
+    H->>U: Msg::Start
+    U-->>H: Effect::QuerySubscriptions
+    H->>A: execute QuerySubscriptions
+    A->>DB: list paginated subscriptions
+    DB-->>A: subscriptions
+    A-->>H: Msg::SubscriptionsLoaded
+    H->>U: Msg::SubscriptionsLoaded
+    U-->>H: no effects (model holds data)
+    H->>H: view(model)
+    H->>D: edit message (sections, pagination row)
+    D->>H: component click (custom_id)
+    H->>U: Msg::ToggleUnsub (feed id)
+    U-->>H: no effects (model mutated)
+    H->>H: view(model)
+    H->>D: edit message (unsub button shown)
+    D->>H: Save click
+    H->>U: Msg::Save
+    U-->>H: Effect::SaveUnsubscribes (HashSet)
+    H->>A: execute SaveUnsubscribes
+    A->>DB: unsubscribe feeds
+    DB-->>A: ok
+    A-->>H: Msg::Saved
+    H->>U: Msg::Saved
+    U-->>H: no effects
+    H->>D: edit message (saved state)

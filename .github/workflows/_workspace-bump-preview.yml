@@ -1,0 +1,89 @@
+name: Workspace Bump Preview
+
+on:
+  workflow_call:
+    outputs:
+      member-versions:
+        description: 'JSON object of member:current:bumped'
+        value: ${{ jobs.detect.outputs.member-versions }}
+
+jobs:
+  detect:
+    name: Detect Workspace Changes
+    runs-on: ubuntu-latest
+    outputs:
+      member-versions: ${{ steps.output.outputs.member-versions }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Fetch All Tags
+        run: git fetch --tags --force origin '+refs/tags/*:refs/tags/*'
+
+      - name: Prepare Tag for Preview
+        run: |
+          LATEST_TAG=$(git tag -l 'v*' --sort=-version:refname | head -1)
+          if [ -n "$LATEST_TAG" ]; then
+            MERGE_BASE=$(git merge-base HEAD "$LATEST_TAG" 2>/dev/null || git rev-parse HEAD^)
+            git tag -f "$LATEST_TAG" "$MERGE_BASE"
+          fi
+
+      - name: Detect changed workspace members
+        id: detect
+        run: |
+          if ! grep -q '^\[workspace\]' Cargo.toml; then
+            echo "member-versions={}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          MEMBERS=$(find crates -maxdepth 2 -name Cargo.toml -exec dirname {} \; | sed 's|^crates/||' | sort -u)
+          if [ -z "$MEMBERS" ]; then
+            echo "member-versions={}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          PREV_TAG=$(git tag -l 'v*' --sort=-version:refname | head -1)
+          if [ -z "$PREV_TAG" ]; then
+            CHANGED="$MEMBERS"
+          else
+            CHANGED=""
+            for member in $MEMBERS; do
+              if git diff --name-only "$PREV_TAG"..HEAD -- "crates/$member/" | grep -q .; then
+                CHANGED="$CHANGED $member"
+              fi
+            done
+          fi
+
+          RESULT="{"
+          FIRST=true
+          for member in $CHANGED; do
+            CURRENT=$(grep '^version = ' "crates/$member/Cargo.toml" | head -n1 | sed 's/version = "\(.*\)"/\1/')
+            BUMP="patch"
+            if [ -n "$PREV_TAG" ]; then
+              while IFS= read -r commit; do
+                if echo "$commit" | grep -q '^chore!(major)'; then
+                  BUMP="major"; break
+                elif echo "$commit" | grep -q '^chore!(minor)'; then
+                  BUMP="minor"
+                fi
+              done < <(git log "$PREV_TAG..HEAD" --no-merges --format="%s" -- "crates/$member/")
+            fi
+            MAJOR=$(echo "$CURRENT" | cut -d. -f1)
+            MINOR=$(echo "$CURRENT" | cut -d. -f2)
+            PATCH=$(echo "$CURRENT" | cut -d. -f3)
+            case "$BUMP" in
+              major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+              minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+              patch) PATCH=$((PATCH + 1)) ;;
+            esac
+            [ "$FIRST" = true ] || RESULT="$RESULT,"
+            FIRST=false
+            RESULT="$RESULT\"$member\":\"$CURRENT:$MAJOR.$MINOR.$PATCH\""
+          done
+          RESULT="$RESULT}"
+
+          echo "member-versions=$RESULT" >> "$GITHUB_OUTPUT"
+
+      - name: Set output
+        id: output
+        run: echo "member-versions=${{ steps.detect.outputs.member-versions }}" >> "$GITHUB_OUTPUT"

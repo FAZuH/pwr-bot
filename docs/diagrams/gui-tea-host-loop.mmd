@@ -1,0 +1,20 @@
+flowchart TD
+    S["slash command"] --> H["Host init"]
+    H --> U0["update Msg::Start"]
+    U0 --> EX["execute Effects (sync inline, async spawned)"]
+    EX --> V["render view(model)"]
+    V --> S2["send / edit message, start collectors"]
+    S2 --> EV{"next event"}
+    EV -->|"Timeout"| TO["update Msg::Expired"]
+    EV -->|"Component"| TC["translate custom_id to Msg"]
+    EV -->|"Modal submit"| TM["wrap as Msg"]
+    EV -->|"async result"| TA["wrap as Msg"]
+    TC --> U["update Msg"]
+    TM --> U
+    TA --> U
+    U -->|"Vec of Effect"| EX
+    U -->|"none"| RD{"Cmd"}
+    RD -->|"Render"| V
+    RD -->|"Continue"| S2
+    TO --> EXA["execute save Effects, then stop"]
+    EXA --> Z["end"]

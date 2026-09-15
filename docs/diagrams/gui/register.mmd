@@ -1,0 +1,32 @@
+---
+config:
+  layout: elk
+  class:
+    hideEmptyMembersBox: true
+---
+classDiagram
+    direction LR
+    class GuiFeature { <<Trait>> }
+    class RegisterFeature
+    class RegisterModel
+    class RegisterMsg {
+        <<enumeration>>
+        Start
+        Expired
+        Registered
+    }
+    class RegisterEffect {
+        <<enumeration>>
+    }
+    class RegisterAction {
+        <<enumeration>>
+    }
+    class ActionRegistry
+    class Router
+
+    GuiFeature <|.. RegisterFeature
+    RegisterFeature ..> RegisterModel : Model
+    RegisterFeature ..> RegisterMsg : Msg
+    RegisterFeature ..> RegisterEffect : Effect
+    RegisterFeature ..> RegisterAction : Action
+    Router ..> RegisterFeature : drives view + update (no Host)

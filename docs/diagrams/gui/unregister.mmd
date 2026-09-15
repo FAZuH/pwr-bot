@@ -1,0 +1,32 @@
+---
+config:
+  layout: elk
+  class:
+    hideEmptyMembersBox: true
+---
+classDiagram
+    direction LR
+    class GuiFeature { <<Trait>> }
+    class UnregisterFeature
+    class UnregisterModel
+    class UnregisterMsg {
+        <<enumeration>>
+        Start
+        Expired
+        Unregistered
+    }
+    class UnregisterEffect {
+        <<enumeration>>
+    }
+    class UnregisterAction {
+        <<enumeration>>
+    }
+    class ActionRegistry
+    class Router
+
+    GuiFeature <|.. UnregisterFeature
+    UnregisterFeature ..> UnregisterModel : Model
+    UnregisterFeature ..> UnregisterMsg : Msg
+    UnregisterFeature ..> UnregisterEffect : Effect
+    UnregisterFeature ..> UnregisterAction : Action
+    Router ..> UnregisterFeature : drives view + update (no Host)

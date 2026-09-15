@@ -49,7 +49,7 @@ pub fn generate_line_chart(
             x_min = 0;
             x_max = 23;
             for i in 0..=23 {
-                x_labels.push(format!("{:02}:00", i));
+                x_labels.push(format!("{i:02}:00"));
             }
         }
         VoiceStatsTimeRange::Weekly => {
@@ -64,7 +64,7 @@ pub fn generate_line_chart(
             x_min = 1;
             x_max = 31;
             for i in 1..=31 {
-                x_labels.push(format!("{}", i));
+                x_labels.push(format!("{i}"));
             }
         }
         _ => {}
@@ -117,12 +117,11 @@ pub fn generate_line_chart(
 
     for line_idx in 0..=3 {
         for x_val in x_min..=x_max {
-            let val;
-            if stat_type == GuildStatType::ActiveUserCount && !is_user {
-                val = user_map
+            let val = if stat_type == GuildStatType::ActiveUserCount && !is_user {
+                user_map
                     .get(&(line_idx, x_val))
                     .map(|s| s.len() as f64)
-                    .unwrap_or(0.0);
+                    .unwrap_or(0.0)
             } else if stat_type == GuildStatType::AverageTime && !is_user {
                 let secs = *time_map.get(&(line_idx, x_val)).unwrap_or(&0) as f64;
                 let users = user_map
@@ -130,11 +129,11 @@ pub fn generate_line_chart(
                     .map(|s| s.len() as f64)
                     .unwrap_or(1.0)
                     .max(1.0);
-                val = (secs / 3600.0) / users; // hours
+                (secs / 3600.0) / users // hours
             } else {
                 let secs = *time_map.get(&(line_idx, x_val)).unwrap_or(&0) as f64;
-                val = secs / 3600.0; // hours
-            }
+                secs / 3600.0 // hours
+            };
             if val > max_y {
                 max_y = val;
             }
@@ -284,7 +283,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_duration_capping() {
+    fn duration_capping() {
         let now = Utc::now();
         // create a ghost session 30 days ago
         let session = VoiceSessionsEntity {

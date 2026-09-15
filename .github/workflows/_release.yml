@@ -1,0 +1,295 @@
+name: Release
+
+on:
+  workflow_call:
+    inputs:
+      binary-name:
+        description: 'Binary name (e.g. tomo, lab-ops)'
+        required: false
+        type: string
+        default: ''
+      artifact-pattern:
+        description: 'Glob selecting uploaded artifacts to download as release assets; defaults to <binary-name>-*'
+        required: false
+        type: string
+        default: ''
+      platforms:
+        description: 'Build targets: multi (all 4) or linux (x64 only)'
+        required: false
+        type: string
+        default: 'multi'
+      build-binaries:
+        description: 'Whether to build and release binaries'
+        required: false
+        type: boolean
+        default: true
+      publish-crates:
+        description: 'Whether to publish to crates.io'
+        required: false
+        type: boolean
+        default: false
+      run-build:
+        description: 'Run the build stage (build.yml) even when build-binaries is false'
+        required: false
+        type: boolean
+        default: false
+    outputs:
+      tag:
+        description: 'The release tag that was created'
+        value: ${{ jobs.publish-changelog.outputs.tag }}
+    secrets:
+      PRIVATE_TOKEN:
+        required: true
+      DISCORD_RELEASE_WEBHOOK_URL:
+        required: false
+      CARGO_REGISTRY_TOKEN:
+        required: false
+
+jobs:
+  changelog:
+    name: Generate Changelog
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.changelog.outputs.tag }}
+      skipped: ${{ steps.changelog.outputs.skipped }}
+      changelog: ${{ steps.changelog.outputs.changelog }}
+      mode: ${{ steps.mode.outputs.mode }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Fetch All Tags
+        run: git fetch --tags --force origin '+refs/tags/*:refs/tags/*'
+
+      - name: Read changelog mode
+        id: mode
+        run: |
+          MODE=$(cat .github/changelog-mode 2>/dev/null || echo auto)
+          echo "mode=$MODE" >> "$GITHUB_OUTPUT"
+
+      - name: Set Up version.json
+        run: |
+          LATEST_TAG=$(git tag -l 'v*' --sort=-version:refname | head -1)
+          echo "{\"version\":\"${LATEST_TAG:-v0.0.0}\"}" > version.json
+
+      - name: Install changelog dependencies
+        run: |
+          npm install --no-save --no-package-lock conventional-changelog-conventionalcommits@7.0.2
+
+      - name: Generate Changelog (dry run)
+        id: changelog
+        uses: TriPSs/conventional-changelog-action@v6
+        with:
+          skip-commit: true
+          skip-tag: true
+          github-token: ${{ secrets.PRIVATE_TOKEN }}
+          config-file-path: ./.github/.config.cjs
+          version-file: ./version.json
+          preset: conventionalcommits
+          skip-version-file: true
+          skip-git-pull: true
+          skip-on-empty: false
+
+  patch-version:
+    name: Patch Version
+    needs: changelog
+    if: ${{ needs.changelog.outputs.skipped != 'true' }}
+    uses: ./.github/workflows/patch-version.yml
+    with:
+      version: ${{ needs.changelog.outputs.tag }}
+      publish-crates: ${{ inputs.publish-crates }}
+
+  build:
+    name: Build Binaries
+    needs: [changelog, patch-version]
+    if: ${{ needs.changelog.outputs.skipped != 'true' && (inputs.build-binaries || inputs.run-build) }}
+    uses: ./.github/workflows/build.yml
+    with:
+      cargo-build-args: '--release --all-features --all-targets'
+      upload-binary: ${{ inputs.build-binaries }}
+      release: true
+      require-patched-cargo: true
+
+  publish-crates:
+    name: Publish to crates.io
+    needs: [changelog, patch-version, build]
+    if: |
+      always() && 
+      needs.changelog.outputs.skipped != 'true' && 
+      inputs.publish-crates && 
+      needs.changelog.result == 'success' &&
+      (needs.build.result == 'success' || needs.build.result == 'skipped')
+    runs-on: ubuntu-latest
+    environment:
+      name: crates-io-production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Restore patched manifests
+        env:
+          MANIFESTS_B64: ${{ needs.patch-version.outputs.manifests_b64 }}
+        run: |
+          printf '%s' "$MANIFESTS_B64" | base64 -d | tar xzf -
+
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+      
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "ci"
+          add-job-id-key: false
+
+      - name: Publish to crates.io
+        uses: katyo/publish-crates@v2
+        with:
+          registry-token: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          args: --allow-dirty
+          packages: ${{ needs.patch-version.outputs.packages }}
+
+  publish-changelog:
+    name: Publish Changelog Commit
+    needs: [changelog, patch-version, build, publish-crates]
+    if: |
+      always() && 
+      needs.changelog.outputs.skipped != 'true' && 
+      needs.changelog.result == 'success' &&
+      (needs.build.result == 'success' || needs.build.result == 'skipped') &&
+      (needs.publish-crates.result == 'success' || needs.publish-crates.result == 'skipped')
+    outputs:
+      tag: ${{ steps.commit.outputs.tag }}
+      changelog-body: ${{ steps.manual-body.outputs.body }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Fetch All Tags
+        run: git fetch --tags --force origin '+refs/tags/*:refs/tags/*'
+
+      - name: Set Up version.json
+        run: |
+          LATEST_TAG=$(git tag -l 'v*' --sort=-version:refname | head -1)
+          echo "{\"version\":\"${LATEST_TAG:-v0.0.0}\"}" > version.json
+
+      - name: Restore patched manifests
+        env:
+          MANIFESTS_B64: ${{ needs.patch-version.outputs.manifests_b64 }}
+        run: |
+          printf '%s' "$MANIFESTS_B64" | base64 -d | tar xzf -
+
+      - name: Stage patched files
+        run: |
+          git add Cargo.toml Cargo.lock
+          git add crates/*/Cargo.toml 2>/dev/null || true
+
+      - name: Install changelog dependencies
+        run: |
+          npm install --no-save --no-package-lock conventional-changelog-conventionalcommits@7.0.2
+
+      - name: Commit, Tag, Push
+        id: commit
+        uses: TriPSs/conventional-changelog-action@v6
+        with:
+          github-token: ${{ secrets.PRIVATE_TOKEN }}
+          git-user-name: "faz-bot"
+          git-user-email: "mail@fazuh.com"
+          config-file-path: ./.github/.config.cjs
+          version-file: ./version.json
+          preset: conventionalcommits
+          skip-version-file: true
+          skip-git-pull: true
+          skip-on-empty: false
+          output-file: ${{ needs.changelog.outputs.mode == 'manual' && 'false' || 'CHANGELOG.md' }}
+          git-push: false
+
+      - name: Materialize [Unreleased] section
+        id: manual-body
+        if: needs.changelog.outputs.mode == 'manual'
+        run: |
+          BODY="$(node ./.github/scripts/materialize-unreleased.cjs CHANGELOG.md "${{ steps.commit.outputs.tag }}" "$(date -u +%Y-%m-%d)")"
+          git add CHANGELOG.md 2>/dev/null || true
+          {
+            echo "body<<EOF"
+            printf '%s\n' "$BODY"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Clean stale artifacts and push release
+        run: |
+          git config user.name "faz-bot"
+          git config user.email "mail@fazuh.com"
+          git remote set-url origin "https://x-access-token:${{ secrets.PRIVATE_TOKEN }}@github.com/${{ github.repository }}"
+          TAG="${{ steps.commit.outputs.tag }}"
+          git rm --cached -rf --ignore-unmatch node_modules/ version.json
+          git commit --amend --no-edit
+          if [ -n "$TAG" ]; then
+            git tag -f "$TAG"
+          fi
+          git push origin release --tags
+
+      - name: Sync version bump to main
+        run: |
+          git config user.name "faz-bot"
+          git config user.email "mail@fazuh.com"
+          git remote set-url origin "https://x-access-token:${{ secrets.PRIVATE_TOKEN }}@github.com/${{ github.repository }}"
+          git fetch origin main
+          git checkout -B main origin/main
+          git merge release --no-edit -m "chore(release): sync version bump to main [skip ci]"
+          git push origin main
+
+  release-github:
+    name: Release to GitHub
+    needs: [changelog, build, publish-changelog, publish-crates]
+    if: |
+      always() && 
+      needs.changelog.outputs.skipped != 'true' && 
+      needs.changelog.result == 'success' &&
+      (needs.build.result == 'success' || needs.build.result == 'skipped') &&
+      (needs.publish-crates.result == 'success' || needs.publish-crates.result == 'skipped') &&
+      needs.publish-changelog.result == 'success'
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_BODY: ${{ needs.changelog.outputs.mode != 'manual' && needs.changelog.outputs.changelog || needs.publish-changelog.outputs.changelog-body }}
+    steps:
+      - name: Download Artifacts
+        if: ${{ inputs.build-binaries }}
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: ${{ inputs.artifact-pattern || format('{0}-*', inputs.binary-name) }}
+
+      - name: Prepare Release Files
+        if: ${{ inputs.build-binaries }}
+        # Copy every downloaded binary artifact into the release folder.
+        # Supports any number of binaries; single-binary projects are unaffected.
+        run: |
+          mkdir -p release
+          find artifacts -mindepth 2 -maxdepth 2 -type f -exec cp {} release/ \;
+
+      - name: Create Release
+        id: release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.publish-changelog.outputs.tag }}
+          body: ${{ env.RELEASE_BODY }}
+          files: release/*
+
+      - name: Post Release on Discord
+        uses: tsickert/discord-webhook@v6.0.0
+        with:
+          webhook-url: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
+          embed-color: "9498256"
+          embed-title: "${{ github.event.repository.name }} ${{ needs.publish-changelog.outputs.tag }}"
+          embed-description: ${{ env.RELEASE_BODY }}
+          embed-url: ${{ steps.release.outputs.url }}
+          embed-timestamp: ${{ github.event.head_commit.timestamp }}
