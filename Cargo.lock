@@ -1793,7 +1793,7 @@ dependencies = [
 name = "feed-settings"
 version = "0.1.0"
 dependencies = [
- "pwr-ext 0.1.0 (git+https://github.com/FAZuH/pwr-ext?tag=v0.1.0)",
+ "pwr-ext",
  "pwr-plugin-protocol",
  "pwr-plugin-support",
  "pwr-poise-components",
@@ -2405,7 +2405,7 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 name = "hello"
 version = "0.1.0"
 dependencies = [
- "pwr-ext 0.1.0 (git+https://github.com/FAZuH/pwr-ext?tag=v0.1.0)",
+ "pwr-ext",
  "pwr-plugin-protocol",
  "pwr-plugin-support",
  "serde_json",
@@ -4283,7 +4283,7 @@ dependencies = [
  "plotters",
  "poise",
  "postgresql_embedded",
- "pwr-ext 0.1.0 (git+https://github.com/FAZuH/pwr-ext?tag=v0.1.0)",
+ "pwr-ext",
  "pwr-plugin-protocol",
  "pwr-plugin-support",
  "pwr-poise-components",
@@ -4322,17 +4322,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pwr-ext"
-version = "0.1.0"
-source = "git+https://github.com/FAZuH/pwr-ext?branch=main#60e2a93e3e29ce5e168ed68d4c6282204b54dc09"
-dependencies = [
- "serde",
- "serde_json",
- "serenity",
- "small-fixed-array",
-]
-
-[[package]]
 name = "pwr-ext-macros"
 version = "0.1.0"
 source = "git+https://github.com/FAZuH/pwr-ext?tag=v0.1.0#54310c1adc16e2ed3a3aa73ea3a70159e174b5af"
@@ -4364,7 +4353,7 @@ dependencies = [
 name = "pwr-poise-components"
 version = "0.1.0"
 dependencies = [
- "pwr-ext 0.1.0 (git+https://github.com/FAZuH/pwr-ext?tag=v0.1.0)",
+ "pwr-ext",
  "pwr-plugin-protocol",
  "serde",
  "serde_json",
@@ -4383,14 +4372,14 @@ dependencies = [
 
 [[package]]
 name = "pwr-viewgen"
-version = "0.1.0"
-source = "git+https://github.com/FAZuH/pwr-viewgen?tag=v0.1.0#dc7700ec791a56ff624b0d544032ce6e43f93ba4"
+version = "0.1.1"
+source = "git+https://github.com/FAZuH/pwr-viewgen?tag=v0.1.1#fd72ea02b385ff1f2e1f93bb4a003ebe1e541b4c"
 dependencies = [
  "chromiumoxide",
  "chrono",
  "clap",
  "futures",
- "pwr-ext 0.1.0 (git+https://github.com/FAZuH/pwr-ext?branch=main)",
+ "pwr-ext",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -5394,7 +5383,7 @@ dependencies = [
 name = "settings"
 version = "0.1.0"
 dependencies = [
- "pwr-ext 0.1.0 (git+https://github.com/FAZuH/pwr-ext?tag=v0.1.0)",
+ "pwr-ext",
  "pwr-plugin-protocol",
  "pwr-plugin-support",
  "pwr-poise-components",
@@ -6786,7 +6775,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 name = "voice-settings"
 version = "0.1.0"
 dependencies = [
- "pwr-ext 0.1.0 (git+https://github.com/FAZuH/pwr-ext?tag=v0.1.0)",
+ "pwr-ext",
  "pwr-plugin-protocol",
  "pwr-plugin-support",
  "pwr-poise-components",
@@ -7046,7 +7035,7 @@ checksum = "a28ac98ddc8b9274cb41bb4d9d4d5c425b6020c50c46f25559911905610b4a88"
 name = "welcome-settings"
 version = "0.1.0"
 dependencies = [
- "pwr-ext 0.1.0 (git+https://github.com/FAZuH/pwr-ext?tag=v0.1.0)",
+ "pwr-ext",
  "pwr-plugin-protocol",
  "pwr-plugin-support",
  "pwr-poise-components",
