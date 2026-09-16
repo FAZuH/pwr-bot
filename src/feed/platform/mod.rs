@@ -38,7 +38,7 @@ where
     limiter.until_ready().await;
 
     let req = request.build()?;
-    debug!("Making request to: {}", req.url());
+    debug!("Making request to: {}", req.uri());
     let response = client.execute(req).await?;
 
     let body = response.text().await?;
