@@ -699,7 +699,7 @@ fn plugin_slash_dispatch(
     ctx: poise::ApplicationContext<'_, Data, Error>,
 ) -> poise::BoxFuture<'_, Result<(), poise::FrameworkError<'_, Data, Error>>> {
     Box::pin(async move {
-        let command_name = ctx.command.name.as_ref();
+        let command_name = ctx.command().name.as_ref();
         let data = ctx.framework.user_data();
         let Some(plugin_name) = data.plugin_routes.get(command_name) else {
             return Err(poise::FrameworkError::new_command_structure_mismatch(
@@ -709,7 +709,7 @@ fn plugin_slash_dispatch(
         };
         // Re-parse the interaction's args against the command's schema before
         // any side effects, so the plugin receives the real arguments.
-        let args = match reparse_command_args(ctx.command, ctx.interaction) {
+        let args = match reparse_command_args(ctx.command(), ctx.interaction) {
             Ok(args) => args,
             Err(error) => return Err(poise::FrameworkError::new_command(ctx.into(), error.into())),
         };

@@ -1189,6 +1189,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "darling"
+version = "0.24.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ed17f5901b6630b993ca003def43f2f8ef4014fc13b047b57aad617ff32bc2ec"
+dependencies = [
+ "darling_core 0.24.1",
+ "darling_macro 0.24.1",
+]
+
+[[package]]
 name = "darling_core"
 version = "0.20.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1217,6 +1227,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "darling_core"
+version = "0.24.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6837e2cf7485aaae18f86181d2f0e9a7ed297a025e220aeabf63fdebd3a2ddff"
+dependencies = [
+ "ident_case",
+ "proc-macro2",
+ "quote",
+ "strsim",
+ "syn 3.0.5",
+]
+
+[[package]]
 name = "darling_macro"
 version = "0.20.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1236,6 +1259,17 @@ dependencies = [
  "darling_core 0.21.3",
  "quote",
  "syn 2.0.116",
+]
+
+[[package]]
+name = "darling_macro"
+version = "0.24.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2ac7135c3ef02b2f7833bbeb1be5ba7f966dcde8a87c6b87f65a778d71a02785"
+dependencies = [
+ "darling_core 0.24.1",
+ "quote",
+ "syn 3.0.5",
 ]
 
 [[package]]
@@ -1316,14 +1350,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "derivative"
-version = "2.2.0"
+name = "derive-where"
+version = "1.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fcc3dd5e9e9c0b295d6e1e4d811fb6f157d5ffd784b8d202fc62eac8035a770b"
+checksum = "2e2b94854e8576378ccda7c8de8a66ed8b4e8acbd2c50ec3418ea6c8aaf4b567"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 1.0.109",
+ "syn 3.0.5",
 ]
 
 [[package]]
@@ -2631,7 +2665,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2 0.6.5",
  "tokio",
  "tower-service",
  "tracing",
@@ -3925,13 +3959,12 @@ dependencies = [
 
 [[package]]
 name = "poise"
-version = "0.6.1"
-source = "git+https://github.com/serenity-rs/poise?branch=serenity-next#b189f7c1cfd47eb4e7863683a49c389a9702ce23"
+version = "0.7.0"
+source = "git+https://github.com/serenity-rs/poise?branch=serenity-next#e762abbdf210ef77ab46187f5d9710d7fca22c3e"
 dependencies = [
  "async-trait",
- "derivative",
+ "derive-where",
  "futures-util",
- "indexmap",
  "parking_lot",
  "poise_macros",
  "regex",
@@ -3943,13 +3976,13 @@ dependencies = [
 
 [[package]]
 name = "poise_macros"
-version = "0.6.1"
-source = "git+https://github.com/serenity-rs/poise?branch=serenity-next#b189f7c1cfd47eb4e7863683a49c389a9702ce23"
+version = "0.7.0"
+source = "git+https://github.com/serenity-rs/poise?branch=serenity-next#e762abbdf210ef77ab46187f5d9710d7fca22c3e"
 dependencies = [
- "darling 0.20.11",
+ "darling 0.24.1",
  "proc-macro2",
  "quote",
- "syn 2.0.116",
+ "syn 3.0.5",
 ]
 
 [[package]]
@@ -4370,7 +4403,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.5.10",
+ "socket2 0.6.5",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -4408,7 +4441,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.5.10",
+ "socket2 0.6.5",
  "tracing",
  "windows-sys 0.60.2",
 ]
@@ -5250,7 +5283,7 @@ dependencies = [
 [[package]]
 name = "serenity"
 version = "0.12.5"
-source = "git+https://github.com/serenity-rs/serenity?branch=next#46f5689715c49476ab289465b675dd79e25fb079"
+source = "git+https://github.com/serenity-rs/serenity?branch=next#98ec74223b0ff77fc4e8085d25569ea59e09a36f"
 dependencies = [
  "aformat",
  "arrayvec",
@@ -6371,9 +6404,9 @@ dependencies = [
 
 [[package]]
 name = "trim-in-place"
-version = "0.1.7"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "343e926fc669bc8cde4fa3129ab681c63671bae288b1f1081ceee6d9d37904fc"
+checksum = "e7d6719f139c2eebdc67eb3c1bae4fe8f70923492acac034c2d425742e08f80d"
 
 [[package]]
 name = "try-lock"
@@ -7023,7 +7056,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
