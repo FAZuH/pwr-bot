@@ -5,10 +5,6 @@ use std::fmt::Debug;
 use log::error;
 use uuid::Uuid;
 
-use crate::feed::error::FeedError;
-use crate::repo::error::DatabaseError;
-use crate::service::error::ServiceError;
-
 /// Application-level errors.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -39,12 +35,4 @@ impl AppError {
         error!("Internal error ({ref_id}): {msg:?}");
         ref_id
     }
-}
-
-/// Union of all possible error types in the application.
-pub enum AppErrorKind {
-    AppError(AppError),
-    DatabaseError(DatabaseError),
-    FeedError(FeedError),
-    ServiceError(ServiceError),
 }

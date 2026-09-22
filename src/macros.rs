@@ -1,69 +1,3 @@
-/// Generates a struct with an internal `data` field and implements `WithData<T>`.
-///
-/// # Syntax
-///
-/// ```rust,ignore
-/// with_data! {
-///     DataType,
-///     pub struct MyStruct<'a> {
-///         field1: Type1,
-///         field2: Type2,
-///     }
-/// }
-/// ```
-///
-/// # Example
-///
-/// ```rust,ignore
-/// struct MyData {
-///     count: i32,
-/// }
-///
-/// with_data! {
-///     MyData,
-///     pub struct Counter<'a> {
-///         name: &'a str,
-///     }
-/// }
-///
-/// let mut counter = Counter {
-///     data: MyData { count: 0 },
-///     name: "test",
-/// };
-///
-/// counter.data_mut().count += 1;
-/// assert_eq!(counter.data().count, 1);
-/// ```
-#[macro_export]
-macro_rules! with_data {
-    (
-        $data_type:ty,
-        $(#[$meta:meta])*
-        $vis:vis struct $name:ident<$lt:lifetime> {
-            $($field:ident : $field_type:ty),* $(,)?
-        }
-    ) => {
-        $(#[$meta])*
-        $vis struct $name<$lt> {
-            /// Internal data storage.
-            pub data: $data_type,
-            $(
-                #[doc = concat!("Field `", stringify!($field), "`.")]
-                pub $field: $field_type,
-            )*
-        }
-
-        impl<$lt> $crate::WithData<$data_type> for $name<$lt> {
-            fn data(&self) -> &$data_type {
-                &self.data
-            }
-            fn data_mut(&mut self) -> &mut $data_type {
-                &mut self.data
-            }
-        }
-    };
-}
-
 /// Generates boilerplate for a Handler implementation.
 ///
 /// This macro creates a handler struct with constructor and Handler
@@ -84,7 +18,7 @@ macro_rules! with_data {
 ///
 /// ```rust,ignore
 /// use pwr_bot::handler;
-/// use pwr_bot::bot::navigation::NavigationResult;
+/// use pwr_bot::bot::navigation::Navigation;
 ///
 /// handler! {
 ///     pub struct MySettingsHandler {}
@@ -92,14 +26,14 @@ macro_rules! with_data {
 ///
 /// // Then implement the run method:
 /// #[async_trait::async_trait]
-/// impl Handler for MySettingsHandler {
-///     async fn run(&mut self, coordinator: std::sync::Arc<Coordinator<'_, S>>) -> Result<(), Error> {
+/// impl CommandHandler for MySettingsHandler {
+///     async fn run(&mut self, coordinator: std::sync::Arc<Router<'_>>) -> Result<(), Error> {
 ///         let ctx = *coordinator.context();
 ///         ctx.defer().await?;
-///         
+///
 ///         // Handler logic here
-///         
-///         Ok(NavigationResult::Exit)
+///
+///         Ok(Navigation::Exit)
 ///     }
 /// }
 /// ```
@@ -241,13 +175,6 @@ macro_rules! action_extends {
                 $(#[doc = $doc])*
                 $variant $( ( $($tuple_field),* ) )? $( { $($struct_field : $struct_type),* } )?,
             )*
-        }
-
-        impl $name {
-            #[doc = "Create from base action"]
-            pub fn from_base(base: $base) -> Self {
-                Self::Base(base)
-            }
         }
 
         impl $crate::bot::view::Action for $name {
