@@ -304,8 +304,6 @@ mod tests {
     enum TestAction {
         First,
         Second,
-        #[allow(dead_code)]
-        Third,
     }
 
     impl Action for TestAction {
@@ -313,7 +311,6 @@ mod tests {
             match self {
                 TestAction::First => "First",
                 TestAction::Second => "Second",
-                TestAction::Third => "Third",
             }
         }
     }

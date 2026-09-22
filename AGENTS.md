@@ -86,12 +86,12 @@ for the layering rules. Existing modules: `about`, `feed_batch`,
 - PostgreSQL with Diesel (diesel-async 0.8 + deadpool)
 - Migrations: `diesel migration generate <name>` (requires `diesel_cli` installed with PostgreSQL support)
 - Schema source: `src/repo/schema.rs` — regenerate with `diesel print-schema` after migration changes, then manually correct `Nullable<Integer>` PKs to `Integer`
-- See `.opencode/skills/db-schema/SKILL.md` for migration and model patterns
+- See `.agents/skills/db-schema/SKILL.md` for migration and model patterns
 - Migration script: `scripts/migrate.py` (SQLite → PostgreSQL data migration)
 
 ## Commit Conventions
 
-See `.opencode/skills/commit/SKILL.md` for full conventions.
+See `docs/dev/commit-changelog.md` for full conventions.
 
 - **User-facing commits**: include `[pub]` or `[public]` in the message (anywhere) to appear in the changelog
 - **CI skip**: append `[skip ci]`, `[no ci]`, `[ci skip]`, etc. for docs/format-only commits
@@ -108,7 +108,7 @@ Source lives in `docs/diagrams/*.mmd`. Export to PNG with `mmdc` after edits.
 | Mistake | Solution |
 |---------|----------|
 | Stripping doc comments during refactoring | Preserve all `///` and `//!` docs when moving code |
-| Wrong commit format | Follow `.opencode/skills/commit/SKILL.md` strictly |
+| Wrong commit format | Follow `docs/dev/commit-changelog.md` strictly |
 
 ## Agent skills
 
