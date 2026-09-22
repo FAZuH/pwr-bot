@@ -84,14 +84,14 @@ pub async fn command(
     Ok(())
 }
 
-handler! { pub struct VoiceStatsHandler<'a> {
+handler! { pub struct VoiceStatsHandler {
     time_range: VoiceStatsTimeRange,
     target_user: Option<User>,
     stat_type: GuildStatType,
 } }
 
 #[async_trait::async_trait]
-impl CommandHandler for VoiceStatsHandler<'_> {
+impl CommandHandler for VoiceStatsHandler {
     async fn run(&mut self, coordinator: std::sync::Arc<Router<'_>>) -> Result<(), Error> {
         let ctx = *coordinator.context();
         ctx.defer().await?;

@@ -66,14 +66,14 @@ macro_rules! with_data {
 
 /// Generates boilerplate for a Handler implementation.
 ///
-/// This macro creates a handler struct with context field, constructor,
-/// and Handler trait implementation with the run method signature.
+/// This macro creates a handler struct with constructor and Handler
+/// fields: the run method reads context from the coordinator.
 ///
 /// # Syntax
 ///
 /// ```rust,ignore
 /// handler! {
-///     pub struct MyHandler<'a> {
+///     pub struct MyHandler {
 ///         field1: Type1,
 ///         field2: Type2,
 ///     }
@@ -87,12 +87,12 @@ macro_rules! with_data {
 /// use pwr_bot::bot::navigation::NavigationResult;
 ///
 /// handler! {
-///     pub struct MySettingsHandler<'a> {}
+///     pub struct MySettingsHandler {}
 /// }
 ///
 /// // Then implement the run method:
 /// #[async_trait::async_trait]
-/// impl Handler for MySettingsHandler<'_> {
+/// impl Handler for MySettingsHandler {
 ///     async fn run(&mut self, coordinator: std::sync::Arc<Coordinator<'_, S>>) -> Result<(), Error> {
 ///         let ctx = *coordinator.context();
 ///         ctx.defer().await?;
@@ -107,7 +107,7 @@ macro_rules! with_data {
 macro_rules! handler {
     (
         $(#[$meta:meta])*
-        $vis:vis struct $name:ident<$lt:lifetime> {
+        $vis:vis struct $name:ident {
             $(
                 $(#[$field_meta:meta])*
                 $field:ident : $field_type:ty
@@ -115,23 +115,19 @@ macro_rules! handler {
         }
     ) => {
         $(#[$meta])*
-        $vis struct $name<$lt> {
-            #[allow(dead_code)]
-            ctx: $crate::bot::command::Context<$lt>,
+        $vis struct $name {
             $(
                 $(#[$field_meta:meta])*
                 pub $field: $field_type,
             )*
         }
 
-        impl<$lt> $name<$lt> {
+        impl $name {
             /// Creates a new handler instance.
             pub fn new(
-                ctx: $crate::bot::command::Context<$lt>,
                 $($field: $field_type),*
             ) -> Self {
                 Self {
-                    ctx,
                     $($field,)*
                 }
             }
