@@ -9,8 +9,10 @@
 //! Behavior:
 //! - announces `hello` (`v`, `name`, `caps`) as its first line after spawn;
 //! - answers `invoke` of the `settings` command with the settings hub view,
-//!   loading the persisted model from `host.kv.get` (`namespace='settings'`)
-//!   on first open and applying the default model when the key is unset;
+//!   loading the persisted model from the per-feature `host.kv.get` keys
+//!   (`namespace='settings'`) merged over the legacy blob key, so an upgrade
+//!   never resets the toggles, and applying the default model when nothing
+//!   is set; opening a hub writes nothing (#136);
 //! - renders Components V2 (`IS_COMPONENTS_V2`, no legacy content): a
 //!   container holding the `-# **Settings**` header, the two info sections
 //!   from the original monolith hub, a row of per-feature buttons, a string
@@ -18,7 +20,9 @@
 //!   nav row; the 🛈 About button sits outside the container;
 //! - answers `view.interact` on the toggle select (`settings:toggle`) by
 //!   toggling every selected feature via the settings update logic and
-//!   persisting the model through `host.kv.set` before replying;
+//!   persisting only the toggled features' keys through `host.kv.set`
+//!   before replying, so two concurrently open hubs never revert each
+//!   other's toggles on different features (#136);
 //! - `settings:about` issues `host.stats` and renders the plugin-side About
 //!   panel with the live values (formatted like `/about`'s Stats section);
 //!   a failed op renders the fallback copy — `settings:about:back` returns
@@ -81,8 +85,19 @@ const PLUGIN_NAME: &str = "settings";
 /// The KV namespace the settings model is persisted under.
 const KV_NAMESPACE: &str = "settings";
 
-/// The KV key the settings model is persisted under.
-const KV_MODEL_KEY: &str = "model";
+/// The legacy blob key the pre-per-feature-keys deployments wrote: read as a
+/// fallback so an upgrade never silently resets the toggles, never written
+/// (harmless to keep around, trivial to roll back).
+const KV_LEGACY_KEY: &str = "model";
+
+/// The per-feature KV keys in load order, paired with their toggle message:
+/// one `"true"`/`"false"` value per key, so concurrently open hubs persist
+/// different features without clobbering each other (#136).
+const KV_KEYS: [(&str, SettingsMsg); 3] = [
+    ("feeds", SettingsMsg::Feeds),
+    ("voice", SettingsMsg::Voice),
+    ("welcome", SettingsMsg::Welcome),
+];
 
 /// Custom ids for the hub's interactive components.
 const CUSTOM_ID_TOGGLE: &str = "settings:toggle";
@@ -125,14 +140,22 @@ enum NavTargets {
 /// what to do with the host's resp once it arrives. The pending kinds whose
 /// reply echoes an interaction's session state carry that state, parsed from
 /// the interaction args at dispatch time.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 enum Pending {
-    /// The `host.kv.get` issued to load the model before the first render.
-    /// The page a panel asked the hub to open on rides the chain: the
-    /// panel's Back/About handoff names it through its `page` invoke arg.
-    Load(u64, Page),
-    /// The `host.kv.set` issued to persist a toggled session model.
-    Save(u64, ViewState),
+    /// The `host.kv.get` chain loading the model before the first render:
+    /// one get per feature key ([`KV_KEYS`], in order), then the legacy
+    /// blob key. Carries the feature states loaded so far and the
+    /// in-flight step — an index into [`KV_KEYS`], with `KV_KEYS.len()`
+    /// fetching the legacy key. The page a panel asked the hub to open on
+    /// rides the chain: the panel's Back/About handoff names it through
+    /// its `page` invoke arg.
+    Load(u64, Page, [Loaded; 3], usize),
+    /// The `host.kv.set` chain persisting a toggle, one feature key per
+    /// call: the key/value pairs left to persist — the first is the write
+    /// currently in flight — and the keys whose writes failed so far. The
+    /// last write's resp arrives while one pair remains, answering the
+    /// session's envelope.
+    Save(u64, ViewState, Vec<(&'static str, bool)>, Vec<&'static str>),
     /// The `host.open_view` issued to open a target plugin's panel. The
     /// optional id is the message the click fired on: when present, the
     /// panel replaces that message and the resp answers with the
@@ -147,7 +170,7 @@ enum Pending {
 impl Pending {
     /// The host op this pending kind belongs to. The op string lives here so
     /// it stays paired with the kind that resolves its resp.
-    fn op(self) -> &'static str {
+    fn op(&self) -> &'static str {
         match self {
             Pending::Load(..) => "host.kv.get",
             Pending::Save(..) => "host.kv.set",
@@ -266,10 +289,10 @@ fn page_from_name(name: Option<&str>) -> Page {
 /// is showing. Serialized as the envelope's opaque `view` payload, which the
 /// host stores per message and echoes back on every interaction — so two
 /// concurrently open hubs keep independent pages and models instead of
-/// sharing process-global state. The tradeoff is lost updates: each toggle
-/// persists its session's full model, so two hubs open at once last-writer-
-/// wins against each other — acceptable for three boolean features, and a
-/// reopen of the hub picks up whatever was persisted.
+/// sharing process-global state. A toggle persists only the toggled
+/// feature's key (#136), so two hubs never revert each other on different
+/// features; two toggles on the SAME feature stay last-writer-wins — two
+/// humans flipping one switch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct ViewState {
     model: SettingsModel,
@@ -330,6 +353,55 @@ fn toggle_msg_for(label: &str) -> Option<SettingsMsg> {
         .iter()
         .find(|(name, _, _)| *name == label)
         .map(|(_, msg, _)| *msg)
+}
+
+/// The KV key one feature's boolean persists under.
+fn feature_key(msg: SettingsMsg) -> &'static str {
+    match msg {
+        SettingsMsg::Feeds => "feeds",
+        SettingsMsg::Voice => "voice",
+        SettingsMsg::Welcome => "welcome",
+    }
+}
+
+/// Parses a persisted feature value: only `"true"` and `"false"` count;
+/// anything else is treated as absent.
+fn parse_bool(value: &str) -> Option<bool> {
+    match value {
+        "true" => Some(true),
+        "false" => Some(false),
+        _ => None,
+    }
+}
+
+/// One feature key's loaded state: the persisted value, `Absent` when the
+/// key is missing (the legacy blob's field applies), or `Failed` when the
+/// get errored — the feature stays at its default, the pre-per-feature-key
+/// behavior, rather than resurrecting legacy state behind a transient
+/// error.
+#[derive(Debug, Clone, Copy)]
+enum Loaded {
+    Value(bool),
+    Absent,
+    Failed,
+}
+
+/// Merges the loaded per-feature states over the legacy blob: a loaded
+/// value wins, an absent key keeps the legacy field's value, and a failed
+/// get (or a missing legacy field, or no blob at all) stays the default.
+/// `loaded` is indexed like [`KV_KEYS`].
+fn merge_model(legacy: Option<&Value>, loaded: &[Loaded; 3]) -> SettingsModel {
+    let fallback = legacy.map(SettingsModel::from_value).unwrap_or_default();
+    let pick = |loaded: Loaded, legacy_value: bool| match loaded {
+        Loaded::Value(on) => on,
+        Loaded::Absent => legacy_value,
+        Loaded::Failed => false,
+    };
+    SettingsModel {
+        feeds_enabled: pick(loaded[0], fallback.feeds_enabled),
+        voice_enabled: pick(loaded[1], fallback.voice_enabled),
+        welcome_enabled: pick(loaded[2], fallback.welcome_enabled),
+    }
 }
 
 /// Info text under the Configure heading, verbatim from the original hub.
@@ -651,17 +723,17 @@ fn manifest() -> Manifest {
     }
 }
 
-/// The `host.kv.get` call args for the settings model.
-fn kv_get_args() -> Value {
-    json!({ "namespace": KV_NAMESPACE, "key": KV_MODEL_KEY })
+/// The `host.kv.get` call args for one settings key.
+fn kv_get_args(key: &str) -> Value {
+    json!({ "namespace": KV_NAMESPACE, "key": key })
 }
 
-/// The `host.kv.set` call args persisting the settings model.
-fn kv_set_args(model: &SettingsModel) -> Value {
+/// The `host.kv.set` call args persisting one feature's boolean.
+fn kv_set_args(key: &str, value: bool) -> Value {
     json!({
         "namespace": KV_NAMESPACE,
-        "key": KV_MODEL_KEY,
-        "value": serde_json::to_string(&model.to_value()).expect("serialize settings model"),
+        "key": key,
+        "value": if value { "true" } else { "false" },
     })
 }
 
@@ -718,10 +790,11 @@ fn issue_host_call(
         pending: pending_kind,
         args,
     } = call;
+    let op = pending_kind.op();
     pending.insert(*next_call_id, pending_kind);
     let call_msg = Msg::Call {
         id: *next_call_id,
-        op: pending_kind.op().into(),
+        op: op.into(),
         cmd: None,
         args: Some(args),
     };
@@ -736,14 +809,14 @@ fn answer_envelope(
     invoke_id: u64,
     ok: bool,
     error: Option<WireError>,
-    pending_kind: Pending,
+    op: &str,
     state: &ViewState,
     ctx: &RenderCtx<'_>,
 ) -> bool {
     if !ok {
         eprintln!(
             "{} failed: {:?}",
-            pending_kind.op(),
+            op,
             error.unwrap_or_else(|| WireError {
                 kind: "HostError".into(),
                 msg: "host call failed".into(),
@@ -846,7 +919,10 @@ fn main() -> ExitCode {
                                 .and_then(|a| a.get("page"))
                                 .and_then(Value::as_str),
                         );
-                        Some(HostCall::new(Pending::Load(id, page), kv_get_args()))
+                        Some(HostCall::new(
+                            Pending::Load(id, page, [Loaded::Absent; 3], 0),
+                            kv_get_args(KV_KEYS[0].0),
+                        ))
                     }
                     ("view.interact", Some(PLUGIN_NAME)) => {
                         let custom_id = args
@@ -937,21 +1013,43 @@ fn main() -> ExitCode {
                                 continue;
                             };
                             let mut current = session.model;
+                            // One key per toggled feature: a toggle never
+                            // writes untouched features, so two concurrently
+                            // open hubs never revert each other (#136).
+                            let mut writes: Vec<(&'static str, bool)> = Vec::new();
                             for value in values.iter().filter_map(Value::as_str) {
                                 if let Some(msg) = toggle_msg_for(value) {
                                     update(msg, &mut current);
+                                    writes.push((feature_key(msg), feature_enabled(&current, msg)));
                                 }
                             }
-                            // The cache seeds future sessions with what this
-                            // toggle just persisted.
-                            model = Some(current);
                             let state = ViewState {
                                 model: current,
                                 page: session.page,
                             };
+                            if writes.is_empty() {
+                                // Nothing recognized in the select: nothing
+                                // to persist, answer right away.
+                                if !reply_envelope(
+                                    &mut out,
+                                    id,
+                                    &state,
+                                    &RenderCtx {
+                                        nav: &nav,
+                                        stats: stats.as_ref(),
+                                    },
+                                ) {
+                                    return ExitCode::FAILURE;
+                                }
+                                continue;
+                            }
+                            // The session cache is NOT seeded here: it only
+                            // takes the toggled model once the Save chain
+                            // confirms every write persisted it.
+                            let args = kv_set_args(writes[0].0, writes[0].1);
                             Some(HostCall::new(
-                                Pending::Save(id, state),
-                                kv_set_args(&current),
+                                Pending::Save(id, state, writes, Vec::new()),
+                                args,
                             ))
                         } else {
                             if !reply_err(
@@ -1006,32 +1104,60 @@ fn main() -> ExitCode {
                     eprintln!("unexpected message: {line}");
                     continue;
                 };
-                match pending_kind {
-                    Pending::Load(invoke_id, page) => {
-                        // The stored model, or the default when unset or
-                        // failed; then discover the nav row's targets before
-                        // the first render.
-                        let loaded = if ok {
+                match &pending_kind {
+                    Pending::Load(invoke_id, page, loaded, step) => {
+                        // The in-flight get's value: `"true"`/`"false"` for a
+                        // feature key, the legacy JSON blob for the last
+                        // step. An absent key keeps the legacy fallback; a
+                        // FAILED call falls through to the feature's default
+                        // — the pre-per-feature-key behavior — instead of
+                        // resurrecting legacy state behind a transient error.
+                        let value = if ok {
                             data.as_ref()
                                 .and_then(|d| d.get("value"))
                                 .and_then(Value::as_str)
-                                .and_then(|s| serde_json::from_str::<Value>(s).ok())
-                                .map(|v| SettingsModel::from_value(&v))
                         } else {
                             None
                         };
-                        let current = loaded.unwrap_or_default();
-                        model = Some(current);
-                        let call = HostCall::new(Pending::ListPlugins(invoke_id, page), json!({}));
+                        let mut loaded = *loaded;
+                        let step = *step;
+                        let call = match KV_KEYS.get(step) {
+                            Some((_, _)) => {
+                                loaded[step] = if ok {
+                                    value
+                                        .and_then(parse_bool)
+                                        .map_or(Loaded::Absent, Loaded::Value)
+                                } else {
+                                    Loaded::Failed
+                                };
+                                let next =
+                                    KV_KEYS.get(step + 1).map_or(KV_LEGACY_KEY, |(key, _)| *key);
+                                HostCall::new(
+                                    Pending::Load(*invoke_id, *page, loaded, step + 1),
+                                    kv_get_args(next),
+                                )
+                            }
+                            None => {
+                                // The legacy blob's resp, last in the chain:
+                                // merge and discover the nav row's targets
+                                // before the first render.
+                                let legacy =
+                                    value.and_then(|s| serde_json::from_str::<Value>(s).ok());
+                                model = Some(merge_model(legacy.as_ref(), &loaded));
+                                HostCall::new(Pending::ListPlugins(*invoke_id, *page), json!({}))
+                            }
+                        };
                         if !issue_host_call(&mut out, &mut pending, &mut next_call_id, call) {
                             return ExitCode::FAILURE;
                         }
                     }
                     Pending::ListPlugins(invoke_id, page) => {
                         // The running plugin names, or the default target when
-                        // discovery failed; then persist the panel state
-                        // before the first render. The session lands on the
-                        // page the handoff asked for, the hub page by default.
+                        // discovery failed; then render. Nothing is persisted
+                        // on open — the blind re-save here used to clobber
+                        // toggles that landed between the load and the save
+                        // (#136). The session lands on the page the handoff
+                        // asked for, the hub page by default.
                         match parse_list_plugins(data.as_ref()) {
                             Some(targets) => nav = NavTargets::Discovered(targets),
                             None => {
@@ -1041,13 +1167,17 @@ fn main() -> ExitCode {
                         }
                         let state = ViewState {
                             model: model.unwrap_or_default(),
-                            page,
+                            page: *page,
                         };
-                        let call = HostCall::new(
-                            Pending::Save(invoke_id, state),
-                            kv_set_args(&state.model),
-                        );
-                        if !issue_host_call(&mut out, &mut pending, &mut next_call_id, call) {
+                        if !reply_envelope(
+                            &mut out,
+                            *invoke_id,
+                            &state,
+                            &RenderCtx {
+                                nav: &nav,
+                                stats: stats.as_ref(),
+                            },
+                        ) {
                             return ExitCode::FAILURE;
                         }
                     }
@@ -1068,7 +1198,7 @@ fn main() -> ExitCode {
                         };
                         if !reply_envelope(
                             &mut out,
-                            invoke_id,
+                            *invoke_id,
                             &state,
                             &RenderCtx {
                                 nav: &nav,
@@ -1078,14 +1208,53 @@ fn main() -> ExitCode {
                             return ExitCode::FAILURE;
                         }
                     }
-                    Pending::Save(invoke_id, state) | Pending::OpenView(invoke_id, None, state) => {
+                    Pending::Save(invoke_id, state, remaining, failed) => {
+                        // The first pair is the write this resp completes: a
+                        // failed write is logged with its key and excluded
+                        // from the cache seeding — the wire reply is
+                        // identical either way — while the remaining keys
+                        // still land.
+                        let mut failed = failed.clone();
+                        let Some(((key, _), rest)) = remaining.split_first() else {
+                            unreachable!("a save chain always carries its in-flight write");
+                        };
+                        if !ok {
+                            failed.push(*key);
+                            eprintln!("host.kv.set failed for key {key:?}: {error:?}");
+                        }
+                        if rest.is_empty() {
+                            if failed.is_empty() {
+                                model = Some(state.model);
+                            }
+                            if !reply_envelope(
+                                &mut out,
+                                *invoke_id,
+                                state,
+                                &RenderCtx {
+                                    nav: &nav,
+                                    stats: stats.as_ref(),
+                                },
+                            ) {
+                                return ExitCode::FAILURE;
+                            }
+                        } else {
+                            let call = HostCall::new(
+                                Pending::Save(*invoke_id, *state, rest.to_vec(), failed),
+                                kv_set_args(rest[0].0, rest[0].1),
+                            );
+                            if !issue_host_call(&mut out, &mut pending, &mut next_call_id, call) {
+                                return ExitCode::FAILURE;
+                            }
+                        }
+                    }
+                    Pending::OpenView(invoke_id, None, state) => {
                         if !answer_envelope(
                             &mut out,
-                            invoke_id,
+                            *invoke_id,
                             ok,
                             error,
-                            pending_kind,
-                            &state,
+                            pending_kind.op(),
+                            state,
                             &RenderCtx {
                                 nav: &nav,
                                 stats: stats.as_ref(),
@@ -1103,7 +1272,7 @@ fn main() -> ExitCode {
                         if ok {
                             if !reply_err(
                                 &mut out,
-                                invoke_id,
+                                *invoke_id,
                                 VIEW_MOVED_KIND,
                                 "panel opened in place",
                             ) {
@@ -1113,11 +1282,11 @@ fn main() -> ExitCode {
                         }
                         if !answer_envelope(
                             &mut out,
-                            invoke_id,
+                            *invoke_id,
                             ok,
                             error,
-                            pending_kind,
-                            &state,
+                            pending_kind.op(),
+                            state,
                             &RenderCtx {
                                 nav: &nav,
                                 stats: stats.as_ref(),
@@ -1654,17 +1823,82 @@ mod tests {
     }
 
     #[test]
-    fn kv_set_args_serialize_the_model_as_a_string() {
-        let model = SettingsModel {
-            feeds_enabled: true,
-            voice_enabled: false,
-            welcome_enabled: false,
-        };
-        let args = kv_set_args(&model);
-        assert_eq!(args["namespace"], KV_NAMESPACE);
-        assert_eq!(args["key"], KV_MODEL_KEY);
-        let parsed: Value = serde_json::from_str(args["value"].as_str().unwrap()).unwrap();
-        assert_eq!(parsed["feeds"], true);
-        assert_eq!(parsed["voice"], false);
+    fn kv_args_target_one_feature_key() {
+        let get = kv_get_args("feeds");
+        assert_eq!(get["namespace"], KV_NAMESPACE);
+        assert_eq!(get["key"], json!("feeds"));
+
+        let set = kv_set_args("voice", true);
+        assert_eq!(set["namespace"], KV_NAMESPACE);
+        assert_eq!(set["key"], json!("voice"));
+        assert_eq!(set["value"], json!("true"));
+        assert_eq!(kv_set_args("voice", false)["value"], json!("false"));
+    }
+
+    #[test]
+    fn parse_bool_accepts_only_the_two_wire_values() {
+        assert_eq!(parse_bool("true"), Some(true));
+        assert_eq!(parse_bool("false"), Some(false));
+        assert_eq!(parse_bool(""), None);
+        assert_eq!(parse_bool("yes"), None);
+        assert_eq!(parse_bool("TRUE"), None);
+    }
+
+    #[test]
+    fn feature_keys_match_the_load_order() {
+        let keys: Vec<&str> = KV_KEYS.iter().map(|(key, _)| *key).collect();
+        assert_eq!(keys, ["feeds", "voice", "welcome"]);
+        for (key, msg) in KV_KEYS {
+            assert_eq!(feature_key(msg), key);
+        }
+    }
+
+    #[test]
+    fn a_feature_value_wins_over_the_legacy_blob() {
+        let legacy = json!({"feeds": false, "voice": true, "welcome": false});
+        let merged = merge_model(
+            Some(&legacy),
+            &[Loaded::Value(true), Loaded::Absent, Loaded::Value(true)],
+        );
+        assert!(merged.feeds_enabled, "the feature key wins over legacy");
+        assert!(merged.voice_enabled, "an absent key keeps the legacy value");
+        assert!(merged.welcome_enabled, "the feature key wins over legacy");
+    }
+
+    #[test]
+    fn merge_falls_back_through_legacy_to_the_defaults() {
+        assert_eq!(
+            merge_model(None, &[Loaded::Absent; 3]),
+            SettingsModel::default()
+        );
+
+        let legacy = json!({"feeds": true, "welcome": true});
+        let merged = merge_model(Some(&legacy), &[Loaded::Absent; 3]);
+        assert_eq!(
+            merged,
+            SettingsModel {
+                feeds_enabled: true,
+                voice_enabled: false,
+                welcome_enabled: true,
+            }
+        );
+    }
+
+    #[test]
+    fn a_failed_get_ignores_the_legacy_blob_for_that_feature() {
+        let legacy = json!({"feeds": true, "welcome": true});
+        let merged = merge_model(
+            Some(&legacy),
+            &[Loaded::Failed, Loaded::Absent, Loaded::Value(false)],
+        );
+        assert!(
+            !merged.feeds_enabled,
+            "a failed get falls to the default, not legacy"
+        );
+        assert!(
+            !merged.voice_enabled,
+            "an absent key falls through legacy to the default"
+        );
+        assert!(!merged.welcome_enabled, "the loaded value wins");
     }
 }

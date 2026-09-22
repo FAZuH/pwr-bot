@@ -9,11 +9,14 @@
 //!   `{"data", "ephemeral", "view"}` whose data is a Components V2 container
 //!   mirroring the original monolith hub, carrying the loaded (or default)
 //!   model and the session's page in `view`;
-//! - the first invoke loads the model from `host.kv.get` (namespace
-//!   `settings`) and re-registers it via `host.kv.set` before rendering;
+//! - the first invoke loads the model from the per-feature `host.kv.get`
+//!   keys (namespace `settings`) merged over the legacy `settings/model`
+//!   blob, and writes nothing — opening a hub must not persist (#136);
 //! - `view.interact` on the toggle select (`settings:toggle`) flips every
-//!   selected feature of the session's own model and persists it via
-//!   `host.kv.set` before answering;
+//!   selected feature of the session's own model and persists ONLY the
+//!   toggled features' keys via `host.kv.set` before answering, so two
+//!   concurrently open hubs toggling different features never lose an
+//!   update (#136);
 //! - an About click issues `host.stats` and renders the About panel with the
 //!   live values (the fallback copy when the op fails); Back returns to the
 //!   hub — neither touches the model. The page rides the per-session `view`
@@ -50,9 +53,11 @@ use pwr_poise_components::IS_COMPONENTS_V2;
 use serde_json::Value;
 use serde_json::json;
 
-/// The KV namespace and model key the settings plugin persists under.
+/// The KV namespace the settings plugin persists under, the legacy blob key
+/// the pre-per-feature-keys deployments wrote, and one feature key per
+/// toggle.
 const KV_NAMESPACE: &str = "settings";
-const KV_MODEL_KEY: &str = "model";
+const KV_LEGACY_KEY: &str = "model";
 
 mod probe;
 use probe::probe_binary;
@@ -70,12 +75,20 @@ impl SharedKv {
         Arc::new(Self::default())
     }
 
-    /// The persisted value for the settings model, if any.
-    fn model_value(&self) -> Option<String> {
+    /// Pre-seeds one key before the plugin spawns.
+    fn seed(&self, key: &str, value: &str) {
+        self.inner.lock().expect("kv lock").insert(
+            (KV_NAMESPACE.to_string(), key.to_string()),
+            value.to_string(),
+        );
+    }
+
+    /// The persisted value for one settings key, if any.
+    fn value(&self, key: &str) -> Option<String> {
         self.inner
             .lock()
             .expect("kv lock")
-            .get(&(KV_NAMESPACE.to_string(), KV_MODEL_KEY.to_string()))
+            .get(&(KV_NAMESPACE.to_string(), key.to_string()))
             .cloned()
     }
 }
@@ -297,9 +310,11 @@ fn assert_hub(data: &Value, enabled: &[bool; 3]) {
 }
 
 /// An `invoke` of `settings` answers the full envelope with the default model
-/// (every feature disabled) after loading from and re-registering in KV.
+/// (every feature disabled) after loading from KV — and writes nothing:
+/// opening a hub must not persist, or a stale open would clobber concurrent
+/// toggles (#136).
 #[tokio::test]
-async fn invoke_answers_the_default_envelope_and_registers_in_kv() {
+async fn invoke_answers_the_default_envelope_without_writing() {
     let kv = SharedKv::new();
     let plugin = spawn_settings(Some(kv.clone())).await;
 
@@ -310,20 +325,14 @@ async fn invoke_answers_the_default_envelope_and_registers_in_kv() {
 
     let view = assert_envelope(&resp, 0);
     assert_toggles(&view, false, false, false);
-    // The first invoke loaded from KV (empty → default) and re-registered the
-    // model before rendering (AC3 registration contract).
     assert_eq!(
-        kv.model_value(),
-        Some(
-            json!({
-                "feeds": false,
-                "voice": false,
-                "welcome": false
-            })
-            .to_string()
-        ),
-        "model registered in KV"
+        kv.value(KV_LEGACY_KEY),
+        None,
+        "opening a hub never writes the legacy blob"
     );
+    assert_eq!(kv.value("feeds"), None, "opening a hub writes no feature");
+    assert_eq!(kv.value("voice"), None, "opening a hub writes no feature");
+    assert_eq!(kv.value("welcome"), None, "opening a hub writes no feature");
 
     let status = plugin.stop().await.expect("graceful stop");
     assert_eq!(status.code(), Some(0), "clean exit after bye: {status}");
@@ -353,9 +362,10 @@ async fn second_invoke_answers_immediately_with_the_loaded_model() {
     assert_eq!(status.code(), Some(0), "clean exit after bye: {status}");
 }
 
-/// A `view.interact` on the toggle select flips the selected feature,
-/// persists the model through `host.kv.set` (namespace `settings`), and
-/// answers the fresh envelope.
+/// A `view.interact` on the toggle select flips the selected feature and
+/// persists ONLY that feature's key (namespace `settings`) before answering —
+/// untouched features are never written, so a concurrent hub's toggles on
+/// other features survive (#136).
 #[tokio::test]
 async fn interact_toggles_a_feature_and_persists_it() {
     let kv = SharedKv::new();
@@ -381,16 +391,66 @@ async fn interact_toggles_a_feature_and_persists_it() {
     let view = assert_envelope(&resp, 1);
     assert_toggles(&view, true, false, false);
     assert_eq!(
-        kv.model_value(),
-        Some(
-            json!({
-                "feeds": true,
-                "voice": false,
-                "welcome": false
-            })
-            .to_string()
-        ),
-        "toggled model persisted in KV"
+        kv.value("feeds"),
+        Some("true".into()),
+        "toggled feature persisted as its own key"
+    );
+    assert_eq!(
+        kv.value("voice"),
+        None,
+        "untouched features are not written"
+    );
+    assert_eq!(
+        kv.value("welcome"),
+        None,
+        "untouched features are not written"
+    );
+
+    let status = plugin.stop().await.expect("graceful stop");
+    assert_eq!(status.code(), Some(0), "clean exit after bye: {status}");
+}
+
+/// A toggle select carrying two labels persists BOTH features' keys through
+/// the chained writes and renders both flags — the multi-write branch of
+/// the save chain (#136).
+#[tokio::test]
+async fn a_multi_feature_toggle_persists_every_selected_key() {
+    let kv = SharedKv::new();
+    let plugin = spawn_settings(Some(kv.clone())).await;
+
+    plugin
+        .call("invoke", Some("settings"), Some(json!({})))
+        .await
+        .expect("invoke answered");
+
+    let resp = plugin
+        .call(
+            "view.interact",
+            Some("settings"),
+            Some(json!({
+                "custom_id": "settings:toggle",
+                "data": { "values": ["Feeds", "Voice"] }
+            })),
+        )
+        .await
+        .expect("toggle answered");
+
+    let view = assert_envelope(&resp, 1);
+    assert_toggles(&view, true, true, false);
+    assert_eq!(
+        kv.value("feeds"),
+        Some("true".into()),
+        "the first selected key persisted"
+    );
+    assert_eq!(
+        kv.value("voice"),
+        Some("true".into()),
+        "the second selected key persisted"
+    );
+    assert_eq!(
+        kv.value("welcome"),
+        None,
+        "unselected features are not written"
     );
 
     let status = plugin.stop().await.expect("graceful stop");
@@ -872,6 +932,100 @@ async fn concurrent_hubs_keep_independent_pages() {
     let toggled_view = assert_envelope(&toggle_resp, 3);
     assert_page(&toggled_view, "hub");
     assert_toggles(&toggled_view, false, true, false);
+
+    let status = plugin.stop().await.expect("graceful stop");
+    assert_eq!(status.code(), Some(0), "clean exit after bye: {status}");
+}
+
+/// Two spawned instances sharing one store toggle different features
+/// interleaved: each toggle persists only its own feature's key, so neither
+/// update is lost and a fresh open sees both (#136).
+#[tokio::test]
+async fn concurrent_instances_keep_each_others_toggles() {
+    let kv = SharedKv::new();
+    let first = spawn_settings(Some(kv.clone())).await;
+    let second = spawn_settings(Some(kv.clone())).await;
+
+    first
+        .call("invoke", Some("settings"), Some(json!({})))
+        .await
+        .expect("first invoke answered");
+    second
+        .call("invoke", Some("settings"), Some(json!({})))
+        .await
+        .expect("second invoke answered");
+
+    // Interleaved on different features: the first hub toggles Voice, then
+    // the second toggles Feeds from its own (older) session model. The old
+    // whole-model blob save made the second toggle revert the first.
+    first
+        .call(
+            "view.interact",
+            Some("settings"),
+            Some(json!({
+                "custom_id": "settings:toggle",
+                "data": { "values": ["Voice"] }
+            })),
+        )
+        .await
+        .expect("first toggle answered");
+    second
+        .call(
+            "view.interact",
+            Some("settings"),
+            Some(json!({
+                "custom_id": "settings:toggle",
+                "data": { "values": ["Feeds"] }
+            })),
+        )
+        .await
+        .expect("second toggle answered");
+
+    assert_eq!(
+        kv.value("voice"),
+        Some("true".into()),
+        "the first toggle survived the second"
+    );
+    assert_eq!(
+        kv.value("feeds"),
+        Some("true".into()),
+        "the second toggle landed"
+    );
+
+    // A fresh open picks up both toggles.
+    let third = spawn_settings(Some(kv.clone())).await;
+    let resp = third
+        .call("invoke", Some("settings"), Some(json!({})))
+        .await
+        .expect("third invoke answered");
+    let view = assert_envelope(&resp, 0);
+    assert_toggles(&view, true, true, false);
+
+    for plugin in [first, second, third] {
+        let status = plugin.stop().await.expect("graceful stop");
+        assert_eq!(status.code(), Some(0), "clean exit after bye: {status}");
+    }
+}
+
+/// A store holding only the pre-per-feature-keys blob (`settings/model`)
+/// seeds the first render: existing deployments keep their toggles across
+/// the upgrade instead of silently resetting.
+#[tokio::test]
+async fn a_legacy_model_blob_seeds_the_first_render() {
+    let kv = SharedKv::new();
+    kv.seed(
+        KV_LEGACY_KEY,
+        &json!({"feeds": true, "voice": false, "welcome": true}).to_string(),
+    );
+    let plugin = spawn_settings(Some(kv.clone())).await;
+
+    let resp = plugin
+        .call("invoke", Some("settings"), Some(json!({})))
+        .await
+        .expect("invoke answered");
+
+    let view = assert_envelope(&resp, 0);
+    assert_toggles(&view, true, false, true);
 
     let status = plugin.stop().await.expect("graceful stop");
     assert_eq!(status.code(), Some(0), "clean exit after bye: {status}");
