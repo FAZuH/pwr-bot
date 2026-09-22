@@ -97,6 +97,7 @@ See `.opencode/skills/commit/SKILL.md` for full conventions.
 - **CI skip**: append `[skip ci]`, `[no ci]`, `[ci skip]`, etc. for docs/format-only commits
 - **Version bumps**: use `chore!(major)` or `chore!(minor)` in the subject to trigger major/minor releases
 - Do **not** use the old `u_` prefix — it has been replaced by the `[pub]` marker
+- **Merging PRs**: always merge commits (`merge_method=merge`, a real merge commit); never squash or rebase-merge. History preserves each reviewed commit. Note `gh pr merge` has no `-m` flag — use `gh api -X PUT repos/FAZuH/pwr-bot/pulls/<n>/merge -f merge_method=merge -f commit_title=... -f commit_message=...` instead.
 
 ## Architecture Diagrams
 
