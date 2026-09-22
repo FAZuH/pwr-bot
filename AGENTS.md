@@ -22,9 +22,8 @@ cargo test --all-features
 ```
 
 - Do **not** run `./dev.sh format lint` after every edit — it mutates source files and may require re-reading
-- Do **not** use `./dev.sh build` for quick feedback — it builds a Docker image
 - Tests need `DB_URL` in `.env` locally; CI copies `.env-example` → `.env` automatically
-- CI order: `fmt --check` → `build --all-targets` → `clippy -D warnings` → `test`
+- CI order: `fmt --check` → `clippy -D warnings` → `test` (Docker/binary builds run as separate CI workflows)
 - Diagrams: always use `./dev.sh docs`, never invoke `mmdc` directly
 
 ## Code Style
@@ -93,15 +92,14 @@ for the layering rules. Existing modules: `about`, `feed_batch`,
 
 See `docs/dev/commit-changelog.md` for full conventions.
 
-- **User-facing commits**: include `[pub]` or `[public]` in the message (anywhere) to appear in the changelog
+- **Changelog**: generated automatically from commit types — `feat` and `fix` create the user-facing entries; other types are internal
 - **CI skip**: append `[skip ci]`, `[no ci]`, `[ci skip]`, etc. for docs/format-only commits
-- **Version bumps**: use `chore!(major)` or `chore!(minor)` in the subject to trigger major/minor releases
-- Do **not** use the old `u_` prefix — it has been replaced by the `[pub]` marker
+- **Version bumps**: use `chore!(major)` or `chore!(minor)` in the subject to trigger major/minor releases (see the `whatBump` logic in `.github/.config.cjs`); anything else is a patch bump
 - **Merging PRs**: always merge commits (`merge_method=merge`, a real merge commit); never squash or rebase-merge. History preserves each reviewed commit. Note `gh pr merge` has no `-m` flag — use `gh api -X PUT repos/FAZuH/pwr-bot/pulls/<n>/merge -f merge_method=merge -f commit_title=... -f commit_message=...` instead.
 
 ## Architecture Diagrams
 
-Source lives in `docs/diagrams/*.mmd`. Export to PNG with `mmdc` after edits.
+Source lives in `docs/diagrams/*.mmd`. Re-export the PNGs with `./dev.sh docs` after edits.
 
 ## Past Mistakes
 

@@ -2,7 +2,7 @@
 
 The changelog is generated from your commits automatically. Generation uses
 the stock `conventional-changelog-conventionalcommits` preset. The only
-custom behavior in `.config.cjs` is the version bump logic.
+custom behavior in `.github/.config.cjs` is the version bump logic.
 
 ## Commit message format
 
