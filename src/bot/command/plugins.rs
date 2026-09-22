@@ -2,11 +2,11 @@
 //! from the external catalog.
 //!
 //! Subcommands are admin-gated (see
-//! [`is_author_guild_admin`](crate::bot::checks::is_author_guild_admin)) and
+//! [`is_author_guild_admin`]) and
 //! guild-scoped: enablement state lives in the `guild_plugins` table, and
 //! command registration targets the invoking guild. Pure state transitions
-//! run through [`PluginsUpdate`](crate::update::PluginsUpdate); the returned
-//! [`PluginsCmd`](crate::update::PluginsCmd) drives the Discord/DB side
+//! run through [`PluginsUpdate`]; the returned
+//! [`PluginsCmd`] drives the Discord/DB side
 //! effects.
 
 use std::collections::HashMap;

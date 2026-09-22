@@ -134,32 +134,30 @@ impl<'a> Router<'a> {
     /// channel has nothing to render. The terminal targets never reach this
     /// map — [`pop_step`] resolves them into the hub handoff, the root
     /// dismissal, or the end of the session.
-    fn handler_for(&self, target: Navigation) -> Option<Box<dyn CommandHandler + 'a>> {
+    fn handler_for(&self, target: Navigation) -> Option<Box<dyn CommandHandler>> {
         use Navigation::*;
-        let ctx = self.ctx;
         match target {
-            SettingsAbout => Some(Box::new(AboutHandler::new(ctx))),
+            SettingsAbout => Some(Box::new(AboutHandler::new())),
             FeedSubscriptions { send_into } => {
-                send_into.map(|send_into| Box::new(FeedListHandler::new(ctx, send_into)) as Box<_>)
+                send_into.map(|send_into| Box::new(FeedListHandler::new(send_into)) as Box<_>)
             }
             FeedSubscribe { links, send_into } => {
-                Some(Box::new(FeedSubscribeHandler::new(ctx, links, send_into)))
+                Some(Box::new(FeedSubscribeHandler::new(links, send_into)))
             }
             FeedUnsubscribe { links, send_into } => {
-                Some(Box::new(FeedUnsubscribeHandler::new(ctx, links, send_into)))
+                Some(Box::new(FeedUnsubscribeHandler::new(links, send_into)))
             }
             FeedList(send_into) => {
-                send_into.map(|send_into| Box::new(FeedListHandler::new(ctx, send_into)) as Box<_>)
+                send_into.map(|send_into| Box::new(FeedListHandler::new(send_into)) as Box<_>)
             }
             VoiceLeaderboard { time_range } => {
-                Some(Box::new(VoiceLeaderboardHandler::new(ctx, time_range)))
+                Some(Box::new(VoiceLeaderboardHandler::new(time_range)))
             }
             VoiceStats {
                 time_range,
                 target_user,
                 stat_type,
             } => Some(Box::new(VoiceStatsHandler::new(
-                ctx,
                 time_range,
                 *target_user,
                 stat_type,

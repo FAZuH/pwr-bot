@@ -38,12 +38,12 @@ pub async fn leaderboard(
     Ok(())
 }
 
-handler! { pub struct VoiceLeaderboardHandler<'a> {
+handler! { pub struct VoiceLeaderboardHandler {
     time_range: VoiceLeaderboardTimeRange,
 } }
 
 #[async_trait::async_trait]
-impl CommandHandler for VoiceLeaderboardHandler<'_> {
+impl CommandHandler for VoiceLeaderboardHandler {
     async fn run(&mut self, coordinator: std::sync::Arc<Router<'_>>) -> Result<(), Error> {
         let ctx = *coordinator.context();
         ctx.defer().await?;

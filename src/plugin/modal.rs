@@ -15,7 +15,7 @@
 //! it, so a second submission from the same author (without a fresh
 //! `host.open_modal`) finds no route and falls back to the message-keyed
 //! view route. A binding expires with the interaction window
-//! ([`DEFAULT_VIEW_TIMEOUT`]), and unloading the owner plugin drops its
+//! ([`DEFAULT_VIEW_TIMEOUT`](crate::plugin::interaction::DEFAULT_VIEW_TIMEOUT)), and unloading the owner plugin drops its
 //! bindings (session death ends the route). A missing or expired route is a
 //! typed [`ModalRouteError`], never a hang.
 

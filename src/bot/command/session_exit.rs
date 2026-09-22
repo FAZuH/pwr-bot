@@ -35,6 +35,10 @@
 //! [`Router`]: crate::bot::command::Router
 //! [`Host::run`]: crate::bot::gui::rt::Host::run
 //! [`ViewSpec`]: pwr_plugin_protocol::ViewSpec
+//!
+//! [`Navigation::Exit`]: crate::bot::navigation::Navigation::Exit
+//! [`Navigation::SettingsMain`]: crate::bot::navigation::Navigation::SettingsMain
+//! [`Navigation::Back`]: crate::bot::navigation::Navigation::Back
 
 use std::sync::Arc;
 

@@ -16,7 +16,7 @@ use crate::update::lifecycle::Lifecycle;
 
 /// Seal for [`GuiFeature`] — only this module's features may impl it.
 pub mod sealed {
-    /// Marker trait that closes [`GuiFeature`] to external implementors.
+    /// Marker trait that closes [`GuiFeature`](super::GuiFeature) to external implementors.
     pub trait Sealed {}
 }
 

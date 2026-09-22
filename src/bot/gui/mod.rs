@@ -23,12 +23,12 @@
 //!
 //! - **Pure core** lives in `crate::update/<feature>`: `Model`, `Msg`,
 //!   `Effect`, `update`. No serenity/tokio/DB/diesel.
-//! - **Shell** is this module: the [`GuiFeature`](feature::GuiFeature)
-//!   contract, the [`Host`](rt::Host) runtime, and the pure `view` / input
+//! - **Shell** is this module: the [`GuiFeature`]
+//!   contract, the [`Host`] runtime, and the pure `view` / input
 //!   translation. The shell may touch serenity types, but never does IO in
 //!   `view`.
 //! - **Adapters** execute effects through the
-//!   [`EffectHandler`](effects::EffectHandler) port — the only IO.
+//!   [`EffectHandler`] port — the only IO.
 //!
 //! Implementors of [`GuiFeature`] are closed to this module.
 
@@ -37,7 +37,6 @@ pub mod effects;
 pub mod feature;
 pub mod feed_batch;
 pub mod feed_list;
-pub mod input;
 pub mod register;
 pub mod rt;
 pub mod unregister;

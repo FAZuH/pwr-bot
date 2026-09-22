@@ -29,12 +29,12 @@ pub async fn list(
     Ok(())
 }
 
-handler! { pub struct FeedListHandler<'a> {
+handler! { pub struct FeedListHandler {
     send_into: SendInto
 } }
 
 #[async_trait::async_trait]
-impl CommandHandler for FeedListHandler<'_> {
+impl CommandHandler for FeedListHandler {
     async fn run(&mut self, coordinator: std::sync::Arc<Router<'_>>) -> Result<(), Error> {
         let ctx = *coordinator.context();
         ctx.defer().await?;

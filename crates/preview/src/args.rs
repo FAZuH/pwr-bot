@@ -18,7 +18,7 @@ pub enum Parsed {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PreviewArgs {
     /// Which plugin to spawn: a bare binary name (resolved against the cargo
-    /// build profile directories, see [`crate::resolve`]) or an explicit
+    /// build profile directories, see `crate::resolve`) or an explicit
     /// path. Defaults to [`DEFAULT_PLUGIN`].
     pub plugin: PluginSpec,
     /// The command to invoke. Defaults to the plugin manifest's single

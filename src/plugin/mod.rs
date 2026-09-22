@@ -120,7 +120,7 @@ const HELLO_TIMEOUT: Duration = Duration::from_secs(5);
 const CALL_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// How long [`RunningPlugin::stop`] waits for the plugin to exit after `bye`
-/// before escalating: SIGTERM to the process group, another [`STOP_TIMEOUT`]
+/// before escalating: SIGTERM to the process group, another `STOP_TIMEOUT`
 /// grace, then SIGKILL to the group.
 const STOP_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -420,11 +420,11 @@ impl RunningPlugin {
     }
 
     /// Gracefully stops the plugin: sends `bye`, closes stdin (EOF), and
-    /// waits up to [`STOP_TIMEOUT`] for a clean exit. If the plugin does not
+    /// waits up to `STOP_TIMEOUT` for a clean exit. If the plugin does not
     /// comply, SIGTERM is sent to the whole process group — the plugin is
     /// the group leader (`process_group(0)` at spawn), so any descendants
     /// share the group and the one signal reaches them all. After another
-    /// [`STOP_TIMEOUT`] grace, SIGKILL finishes the group. Returns the final
+    /// `STOP_TIMEOUT` grace, SIGKILL finishes the group. Returns the final
     /// exit status.
     ///
     /// `stop()` always returns within a bounded time. A plugin that neither
