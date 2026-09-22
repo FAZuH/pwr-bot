@@ -120,7 +120,7 @@ pub fn download_client() -> wreq::Client {
         .expect("wreq client construction cannot fail")
 }
 
-/// The download redirect policy: follow at most [`MAX_REDIRECTS`] hops, and
+/// The download redirect policy: follow at most `MAX_REDIRECTS` hops, and
 /// only onto https URLs; anything else stops the redirect. The client's
 /// `https_only` flag is the second layer.
 pub fn redirect_policy() -> wreq::redirect::Policy {
@@ -137,7 +137,7 @@ pub fn redirect_policy() -> wreq::redirect::Policy {
 
 /// Downloads `entry`'s binary into a fresh temp file inside `plugin_dir`.
 /// The response body is streamed chunk-by-chunk with a
-/// [`MAX_DOWNLOAD_BYTES`] cap, so an oversized body is rejected without
+/// `MAX_DOWNLOAD_BYTES` cap, so an oversized body is rejected without
 /// being buffered in memory first; the temp file is deleted on drop, so an
 /// aborted install leaves nothing behind.
 pub async fn download(

@@ -110,7 +110,7 @@ const NAV_TARGET_DEFAULT: &str = "hello";
 
 /// The nav row's targets: discovered from the host's running plugins at the
 /// first view load. A `Fallback` renders the single default target; a
-/// `Discovered` list renders one "Open <name>" button per entry — an empty
+/// `Discovered` list renders one `Open <name>` button per entry — an empty
 /// list renders no nav row at all (the #128 gate), and the [`FEATURES`] panel
 /// targets are skipped at render (their buttons already ride the same ids).
 enum NavTargets {
@@ -529,7 +529,7 @@ fn about_view(stats: Option<&HostStats>) -> Value {
 /// the one [`NAV_TARGET_DEFAULT`]; an empty [`NavTargets::Discovered`] renders
 /// no row at all (the hub never shows a dead button); a non-empty list renders
 /// one `Open <target>` button per target, chunked so the one-action-row
-/// five-button law is never violated — [`Vec::chunks`] never yields an empty
+/// five-button law is never violated — `Vec::chunks` never yields an empty
 /// chunk, so no row is drawn without a button. Discovered targets that a
 /// config button already opens (the [`FEATURES`] panels) are skipped: a
 /// second button with the same `settings:open:<target>` id would make Discord

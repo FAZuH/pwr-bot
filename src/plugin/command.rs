@@ -1,7 +1,7 @@
 //! Converts plugin manifest command blobs into routing [`poise::Command`]s.
 //!
 //! Each [`Manifest`] entry carries a Discord-native `CreateCommand` JSON blob
-//! ([`CommandDef::create_command`]) — the single source of truth for both
+//! (`create_command` field of [`CommandDef`](pwr_plugin_protocol::CommandDef)) — the single source of truth for both
 //! Discord registration and host-side argument re-parsing. This module parses
 //! such a blob into a [`HostCommandSpec`] and builds a framework `Command`
 //! from it, so plugins declare slash commands without host-side per-command
@@ -31,7 +31,7 @@
 //!   cannot ride per-option values (deferred to #114, documented).
 //!
 //! Deferred seams:
-//! - Every built command carries [`plugin_slash_dispatch`] as its action,
+//! - Every built command carries `plugin_slash_dispatch` as its action,
 //!   which routes the invocation to its plugin's view session via the
 //!   command-name → plugin-name route table built from loaded manifests
 //!   ([`routes_from_manifests`]; see the function's docs).
@@ -322,7 +322,7 @@ pub enum ReparseError {
 /// Parses a `CreateCommand` blob into a routing poise command.
 ///
 /// The command's `slash_action` is the core-plugin dispatch
-/// ([`plugin_slash_dispatch`]); `on_error`/`checks` are left at framework
+/// (`plugin_slash_dispatch`); `on_error`/`checks` are left at framework
 /// defaults.
 pub fn command_from_blob(blob: &Value) -> Result<Command<Data, Error>, CommandSpecError> {
     let spec = HostCommandSpec::parse(blob)?;
@@ -568,7 +568,7 @@ pub async fn register_in_guild(
 }
 
 /// Command-name → plugin-name routes. Built from the manifests of the plugins
-/// loaded at startup ([`routes_from_manifests`]); [`plugin_slash_dispatch`]
+/// loaded at startup ([`routes_from_manifests`]); `plugin_slash_dispatch`
 /// looks an invoked command name up here to find its owning plugin.
 pub type PluginRoutes = HashMap<String, String>;
 
@@ -625,7 +625,7 @@ fn view_presentation(spec: &ViewSpec) -> ViewPresentation {
 /// declared attachment slots filled, ADR-0012), and register the engine
 /// session on the edited message's id. No placeholder message is ever sent.
 ///
-/// Shared by [`plugin_slash_dispatch`] and the settings commands that
+/// Shared by `plugin_slash_dispatch` and the settings commands that
 /// deep-link a panel plugin without declaring slash commands of their own.
 /// `plugin_name` keys the manager lookup; `command` is the invoke command
 /// the plugin answers (for the panel plugins both are the plugin name).

@@ -5,7 +5,7 @@
 //! ([`InteractionEngine::open`]), keyed by the message id. Every later
 //! interaction with that message routes to the plugin via a `view.interact`
 //! call carrying the raw Discord interaction, the pressed `custom_id`, and
-//! the plugin's own opaque view state ([`interact_args`]). The plugin answers
+//! the plugin's own opaque view state (`interact_args`). The plugin answers
 //! with the view's next spec — rendered by the caller verbatim — or a
 //! first-class wire error, surfaced as [`InteractionError::PluginRejected`].
 //!
@@ -325,7 +325,7 @@ impl<P: PluginHandle> InteractionEngine<P> {
 
     /// Routes one component interaction to the session's plugin: the stored
     /// `view` state and the pressed `custom_id` ride along in the call args
-    /// ([`interact_args`]), and the returned spec's `view` becomes the
+    /// (`interact_args`), and the returned spec's `view` becomes the
     /// session's new state. Errors with [`InteractionError::NoSession`] when
     /// `message_id` has no open session.
     ///
