@@ -48,6 +48,12 @@ pub use msg::WireError;
 /// target itself, by waking the session that handed the message to the
 /// panel.
 pub const SETTINGS_TARGET: &str = "settings";
+
+/// The host-reserved `host.open_view` target that opens the host About view
+/// on the panel's message, waking the session that handed it to the panel.
+/// Like [`SETTINGS_TARGET`], not a plugin name: the host answers the target
+/// itself.
+pub const ABOUT_TARGET: &str = "about";
 pub use settings::FeedsSettings;
 pub use settings::ServerSettings;
 pub use settings::VoiceSettings;

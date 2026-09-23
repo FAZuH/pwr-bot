@@ -1227,7 +1227,6 @@ mod tests {
 
         assert_eq!(names, ["settings"]);
     }
-
     /// A catalog entry whose plugin is not a core plugin still contributes
     /// its commands.
     #[test]
@@ -1242,6 +1241,54 @@ mod tests {
             .collect();
 
         assert_eq!(names, ["settings", "greet"]);
+    }
+
+    /// The full registered command surface — the host Cog commands plus one
+    /// routing command per core plugin manifest, assembled through the same
+    /// `commands_from_manifest` path the host registers through — pinned
+    /// against a committed snapshot. With `UPDATE_SNAPSHOT=1` the test
+    /// rewrites the fixture instead of asserting.
+    #[test]
+    fn the_registered_command_surface_matches_the_committed_snapshot() {
+        let core_manifests = HashMap::from([
+            (feed::PLUGIN_NAME.to_string(), feed::manifest()),
+            (voice::PLUGIN_NAME.to_string(), voice::manifest()),
+            (welcome::PLUGIN_NAME.to_string(), welcome::manifest()),
+        ]);
+        let mut commands = Cogs.commands();
+        commands.extend(plugin_commands(&core_manifests, &HashMap::new()));
+
+        let mut surface =
+            serde_json::to_value(poise::builtins::create_application_commands(&commands))
+                .expect("the application commands serialize");
+        let serde_json::Value::Array(entries) = &mut surface else {
+            panic!("create_application_commands returns a list");
+        };
+        entries.sort_by_key(|entry| entry["name"].as_str().unwrap_or("").to_string());
+        let snapshot = serde_json::to_string_pretty(&surface).expect("snapshot serializes") + "\n";
+
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/registered_commands.json");
+        if std::env::var_os("UPDATE_SNAPSHOT").is_some() {
+            fs::write(&path, &snapshot).expect("snapshot fixture is writable");
+            return;
+        }
+
+        let committed = fs::read_to_string(&path).unwrap_or_else(|error| {
+            panic!(
+                "the command snapshot is missing at {}: run \
+                     `UPDATE_SNAPSHOT=1 cargo test the_registered_command_surface` to \
+                     regenerate it ({error})",
+                path.display()
+            )
+        });
+        assert_eq!(
+            snapshot, committed,
+            "the registered command surface drifted from \
+             tests/fixtures/registered_commands.json — if the change is \
+             deliberate, run `UPDATE_SNAPSHOT=1 cargo test \
+             the_registered_command_surface` and commit the fixture"
+        );
     }
 
     /// A round trip that beats the window resolves to its result.

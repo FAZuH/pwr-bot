@@ -101,6 +101,10 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 httpmock = "0.7.0"
 serial_test = "3.3.1"
 pwr-viewgen.workspace = true
+# The core panels' manifests, read by the registered-command snapshot test.
+feed = { path = "crates/plugin/feed" }
+voice = { path = "crates/plugin/voice" }
+welcome = { path = "crates/plugin/welcome" }
 postgresql_embedded = { version = "=0.20.1", default-features = false, features = ["zonky", "tokio", "rustls"] }
 tokio-postgres = "0.7"
 # TLS for tokio-postgres in the test DB seam: `sslmode=require` URLs must

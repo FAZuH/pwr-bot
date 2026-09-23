@@ -108,20 +108,47 @@ impl TranslateLayer {
 /// When the Router hands the live message to a plugin section, it parks a
 /// oneshot keyed by the message id and keeps the session task alive. The
 /// panel's Back presses `host.open_view` against the host-reserved
-/// [`SETTINGS_TARGET`]; the host op answers it by completing the waiter,
-/// waking the Router to re-run the Settings GUI on the same message. A
-/// panel opened outside a live Settings session — or one whose wait
-/// expired — finds no waiter and stays on screen.
+/// [`SETTINGS_TARGET`], and its About press against `about`; the host op
+/// answers by completing the waiter with the page the press asked for,
+/// waking the Router to re-run that page on the same message. A panel
+/// opened outside a live Settings session — or one whose wait expired —
+/// finds no waiter and stays on screen.
 ///
 /// [`SETTINGS_TARGET`]: pwr_plugin_protocol::SETTINGS_TARGET
 #[derive(Default)]
 pub struct SettingsReturns {
-    waiters: Mutex<HashMap<MessageId, oneshot::Sender<()>>>,
+    waiters: Mutex<HashMap<MessageId, oneshot::Sender<SettingsReturnPage>>>,
+}
+
+/// The page a completed return waiter asks the parked session to re-run:
+/// the Settings list (a panel's Back), or the host About view (a panel's
+/// About press). The host op sets it from the open_view target it served.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SettingsReturnPage {
+    /// Re-run the Settings GUI: the return the Settings section handoff
+    /// parks for.
+    Settings,
+    /// Run the host About view on the same message; its Back then exits to
+    /// the Settings list.
+    About,
+}
+
+impl SettingsReturnPage {
+    /// The page a host-reserved `open_view` target asks the parked session
+    /// to re-run, or `None` when `target` is a plugin target the host
+    /// resolves through the plugin engine.
+    pub fn from_target(target: &str) -> Option<Self> {
+        match target {
+            pwr_plugin_protocol::SETTINGS_TARGET => Some(Self::Settings),
+            pwr_plugin_protocol::ABOUT_TARGET => Some(Self::About),
+            _ => None,
+        }
+    }
 }
 
 impl SettingsReturns {
     /// Parks a waiter for `message_id`, returning its receiver.
-    pub fn wait(&self, message_id: MessageId) -> oneshot::Receiver<()> {
+    pub fn wait(&self, message_id: MessageId) -> oneshot::Receiver<SettingsReturnPage> {
         let (tx, rx) = oneshot::channel();
         if let Ok(mut waiters) = self.waiters.lock() {
             waiters.insert(message_id, tx);
@@ -130,11 +157,12 @@ impl SettingsReturns {
     }
 
     /// Takes the waiter for `message_id` out of the registry: `Some` when
-    /// one was live (the caller completes it by sending), `None` when the
-    /// Back found nothing to return to — a panel opened outside a Settings
-    /// session, or a parked side that already gave up. Taking without
-    /// sending also retracts a waiter the parked side is about to abandon.
-    pub fn take(&self, message_id: MessageId) -> Option<oneshot::Sender<()>> {
+    /// one was live (the caller completes it by sending the page it asked
+    /// for), `None` when the exit found nothing to return to — a panel
+    /// opened outside a Settings session, or a parked side that already
+    /// gave up. Taking without sending also retracts a waiter the parked
+    /// side is about to abandon.
+    pub fn take(&self, message_id: MessageId) -> Option<oneshot::Sender<SettingsReturnPage>> {
         self.waiters
             .lock()
             .ok()
@@ -196,6 +224,19 @@ mod tests {
         let _session = layer.host_session(MessageId::new(4));
 
         assert!(!layer.host_owned(MessageId::new(5)));
+    }
+
+    #[test]
+    fn only_the_host_reserved_targets_map_to_a_return_page() {
+        assert_eq!(
+            SettingsReturnPage::from_target(pwr_plugin_protocol::SETTINGS_TARGET),
+            Some(SettingsReturnPage::Settings)
+        );
+        assert_eq!(
+            SettingsReturnPage::from_target(pwr_plugin_protocol::ABOUT_TARGET),
+            Some(SettingsReturnPage::About)
+        );
+        assert_eq!(SettingsReturnPage::from_target("voice"), None);
     }
 
     /// The double-ack regression (live `/about` Back click): the global

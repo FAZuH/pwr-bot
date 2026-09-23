@@ -18,14 +18,14 @@
 //! - answers `view.interact` by applying the monolith update vocabulary
 //!   (toggle) to the session's own model copy and re-rendering — a plain
 //!   edit makes no host call;
-//! - `Back` and the engine's `view.timeout` event persist the session's
-//!   snapshot through `host.voice.update_settings` (the monolith's
-//!   save-on-exit semantics);
-//! - `Back` then hands the message back to the host Settings GUI through
-//!   `host.open_view` against the host-reserved `settings` target,
-//!   answering its own interaction with the `ViewMoved` marker when the
-//!   open replaced the panel's message; when no live Settings session
-//!   takes the message back, the panel re-renders and stays;
+//! - `Back`, `About`, and the engine's `view.timeout` event each persist the
+//!   session's snapshot exactly once through `host.voice.update_settings`;
+//! - `Back` then hands the message back to the host Settings GUI and
+//!   `About` opens the host About view on the panel's message, both
+//!   through `host.open_view` against their host-reserved targets,
+//!   answering the interaction with the `ViewMoved` marker when the open
+//!   replaced the panel's message; when no live Settings session takes the
+//!   message back, the panel re-renders and stays;
 //! - treats `event` (`view.timeout`) as one-way, never answering it: the
 //!   persist it triggers rides a `host.voice.update_settings` call whose
 //!   resp is only logged;
@@ -40,14 +40,12 @@ use std::process::ExitCode;
 use pwr_ext::view;
 use pwr_ext::view_support::ButtonStyle;
 use pwr_plugin_protocol::API_VERSION;
-use pwr_plugin_protocol::CommandDef;
-use pwr_plugin_protocol::Manifest;
 use pwr_plugin_protocol::Msg;
 use pwr_plugin_protocol::ServerSettings;
-use pwr_plugin_protocol::SettingsSection;
 use pwr_plugin_protocol::VIEW_MOVED_KIND;
 use pwr_plugin_protocol::WireError;
 use pwr_plugin_support::Panel;
+use pwr_plugin_support::about_exit;
 use pwr_plugin_support::back_exit;
 use pwr_plugin_support::id_as_u64;
 use pwr_plugin_support::issue_host_call;
@@ -55,19 +53,14 @@ use pwr_plugin_support::reply_err;
 use pwr_plugin_support::write_msg;
 use serde_json::Value;
 use serde_json::json;
-
-/// The plugin's name: the hello `name` and the handle the host keeps it
-/// under.
-const PLUGIN_NAME: &str = "voice";
-
-/// The command the panel serves: the manifest's slash command and the
-/// invoke command the host Settings section and the `/vc settings`
-/// deep-link dispatch.
-const COMMAND_NAME: &str = "voice-settings";
+use voice::COMMAND_NAME;
+use voice::PLUGIN_NAME;
+use voice::manifest;
 
 /// Custom ids for the panel's interactive components.
 const CUSTOM_ID_TOGGLE: &str = "voice:toggle";
 const CUSTOM_ID_BACK: &str = "voice:back";
+const CUSTOM_ID_ABOUT: &str = "voice:about";
 
 // ── the plugin's own update logic ─────────────────────────────────────────────
 
@@ -96,6 +89,7 @@ impl Model {
 enum PanelMsg {
     ToggleEnabled,
     Back,
+    About,
     Expired,
 }
 
@@ -106,9 +100,9 @@ enum Effect {
     Persist(ServerSettings),
 }
 
-/// The pure update function — the only writer of the model. `Back` and
-/// `Expired` persist the current snapshot; every edit applies in place with
-/// no effect.
+/// The pure update function — the only writer of the model. `Back`, `About`,
+/// and `Expired` persist the current snapshot; every edit applies in place
+/// with no effect.
 fn update(msg: PanelMsg, model: &mut Model) -> Vec<Effect> {
     match msg {
         PanelMsg::ToggleEnabled => {
@@ -116,12 +110,12 @@ fn update(msg: PanelMsg, model: &mut Model) -> Vec<Effect> {
             model.settings.voice.enabled = Some(!current);
             Vec::new()
         }
-        PanelMsg::Back | PanelMsg::Expired => persist(model),
+        PanelMsg::Back | PanelMsg::About | PanelMsg::Expired => persist(model),
     }
 }
 
-/// The persist behavior shared by `Back` and expiry: snapshot the current
-/// settings exactly once.
+/// The persist behavior shared by `Back`, `About`, and expiry: snapshot the
+/// current settings exactly once.
 fn persist(model: &Model) -> Vec<Effect> {
     vec![Effect::Persist(model.settings.clone())]
 }
@@ -151,7 +145,7 @@ type HostCall = pwr_plugin_support::HostCall<Model>;
 
 /// Renders the panel as Components V2, mirroring the monolith's
 /// `/vc settings` view: the status header (whose copy reflects the enabled
-/// state), the toggle button, and the Back row outside the container.
+/// state), the toggle button, and the Back/About row outside the container.
 fn view_data(model: &Model) -> Value {
     let is_enabled = model.is_enabled();
 
@@ -189,6 +183,11 @@ fn view_data(model: &Model) -> Value {
                     label: "❮ Back",
                     style: ButtonStyle::Secondary
                 }
+                button {
+                    custom_id: CUSTOM_ID_ABOUT,
+                    label: "🛈 About",
+                    style: ButtonStyle::Secondary
+                }
             }
         }
     };
@@ -213,33 +212,6 @@ fn reply_envelope(out: &mut impl Write, invoke_id: u64, session: &SessionState) 
 }
 
 // ── protocol helpers ───────────────────────────────────────────────────────────
-
-/// The plugin's static declaration, matching what its hello announces.
-fn manifest() -> Manifest {
-    Manifest {
-        name: PLUGIN_NAME.into(),
-        description: "Manage voice tracking settings".into(),
-        version: "0.1.0".into(),
-        // The guild-only slash command the host Settings section dispatches:
-        // a direct invoke carries no `guild_id` in its re-parsed args, so
-        // the host injects the invocation's guild into the args.
-        commands: vec![CommandDef {
-            create_command: json!({
-                "name": COMMAND_NAME,
-                "description": "Manage voice tracking settings",
-                "dm_permission": false,
-            }),
-        }],
-        event_handlers: vec!["view.timeout".into()],
-        tasks: vec![],
-        settings: vec![SettingsSection {
-            name: "Voice".into(),
-            description: "Manage voice tracking settings".into(),
-            command: COMMAND_NAME.into(),
-        }],
-        api_version: API_VERSION,
-    }
-}
 
 /// The `host.voice.get_settings` call args.
 fn get_settings_args(guild_id: u64) -> Value {
@@ -343,6 +315,7 @@ fn main() -> ExitCode {
                         let msg = match custom_id {
                             Some(CUSTOM_ID_TOGGLE) => PanelMsg::ToggleEnabled,
                             Some(CUSTOM_ID_BACK) => PanelMsg::Back,
+                            Some(CUSTOM_ID_ABOUT) => PanelMsg::About,
                             Some(other) => {
                                 if !reply_err(
                                     &mut out,
@@ -370,17 +343,20 @@ fn main() -> ExitCode {
                             }
                             continue;
                         }
-                        // A Back press persists first (the save-on-exit
-                        // semantics), then hands the message back to the
-                        // host Settings GUI.
-                        let back = back_exit(args.as_ref(), session.guild_id);
+                        // A Back or About press persists the snapshot,
+                        // then hands the message to the host page the press
+                        // asked for.
+                        let exit = match custom_id {
+                            Some(CUSTOM_ID_ABOUT) => about_exit(args.as_ref(), session.guild_id),
+                            _ => back_exit(args.as_ref(), session.guild_id),
+                        };
                         let persist_args =
                             update_settings_args(session.guild_id, &session.model.settings);
                         Some(HostCall::new(
                             Pending::Persist {
                                 invoke_id: id,
                                 session,
-                                back,
+                                exit,
                             },
                             persist_args,
                         ))
@@ -489,16 +465,16 @@ fn main() -> ExitCode {
                     Pending::Persist {
                         invoke_id,
                         session,
-                        back,
+                        exit,
                     } => {
                         // A failed persist logs but the exit continues: the
                         // user asked to leave, so the panel still hands the
-                        // message back to the host Settings GUI.
+                        // message to the host page the press asked for.
                         if !ok {
                             eprintln!("host.voice.update_settings failed: {error:?}");
                         }
-                        let Some(back) = back else {
-                            eprintln!("back without a channel id: panel stays");
+                        let Some(exit) = exit else {
+                            eprintln!("return without a channel id: panel stays");
                             if !reply_envelope(&mut out, invoke_id, &session) {
                                 return ExitCode::FAILURE;
                             }
@@ -508,9 +484,9 @@ fn main() -> ExitCode {
                             Pending::OpenSettings {
                                 invoke_id,
                                 session,
-                                message_id: back.message_id,
+                                message_id: exit.message_id,
                             },
-                            back.args,
+                            exit.args,
                         );
                         if !issue_host_call(&mut out, &mut pending, &mut next_call_id, call) {
                             return ExitCode::FAILURE;
@@ -525,12 +501,13 @@ fn main() -> ExitCode {
                             eprintln!("host.open_view(settings) failed: {error:?}");
                         }
                         // In place: the open replaced this panel's message
-                        // with the host Settings GUI, so answering with the
-                        // panel's own render would overwrite it — the host
-                        // skips its render on the marker kind. Without a
-                        // source message (or when no live Settings session
-                        // took the message back) the panel stays and keeps
-                        // answering its own interactions.
+                        // with the host page the exit asked for, so
+                        // answering with the panel's own render would
+                        // overwrite it — the host skips its render on the
+                        // marker kind. Without a source message (or when no
+                        // live Settings session took the message back) the
+                        // panel stays and keeps answering its own
+                        // interactions.
                         if ok && message_id.is_some() {
                             if !reply_err(&mut out, invoke_id, VIEW_MOVED_KIND, "settings opened") {
                                 return ExitCode::FAILURE;
@@ -589,8 +566,8 @@ mod tests {
     }
 
     #[test]
-    fn back_and_expiry_persist_the_snapshot_exactly_once() {
-        for msg in [PanelMsg::Back, PanelMsg::Expired] {
+    fn back_about_and_expiry_persist_the_snapshot_exactly_once() {
+        for msg in [PanelMsg::Back, PanelMsg::About, PanelMsg::Expired] {
             let mut m = model();
             let effects = update(msg, &mut m);
             assert_eq!(effects.len(), 1, "{msg:?}");
@@ -656,6 +633,8 @@ mod tests {
         let nav = components[1]["components"].as_array().expect("nav");
         assert_eq!(nav[0]["custom_id"], json!(CUSTOM_ID_BACK));
         assert_eq!(nav[0]["label"], json!("❮ Back"));
+        assert_eq!(nav[1]["custom_id"], json!(CUSTOM_ID_ABOUT));
+        assert_eq!(nav[1]["label"], json!("🛈 About"));
     }
 
     #[test]
@@ -719,7 +698,7 @@ mod tests {
             Pending::Persist {
                 invoke_id: 0,
                 session: session.clone(),
-                back: None,
+                exit: None,
             }
             .op(),
             "host.voice.update_settings"

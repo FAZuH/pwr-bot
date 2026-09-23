@@ -32,6 +32,7 @@ use pwr_plugin_protocol::WireError;
 use serde_json::Value;
 use serde_json::json;
 
+use crate::bot::translate::SettingsReturnPage;
 use crate::plugin::InteractionEngine;
 use crate::plugin::InteractionError;
 use crate::plugin::PluginManager;
@@ -698,16 +699,17 @@ pub async fn handle_host_call(
             let Some(io) = host.and_then(|host| host.io.clone()) else {
                 return resp_err(id, "HostUnavailable", "host io is not configured");
             };
-            // The host-reserved `settings` target wakes the parked Settings
-            // session; no plugin view is opened.
-            if args
+            // The host-reserved targets wake the parked Settings session;
+            // any other target opens a plugin view.
+            let page = args
                 .and_then(Value::as_object)
                 .and_then(|obj| obj.get("plugin"))
                 .and_then(Value::as_str)
-                == Some(pwr_plugin_protocol::SETTINGS_TARGET)
-            {
+                .and_then(SettingsReturnPage::from_target);
+            if let Some(page) = page {
                 return match settings_return_call(
                     args,
+                    page,
                     host.and_then(|host| host.settings_returns.as_deref()),
                     host.and_then(|host| host.engine.as_deref()),
                 )
@@ -903,14 +905,16 @@ async fn io_call(
     }
 }
 
-/// Answers the host-reserved `settings` open_view target — the panel
-/// return path. The parked Settings session that handed the message to the
-/// panel wakes and re-runs the Settings GUI on the same message; nothing
+/// Answers the host-reserved `settings` and `about` open_view targets —
+/// the panel return paths. The parked Settings session that handed the
+/// message to the panel wakes and re-runs the page the target asked for
+/// (the Settings GUI, or the host About view) on the same message; nothing
 /// renders here, the wake-up side owns the morph. Without a live waiter (a
 /// panel opened outside a Settings session, or one whose wait expired) the
 /// call fails and the panel stays on screen.
 async fn settings_return_call(
     args: Option<&Value>,
+    page: SettingsReturnPage,
     settings_returns: Option<&crate::bot::translate::SettingsReturns>,
     engine: Option<&InteractionEngine<RunningPlugin>>,
 ) -> Result<Option<Value>, WireError> {
@@ -919,7 +923,7 @@ async fn settings_return_call(
         .and_then(id_as_u64)
         .ok_or_else(|| WireError {
             kind: "NoSettingsSession".into(),
-            msg: "the host-reserved `settings` target opens only in place".into(),
+            msg: "host-reserved targets open only in place".into(),
         })?;
     let Some(waiter) = settings_returns
         .and_then(|returns| returns.take(serenity::model::id::MessageId::new(message_id)))
@@ -929,15 +933,14 @@ async fn settings_return_call(
             msg: "no live host Settings session is waiting on this message".into(),
         });
     };
-    // The panel's engine session dies silently with the return: no
-    // `view.timeout` push (the panel already persisted on its Back) and no
-    // reaper expiry firing a second persist later.
+    // The panel persists on its exit; the engine session is deregistered
+    // instead of expiring.
     if let Some(engine) = engine {
         engine
             .deregister(serenity::model::id::MessageId::new(message_id))
             .await;
     }
-    let _ = waiter.send(());
+    let _ = waiter.send(page);
     Ok(Some(json!({ "message_id": message_id })))
 }
 
@@ -1930,6 +1933,64 @@ mod tests {
         .await;
         assert!(matches!(&resp, Msg::Resp { ok: true, .. }), "{resp:?}");
         rx.await.expect("the parked session was woken");
+    }
+
+    #[tokio::test]
+    async fn open_view_about_target_completes_the_parked_waiter_with_the_about_page() {
+        let mock = MockHostIo::new();
+        let host = services(Some(Arc::new(mock)), Some(sample_config()));
+        let returns = Arc::new(crate::bot::translate::SettingsReturns::default());
+        let rx = returns.wait(serenity::model::id::MessageId::new(42));
+        let host = HostServices {
+            settings_returns: Some(returns),
+            ..host
+        };
+
+        let resp = handle_host_call(
+            7,
+            "feed",
+            "host.open_view",
+            Some(&json!({
+                "channel_id": 9,
+                "plugin": pwr_plugin_protocol::ABOUT_TARGET,
+                "message_id": 42,
+            })),
+            Some(&host),
+            None,
+        )
+        .await;
+        assert!(matches!(&resp, Msg::Resp { ok: true, .. }), "{resp:?}");
+        let page = rx.await.expect("the parked session was woken");
+        assert_eq!(page, SettingsReturnPage::About);
+    }
+
+    #[tokio::test]
+    async fn open_view_settings_target_completes_the_parked_waiter_with_the_settings_page() {
+        let mock = MockHostIo::new();
+        let host = services(Some(Arc::new(mock)), Some(sample_config()));
+        let returns = Arc::new(crate::bot::translate::SettingsReturns::default());
+        let rx = returns.wait(serenity::model::id::MessageId::new(42));
+        let host = HostServices {
+            settings_returns: Some(returns),
+            ..host
+        };
+
+        let resp = handle_host_call(
+            7,
+            "feed",
+            "host.open_view",
+            Some(&json!({
+                "channel_id": 9,
+                "plugin": pwr_plugin_protocol::SETTINGS_TARGET,
+                "message_id": 42,
+            })),
+            Some(&host),
+            None,
+        )
+        .await;
+        assert!(matches!(&resp, Msg::Resp { ok: true, .. }), "{resp:?}");
+        let page = rx.await.expect("the parked session was woken");
+        assert_eq!(page, SettingsReturnPage::Settings);
     }
 
     #[tokio::test]
