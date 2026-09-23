@@ -56,14 +56,18 @@ pub trait HostIo: Send + Sync {
     /// original response to be edited later.
     async fn acknowledge(&self, interaction_id: u64, token: &str) -> Result<(), HostError>;
 
-    /// Sends a message to a channel. The prose renders as a text display
-    /// inside a Components V2 envelope — the send seam has no legacy content
-    /// path, so a content-beside-V2 payload (Discord error 50035) is
-    /// unrepresentable here. Returns the created message's id.
+    /// Sends a message to a channel. `data` is the raw Discord message
+    /// payload, transmitted verbatim — the seam never rewrites plugin JSON
+    /// (Verbatim send). `attachments` are the files the payload's
+    /// `attachments` declaration names; an empty list sends no files. The
+    /// send seam has no legacy content path, so a content-beside-V2 payload
+    /// (Discord error 50035) is unrepresentable here. Returns the created
+    /// message's id.
     async fn send_message(
         &self,
         channel_id: u64,
-        content: &str,
+        data: Value,
+        attachments: Vec<serenity::CreateAttachment<'static>>,
     ) -> Result<Option<Value>, HostError>;
 
     /// Edits a previously sent message in place. `data` is the edit body:
@@ -132,14 +136,15 @@ impl HostIo for SerenityHostIo {
     async fn send_message(
         &self,
         channel_id: u64,
-        content: &str,
+        data: Value,
+        attachments: Vec<serenity::CreateAttachment<'static>>,
     ) -> Result<Option<Value>, HostError> {
         let message = self
             .http
             .send_message(
                 channel_id.into(),
-                Vec::new(),
-                &send_message_payload(content),
+                attachments.into_iter().map(Into::into).collect(),
+                &data,
             )
             .await?;
         Ok(Some(json!({ "message_id": message.id.get() })))
@@ -191,9 +196,10 @@ pub enum HostError {
     InvalidModal(String),
 }
 
-/// Builds the wire payload for a [`HostIo::send_message`] call: the prose in
-/// a text display inside a Components V2 envelope, with the explicit `tts`
-/// and `enforce_nonce` fields the raw HTTP route needs.
+/// Builds the wire payload for a prose `host.send_message` call: the prose
+/// in a text display inside a Components V2 envelope, with the explicit
+/// shape the raw HTTP route needs. A `data` argument bypasses this builder
+/// and rides the seam verbatim after the Gate.
 fn send_message_payload(content: &str) -> Value {
     pwr_poise_components::view_data_v2([pwr_poise_components::text_display(content)])
 }
@@ -618,6 +624,11 @@ pub struct HostServices {
     /// Fills the attachment slots a plugin envelope declares at transport
     /// (ADR-0012); absent when the host holds no preview renderer.
     pub previews: Option<Arc<crate::plugin::preview::PreviewResolver>>,
+    /// The Settings return-waiter registry: the host-reserved `settings`
+    /// open_view target completes a waiter to wake the Router session that
+    /// handed its message to a panel section. Absent when no Settings GUI
+    /// session machinery is wired.
+    pub settings_returns: Option<Arc<crate::bot::translate::SettingsReturns>>,
 }
 
 /// Serves one plugin→host [`Msg::Call`], answering with the correlation-id
@@ -671,7 +682,14 @@ pub async fn handle_host_call(
             let Some(io) = host.and_then(|host| host.io.clone()) else {
                 return resp_err(id, "HostUnavailable", "host io is not configured");
             };
-            match io_call(cap, args, &*io).await {
+            match io_call(
+                cap,
+                args,
+                &*io,
+                host.and_then(|host| host.previews.as_deref()),
+            )
+            .await
+            {
                 Ok(data) => Msg::resp_ok(id, data),
                 Err(wire) => Msg::resp_err(id, wire),
             }
@@ -680,6 +698,25 @@ pub async fn handle_host_call(
             let Some(io) = host.and_then(|host| host.io.clone()) else {
                 return resp_err(id, "HostUnavailable", "host io is not configured");
             };
+            // The host-reserved `settings` target wakes the parked Settings
+            // session; no plugin view is opened.
+            if args
+                .and_then(Value::as_object)
+                .and_then(|obj| obj.get("plugin"))
+                .and_then(Value::as_str)
+                == Some(pwr_plugin_protocol::SETTINGS_TARGET)
+            {
+                return match settings_return_call(
+                    args,
+                    host.and_then(|host| host.settings_returns.as_deref()),
+                    host.and_then(|host| host.engine.as_deref()),
+                )
+                .await
+                {
+                    Ok(data) => Msg::resp_ok(id, data),
+                    Err(wire) => Msg::resp_err(id, wire),
+                };
+            }
             let Some(engine) = host.and_then(|host| host.engine.clone()) else {
                 return resp_err(
                     id,
@@ -818,6 +855,7 @@ async fn io_call(
     cap: HostCap,
     args: Option<&Value>,
     io: &dyn HostIo,
+    previews: Option<&crate::plugin::preview::PreviewResolver>,
 ) -> Result<Option<Value>, WireError> {
     match cap {
         HostCap::Defer => {
@@ -835,28 +873,72 @@ async fn io_call(
             Ok(None)
         }
         HostCap::SendMessage => {
-            let (channel_id, content) = parse_send_message(args)?;
-            io.send_message(channel_id, &content)
+            let (channel_id, data, attachments) = parse_send_message(args)?;
+            io.send_message(channel_id, data, attachments)
                 .await
                 .map_err(host_io_err)
         }
         HostCap::EditMessage => {
             let (channel_id, message_id, data) = parse_edit_message(args)?;
             reject_content_on_edit(&data).map_err(WireError::from)?;
-            io.edit_message(
-                channel_id,
-                message_id,
-                edit_body_for_transport(&data),
-                Vec::new(),
-            )
-            .await
-            .map_err(host_io_err)
+            let guild_id = args
+                .and_then(|args| args.get("guild_id"))
+                .and_then(id_as_u64);
+            let (body, attachments) = match previews {
+                Some(previews) => {
+                    previews
+                        .resolve(edit_body_for_transport(&data), guild_id)
+                        .await
+                }
+                None => (edit_body_for_transport(&data), Vec::new()),
+            };
+            io.edit_message(channel_id, message_id, body, attachments)
+                .await
+                .map_err(host_io_err)
         }
         other => Err(WireError {
             kind: "UnknownOp".into(),
             msg: format!("op `{}` is not an I/O op", other.as_str()),
         }),
     }
+}
+
+/// Answers the host-reserved `settings` open_view target — the panel
+/// return path. The parked Settings session that handed the message to the
+/// panel wakes and re-runs the Settings GUI on the same message; nothing
+/// renders here, the wake-up side owns the morph. Without a live waiter (a
+/// panel opened outside a Settings session, or one whose wait expired) the
+/// call fails and the panel stays on screen.
+async fn settings_return_call(
+    args: Option<&Value>,
+    settings_returns: Option<&crate::bot::translate::SettingsReturns>,
+    engine: Option<&InteractionEngine<RunningPlugin>>,
+) -> Result<Option<Value>, WireError> {
+    let message_id = args
+        .and_then(|args| args.get("message_id"))
+        .and_then(id_as_u64)
+        .ok_or_else(|| WireError {
+            kind: "NoSettingsSession".into(),
+            msg: "the host-reserved `settings` target opens only in place".into(),
+        })?;
+    let Some(waiter) = settings_returns
+        .and_then(|returns| returns.take(serenity::model::id::MessageId::new(message_id)))
+    else {
+        return Err(WireError {
+            kind: "NoSettingsSession".into(),
+            msg: "no live host Settings session is waiting on this message".into(),
+        });
+    };
+    // The panel's engine session dies silently with the return: no
+    // `view.timeout` push (the panel already persisted on its Back) and no
+    // reaper expiry firing a second persist later.
+    if let Some(engine) = engine {
+        engine
+            .deregister(serenity::model::id::MessageId::new(message_id))
+            .await;
+    }
+    let _ = waiter.send(());
+    Ok(Some(json!({ "message_id": message_id })))
 }
 
 /// Runs the `host.open_view` op end to end: resolves the target plugin from
@@ -892,7 +974,7 @@ async fn open_view_call(
         Some(message_id) => message_id,
         None => {
             let placeholder = io
-                .send_message(channel_id, "Loading…")
+                .send_message(channel_id, send_message_payload("Loading…"), Vec::new())
                 .await
                 .map_err(host_io_err)?;
             placeholder
@@ -973,7 +1055,7 @@ async fn open_modal_call(
 ) -> Result<Option<Value>, WireError> {
     let (author_id, interaction_id, token, modal) = parse_open_modal(args)?;
     serde_json::from_value::<CreateModalDe>(modal.clone())
-        .map_err(|e| invalid_args(&format!("`modal` is not a valid modal spec: {e}")))?;
+        .map_err(|e| invalid_args(format!("`modal` is not a valid modal spec: {e}")))?;
     // `CreateModalDe` requires `custom_id: Cow<str>`, so a spec that just
     // validated always carries it as a string here.
     let custom_id = modal
@@ -1110,18 +1192,27 @@ fn parse_id_token(args: Option<&Value>) -> Result<(u64, String), WireError> {
     Ok((interaction_id, token))
 }
 
-/// Parses `host.send_message` args: a channel id and the prose to send. The
-/// prose renders as a text display inside a Components V2 envelope; unknown
-/// argument keys (e.g. a legacy plugin's `data` object) have no effect and
-/// are logged at debug level.
-fn parse_send_message(args: Option<&Value>) -> Result<(u64, String), WireError> {
+/// Parses `host.send_message` args. Two shapes:
+///
+/// - `content` (prose): the host renders it as a text display inside a
+///   Components V2 envelope. When both `content` and `data` arrive, the
+///   prose wins and the raw payload is ignored;
+/// - `data` (raw Discord message JSON): validated through the Gate
+///   ([`validate_view_data`], parse-clone-discard, ADR-0003) and sent
+///   verbatim. Optional `files` entries (`filename` + `data_base64`) are
+///   decoded into attachments so a plugin can send runtime-generated files;
+///   `files` without `data` is invalid (the prose builder has no
+///   attachment slots to declare).
+fn parse_send_message(
+    args: Option<&Value>,
+) -> Result<(u64, Value, Vec<serenity::CreateAttachment<'static>>), WireError> {
     let obj = args.and_then(Value::as_object).ok_or_else(|| {
-        invalid_args("expected args object with `channel_id` (u64) and `content` (string)")
+        invalid_args("expected args object with `channel_id` (u64) and `content` or `data`")
     })?;
     let ignored: Vec<&str> = obj
         .keys()
         .map(String::as_str)
-        .filter(|key| !matches!(*key, "channel_id" | "content"))
+        .filter(|key| !matches!(*key, "channel_id" | "content" | "data" | "files"))
         .collect();
     if !ignored.is_empty() {
         debug!("host.send_message ignored argument keys: {ignored:?}");
@@ -1130,12 +1221,64 @@ fn parse_send_message(args: Option<&Value>) -> Result<(u64, String), WireError> 
         .get("channel_id")
         .and_then(Value::as_u64)
         .ok_or_else(|| invalid_args("missing `channel_id` (u64)"))?;
-    let content = obj
-        .get("content")
-        .and_then(Value::as_str)
-        .ok_or_else(|| invalid_args("missing `content` (string)"))?
-        .to_string();
-    Ok((channel_id, content))
+    let content = obj.get("content");
+    let data = obj.get("data");
+    let files = parse_send_message_files(obj.get("files"))?;
+    if let Some(content) = content.and_then(Value::as_str) {
+        if !files.is_empty() {
+            return Err(invalid_args("`files` requires `data` (object)"));
+        }
+        return Ok((channel_id, send_message_payload(content), Vec::new()));
+    }
+    if let Some(data) = data {
+        validate_view_data(data).map_err(WireError::from)?;
+        return Ok((channel_id, data.clone(), files));
+    }
+    Err(invalid_args(
+        "missing `content` (string) or `data` (object)",
+    ))
+}
+
+/// Decodes the `files` entries of a `host.send_message` call into
+/// attachments: each entry carries a `filename` and base64-encoded
+/// `data_base64` bytes. A malformed entry (missing fields, non-string
+/// values, invalid base64) fails the whole op with `InvalidArgs` — a
+/// half-decoded send is never attempted.
+fn parse_send_message_files(
+    files: Option<&Value>,
+) -> Result<Vec<serenity::CreateAttachment<'static>>, WireError> {
+    use base64::Engine as _;
+
+    let Some(files) = files else {
+        return Ok(Vec::new());
+    };
+    let entries = files
+        .as_array()
+        .ok_or_else(|| invalid_args("`files` must be an array"))?;
+    let mut attachments = Vec::with_capacity(entries.len());
+    for (index, entry) in entries.iter().enumerate() {
+        let obj = entry
+            .as_object()
+            .ok_or_else(|| invalid_args(format!("`files` entry {index} is not an object")))?;
+        let filename = obj
+            .get("filename")
+            .and_then(Value::as_str)
+            .ok_or_else(|| invalid_args(format!("`files` entry {index} is missing `filename`")))?;
+        let data_base64 = obj
+            .get("data_base64")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                invalid_args(format!("`files` entry {index} is missing `data_base64`"))
+            })?;
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(data_base64)
+            .map_err(|_| invalid_args(format!("`files` entry {index} has invalid base64")))?;
+        attachments.push(serenity::CreateAttachment::bytes(
+            bytes,
+            filename.to_owned(),
+        ));
+    }
+    Ok(attachments)
 }
 
 /// Parses `host.edit_message` args: a channel id, message id, and the edit
@@ -1195,7 +1338,7 @@ fn parse_open_view(
     Ok((channel_id, plugin, command, call_args, message_id))
 }
 
-fn invalid_args(msg: &str) -> WireError {
+fn invalid_args(msg: impl Into<String>) -> WireError {
     WireError {
         kind: "InvalidArgs".into(),
         msg: msg.into(),
@@ -1303,7 +1446,7 @@ fn parse_update_settings(args: Option<&Value>) -> Result<(u64, ServerSettings), 
         .and_then(|obj| obj.get("settings"))
         .ok_or_else(|| invalid_args("missing `settings` (ServerSettings object)"))?;
     serde_json::from_value(settings.clone())
-        .map_err(|e| invalid_args(&format!("`settings` is not a ServerSettings: {e}")))
+        .map_err(|e| invalid_args(format!("`settings` is not a ServerSettings: {e}")))
         .map(|settings| (guild_id, settings))
 }
 
@@ -1443,6 +1586,7 @@ mod tests {
             voice: None,
             welcome: None,
             previews: None,
+            settings_returns: None,
         }
     }
 
@@ -1461,6 +1605,7 @@ mod tests {
             voice: None,
             welcome: None,
             previews: None,
+            settings_returns: None,
         }
     }
 
@@ -1477,6 +1622,7 @@ mod tests {
             voice: None,
             welcome: None,
             previews: None,
+            settings_returns: None,
         }
     }
 
@@ -1600,9 +1746,9 @@ mod tests {
     async fn send_message_routes_through_the_seam() {
         let mut mock = MockHostIo::new();
         mock.expect_send_message()
-            .with(eq(99_u64), eq("hello world"))
+            .with(eq(99_u64), always(), always())
             .times(1)
-            .returning(|_, _| Ok(Some(json!({ "message_id": 1234 }))));
+            .returning(|_, _, _| Ok(Some(json!({ "message_id": 1234 }))));
         let host = services(Some(Arc::new(mock)), Some(sample_config()));
 
         let resp = handle_host_call(
@@ -1612,7 +1758,6 @@ mod tests {
             Some(&json!({
                 "channel_id": 99,
                 "content": "hello world",
-                "data": { "flags": 0 },
             })),
             Some(&host),
             None,
@@ -1654,25 +1799,257 @@ mod tests {
         assert_err(resp, 7, "InvalidArgs");
     }
 
+    /// A valid raw message payload: a Components V2 create envelope the way
+    /// a plugin build produces it (the `view!` macro's shape).
+    fn raw_send_data() -> Value {
+        json!({
+            "content": null,
+            "nonce": "send-42",
+            "tts": false,
+            "embeds": [],
+            "allowed_mentions": {"parse": []},
+            "message_reference": null,
+            "components": [{ "type": 10, "content": "raw" }],
+            "sticker_ids": [],
+            "flags": 32768,
+            "attachments": [],
+            "enforce_nonce": false,
+            "poll": null
+        })
+    }
+
     #[tokio::test]
-    async fn send_message_non_object_data_is_ignored() {
+    async fn send_message_raw_data_is_transmitted_verbatim() {
+        let data = raw_send_data();
         let mut mock = MockHostIo::new();
         mock.expect_send_message()
-            .with(eq(99_u64), eq("x"))
+            .with(eq(99_u64), eq(data.clone()), always())
             .times(1)
-            .returning(|_, _| Ok(Some(json!({ "message_id": 1 }))));
+            .returning(|_, _, _| Ok(Some(json!({ "message_id": 1234 }))));
         let host = services(Some(Arc::new(mock)), Some(sample_config()));
 
         let resp = handle_host_call(
             7,
             "hello",
             "host.send_message",
-            Some(&json!({ "channel_id": 99, "content": "x", "data": "oops" })),
+            Some(&json!({ "channel_id": 99, "data": data })),
             Some(&host),
             None,
         )
         .await;
-        assert_ok(resp, 7);
+        assert_eq!(assert_ok(resp, 7), Some(json!({ "message_id": 1234 })));
+    }
+
+    #[tokio::test]
+    async fn send_message_raw_data_passes_the_validate_only_gate() {
+        // A payload the Gate refuses (content beside the V2 flag, error
+        // 50035) never reaches the seam: parse-clone-discard, ADR-0003.
+        let data = json!({
+            "content": "hello",
+            "nonce": "send-42",
+            "tts": false,
+            "embeds": [],
+            "allowed_mentions": {"parse": []},
+            "message_reference": null,
+            "components": [{ "type": 10, "content": "raw" }],
+            "sticker_ids": [],
+            "flags": 32768,
+            "attachments": [],
+            "enforce_nonce": false,
+            "poll": null
+        });
+        let mock = MockHostIo::new();
+        let host = services(Some(Arc::new(mock)), Some(sample_config()));
+
+        let resp = handle_host_call(
+            7,
+            "hello",
+            "host.send_message",
+            Some(&json!({ "channel_id": 99, "data": data })),
+            Some(&host),
+            None,
+        )
+        .await;
+        assert_err(resp, 7, "InvalidView");
+    }
+
+    #[tokio::test]
+    async fn send_message_content_wins_over_a_vestigial_data() {
+        let mut mock = MockHostIo::new();
+        mock.expect_send_message()
+            .with(
+                eq(99_u64),
+                eq(send_message_payload("prose")),
+                mockall::predicate::function(|attachments: &Vec<serenity::CreateAttachment>| {
+                    attachments.is_empty()
+                }),
+            )
+            .times(1)
+            .returning(|_, _, _| Ok(Some(json!({ "message_id": 1234 }))));
+        let host = services(Some(Arc::new(mock)), Some(sample_config()));
+
+        let resp = handle_host_call(
+            7,
+            "hello",
+            "host.send_message",
+            Some(&json!({
+                "channel_id": 99,
+                "content": "prose",
+                "data": raw_send_data(),
+            })),
+            Some(&host),
+            None,
+        )
+        .await;
+        assert!(matches!(&resp, Msg::Resp { ok: true, .. }), "{resp:?}");
+    }
+
+    #[tokio::test]
+    async fn open_view_settings_target_completes_the_parked_waiter() {
+        let mock = MockHostIo::new();
+        let host = services(Some(Arc::new(mock)), Some(sample_config()));
+        let returns = Arc::new(crate::bot::translate::SettingsReturns::default());
+        let rx = returns.wait(serenity::model::id::MessageId::new(42));
+        let host = HostServices {
+            settings_returns: Some(returns),
+            ..host
+        };
+
+        let resp = handle_host_call(
+            7,
+            "feed",
+            "host.open_view",
+            Some(&json!({
+                "channel_id": 9,
+                "plugin": pwr_plugin_protocol::SETTINGS_TARGET,
+                "message_id": 42,
+            })),
+            Some(&host),
+            None,
+        )
+        .await;
+        assert!(matches!(&resp, Msg::Resp { ok: true, .. }), "{resp:?}");
+        rx.await.expect("the parked session was woken");
+    }
+
+    #[tokio::test]
+    async fn open_view_settings_target_without_a_waiter_fails_the_return() {
+        let mock = MockHostIo::new();
+        let host = services(Some(Arc::new(mock)), Some(sample_config()));
+
+        let resp = handle_host_call(
+            7,
+            "feed",
+            "host.open_view",
+            Some(&json!({
+                "channel_id": 9,
+                "plugin": pwr_plugin_protocol::SETTINGS_TARGET,
+                "message_id": 42,
+            })),
+            Some(&host),
+            None,
+        )
+        .await;
+        match &resp {
+            Msg::Resp {
+                ok: false,
+                error: Some(err),
+                ..
+            } => assert_eq!(err.kind, "NoSettingsSession"),
+            other => panic!("expected NoSettingsSession, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn send_message_files_without_data_is_invalid_args() {
+        let mock = MockHostIo::new();
+        let host = services(Some(Arc::new(mock)), Some(sample_config()));
+
+        let resp = handle_host_call(
+            7,
+            "hello",
+            "host.send_message",
+            Some(&json!({
+                "channel_id": 99,
+                "content": "prose",
+                "files": [{ "filename": "chart.png", "data_base64": "aGk=" }],
+            })),
+            Some(&host),
+            None,
+        )
+        .await;
+        assert_err(resp, 7, "InvalidArgs");
+    }
+
+    #[tokio::test]
+    async fn send_message_files_decode_into_attachments() {
+        // "aGk=" is base64("hi"): the decoded bytes ride the seam as the
+        // attachment's content, keyed by filename.
+        let mut mock = MockHostIo::new();
+        mock.expect_send_message()
+            .with(
+                eq(99_u64),
+                eq(raw_send_data()),
+                mockall::predicate::function(|attachments: &Vec<serenity::CreateAttachment>| {
+                    attachments.len() == 1
+                }),
+            )
+            .times(1)
+            .returning(|_, _, _| Ok(Some(json!({ "message_id": 1234 }))));
+        let host = services(Some(Arc::new(mock)), Some(sample_config()));
+
+        let resp = handle_host_call(
+            7,
+            "hello",
+            "host.send_message",
+            Some(&json!({
+                "channel_id": 99,
+                "data": raw_send_data(),
+                "files": [{ "filename": "chart.png", "data_base64": "aGk=" }],
+            })),
+            Some(&host),
+            None,
+        )
+        .await;
+        assert_eq!(assert_ok(resp, 7), Some(json!({ "message_id": 1234 })));
+    }
+
+    #[tokio::test]
+    async fn send_message_an_invalid_base64_file_fails_the_whole_op() {
+        let mock = MockHostIo::new();
+        let host = services(Some(Arc::new(mock)), Some(sample_config()));
+
+        let resp = handle_host_call(
+            7,
+            "hello",
+            "host.send_message",
+            Some(&json!({
+                "channel_id": 99,
+                "data": raw_send_data(),
+                "files": [{ "filename": "chart.png", "data_base64": "not base64!" }],
+            })),
+            Some(&host),
+            None,
+        )
+        .await;
+        assert_err(resp, 7, "InvalidArgs");
+    }
+
+    #[tokio::test]
+    async fn send_message_non_object_data_is_invalid_view() {
+        let mock = MockHostIo::new();
+        let host = services(Some(Arc::new(mock)), Some(sample_config()));
+
+        let resp = handle_host_call(
+            7,
+            "hello",
+            "host.send_message",
+            Some(&json!({ "channel_id": 99, "data": "oops" })),
+            Some(&host),
+            None,
+        )
+        .await;
+        assert_err(resp, 7, "InvalidView");
     }
 
     // ── edit_message ──────────────────────────────────────────────────────────
@@ -2294,6 +2671,7 @@ mod tests {
             voice: None,
             welcome: None,
             previews: None,
+            settings_returns: None,
         };
 
         let resp = handle_host_call(7, "hello", "host.stats", None, Some(&host), None).await;
@@ -2345,6 +2723,7 @@ mod tests {
             voice: None,
             welcome: None,
             previews: None,
+            settings_returns: None,
         };
 
         let resp = handle_host_call(7, "hello", "host.stats", None, Some(&host), None).await;
@@ -2377,6 +2756,7 @@ mod tests {
             voice: None,
             welcome: None,
             previews: None,
+            settings_returns: None,
         }
     }
 
@@ -2391,6 +2771,7 @@ mod tests {
             voice: None,
             welcome: Some(welcome),
             previews: None,
+            settings_returns: None,
         }
     }
 
@@ -2599,6 +2980,7 @@ mod tests {
             voice: Some(voice),
             welcome: None,
             previews: None,
+            settings_returns: None,
         }
     }
 
@@ -3172,7 +3554,7 @@ mod tests {
     #[tokio::test]
     async fn seam_failure_is_host_io_error() {
         let mut mock = MockHostIo::new();
-        mock.expect_send_message().times(1).returning(|_, _| {
+        mock.expect_send_message().times(1).returning(|_, _, _| {
             Err(HostError::Serenity(serenity::Error::Http(
                 serenity::HttpError::InvalidWebhook,
             )))

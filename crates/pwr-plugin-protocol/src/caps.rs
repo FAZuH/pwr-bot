@@ -15,8 +15,12 @@ use serde::Serialize;
 pub enum HostCap {
     /// Defer the interaction response (long-running command).
     Defer,
-    /// Send a message to a channel. The prose renders as a Components V2
-    /// text display; a legacy `data` argument is accepted and ignored.
+    /// Send a message to a channel. The prose renders as a text display
+    /// inside a Components V2 envelope; a raw Discord message payload rides
+    /// the `data` argument verbatim after the host's validate-only gate
+    /// (ADR-0003), with optional `files` entries for runtime-generated
+    /// attachments. `files` requires `data`: a prose-only send cannot carry
+    /// files.
     SendMessage,
     /// Edit a previously sent message.
     EditMessage,

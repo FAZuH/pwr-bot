@@ -53,6 +53,7 @@ use poise::serenity_prelude as serenity;
 use pwr_plugin_protocol::Manifest;
 use pwr_plugin_protocol::ViewSpec;
 use serde_json::Value;
+use serde_json::json;
 
 use crate::bot::Data;
 use crate::bot::command::Error;
@@ -625,15 +626,17 @@ fn view_presentation(spec: &ViewSpec) -> ViewPresentation {
 /// declared attachment slots filled, ADR-0012), and register the engine
 /// session on the edited message's id. No placeholder message is ever sent.
 ///
-/// Shared by `plugin_slash_dispatch` and the settings commands that
-/// deep-link a panel plugin without declaring slash commands of their own.
-/// `plugin_name` keys the manager lookup; `command` is the invoke command
-/// the plugin answers (for the panel plugins both are the plugin name).
+/// Shared by `plugin_slash_dispatch` and the commands that deep-link a
+/// panel plugin. `plugin_name` keys the manager lookup; `command` is the
+/// invoke command the plugin answers (for the panel plugins the manifest's
+/// `<plugin>-settings` command). When `args` carries no `guild_id` and the
+/// interaction ran in a guild, the invocation's guild is injected: the
+/// panel plugins key their settings by guild.
 pub async fn open_plugin_view(
     ctx: poise::Context<'_, Data, Error>,
     plugin_name: &str,
     command: &str,
-    args: Value,
+    mut args: Value,
 ) -> Result<(), Error> {
     let poise::Context::Application(app) = ctx else {
         return Err(anyhow::anyhow!("open_plugin_view requires an application interaction").into());
@@ -642,6 +645,11 @@ pub async fn open_plugin_view(
     let Some(plugin) = data.plugin_manager.get(plugin_name).await else {
         return Err(anyhow::anyhow!("plugin `{plugin_name}` is not running").into());
     };
+    if args.get("guild_id").is_none()
+        && let Some(guild_id) = ctx.guild_id()
+    {
+        args["guild_id"] = json!(guild_id.get());
+    }
     // The interaction token outlives the context borrows below and is
     // needed to edit the reply through the interaction-webhook route.
     let interaction_token = app.interaction.token.as_str();

@@ -36,7 +36,7 @@ services:
       RUST_LOG: ${RUST_LOG:-pwr_bot=info}
       ADMIN_ID: ${ADMIN_ID:?error}
       LOGS_PATH: ${LOGS_PATH:-./logs}
-      CORE_PLUGINS: ${CORE_PLUGINS:-settings,feed,voice,welcome}
+      CORE_PLUGINS: ${CORE_PLUGINS:-feed,voice,welcome}
     depends_on:
       db:
         condition: service_healthy

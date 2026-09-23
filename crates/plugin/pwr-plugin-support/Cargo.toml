@@ -3,7 +3,7 @@ name = "pwr-plugin-support"
 version = "0.1.0"
 edition = "2024"
 authors = ["FAZuH <mail@fazuh.com>"]
-description = "Shared plugin-side plumbing for pwr-bot panel plugins: session state, host-call bookkeeping, wire writing, and hub navigation"
+description = "Shared plugin-side plumbing for pwr-bot panel plugins: session state, host-call bookkeeping, wire writing, and settings return"
 license = "MIT"
 repository = "https://github.com/FAZuH/pwr-bot"
 

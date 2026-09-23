@@ -21,6 +21,7 @@ pub(crate) fn manifest_named(name: &str) -> Manifest {
         }],
         event_handlers: Vec::new(),
         tasks: Vec::new(),
+        settings: vec![],
         api_version: API_VERSION,
     }
 }

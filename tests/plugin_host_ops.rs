@@ -30,6 +30,11 @@ use serde_json::json;
 mod probe;
 use probe::probe_binary;
 
+/// The V2 text-display envelope the prose send path builds for `content`.
+fn payload_for(content: &str) -> serde_json::Value {
+    pwr_poise_components::view_data_v2([pwr_poise_components::text_display(content)])
+}
+
 fn host_services(io: Arc<dyn HostIo>, kv: Option<Arc<dyn KvStore>>) -> Arc<HostServices> {
     Arc::new(HostServices {
         io: Some(io),
@@ -45,6 +50,7 @@ fn host_services(io: Arc<dyn HostIo>, kv: Option<Arc<dyn KvStore>>) -> Arc<HostS
         voice: None,
         welcome: None,
         previews: None,
+        settings_returns: None,
     })
 }
 
@@ -68,6 +74,7 @@ fn view_host_services(
         voice: None,
         welcome: None,
         previews: None,
+        settings_returns: None,
     })
 }
 
@@ -81,10 +88,13 @@ async fn host_say_serves_send_message_through_the_seam() {
     mock.expect_send_message()
         .with(
             mockall::predicate::eq(987_654_321_u64),
-            mockall::predicate::eq("hello from the fixture"),
+            mockall::predicate::function(|data: &serde_json::Value| {
+                data["components"][0]["content"] == json!("hello from the fixture")
+            }),
+            mockall::predicate::always(),
         )
         .times(1)
-        .returning(|_, _| Ok(Some(json!({ "message_id": 123_456_789 }))));
+        .returning(|_, _, _| Ok(Some(json!({ "message_id": 123_456_789 }))));
 
     let plugin = RunningPlugin::spawn_with(
         probe_binary("hello"),
@@ -237,10 +247,11 @@ async fn host_openview_opens_the_target_plugin_view_end_to_end() {
     mock.expect_send_message()
         .with(
             mockall::predicate::eq(channel_id),
-            mockall::predicate::eq("Loading…"),
+            mockall::predicate::always(),
+            mockall::predicate::always(),
         )
         .times(1)
-        .returning(move |_, _| Ok(Some(json!({ "message_id": produced }))));
+        .returning(move |_, _, _| Ok(Some(json!({ "message_id": produced }))));
     mock.expect_edit_message()
         .with(
             mockall::predicate::eq(channel_id),
@@ -566,13 +577,21 @@ async fn host_call_without_services_is_host_unavailable() {
 async fn concurrent_host_calls_correlate_by_id() {
     let mut mock = MockHostIo::new();
     mock.expect_send_message()
-        .with(mockall::predicate::eq(1_u64), mockall::predicate::eq("one"))
+        .with(
+            mockall::predicate::eq(1_u64),
+            mockall::predicate::eq(payload_for("one")),
+            mockall::predicate::always(),
+        )
         .times(1)
-        .returning(|_, _| Ok(Some(json!({ "message_id": 1 }))));
+        .returning(|_, _, _| Ok(Some(json!({ "message_id": 1 }))));
     mock.expect_send_message()
-        .with(mockall::predicate::eq(2_u64), mockall::predicate::eq("two"))
+        .with(
+            mockall::predicate::eq(2_u64),
+            mockall::predicate::eq(payload_for("two")),
+            mockall::predicate::always(),
+        )
         .times(1)
-        .returning(|_, _| Ok(Some(json!({ "message_id": 2 }))));
+        .returning(|_, _, _| Ok(Some(json!({ "message_id": 2 }))));
 
     let plugin = Arc::new(
         RunningPlugin::spawn_with(

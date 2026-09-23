@@ -34,7 +34,7 @@ pub struct Config {
 /// [`Config::core_plugin_path`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CorePluginSpec {
-    /// Plugin name, e.g. `settings`.
+    /// Plugin name, e.g. `feed`.
     pub name: String,
     /// Binary path to spawn.
     pub path: PathBuf,
@@ -186,11 +186,11 @@ mod tests {
     #[test]
     fn core_plugins_list_is_split_trimmed_and_empties_dropped() {
         assert_eq!(
-            parse_core_plugins(" settings , feed ,,voice"),
+            parse_core_plugins(" feed , voice ,,welcome"),
             vec![
-                "settings".to_string(),
                 "feed".to_string(),
-                "voice".to_string()
+                "voice".to_string(),
+                "welcome".to_string()
             ]
         );
         assert!(parse_core_plugins("").is_empty());

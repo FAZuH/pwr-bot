@@ -31,6 +31,7 @@ pub use caps::HostCap;
 pub use caps::validate_caps;
 pub use manifest::CommandDef;
 pub use manifest::Manifest;
+pub use manifest::SettingsSection;
 pub use manifest::TaskDef;
 pub use msg::API_VERSION;
 pub use msg::BUTTON_CUSTOM_ID;
@@ -41,6 +42,12 @@ pub use msg::Msg;
 pub use msg::PLUGIN_NAME;
 pub use msg::VIEW_MOVED_KIND;
 pub use msg::WireError;
+
+/// The host-reserved `host.open_view` target that hands a panel's message
+/// back to the host Settings GUI. Not a plugin name: the host answers the
+/// target itself, by waking the session that handed the message to the
+/// panel.
+pub const SETTINGS_TARGET: &str = "settings";
 pub use settings::FeedsSettings;
 pub use settings::ServerSettings;
 pub use settings::VoiceSettings;

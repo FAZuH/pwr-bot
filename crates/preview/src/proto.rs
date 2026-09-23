@@ -352,6 +352,7 @@ mod tests {
             .collect(),
             event_handlers: vec![],
             tasks: vec![],
+            settings: vec![],
             api_version: API_VERSION,
         }
     }

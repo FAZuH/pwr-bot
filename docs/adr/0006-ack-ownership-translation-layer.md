@@ -40,7 +40,7 @@ that both runtimes joined, so the global handler could consult it
 instead of special-casing Host messages. That path couples Host teardown
 to plugin registration timing, so we kept the claim-plus-skip instead.
 The cost is a ghost window: the Host claim drops when the loop ends, and
-the hub handoff registers the plugin session only after its morph edit,
+the Settings section handoff registers the plugin session only after its morph edit,
 so a click in between acknowledges, finds no engine session, and takes
 the stale path. We accept that: the window is one morph edit wide, and
 the message's view has just changed. The same acceptance covers a modal

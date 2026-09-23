@@ -33,10 +33,13 @@
 //! [`crate::bot::gui::feature::GuiFeature::translate`], and renders become
 //! Discord payloads in the Host's render step.
 
+use std::collections::HashMap;
 use std::collections::HashSet;
+use std::sync::Mutex;
 use std::sync::RwLock;
 
 use poise::serenity_prelude::MessageId;
+use tokio::sync::oneshot;
 
 /// Tracks the messages owned by live Host (TEA) sessions.
 ///
@@ -97,6 +100,45 @@ impl TranslateLayer {
         if let Ok(mut messages) = self.host_messages.write() {
             messages.remove(&message_id);
         }
+    }
+}
+
+/// The return-waiter registry for the Settings section handoff.
+///
+/// When the Router hands the live message to a plugin section, it parks a
+/// oneshot keyed by the message id and keeps the session task alive. The
+/// panel's Back presses `host.open_view` against the host-reserved
+/// [`SETTINGS_TARGET`]; the host op answers it by completing the waiter,
+/// waking the Router to re-run the Settings GUI on the same message. A
+/// panel opened outside a live Settings session — or one whose wait
+/// expired — finds no waiter and stays on screen.
+///
+/// [`SETTINGS_TARGET`]: pwr_plugin_protocol::SETTINGS_TARGET
+#[derive(Default)]
+pub struct SettingsReturns {
+    waiters: Mutex<HashMap<MessageId, oneshot::Sender<()>>>,
+}
+
+impl SettingsReturns {
+    /// Parks a waiter for `message_id`, returning its receiver.
+    pub fn wait(&self, message_id: MessageId) -> oneshot::Receiver<()> {
+        let (tx, rx) = oneshot::channel();
+        if let Ok(mut waiters) = self.waiters.lock() {
+            waiters.insert(message_id, tx);
+        }
+        rx
+    }
+
+    /// Takes the waiter for `message_id` out of the registry: `Some` when
+    /// one was live (the caller completes it by sending), `None` when the
+    /// Back found nothing to return to — a panel opened outside a Settings
+    /// session, or a parked side that already gave up. Taking without
+    /// sending also retracts a waiter the parked side is about to abandon.
+    pub fn take(&self, message_id: MessageId) -> Option<oneshot::Sender<()>> {
+        self.waiters
+            .lock()
+            .ok()
+            .and_then(|mut w| w.remove(&message_id))
     }
 }
 

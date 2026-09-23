@@ -16,11 +16,20 @@ use crate::bot::command::voice::VoiceStatsTimeRange;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Navigation {
     // -- Settings section --
-    /// Hand the session's message to the settings plugin's hub view: the
-    /// host run morphs the message into the hub and ends, and the message
-    /// continues as a plugin view session. See
-    /// [`crate::bot::command::session_exit`].
+    /// Run the host Settings GUI: the frame the `/settings` command opens,
+    /// listing the settings sections the loaded plugin manifests declare.
+    /// Every other host feature's Back lands here.
     SettingsMain,
+    /// Hand the session's message to a settings section's panel plugin: the
+    /// host run invokes the plugin command, morphs the message into the
+    /// returned view, and ends — the message continues as a plugin view
+    /// session. See [`crate::bot::command::session_exit`].
+    SettingsSection {
+        /// The plugin the section belongs to.
+        plugin: String,
+        /// The plugin's command the section click invokes.
+        command: String,
+    },
     /// Navigate to about page (within settings context)
     SettingsAbout,
 

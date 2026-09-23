@@ -64,3 +64,14 @@ their `Navigation` targets are deleted; the runtime is not.
 - `open_plugin_view` is now the single initial-render path for plugin
   views opened from a slash interaction; `plugin_slash_dispatch` and
   the three settings commands share it.
+
+## Update (2026-09-23)
+
+The settings hub plugin is retired (#165). The host `/settings` command
+runs a new eighth `GuiFeature` — the Settings GUI
+(`src/bot/gui/settings.rs`, core `src/update/settings.rs`) — whose
+section click exits to `Navigation::SettingsSection`, the Settings
+section handoff. `SettingsMain` is now a runnable frame (the Settings
+GUI), not a terminal handoff, and it is the first feature that returns a
+plain `Navigation::Back`, making the root-dismissal branch live. The
+About feature's Back now lands on the Settings GUI instead of the hub.

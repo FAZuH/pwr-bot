@@ -9,7 +9,7 @@ process runs the bot and its plugin subprocesses.
 A subprocess that the host spawns to add commands and views to the bot. It
 speaks JSON-lines over stdio through `pwr-plugin-protocol`, with a `"t"` tag
 on every message. The plugins live in `crates/plugin/`, for example `hello`
-and `settings`.
+and the settings panels `feed`, `voice`, and `welcome`.
 _Avoid_: extension, add-on
 
 **Host**:
@@ -56,9 +56,9 @@ The reusable typed builders in `crates/pwr-poise-components`, rebuilt on
 `pwr-ext`, kept for shared pieces the `view!` grammar does not fit
 (pagination). Runtime assembly now composes `pwr-ext` `component!`/splices
 plus the typed `view_support` builders inside a single `view!` literal:
-plugins author the whole view with `view!` and splice runtime data (such
-as the Settings nav row) at its pinned positions, `Option`-gated on
-discovery. No in-repo view is library-composed any more.
+plugins author the whole view with `view!` and splice runtime data
+(conditional rows, per-section buttons) at pinned positions,
+`Option`-gated on state. No in-repo view is library-composed any more.
 See ADR-0004.
 _Avoid_: pwr-ext
 
@@ -96,10 +96,11 @@ _Avoid_: owned message, session claim
 A Back press with an empty navigation history: the view on screen is
 the root view, so Back dismisses it instead of navigating to a parent
 frame. A public root view is deleted; an ephemeral one is left for the
-user, because it belongs to the interaction that produced it. No host
-feature returns the plain Back navigation today — every Back-capable
-view hands off to the Settings root — so Root Back stays the navigation
-walk's well-defined empty-history branch.
+user, because it belongs to the interaction that produced it. The
+Settings GUI is always the root frame of its session, so its plain
+Back over the empty history is the Root Back; the panels it hands off
+to return through the host-reserved `settings` target, which re-runs
+the Settings GUI instead of popping the walk.
 _Avoid_: exit Back, root dismissal
 
 **Content placeholder vs deferred think**:
@@ -153,5 +154,8 @@ A plugin's registered entry in the host Settings GUI. Declared in the
 plugin manifest as `{name, description, command}`, where `command` names
 one of that plugin's own registered commands. A section is navigation
 only: settings values live wherever the plugin stores them, and the host
-never reads or writes plugin settings data.
+never reads or writes plugin settings data. A section's panel returns to
+the Settings GUI through `host.open_view` against the host-reserved
+`settings` target: the panel's Back persists plugin-side, then the parked
+Settings session re-renders on the same message.
 _Avoid_: settings entry, hub entry
