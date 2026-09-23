@@ -48,6 +48,7 @@ use crate::bot::command::settings::SettingsHandler;
 use crate::bot::command::voice::leaderboard::VoiceLeaderboardHandler;
 use crate::bot::command::voice::stats::VoiceStatsHandler;
 use crate::bot::navigation::Navigation;
+use crate::bot::translate::SettingsReturnPage;
 
 /// Trait for command modules (Cogs) that provide a set of Discord commands.
 ///
@@ -197,25 +198,26 @@ impl<'a> Router<'a> {
     }
 
     /// Hands the live message to the section's panel and parks until the
-    /// panel's Back returns it.
+    /// panel returns it.
     ///
     /// The waiter parks before the handoff edit, so a Back racing the morph
     /// completes it instead of dying on a missing registration. A failed
     /// handoff retracts the waiter and falls back to the root dismissal.
     /// While parked the panel owns the message: its Back presses
-    /// `host.open_view` against the host-reserved `settings` target, whose
-    /// op takes the waiter out and wakes this side to re-run the Settings
-    /// GUI on the same message. On timeout the session ends and the panel
-    /// stays. Returns true only on the wake signal.
-    async fn handoff_and_wait(&self, plugin: &str, command: &str) -> bool {
+    /// `host.open_view` against the host-reserved `settings` target and its
+    /// About press against `about`, whose ops take the waiter out and wake
+    /// this side to re-run the page the target asks for on the same
+    /// message. On timeout the session ends and the panel stays. Returns
+    /// the page to re-run only on the wake signal.
+    async fn handoff_and_wait(&self, plugin: &str, command: &str) -> Option<SettingsReturnPage> {
         let reply = self.reply_handle().await;
         let Some(reply) = reply.as_ref() else {
             warn!("session exit found no live reply; leaving the message as it is");
-            return false;
+            return None;
         };
         let Ok(message) = reply.message().await else {
             warn!("session exit could not fetch the live message; leaving it as it is");
-            return false;
+            return None;
         };
         let message_id = message.id;
         let rx = self.ctx.data().settings_returns.wait(message_id);
@@ -225,13 +227,13 @@ impl<'a> Router<'a> {
             warn!("settings section handoff failed ({error}); dismissing the view instead");
             self.ctx.data().settings_returns.take(message_id);
             session_exit::dismiss_root_view(&self.ctx, reply, &message).await;
-            return false;
+            return None;
         }
         match tokio::time::timeout(SETTINGS_RETURN_PARK, rx).await {
-            Ok(Ok(())) => true,
+            Ok(Ok(page)) => Some(page),
             _ => {
                 self.ctx.data().settings_returns.take(message_id);
-                false
+                None
             }
         }
     }
@@ -266,8 +268,12 @@ impl<'a> Router<'a> {
                     handler.run(self.clone()).await?;
                 }
                 Popped::SectionHandoff { plugin, command } => {
-                    if self.handoff_and_wait(&plugin, &command).await {
-                        self.navigate(Navigation::SettingsMain).await;
+                    if let Some(page) = self.handoff_and_wait(&plugin, &command).await {
+                        match page {
+                            SettingsReturnPage::Settings => self.navigate(Navigation::SettingsMain),
+                            SettingsReturnPage::About => self.navigate(Navigation::SettingsAbout),
+                        }
+                        .await;
                     } else {
                         return Ok(());
                     }

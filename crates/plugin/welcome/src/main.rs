@@ -23,10 +23,11 @@
 //!   submission (whose answer the host does not commit to the session) can
 //!   never render or persist a stale snapshot;
 //! - every mutating message persists immediately through
-//!   `host.welcome.update_settings` (the monolith's persist-on-every-change
-//!   semantics, no-op edits included); `Back` returns to the host Settings
-//!   GUI without persisting — the session simply expires through the
-//!   engine's `view.timeout` event, which persists nothing;
+//!   `host.welcome.update_settings` (no-op edits included); `Back` returns
+//!   to the host Settings GUI and `About` opens the host About view on the
+//!   panel's message —
+//!   neither persists, the session simply expires through the engine's
+//!   `view.timeout` event, which persists nothing;
 //! - the `Add Welcome Message` and `Set Color` buttons open their modals
 //!   through `host.open_modal` (ADR-0011) and answer the click with the
 //!   [`MODAL_OPENED_KIND`] wire error, so the host skips its own response —
@@ -61,30 +62,22 @@ use pwr_ext::view_support::CreateSelectMenuKind;
 use pwr_ext::view_support::CreateSelectMenuOption;
 use pwr_ext::view_support::GenericChannelId;
 use pwr_plugin_protocol::API_VERSION;
-use pwr_plugin_protocol::CommandDef;
 use pwr_plugin_protocol::MODAL_OPENED_KIND;
 use pwr_plugin_protocol::MODAL_SUBMIT_OP;
-use pwr_plugin_protocol::Manifest;
 use pwr_plugin_protocol::Msg;
 use pwr_plugin_protocol::ServerSettings;
-use pwr_plugin_protocol::SettingsSection;
 use pwr_plugin_protocol::VIEW_MOVED_KIND;
 use pwr_plugin_protocol::WireError;
+use pwr_plugin_support::about_exit;
 use pwr_plugin_support::back_exit;
 use pwr_plugin_support::id_as_u64;
 use pwr_plugin_support::reply_err;
 use pwr_plugin_support::write_msg;
 use serde_json::Value;
 use serde_json::json;
-
-/// The plugin's name: the hello `name` and the handle the host keeps it
-/// under.
-const PLUGIN_NAME: &str = "welcome";
-
-/// The command the panel serves: the manifest's slash command and the
-/// invoke command the host Settings section and the `/welcome` deep-link
-/// dispatch.
-const COMMAND_NAME: &str = "welcome-settings";
+use welcome::COMMAND_NAME;
+use welcome::PLUGIN_NAME;
+use welcome::manifest;
 
 /// Filename of the welcome preview attachment, matching the monolith's
 /// `WELCOME_FILE`. The envelope declares this slot; the host fills it.
@@ -99,6 +92,7 @@ const CUSTOM_ID_ADD: &str = "welcome:add";
 const CUSTOM_ID_REMOVE: &str = "welcome:remove";
 const CUSTOM_ID_SAVE: &str = "welcome:save";
 const CUSTOM_ID_BACK: &str = "welcome:back";
+const CUSTOM_ID_ABOUT: &str = "welcome:about";
 const CUSTOM_ID_CANCEL: &str = "welcome:cancel";
 
 /// Custom ids of the modals' text inputs, read back from the submission.
@@ -310,10 +304,11 @@ enum Pending {
     /// The `host.open_modal` a modal trigger issued; its resp answers the
     /// click with [`MODAL_OPENED_KIND`] so the host skips its own response.
     OpenModal { invoke_id: u64 },
-    /// The `host.open_view` a Back press issued against the host-reserved
-    /// `settings` target; its resp answers with the wire's `ViewMoved`
-    /// marker when the open replaced the panel's message, or re-renders
-    /// the panel when no live Settings session took it back.
+    /// The `host.open_view` a Back or About press issued against the
+    /// host-reserved `settings` or `about` target; its resp answers with
+    /// the wire's `ViewMoved` marker when the open replaced the panel's
+    /// message, or re-renders the panel when no live Settings session took
+    /// it back.
     OpenSettings {
         invoke_id: u64,
         session: SessionState,
@@ -409,7 +404,7 @@ fn removal_label(msg: &str, marked: bool) -> String {
 /// view: the status header, the toggle, the channel and template selects,
 /// the Set Color / Add Welcome Message / Preview Templates row, the
 /// variables help, the conditional removal select with its save/cancel
-/// row, and the always-present Back row.
+/// row, and the always-present Back/About row.
 fn view_data(model: &Model) -> Value {
     let is_enabled = model.is_enabled();
     let msgs = model.message_count();
@@ -564,6 +559,11 @@ fn view_data(model: &Model) -> Value {
                     button {
                         custom_id: CUSTOM_ID_BACK,
                         label: "❮ Back",
+                        style: ButtonStyle::Secondary
+                    }
+                    button {
+                        custom_id: CUSTOM_ID_ABOUT,
+                        label: "🛈 About",
                         style: ButtonStyle::Secondary
                     }
                 }
@@ -745,35 +745,6 @@ fn modal_input_value(args: Option<&Value>, input: &str) -> Option<String> {
 const GET_SETTINGS_OP: &str = "host.welcome.get_settings";
 const UPDATE_SETTINGS_OP: &str = "host.welcome.update_settings";
 
-/// The plugin's static declaration, matching what its hello announces.
-fn manifest() -> Manifest {
-    Manifest {
-        name: PLUGIN_NAME.into(),
-        description: "Manage welcome card settings".into(),
-        version: "0.1.0".into(),
-        // The guild-only slash command the host Settings section dispatches:
-        // a direct invoke carries no `guild_id` in its re-parsed args, so
-        // the host injects the invocation's guild into the args. No event
-        // handlers: the monolith's expiry persists nothing, so there is no
-        // `view.timeout` work left for a plugin.
-        commands: vec![CommandDef {
-            create_command: json!({
-                "name": COMMAND_NAME,
-                "description": "Manage welcome card settings",
-                "dm_permission": false,
-            }),
-        }],
-        event_handlers: vec![],
-        tasks: vec![],
-        settings: vec![SettingsSection {
-            name: "Welcome".into(),
-            description: "Manage welcome card settings".into(),
-            command: COMMAND_NAME.into(),
-        }],
-        api_version: API_VERSION,
-    }
-}
-
 /// The `host.welcome.get_settings` call args.
 fn get_settings_args(guild_id: u64) -> Value {
     json!({ "guild_id": guild_id })
@@ -954,11 +925,17 @@ fn main() -> ExitCode {
                                 Pending::OpenModal { invoke_id: id },
                                 open_modal_args(author_id, interaction_id, &token, spec),
                             ))
-                        } else if custom_id == CUSTOM_ID_BACK {
-                            // Back persists nothing — every edit already
-                            // persisted — so no settings load either: hand
-                            // the message back to the host Settings GUI.
-                            let Some(back) = back_exit(args.as_ref(), session.guild_id) else {
+                        } else if custom_id == CUSTOM_ID_BACK || custom_id == CUSTOM_ID_ABOUT {
+                            // Back and About persist nothing; every edit
+                            // persists as it happens. No settings load
+                            // either: hand the message to the host page the
+                            // press asked for.
+                            let exit = if custom_id == CUSTOM_ID_ABOUT {
+                                about_exit(args.as_ref(), session.guild_id)
+                            } else {
+                                back_exit(args.as_ref(), session.guild_id)
+                            };
+                            let Some(exit) = exit else {
                                 if !reply_err(
                                     &mut out,
                                     id,
@@ -973,9 +950,9 @@ fn main() -> ExitCode {
                                 Pending::OpenSettings {
                                     invoke_id: id,
                                     session,
-                                    message_id: back.message_id,
+                                    message_id: exit.message_id,
                                 },
-                                back.args,
+                                exit.args,
                             ))
                         } else if let Some(msg) = click_msg(custom_id, args.as_ref()) {
                             let guild_id = session.guild_id;
@@ -1276,13 +1253,14 @@ fn main() -> ExitCode {
                         message_id,
                     } => {
                         // In place: the open replaced this panel's message
-                        // with the host Settings GUI, so answering with the
-                        // panel's own render would overwrite it — the host
-                        // skips its render on the marker kind. Anything else
-                        // (no source message, no live Settings session took
-                        // the message back) answers the invoke with the
-                        // failure itself: the panel stays and keeps
-                        // answering its own interactions.
+                        // with the host page the press asked for, so
+                        // answering with the panel's own render would
+                        // overwrite it — the host skips its render on the
+                        // marker kind. Anything else (no source message, no
+                        // live Settings session took the message back)
+                        // answers the invoke with the failure itself: the
+                        // panel stays and keeps answering its own
+                        // interactions.
                         if ok && message_id.is_some() {
                             if !reply_err(&mut out, invoke_id, VIEW_MOVED_KIND, "settings opened") {
                                 return ExitCode::FAILURE;
@@ -1291,7 +1269,7 @@ fn main() -> ExitCode {
                         }
                         let error = error.unwrap_or_else(|| WireError {
                             kind: "HostError".into(),
-                            msg: "the host Settings GUI did not take the message back".into(),
+                            msg: "host call failed".into(),
                         });
                         if !reply_err(&mut out, invoke_id, &error.kind, error.msg) {
                             return ExitCode::FAILURE;
@@ -1603,6 +1581,14 @@ mod tests {
             row[2].get("custom_id").is_none(),
             "a link button has no custom_id"
         );
+
+        let nav = children[7]["components"]
+            .as_array()
+            .expect("back/about row");
+        assert_eq!(nav[0]["custom_id"], json!(CUSTOM_ID_BACK));
+        assert_eq!(nav[0]["label"], json!("❮ Back"));
+        assert_eq!(nav[1]["custom_id"], json!(CUSTOM_ID_ABOUT));
+        assert_eq!(nav[1]["label"], json!("🛈 About"));
 
         assert_eq!(children[5]["content"], json!(VARIABLES_TEXT));
         assert_eq!(

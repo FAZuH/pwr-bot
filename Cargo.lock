@@ -4191,6 +4191,7 @@ dependencies = [
  "diesel-async",
  "diesel_migrations",
  "dotenv",
+ "feed",
  "futures",
  "governor",
  "html2md",
@@ -4226,6 +4227,8 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "uuid",
+ "voice",
+ "welcome",
  "wreq",
  "wreq-util",
 ]

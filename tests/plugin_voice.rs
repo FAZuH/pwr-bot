@@ -14,6 +14,9 @@
 //!   `host.voice.update_settings`, then hands the message back to the host
 //!   Settings GUI (the panel re-renders only when no live Settings session
 //!   takes the message back);
+//! - About persists the edited snapshot exactly once, then opens the host
+//!   About view on the panel's message — the `about` open_view target
+//!   completes the parked waiter with the About page;
 //! - the engine's `view.timeout` event persists the last snapshot once,
 //!   answering nothing;
 //! - a failed settings load fails the open with the host's typed error
@@ -211,6 +214,83 @@ async fn open_edit_and_back_persist_the_snapshot_once_and_return() {
         other => panic!("expected the ViewMoved marker, got {other:?}"),
     }
     rx.await.expect("the parked session was woken");
+}
+
+/// About persists the edited snapshot exactly once (like Back), then opens
+/// the host About view in place: the host-reserved `about` open_view target
+/// completes the parked waiter with the About page, and the panel answers
+/// its interaction with the `ViewMoved` marker.
+#[tokio::test]
+async fn about_persists_the_snapshot_once_and_opens_the_host_about_view() {
+    let mut voice = MockVoiceSettingsSource::new();
+    voice
+        .expect_get_settings()
+        .with(eq(GUILD_ID))
+        .times(1)
+        .returning(|_| Ok(sample_settings()));
+    let mut toggled = sample_settings();
+    toggled.voice.enabled = Some(false);
+    voice
+        .expect_update_settings()
+        .with(eq(GUILD_ID), eq(toggled))
+        .times(1)
+        .returning(|_, _| Ok(()));
+
+    let returns = Arc::new(pwr_bot::bot::translate::SettingsReturns::default());
+    let panel = spawn_panel(services(
+        Arc::new(MockHostIo::new()),
+        Arc::new(voice),
+        Some(returns.clone()),
+    ))
+    .await;
+
+    let resp = panel
+        .call(
+            "invoke",
+            Some("voice-settings"),
+            Some(json!({ "guild_id": GUILD_ID })),
+        )
+        .await
+        .expect("panel invoke answered");
+    let view = assert_envelope(&resp, 0);
+
+    let resp = panel
+        .call(
+            "view.interact",
+            Some("voice-settings"),
+            Some(json!({
+                "custom_id": "voice:toggle",
+                "view": view,
+            })),
+        )
+        .await
+        .expect("toggle answered");
+    let view = assert_envelope(&resp, 1);
+
+    let rx = returns.wait(poise::serenity_prelude::MessageId::new(778));
+    let resp = panel
+        .call(
+            "view.interact",
+            Some("voice-settings"),
+            Some(json!({
+                "custom_id": "voice:about",
+                "view": view,
+                "channel_id": 999,
+                "message": { "id": "778" },
+            })),
+        )
+        .await
+        .expect("about answered");
+    match &resp {
+        Msg::Resp {
+            ok: false,
+            error: Some(err),
+            ..
+        } => assert_eq!(err.kind, "ViewMoved"),
+        other => panic!("expected the ViewMoved marker, got {other:?}"),
+    }
+    let page = rx.await.expect("the parked session was woken");
+    assert_eq!(page, pwr_bot::bot::translate::SettingsReturnPage::About);
 }
 
 /// The expiry event persists the last snapshot exactly once, answering
