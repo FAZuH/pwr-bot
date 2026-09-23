@@ -1,0 +1,530 @@
+[
+  {
+    "description": "Show information about the bot",
+    "description_localizations": {},
+    "name": "about",
+    "name_localizations": {},
+    "nsfw": false,
+    "options": []
+  },
+  {
+    "description": "Manage feed subscriptions and settings",
+    "description_localizations": {},
+    "name": "feed",
+    "name_localizations": {},
+    "nsfw": false,
+    "options": [
+      {
+        "autocomplete": false,
+        "channel_types": [],
+        "choices": [],
+        "description": "Configure feed settings for this server",
+        "max_length": null,
+        "max_value": null,
+        "min_length": null,
+        "min_value": null,
+        "name": "settings",
+        "options": [],
+        "required": false,
+        "type": 1
+      },
+      {
+        "autocomplete": false,
+        "channel_types": [],
+        "choices": [],
+        "description": "Subscribe to one or more feeds",
+        "max_length": null,
+        "max_value": null,
+        "min_length": null,
+        "min_value": null,
+        "name": "subscribe",
+        "options": [
+          {
+            "autocomplete": true,
+            "channel_types": [],
+            "choices": [],
+            "description": "Link(s) of the feeds. Separate links with commas (,)",
+            "max_length": null,
+            "max_value": null,
+            "min_length": null,
+            "min_value": null,
+            "name": "links",
+            "options": [],
+            "required": true,
+            "type": 3
+          },
+          {
+            "autocomplete": false,
+            "channel_types": [],
+            "choices": [
+              {
+                "name": "Server",
+                "name_localizations": {},
+                "value": 0
+              },
+              {
+                "name": "DM",
+                "name_localizations": {},
+                "value": 1
+              }
+            ],
+            "description": "Where to send the notifications. Default to your DM",
+            "max_length": null,
+            "max_value": null,
+            "min_length": null,
+            "min_value": null,
+            "name": "send_into",
+            "options": [],
+            "required": false,
+            "type": 4
+          }
+        ],
+        "required": false,
+        "type": 1
+      },
+      {
+        "autocomplete": false,
+        "channel_types": [],
+        "choices": [],
+        "description": "Unsubscribe from one or more feeds",
+        "max_length": null,
+        "max_value": null,
+        "min_length": null,
+        "min_value": null,
+        "name": "unsubscribe",
+        "options": [
+          {
+            "autocomplete": true,
+            "channel_types": [],
+            "choices": [],
+            "description": "Link(s) of the feeds. Separate links with commas (,)",
+            "max_length": null,
+            "max_value": null,
+            "min_length": null,
+            "min_value": null,
+            "name": "links",
+            "options": [],
+            "required": true,
+            "type": 3
+          },
+          {
+            "autocomplete": false,
+            "channel_types": [],
+            "choices": [
+              {
+                "name": "Server",
+                "name_localizations": {},
+                "value": 0
+              },
+              {
+                "name": "DM",
+                "name_localizations": {},
+                "value": 1
+              }
+            ],
+            "description": "Where notifications were being sent. Default to DM",
+            "max_length": null,
+            "max_value": null,
+            "min_length": null,
+            "min_value": null,
+            "name": "send_into",
+            "options": [],
+            "required": false,
+            "type": 4
+          }
+        ],
+        "required": false,
+        "type": 1
+      },
+      {
+        "autocomplete": false,
+        "channel_types": [],
+        "choices": [],
+        "description": "List your current feed subscriptions",
+        "max_length": null,
+        "max_value": null,
+        "min_length": null,
+        "min_value": null,
+        "name": "list",
+        "options": [
+          {
+            "autocomplete": false,
+            "channel_types": [],
+            "choices": [
+              {
+                "name": "Server",
+                "name_localizations": {},
+                "value": 0
+              },
+              {
+                "name": "DM",
+                "name_localizations": {},
+                "value": 1
+              }
+            ],
+            "description": "Where the notifications are being sent. Default to DM",
+            "max_length": null,
+            "max_value": null,
+            "min_length": null,
+            "min_value": null,
+            "name": "sent_into",
+            "options": [],
+            "required": false,
+            "type": 4
+          }
+        ],
+        "required": false,
+        "type": 1
+      }
+    ]
+  },
+  {
+    "contexts": [
+      0
+    ],
+    "description": "Manage feed subscription settings",
+    "description_localizations": {},
+    "name": "feed-settings",
+    "name_localizations": {},
+    "nsfw": false,
+    "options": []
+  },
+  {
+    "description": "Admin plugin management.",
+    "description_localizations": {},
+    "name": "plugins",
+    "name_localizations": {},
+    "nsfw": false,
+    "options": [
+      {
+        "autocomplete": false,
+        "channel_types": [],
+        "choices": [],
+        "description": "Lists every catalog plugin and its enabled state in this guild.",
+        "max_length": null,
+        "max_value": null,
+        "min_length": null,
+        "min_value": null,
+        "name": "list",
+        "options": [],
+        "required": false,
+        "type": 1
+      },
+      {
+        "autocomplete": false,
+        "channel_types": [],
+        "choices": [],
+        "description": "Enables a catalog plugin for this guild, registering the union of all enabled plugins' commands.",
+        "max_length": null,
+        "max_value": null,
+        "min_length": null,
+        "min_value": null,
+        "name": "enable",
+        "options": [
+          {
+            "autocomplete": false,
+            "channel_types": [],
+            "choices": [],
+            "description": "A slash command parameter",
+            "max_length": null,
+            "max_value": null,
+            "min_length": null,
+            "min_value": null,
+            "name": "plugin",
+            "options": [],
+            "required": true,
+            "type": 3
+          }
+        ],
+        "required": false,
+        "type": 1
+      },
+      {
+        "autocomplete": false,
+        "channel_types": [],
+        "choices": [],
+        "description": "Disables a plugin for this guild: unregisters the remaining enabled plugins' commands.",
+        "max_length": null,
+        "max_value": null,
+        "min_length": null,
+        "min_value": null,
+        "name": "disable",
+        "options": [
+          {
+            "autocomplete": false,
+            "channel_types": [],
+            "choices": [],
+            "description": "A slash command parameter",
+            "max_length": null,
+            "max_value": null,
+            "min_length": null,
+            "min_value": null,
+            "name": "plugin",
+            "options": [],
+            "required": true,
+            "type": 3
+          }
+        ],
+        "required": false,
+        "type": 1
+      },
+      {
+        "autocomplete": false,
+        "channel_types": [],
+        "choices": [],
+        "description": "Swaps an enabled plugin to its freshly installed binary.",
+        "max_length": null,
+        "max_value": null,
+        "min_length": null,
+        "min_value": null,
+        "name": "swap",
+        "options": [
+          {
+            "autocomplete": false,
+            "channel_types": [],
+            "choices": [],
+            "description": "A slash command parameter",
+            "max_length": null,
+            "max_value": null,
+            "min_length": null,
+            "min_value": null,
+            "name": "plugin",
+            "options": [],
+            "required": true,
+            "type": 3
+          }
+        ],
+        "required": false,
+        "type": 1
+      }
+    ]
+  },
+  {
+    "contexts": [
+      0
+    ],
+    "description": "Open the server settings menu",
+    "description_localizations": {},
+    "name": "settings",
+    "name_localizations": {},
+    "nsfw": false,
+    "options": []
+  },
+  {
+    "description": "Voice channel tracking and leaderboard commands",
+    "description_localizations": {},
+    "name": "vc",
+    "name_localizations": {},
+    "nsfw": false,
+    "options": [
+      {
+        "autocomplete": false,
+        "channel_types": [],
+        "choices": [],
+        "description": "Configure voice tracking settings for this server",
+        "max_length": null,
+        "max_value": null,
+        "min_length": null,
+        "min_value": null,
+        "name": "settings",
+        "options": [],
+        "required": false,
+        "type": 1
+      },
+      {
+        "autocomplete": false,
+        "channel_types": [],
+        "choices": [],
+        "description": "Display the voice activity leaderboard",
+        "max_length": null,
+        "max_value": null,
+        "min_length": null,
+        "min_value": null,
+        "name": "leaderboard",
+        "options": [
+          {
+            "autocomplete": false,
+            "channel_types": [],
+            "choices": [
+              {
+                "name": "This month",
+                "name_localizations": {},
+                "value": 0
+              },
+              {
+                "name": "Today",
+                "name_localizations": {},
+                "value": 1
+              },
+              {
+                "name": "Past 24 hours",
+                "name_localizations": {},
+                "value": 2
+              },
+              {
+                "name": "Past 72 hours",
+                "name_localizations": {},
+                "value": 3
+              },
+              {
+                "name": "Past 7 days",
+                "name_localizations": {},
+                "value": 4
+              },
+              {
+                "name": "Past 14 days",
+                "name_localizations": {},
+                "value": 5
+              },
+              {
+                "name": "This year",
+                "name_localizations": {},
+                "value": 6
+              },
+              {
+                "name": "All time",
+                "name_localizations": {},
+                "value": 7
+              }
+            ],
+            "description": "Time period to filter voice activity. Defaults to \"This month\"",
+            "max_length": null,
+            "max_value": null,
+            "min_length": null,
+            "min_value": null,
+            "name": "time_range",
+            "options": [],
+            "required": false,
+            "type": 4
+          }
+        ],
+        "required": false,
+        "type": 1
+      },
+      {
+        "autocomplete": false,
+        "channel_types": [],
+        "choices": [],
+        "description": "Show voice activity statistics",
+        "max_length": null,
+        "max_value": null,
+        "min_length": null,
+        "min_value": null,
+        "name": "stats",
+        "options": [
+          {
+            "autocomplete": false,
+            "channel_types": [],
+            "choices": [
+              {
+                "name": "Yearly",
+                "name_localizations": {},
+                "value": 0
+              },
+              {
+                "name": "Monthly",
+                "name_localizations": {},
+                "value": 1
+              },
+              {
+                "name": "Weekly",
+                "name_localizations": {},
+                "value": 2
+              },
+              {
+                "name": "Hourly",
+                "name_localizations": {},
+                "value": 3
+              }
+            ],
+            "description": "Time period to display. Defaults to \"This month\"",
+            "max_length": null,
+            "max_value": null,
+            "min_length": null,
+            "min_value": null,
+            "name": "time_range",
+            "options": [],
+            "required": false,
+            "type": 4
+          },
+          {
+            "autocomplete": false,
+            "channel_types": [],
+            "choices": [],
+            "description": "User to show stats for (defaults to server stats in server, yourself in DM)",
+            "max_length": null,
+            "max_value": null,
+            "min_length": null,
+            "min_value": null,
+            "name": "user",
+            "options": [],
+            "required": false,
+            "type": 6
+          },
+          {
+            "autocomplete": false,
+            "channel_types": [],
+            "choices": [
+              {
+                "name": "Average Time",
+                "name_localizations": {},
+                "value": 0
+              },
+              {
+                "name": "Active Users",
+                "name_localizations": {},
+                "value": 1
+              },
+              {
+                "name": "Total Time",
+                "name_localizations": {},
+                "value": 2
+              }
+            ],
+            "description": "Statistic to display for server view",
+            "max_length": null,
+            "max_value": null,
+            "min_length": null,
+            "min_value": null,
+            "name": "statistic",
+            "options": [],
+            "required": false,
+            "type": 4
+          }
+        ],
+        "required": false,
+        "type": 1
+      }
+    ]
+  },
+  {
+    "contexts": [
+      0
+    ],
+    "description": "Manage voice tracking settings",
+    "description_localizations": {},
+    "name": "voice-settings",
+    "name_localizations": {},
+    "nsfw": false,
+    "options": []
+  },
+  {
+    "description": "Configure welcome cards for new members",
+    "description_localizations": {},
+    "name": "welcome",
+    "name_localizations": {},
+    "nsfw": false,
+    "options": []
+  },
+  {
+    "contexts": [
+      0
+    ],
+    "description": "Manage welcome card settings",
+    "description_localizations": {},
+    "name": "welcome-settings",
+    "name_localizations": {},
+    "nsfw": false,
+    "options": []
+  }
+]
