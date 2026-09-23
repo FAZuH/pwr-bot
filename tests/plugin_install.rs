@@ -61,6 +61,7 @@ fn catalog_manifest(name: &str) -> pwr_plugin_protocol::Manifest {
         }],
         event_handlers: vec![],
         tasks: vec![],
+        settings: vec![],
         api_version: pwr_plugin_protocol::API_VERSION,
     }
 }

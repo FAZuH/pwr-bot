@@ -29,6 +29,10 @@ pub struct Manifest {
     pub event_handlers: Vec<String>,
     /// Recurring tasks the host should drive.
     pub tasks: Vec<TaskDef>,
+    /// Settings sections the plugin contributes to the host `/settings`
+    /// surface; each targets one of the plugin's own commands.
+    #[serde(default)]
+    pub settings: Vec<SettingsSection>,
     /// Protocol version this manifest is written for; validated against
     /// [`API_VERSION`].
     pub api_version: u32,
@@ -47,6 +51,9 @@ impl Manifest {
         }
         for (index, command) in self.commands.iter().enumerate() {
             validate_command_blob(index, &command.create_command)?;
+        }
+        for (index, section) in self.settings.iter().enumerate() {
+            validate_settings_section(index, section, &self.commands)?;
         }
         Ok(())
     }
@@ -73,6 +80,20 @@ pub struct TaskDef {
     pub command: String,
 }
 
+/// A settings section a plugin contributes to the host `/settings` surface:
+/// the tile's display data and the plugin command invoking it opens the
+/// section's panel.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SettingsSection {
+    /// Section title, e.g. `Feed`.
+    pub name: String,
+    /// One-line human-readable description shown on the tile.
+    pub description: String,
+    /// The plugin command invoking this section opens; must name one of the
+    /// manifest's own commands (see [`Manifest::validate`]).
+    pub command: String,
+}
+
 /// Why a [`Manifest`] failed validation.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ManifestError {
@@ -90,6 +111,14 @@ pub enum ManifestError {
         /// Index of the offending entry in `commands`.
         index: usize,
         /// Why the entry failed, e.g. `name` must be a string.
+        reason: String,
+    },
+    /// A settings section does not name one of the manifest's own commands.
+    #[error("settings section {index} is invalid: {reason}")]
+    InvalidSettings {
+        /// Index of the offending entry in `settings`.
+        index: usize,
+        /// Why the entry failed.
         reason: String,
     },
 }
@@ -119,6 +148,34 @@ fn validate_command_blob(index: usize, blob: &Value) -> Result<(), ManifestError
     Ok(())
 }
 
+/// Validates one settings section: its `command` must name a command the
+/// manifest itself declares — a section pointing outside the plugin has no
+/// invocable target.
+fn validate_settings_section(
+    index: usize,
+    section: &SettingsSection,
+    commands: &[CommandDef],
+) -> Result<(), ManifestError> {
+    let declared = commands.iter().any(|command| {
+        command
+            .create_command
+            .get("name")
+            .and_then(Value::as_str)
+            .is_some_and(|name| name == section.command)
+    });
+    if declared {
+        Ok(())
+    } else {
+        Err(ManifestError::InvalidSettings {
+            index,
+            reason: format!(
+                "`command` `{}` is not one of the manifest's commands",
+                section.command
+            ),
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -143,6 +200,7 @@ mod tests {
                 interval_secs: 3600,
                 command: "feed.prune".into(),
             }],
+            settings: vec![],
             api_version: API_VERSION,
         }
     }
@@ -153,7 +211,7 @@ mod tests {
     fn manifest_serializes_to_declared_shape() {
         assert_eq!(
             serde_json::to_string(&sample_manifest()).unwrap(),
-            r#"{"name":"feed","description":"Feed subscriptions","version":"0.1.0","commands":[{"create_command":{"description":"List feeds","name":"feed.list","options":[]}}],"event_handlers":["voice_state"],"tasks":[{"name":"prune","interval_secs":3600,"command":"feed.prune"}],"api_version":1}"#
+            r#"{"name":"feed","description":"Feed subscriptions","version":"0.1.0","commands":[{"create_command":{"description":"List feeds","name":"feed.list","options":[]}}],"event_handlers":["voice_state"],"tasks":[{"name":"prune","interval_secs":3600,"command":"feed.prune"}],"settings":[],"api_version":1}"#
         );
     }
 
@@ -299,6 +357,68 @@ mod tests {
             Err(ManifestError::InvalidCommand {
                 index: 1,
                 reason: "`description` must be a string".into(),
+            })
+        );
+    }
+
+    // ── settings sections ────────────────────────────────────────────────────
+
+    #[test]
+    fn manifest_without_settings_deserializes_with_an_empty_list() {
+        let json = r#"{"name":"feed","description":"d","version":"0.1.0","commands":[],"event_handlers":[],"tasks":[],"api_version":1}"#;
+        let manifest: Manifest = serde_json::from_str(json).unwrap();
+        assert_eq!(manifest.settings, vec![]);
+        assert_eq!(manifest.validate(), Ok(()));
+    }
+
+    #[test]
+    fn settings_section_targeting_a_declared_command_validates() {
+        let mut manifest = sample_manifest();
+        manifest.settings = vec![SettingsSection {
+            name: "Feeds".into(),
+            description: "Manage feed subscriptions".into(),
+            command: "feed.list".into(),
+        }];
+        assert_eq!(manifest.validate(), Ok(()));
+    }
+
+    #[test]
+    fn settings_section_targeting_an_undeclared_command_is_rejected() {
+        let mut manifest = sample_manifest();
+        manifest.settings = vec![SettingsSection {
+            name: "Feeds".into(),
+            description: "Manage feed subscriptions".into(),
+            command: "feed.add".into(),
+        }];
+        assert_eq!(
+            manifest.validate(),
+            Err(ManifestError::InvalidSettings {
+                index: 0,
+                reason: "`command` `feed.add` is not one of the manifest's commands".into(),
+            })
+        );
+    }
+
+    #[test]
+    fn validation_reports_the_offending_settings_index() {
+        let mut manifest = sample_manifest();
+        manifest.settings = vec![
+            SettingsSection {
+                name: "Feeds".into(),
+                description: "Fine".into(),
+                command: "feed.list".into(),
+            },
+            SettingsSection {
+                name: "Broken".into(),
+                description: "No target".into(),
+                command: "ghost".into(),
+            },
+        ];
+        assert_eq!(
+            manifest.validate(),
+            Err(ManifestError::InvalidSettings {
+                index: 1,
+                reason: "`command` `ghost` is not one of the manifest's commands".into(),
             })
         );
     }

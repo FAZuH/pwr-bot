@@ -12,9 +12,16 @@ pub mod prelude;
 pub mod register;
 pub mod register_owner;
 pub mod session_exit;
+pub mod settings;
 pub mod unregister;
 pub mod voice;
 pub mod welcome;
+
+/// How long the session parks on a handed-off section panel before giving
+/// up. The wake re-renders through the original interaction's token, which
+/// Discord invalidates after 15 minutes, so the park is token-bound at 14;
+/// past it the panel keeps the message and answers its own interactions.
+const SETTINGS_RETURN_PARK: Duration = Duration::from_secs(14 * 60);
 
 /// Error type used across bot commands.
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
@@ -26,6 +33,7 @@ pub type Context<'a> = poise::Context<'a, Data, Error>;
 
 use std::collections::VecDeque;
 use std::sync::Arc;
+use std::time::Duration;
 
 use log::warn;
 use poise::Command;
@@ -36,6 +44,7 @@ use crate::bot::command::about::AboutHandler;
 use crate::bot::command::feed::list::FeedListHandler;
 use crate::bot::command::feed::subscribe::FeedSubscribeHandler;
 use crate::bot::command::feed::unsubscribe::FeedUnsubscribeHandler;
+use crate::bot::command::settings::SettingsHandler;
 use crate::bot::command::voice::leaderboard::VoiceLeaderboardHandler;
 use crate::bot::command::voice::stats::VoiceStatsHandler;
 use crate::bot::navigation::Navigation;
@@ -63,6 +72,7 @@ impl Cog for Cogs {
             plugins::plugins(),
             register::register(),
             register_owner::register_owner(),
+            settings::settings(),
             unregister::unregister(),
             voice::voice(),
             welcome::welcome(),
@@ -132,11 +142,12 @@ impl<'a> Router<'a> {
     ///
     /// `None` ends the session: a feed list target that lost its delivery
     /// channel has nothing to render. The terminal targets never reach this
-    /// map — [`pop_step`] resolves them into the hub handoff, the root
+    /// map — [`pop_step`] resolves them into the section handoff, the root
     /// dismissal, or the end of the session.
     fn handler_for(&self, target: Navigation) -> Option<Box<dyn CommandHandler>> {
         use Navigation::*;
         match target {
+            SettingsMain => Some(Box::new(SettingsHandler::new())),
             SettingsAbout => Some(Box::new(AboutHandler::new())),
             FeedSubscriptions { send_into } => {
                 send_into.map(|send_into| Box::new(FeedListHandler::new(send_into)) as Box<_>)
@@ -162,23 +173,17 @@ impl<'a> Router<'a> {
                 *target_user,
                 stat_type,
             ))),
-            SettingsMain | Back | Exit => {
+            SettingsSection { .. } | Back | Exit => {
                 unreachable!("pop_step resolves the terminal targets itself")
             }
         }
     }
 
-    /// Ends the session on the live reply: one terminal step, fetched once.
-    ///
-    /// Both terminal steps share this shape over the reply handle — resolve
-    /// the live reply, fetch its message once, act. The hub handoff morphs
-    /// the message into the settings plugin's hub view, and a failed handoff
-    /// falls back to the root dismissal; a root Back dismisses directly. The
-    /// message is fetched once and passed to both halves, so the
-    /// handoff-failure path cannot fail a refetch and silently skip the
-    /// dismissal. Without a live reply, or when the fetch fails, the miss is
+    /// Ends the session on the live reply with the root dismissal: the
+    /// message is fetched once and deleted, or left alone when it is
+    /// ephemeral. Without a live reply, or when the fetch fails, the miss is
     /// logged and the session ends with the message as it is.
-    async fn exit_through_reply(&self, root_back: bool) {
+    async fn exit_through_reply(&self) {
         let reply = self.reply_handle().await;
         let Some(reply) = reply.as_ref() else {
             warn!("session exit found no live reply; leaving the message as it is");
@@ -188,13 +193,46 @@ impl<'a> Router<'a> {
             warn!("session exit could not fetch the live message; leaving it as it is");
             return;
         };
-        if root_back {
+        session_exit::dismiss_root_view(&self.ctx, reply, &message).await;
+    }
+
+    /// Hands the live message to the section's panel and parks until the
+    /// panel's Back returns it.
+    ///
+    /// The waiter parks before the handoff edit, so a Back racing the morph
+    /// completes it instead of dying on a missing registration. A failed
+    /// handoff retracts the waiter and falls back to the root dismissal.
+    /// While parked the panel owns the message: its Back presses
+    /// `host.open_view` against the host-reserved `settings` target, whose
+    /// op takes the waiter out and wakes this side to re-run the Settings
+    /// GUI on the same message. On timeout the session ends and the panel
+    /// stays. Returns true only on the wake signal.
+    async fn handoff_and_wait(&self, plugin: &str, command: &str) -> bool {
+        let reply = self.reply_handle().await;
+        let Some(reply) = reply.as_ref() else {
+            warn!("session exit found no live reply; leaving the message as it is");
+            return false;
+        };
+        let Ok(message) = reply.message().await else {
+            warn!("session exit could not fetch the live message; leaving it as it is");
+            return false;
+        };
+        let message_id = message.id;
+        let rx = self.ctx.data().settings_returns.wait(message_id);
+        if let Err(error) =
+            session_exit::handoff_to_section(&self.ctx, plugin, command, &message).await
+        {
+            warn!("settings section handoff failed ({error}); dismissing the view instead");
+            self.ctx.data().settings_returns.take(message_id);
             session_exit::dismiss_root_view(&self.ctx, reply, &message).await;
-            return;
+            return false;
         }
-        if let Err(error) = session_exit::handoff_to_hub(&self.ctx, &message).await {
-            warn!("hub handoff failed ({error}); dismissing the view instead");
-            session_exit::dismiss_root_view(&self.ctx, reply, &message).await;
+        match tokio::time::timeout(SETTINGS_RETURN_PARK, rx).await {
+            Ok(Ok(())) => true,
+            _ => {
+                self.ctx.data().settings_returns.take(message_id);
+                false
+            }
         }
     }
 
@@ -206,10 +244,11 @@ impl<'a> Router<'a> {
     /// closes the newest frame and re-runs the one revealed beneath it — so
     /// Back pops exactly one level, and a second Back pops one more.
     ///
-    /// The two ways a session ends while the message still carries a Back
-    /// button are the terminal steps: the hub handoff morphs the live
-    /// message into the settings plugin's hub view and ends, and the root
-    /// dismissal deletes the root view so no dead button stays behind. See
+    /// The two ways a session ends while the message still carries a button
+    /// are the terminal steps: the section handoff morphs the live message
+    /// into the section's plugin view and parks (see
+    /// [`Router::handoff_and_wait`]), and the root dismissal deletes the
+    /// root view so no dead button stays behind. See
     /// [`crate::bot::command::session_exit`].
     pub async fn run(self: Arc<Self>, initial: Navigation) -> Result<(), Error> {
         self.navigate(initial).await;
@@ -226,12 +265,15 @@ impl<'a> Router<'a> {
                     };
                     handler.run(self.clone()).await?;
                 }
-                Popped::HubHandoff => {
-                    self.exit_through_reply(false).await;
-                    return Ok(());
+                Popped::SectionHandoff { plugin, command } => {
+                    if self.handoff_and_wait(&plugin, &command).await {
+                        self.navigate(Navigation::SettingsMain).await;
+                    } else {
+                        return Ok(());
+                    }
                 }
                 Popped::RootBack => {
-                    self.exit_through_reply(true).await;
+                    self.exit_through_reply().await;
                     return Ok(());
                 }
                 Popped::End => return Ok(()),
@@ -244,9 +286,14 @@ impl<'a> Router<'a> {
 enum Popped {
     /// Run the handler for this target: it is the newest open frame.
     Run(Navigation),
-    /// Morph the live message into the settings plugin's hub view and end the
-    /// host session: the message continues as a plugin view session.
-    HubHandoff,
+    /// Morph the live message into the settings section's plugin view and
+    /// end the host session: the message continues as a plugin view session.
+    SectionHandoff {
+        /// The plugin the section belongs to.
+        plugin: String,
+        /// The plugin's command the section click invokes.
+        command: String,
+    },
     /// Back was pressed with no frame left beneath the one it closed: the
     /// message shows the root view, so it is dismissed.
     RootBack,
@@ -260,7 +307,7 @@ enum Popped {
 /// [`Navigation::Back`] marker closes the newest frame, and the frame
 /// revealed beneath it runs again — it stays the current frame, so the next
 /// Back closes one more level. A Back that leaves no frame open is the root
-/// view's Back. [`Navigation::SettingsMain`] is the hub handoff;
+/// view's Back. [`Navigation::SettingsSection`] is the section handoff;
 /// [`Navigation::Exit`] and an empty queue end the session. History is capped
 /// at [`MAX_NAV_HISTORY`] frames, dropping the oldest.
 fn pop_step(queue: &mut VecDeque<Navigation>, history: &mut VecDeque<Navigation>) -> Popped {
@@ -269,7 +316,17 @@ fn pop_step(queue: &mut VecDeque<Navigation>, history: &mut VecDeque<Navigation>
     };
     match target {
         Navigation::Exit => Popped::End,
-        Navigation::SettingsMain => Popped::HubHandoff,
+        Navigation::SettingsSection { plugin, command } => {
+            Popped::SectionHandoff { plugin, command }
+        }
+        Navigation::SettingsMain => {
+            // The Settings GUI is always the root frame: entering it — from
+            // /settings, from About's Back, or back from a panel section —
+            // resets the walk, so its Back is the Root Back and no earlier
+            // frame can re-open beneath it.
+            history.clear();
+            Popped::Run(Navigation::SettingsMain)
+        }
         Navigation::Back => {
             history.pop_back();
             match history.back().cloned() {
@@ -334,8 +391,9 @@ mod tests {
         }
     }
 
-    /// Direct `/about`: About is the only frame open, so the Back its handler
-    /// pushes leaves nothing beneath it — the root dismissal.
+    /// A Back with exactly one frame open is the Root Back: nothing is
+    /// open beneath it, so the walk has no parent to re-run and the view
+    /// on screen is dismissed.
     #[test]
     fn back_over_the_only_frame_is_the_root_back() {
         let mut walk = Walk::new(Navigation::SettingsAbout);
@@ -412,16 +470,39 @@ mod tests {
         ));
     }
 
-    /// Exiting to the hub is the handoff, wherever in the walk it happens:
-    /// the message morphs into the plugin hub and the host run ends.
+    /// Exiting to a settings section is the handoff, wherever in the walk it
+    /// happens: the message morphs into the section's plugin view and the
+    /// host run ends.
     #[test]
-    fn settings_main_is_the_hub_handoff() {
+    fn a_settings_section_is_the_section_handoff() {
+        let mut walk = Walk::new(Navigation::SettingsAbout);
+        walk.opened();
+        assert!(matches!(
+            walk.pushed(Navigation::SettingsSection {
+                plugin: "feed".into(),
+                command: "feed-settings".into(),
+            }),
+            Popped::SectionHandoff { .. }
+        ));
+    }
+
+    /// `SettingsMain` is a runnable frame — the host Settings GUI — that
+    /// also resets the walk: entering it (from /settings, from About's
+    /// Back, or back from a panel section) drops every open frame, so its
+    /// Back is the Root Back and About can never re-open beneath it.
+    #[test]
+    fn settings_main_is_a_runnable_frame_that_resets_the_walk() {
         let mut walk = Walk::new(Navigation::SettingsAbout);
         walk.opened();
         assert!(matches!(
             walk.pushed(Navigation::SettingsMain),
-            Popped::HubHandoff
+            Popped::Run(Navigation::SettingsMain)
         ));
+        assert!(
+            walk.history.is_empty(),
+            "the About frame is gone: the Settings GUI is the root"
+        );
+        assert!(matches!(walk.back(), Popped::RootBack));
     }
 
     /// A session that ends on its own — `Exit`, or a handler that returns

@@ -9,11 +9,11 @@
 //! free logging channel.
 //!
 //! Behavior:
-//! - announces `hello` (`v`, `name`, `caps`) as its first line after spawn;
-//!   the plugin is a core plugin with no slash command — it opens through
-//!   the settings hub's `host.open_view` (ADR-0009), which forwards the
-//!   source interaction's `guild_id` in the invoke args;
-//! - answers `invoke` of `welcome` by loading the guild's whole
+//! - announces `hello` (`v`, `name`, `caps`, `manifest`) as its first line
+//!   after spawn; the manifest declares the `welcome-settings` command and
+//!   the settings section the host Settings GUI opens the panel through,
+//!   which forwards the source interaction's `guild_id` in the invoke args;
+//! - answers `invoke` of `welcome-settings` by loading the guild's whole
 //!   [`ServerSettings`] snapshot through `host.welcome.get_settings` and
 //!   rendering the monolith `/welcome` panel as Components V2;
 //! - unlike the feed and voice panels, the session state it echoes carries
@@ -24,8 +24,9 @@
 //!   never render or persist a stale snapshot;
 //! - every mutating message persists immediately through
 //!   `host.welcome.update_settings` (the monolith's persist-on-every-change
-//!   semantics, no-op edits included); the terminal messages (`Back`,
-//!   `About`) persist nothing and only re-open the hub;
+//!   semantics, no-op edits included); `Back` returns to the host Settings
+//!   GUI without persisting — the session simply expires through the
+//!   engine's `view.timeout` event, which persists nothing;
 //! - the `Add Welcome Message` and `Set Color` buttons open their modals
 //!   through `host.open_modal` (ADR-0011) and answer the click with the
 //!   [`MODAL_OPENED_KIND`] wire error, so the host skips its own response —
@@ -60,25 +61,30 @@ use pwr_ext::view_support::CreateSelectMenuKind;
 use pwr_ext::view_support::CreateSelectMenuOption;
 use pwr_ext::view_support::GenericChannelId;
 use pwr_plugin_protocol::API_VERSION;
+use pwr_plugin_protocol::CommandDef;
 use pwr_plugin_protocol::MODAL_OPENED_KIND;
 use pwr_plugin_protocol::MODAL_SUBMIT_OP;
 use pwr_plugin_protocol::Manifest;
 use pwr_plugin_protocol::Msg;
 use pwr_plugin_protocol::ServerSettings;
+use pwr_plugin_protocol::SettingsSection;
 use pwr_plugin_protocol::VIEW_MOVED_KIND;
 use pwr_plugin_protocol::WireError;
-use pwr_plugin_support::HubPage;
+use pwr_plugin_support::back_exit;
 use pwr_plugin_support::id_as_u64;
-use pwr_plugin_support::open_hub_args;
 use pwr_plugin_support::reply_err;
-use pwr_plugin_support::source_message_id;
 use pwr_plugin_support::write_msg;
 use serde_json::Value;
 use serde_json::json;
 
-/// The plugin's name: the hello `name`, the hub's `host.open_view` target,
-/// and the handle the host keeps it under.
+/// The plugin's name: the hello `name` and the handle the host keeps it
+/// under.
 const PLUGIN_NAME: &str = "welcome";
+
+/// The command the panel serves: the manifest's slash command and the
+/// invoke command the host Settings section and the `/welcome` deep-link
+/// dispatch.
+const COMMAND_NAME: &str = "welcome-settings";
 
 /// Filename of the welcome preview attachment, matching the monolith's
 /// `WELCOME_FILE`. The envelope declares this slot; the host fills it.
@@ -92,9 +98,8 @@ const CUSTOM_ID_COLOR: &str = "welcome:color";
 const CUSTOM_ID_ADD: &str = "welcome:add";
 const CUSTOM_ID_REMOVE: &str = "welcome:remove";
 const CUSTOM_ID_SAVE: &str = "welcome:save";
-const CUSTOM_ID_CANCEL: &str = "welcome:cancel";
 const CUSTOM_ID_BACK: &str = "welcome:back";
-const CUSTOM_ID_ABOUT: &str = "welcome:about";
+const CUSTOM_ID_CANCEL: &str = "welcome:cancel";
 
 /// Custom ids of the modals' text inputs, read back from the submission.
 const INPUT_MESSAGE: &str = "message";
@@ -147,8 +152,6 @@ enum PanelMsg {
     SetColor(String),
     SaveRemoval,
     CancelRemoval,
-    Back,
-    About,
 }
 
 /// Effects the model can request: a persist of the whole snapshot. The
@@ -162,12 +165,10 @@ enum Effect {
 
 /// The pure update function — the only writer of the model. Every mutating
 /// message persists, including no-op edits (empty or over-cap messages,
-/// colors without a leading `#`), exactly as the monolith did. The terminal
-/// messages (`Back`, `About`) and the selection-only messages persist
+/// colors without a leading `#`); the selection-only messages persist
 /// nothing.
 fn update(msg: PanelMsg, model: &mut Model) -> Vec<Effect> {
     match msg {
-        PanelMsg::Back | PanelMsg::About => Vec::new(),
         PanelMsg::ToggleEnabled => {
             let current = model.settings.welcome.enabled.unwrap_or(false);
             model.settings.welcome.enabled = Some(!current);
@@ -298,11 +299,6 @@ enum Pending {
         invoke_id: u64,
         session: SessionState,
         msg: PanelMsg,
-        channel_id: Option<u64>,
-        /// The message the click fired on: Back/About edit it in place
-        /// instead of posting a fresh hub message.
-        message_id: Option<u64>,
-        hub_page: HubPage,
     },
     /// The persist a mutating click or modal submission issued; its resp
     /// answers with the re-rendered panel.
@@ -311,19 +307,18 @@ enum Pending {
         session: SessionState,
         settings: ServerSettings,
     },
-    /// The `host.open_view` a `Back`/`About` issued; its resp answers with
-    /// the panel (the hub opens beside it, like every plugin→plugin
-    /// navigation) — or, when the open replaced the source message, with the
-    /// [`VIEW_MOVED_KIND`] marker so the host skips its own render.
-    OpenHub {
-        invoke_id: u64,
-        session: SessionState,
-        settings: ServerSettings,
-        message_id: Option<u64>,
-    },
     /// The `host.open_modal` a modal trigger issued; its resp answers the
     /// click with [`MODAL_OPENED_KIND`] so the host skips its own response.
     OpenModal { invoke_id: u64 },
+    /// The `host.open_view` a Back press issued against the host-reserved
+    /// `settings` target; its resp answers with the wire's `ViewMoved`
+    /// marker when the open replaced the panel's message, or re-renders
+    /// the panel when no live Settings session took it back.
+    OpenSettings {
+        invoke_id: u64,
+        session: SessionState,
+        message_id: Option<u64>,
+    },
     /// The load issued before applying a modal submission.
     ModalSubmit {
         invoke_id: u64,
@@ -340,8 +335,8 @@ impl Pending {
             | Pending::Interact { .. }
             | Pending::ModalSubmit { .. } => GET_SETTINGS_OP,
             Pending::Persist { .. } => UPDATE_SETTINGS_OP,
-            Pending::OpenHub { .. } => "host.open_view",
             Pending::OpenModal { .. } => "host.open_modal",
+            Pending::OpenSettings { .. } => "host.open_view",
         }
     }
 }
@@ -413,8 +408,8 @@ fn removal_label(msg: &str, marked: bool) -> String {
 /// Renders the panel as Components V2, mirroring the monolith's `/welcome`
 /// view: the status header, the toggle, the channel and template selects,
 /// the Set Color / Add Welcome Message / Preview Templates row, the
-/// variables help, the conditional removal select with its save/cancel row,
-/// and the Back/About row outside the container.
+/// variables help, the conditional removal select with its save/cancel
+/// row, and the always-present Back row.
 fn view_data(model: &Model) -> Value {
     let is_enabled = model.is_enabled();
     let msgs = model.message_count();
@@ -565,17 +560,12 @@ fn view_data(model: &Model) -> Value {
                 text_display { content: VARIABLES_TEXT }
                 { removal_select }
                 { removal_actions }
-            }
-            action_row {
-                button {
-                    custom_id: CUSTOM_ID_BACK,
-                    label: "❮ Back",
-                    style: ButtonStyle::Secondary
-                }
-                button {
-                    custom_id: CUSTOM_ID_ABOUT,
-                    label: "🛈 About",
-                    style: ButtonStyle::Secondary
+                action_row {
+                    button {
+                        custom_id: CUSTOM_ID_BACK,
+                        label: "❮ Back",
+                        style: ButtonStyle::Secondary
+                    }
                 }
             }
         }
@@ -761,14 +751,25 @@ fn manifest() -> Manifest {
         name: PLUGIN_NAME.into(),
         description: "Manage welcome card settings".into(),
         version: "0.1.0".into(),
-        // No slash command: the panel opens through the settings hub
-        // (ADR-0009). A direct slash invoke carries no `guild_id` in its
-        // re-parsed args, so a command would open a panel with no guild to
-        // edit. No event handlers: the monolith's expiry persists nothing,
-        // so there is no `view.timeout` work left for a plugin.
-        commands: vec![],
+        // The guild-only slash command the host Settings section dispatches:
+        // a direct invoke carries no `guild_id` in its re-parsed args, so
+        // the host injects the invocation's guild into the args. No event
+        // handlers: the monolith's expiry persists nothing, so there is no
+        // `view.timeout` work left for a plugin.
+        commands: vec![CommandDef {
+            create_command: json!({
+                "name": COMMAND_NAME,
+                "description": "Manage welcome card settings",
+                "dm_permission": false,
+            }),
+        }],
         event_handlers: vec![],
         tasks: vec![],
+        settings: vec![SettingsSection {
+            name: "Welcome".into(),
+            description: "Manage welcome card settings".into(),
+            command: COMMAND_NAME.into(),
+        }],
         api_version: API_VERSION,
     }
 }
@@ -826,8 +827,6 @@ fn click_msg(custom_id: &str, args: Option<&Value>) -> Option<PanelMsg> {
         CUSTOM_ID_REMOVE => PanelMsg::MarkRemoval(selected_indices(args)),
         CUSTOM_ID_SAVE => PanelMsg::SaveRemoval,
         CUSTOM_ID_CANCEL => PanelMsg::CancelRemoval,
-        CUSTOM_ID_BACK => PanelMsg::Back,
-        CUSTOM_ID_ABOUT => PanelMsg::About,
         _ => return None,
     };
     Some(msg)
@@ -883,8 +882,8 @@ fn main() -> ExitCode {
                 // instead opens its modal and answers the click with the
                 // modal-opened marker.
                 let host_call = match (op.as_str(), cmd.as_deref()) {
-                    ("invoke", Some(PLUGIN_NAME)) => {
-                        // The hub forwards the source interaction's guild
+                    ("invoke", Some(COMMAND_NAME)) => {
+                        // The host forwards the source interaction's guild
                         // id; the model loads before the first render.
                         let Some(guild_id) = args
                             .as_ref()
@@ -904,7 +903,7 @@ fn main() -> ExitCode {
                             get_settings_args(guild_id),
                         ))
                     }
-                    ("view.interact", Some(PLUGIN_NAME)) => {
+                    ("view.interact", Some(COMMAND_NAME)) => {
                         // The session state the host echoed back.
                         let Some(session) =
                             SessionState::from_value(args.as_ref().and_then(|a| a.get("view")))
@@ -955,26 +954,36 @@ fn main() -> ExitCode {
                                 Pending::OpenModal { invoke_id: id },
                                 open_modal_args(author_id, interaction_id, &token, spec),
                             ))
-                        } else if let Some(msg) = click_msg(custom_id, args.as_ref()) {
-                            let hub_page = if custom_id == CUSTOM_ID_ABOUT {
-                                HubPage::About
-                            } else {
-                                HubPage::Hub
+                        } else if custom_id == CUSTOM_ID_BACK {
+                            // Back persists nothing — every edit already
+                            // persisted — so no settings load either: hand
+                            // the message back to the host Settings GUI.
+                            let Some(back) = back_exit(args.as_ref(), session.guild_id) else {
+                                if !reply_err(
+                                    &mut out,
+                                    id,
+                                    "InvalidArgs",
+                                    "missing `channel_id` (u64)",
+                                ) {
+                                    return ExitCode::FAILURE;
+                                }
+                                continue;
                             };
-                            let channel_id = args
-                                .as_ref()
-                                .and_then(|a| a.get("channel_id"))
-                                .and_then(id_as_u64);
-                            let message_id = source_message_id(args.as_ref());
+                            Some(HostCall::new(
+                                Pending::OpenSettings {
+                                    invoke_id: id,
+                                    session,
+                                    message_id: back.message_id,
+                                },
+                                back.args,
+                            ))
+                        } else if let Some(msg) = click_msg(custom_id, args.as_ref()) {
                             let guild_id = session.guild_id;
                             Some(HostCall::new(
                                 Pending::Interact {
                                     invoke_id: id,
                                     session,
                                     msg,
-                                    channel_id,
-                                    message_id,
-                                    hub_page,
                                 },
                                 get_settings_args(guild_id),
                             ))
@@ -1135,9 +1144,6 @@ fn main() -> ExitCode {
                         invoke_id,
                         session,
                         msg,
-                        channel_id,
-                        message_id,
-                        hub_page,
                     } => {
                         if !ok {
                             eprintln!("{GET_SETTINGS_OP} failed: {error:?}");
@@ -1170,27 +1176,6 @@ fn main() -> ExitCode {
                         let session = session.with_marked(model.marked_removal.clone());
                         let guild_id = session.guild_id;
                         let call = match effects.as_slice() {
-                            [] if matches!(msg, PanelMsg::Back | PanelMsg::About) => {
-                                // The terminal exits persist nothing; they
-                                // only hand off to the hub beside the panel.
-                                let Some(channel_id) = channel_id else {
-                                    eprintln!("back/about without a channel id: panel stays");
-                                    if !reply_panel(&mut out, invoke_id, &session, &model.settings)
-                                    {
-                                        return ExitCode::FAILURE;
-                                    }
-                                    continue;
-                                };
-                                Some(HostCall::new(
-                                    Pending::OpenHub {
-                                        invoke_id,
-                                        session,
-                                        settings: model.settings,
-                                        message_id,
-                                    },
-                                    open_hub_args(channel_id, guild_id, hub_page, message_id),
-                                ))
-                            }
                             [] => {
                                 // A selection-only edit re-renders in place.
                                 if !reply_panel(&mut out, invoke_id, &session, &model.settings) {
@@ -1285,28 +1270,30 @@ fn main() -> ExitCode {
                             return ExitCode::FAILURE;
                         }
                     }
-                    Pending::OpenHub {
+                    Pending::OpenSettings {
                         invoke_id,
-                        session,
-                        settings,
+                        session: _,
                         message_id,
                     } => {
-                        if !ok {
-                            eprintln!("host.open_view failed: {error:?}");
-                        }
                         // In place: the open replaced this panel's message
-                        // with the hub, so answering with the panel's own
-                        // render would overwrite it — the host skips its
-                        // render on the marker kind. Without a source
-                        // message the hub opened next to the panel, which
-                        // keeps answering its own interactions.
+                        // with the host Settings GUI, so answering with the
+                        // panel's own render would overwrite it — the host
+                        // skips its render on the marker kind. Anything else
+                        // (no source message, no live Settings session took
+                        // the message back) answers the invoke with the
+                        // failure itself: the panel stays and keeps
+                        // answering its own interactions.
                         if ok && message_id.is_some() {
-                            if !reply_err(&mut out, invoke_id, VIEW_MOVED_KIND, "hub opened") {
+                            if !reply_err(&mut out, invoke_id, VIEW_MOVED_KIND, "settings opened") {
                                 return ExitCode::FAILURE;
                             }
                             continue;
                         }
-                        if !reply_panel(&mut out, invoke_id, &session, &settings) {
+                        let error = error.unwrap_or_else(|| WireError {
+                            kind: "HostError".into(),
+                            msg: "the host Settings GUI did not take the message back".into(),
+                        });
+                        if !reply_err(&mut out, invoke_id, &error.kind, error.msg) {
                             return ExitCode::FAILURE;
                         }
                     }
@@ -1492,11 +1479,10 @@ mod tests {
     }
 
     #[test]
-    fn the_terminal_messages_persist_nothing() {
-        for msg in [PanelMsg::Back, PanelMsg::About] {
-            let mut m = model(&["one"]);
-            assert_eq!(update(msg.clone(), &mut m), Vec::new(), "{msg:?}");
-        }
+    fn a_removal_cancel_persists_nothing() {
+        let mut m = model(&["one"]);
+        m.marked_removal = marked(&[0]);
+        assert_eq!(update(PanelMsg::CancelRemoval, &mut m), Vec::new());
     }
 
     // ── removal labels ──────────────────────────────────────────────────────
@@ -1572,7 +1558,7 @@ mod tests {
     fn panel_mirrors_the_monolith_layout() {
         let data = view_data(&model(&["one"]));
         let components = data["components"].as_array().expect("components");
-        assert_eq!(components.len(), 2, "container plus the nav row");
+        assert_eq!(components.len(), 1, "just the container");
 
         let children = components[0]["components"].as_array().expect("children");
         assert_eq!(
@@ -1623,12 +1609,6 @@ mod tests {
             children[6]["components"][0]["custom_id"],
             json!(CUSTOM_ID_REMOVE)
         );
-
-        let nav = components[1]["components"].as_array().expect("nav");
-        assert_eq!(nav[0]["custom_id"], json!(CUSTOM_ID_BACK));
-        assert_eq!(nav[0]["label"], json!("❮ Back"));
-        assert_eq!(nav[1]["custom_id"], json!(CUSTOM_ID_ABOUT));
-        assert_eq!(nav[1]["label"], json!("🛈 About"));
     }
 
     #[test]
@@ -1652,9 +1632,13 @@ mod tests {
         let with = view_data(&model(&["one"]));
         let without = view_data(&model(&[]));
         let children = with["components"][0]["components"].as_array().unwrap();
-        assert_eq!(children.len(), 7, "six fixed rows plus the removal select");
+        assert_eq!(
+            children.len(),
+            8,
+            "six fixed rows, the removal select, and the Back row"
+        );
         let children = without["components"][0]["components"].as_array().unwrap();
-        assert_eq!(children.len(), 6);
+        assert_eq!(children.len(), 7);
     }
 
     #[test]
@@ -1662,12 +1646,12 @@ mod tests {
         let mut m = model(&["one", "two"]);
         let without = view_data(&m);
         let children = without["components"][0]["components"].as_array().unwrap();
-        assert_eq!(children.len(), 7);
+        assert_eq!(children.len(), 8);
 
         m.marked_removal = marked(&[1]);
         let with = view_data(&m);
         let children = with["components"][0]["components"].as_array().unwrap();
-        assert_eq!(children.len(), 8);
+        assert_eq!(children.len(), 9);
         let row = children[7]["components"].as_array().unwrap();
         assert_eq!(row[0]["custom_id"], json!(CUSTOM_ID_SAVE));
         assert_eq!(row[0]["label"], json!("Save Removals"));
@@ -1864,8 +1848,6 @@ mod tests {
             click_msg(CUSTOM_ID_CANCEL, None),
             Some(PanelMsg::CancelRemoval)
         );
-        assert_eq!(click_msg(CUSTOM_ID_BACK, None), Some(PanelMsg::Back));
-        assert_eq!(click_msg(CUSTOM_ID_ABOUT, None), Some(PanelMsg::About));
     }
 
     #[test]
@@ -1889,10 +1871,13 @@ mod tests {
     // ── protocol ────────────────────────────────────────────────────────────
 
     #[test]
-    fn the_manifest_declares_no_command_and_no_handler() {
+    fn the_manifest_declares_the_command_and_the_settings_section() {
         let m = manifest();
         assert_eq!(m.name, PLUGIN_NAME);
-        assert!(m.commands.is_empty(), "the hub opens this panel");
+        assert_eq!(m.commands.len(), 1);
+        assert_eq!(m.commands[0].create_command["name"], json!(COMMAND_NAME));
+        assert_eq!(m.settings.len(), 1);
+        assert_eq!(m.settings[0].command, COMMAND_NAME);
         assert!(m.event_handlers.is_empty(), "expiry persists nothing");
         assert_eq!(m.api_version, API_VERSION);
     }
@@ -1935,9 +1920,6 @@ mod tests {
                 invoke_id: 0,
                 session: session.clone(),
                 msg: PanelMsg::ToggleEnabled,
-                channel_id: None,
-                message_id: None,
-                hub_page: HubPage::Hub,
             }
             .op(),
             GET_SETTINGS_OP
@@ -1951,17 +1933,16 @@ mod tests {
             .op(),
             UPDATE_SETTINGS_OP
         );
+        assert_eq!(Pending::OpenModal { invoke_id: 0 }.op(), "host.open_modal");
         assert_eq!(
-            Pending::OpenHub {
+            Pending::OpenSettings {
                 invoke_id: 0,
                 session: session.clone(),
-                settings: ServerSettings::default(),
                 message_id: None,
             }
             .op(),
             "host.open_view"
         );
-        assert_eq!(Pending::OpenModal { invoke_id: 0 }.op(), "host.open_modal");
         assert_eq!(
             Pending::ModalSubmit {
                 invoke_id: 0,

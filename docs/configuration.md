@@ -17,7 +17,6 @@ in the repository root. The bot reads the file at startup.
 | `PLUGINS_TOML` | Plugin catalog file. See [Plugin catalog](plugins.md). | `$DATA_PATH/plugins.toml` |
 | `PLUGINS_DIR` | Directory where the bot installs plugin binaries. | `$DATA_PATH/plugins` |
 | `CORE_PLUGINS` | Comma-separated core plugin names, spawned at startup in order. See [Plugin catalog](plugins.md). | empty — no core plugins |
-| `SETTINGS_PLUGIN_PATH` | Path to the settings core plugin binary. | `./settings` next to the bot binary, then `$DATA_PATH/settings` |
 | `FEED_PLUGIN_PATH` | Path to the feed core plugin binary. | `./feed` next to the bot binary, then `$DATA_PATH/feed` |
 | `VOICE_PLUGIN_PATH` | Path to the voice core plugin binary. | `./voice` next to the bot binary, then `$DATA_PATH/voice` |
 | `WELCOME_PLUGIN_PATH` | Path to the welcome core plugin binary. | `./welcome` next to the bot binary, then `$DATA_PATH/welcome` |

@@ -22,6 +22,7 @@ pub mod lifecycle;
 pub mod pagination;
 pub mod plugins;
 pub mod register;
+pub mod settings;
 pub mod unregister;
 pub mod voice_leaderboard;
 pub mod voice_stats;

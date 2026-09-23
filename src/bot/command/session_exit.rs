@@ -1,26 +1,25 @@
-//! Terminal steps of a [`Router`] session: the hub handoff and the root
-//! dismissal.
+//! Terminal steps of a [`Router`] session: the Settings section handoff and
+//! the root dismissal.
 //!
 //! A host session ends in one of three ways. Plain expiry and
 //! [`Navigation::Exit`] leave the live message alone. The two steps here are
-//! the ones that end it while the message still carries a Back button. Both
-//! are best-effort: a failing API call is logged and the session ends
-//! anyway, so a transient failure can leave a dead Back button behind.
+//! the ones that end it while the message still carries a button. Both are
+//! best-effort: a failing API call is logged and the session ends anyway, so
+//! a transient failure can leave a dead button behind.
 //!
-//! - **Hub handoff** ([`Navigation::SettingsMain`]): the Back button of
-//!   the About feature exits to this target. The settings plugin renders its
-//!   hub [`ViewSpec`], the live message is morphed in place into that payload,
-//!   and the message id is registered with the interaction engine — the
-//!   message continues its life as a plugin view session and the host run
-//!   ends. The Host session claim is already released by then: it drops with
-//!   the [`Host::run`] loop, before the Router pops the exit navigation.
+//! - **Settings section handoff** ([`Navigation::SettingsSection`]): a
+//!   section tile on the Settings view was pressed. The target plugin's
+//!   command renders its panel [`ViewSpec`], the live message is morphed in
+//!   place into that payload, and the message id is registered with the
+//!   interaction engine — the message continues its life as a plugin view
+//!   session and the host run ends. The Host session claim is already
+//!   released by then: it drops with the [`Host::run`] loop, before the
+//!   Router pops the exit navigation.
 //! - **Root dismissal** (a [`Navigation::Back`] marker on an empty stack):
-//!   the message shows the root view, so Back deletes it. An ephemeral
-//!   message is left alone instead — it belongs to the interaction that
-//!   produced it. No host view is ephemeral today (the Host renders without
-//!   the flag), so that branch is explicit rather than assumed. No feature
-//!   pushes the Back marker today — every Back hands off to the hub — so
-//!   this step is the walk's well-defined empty-history branch.
+//!   the message shows the root view — the Settings view, whose Back
+//!   is the Root Back — so Back deletes it. An ephemeral message is left
+//!   alone instead: it belongs to the interaction that produced it. The
+//!   Host renders without the ephemeral flag, so every root view deletes.
 //!
 //! The Router's session loop fetches the live message once and passes it to
 //! both steps: a refetch on the handoff-failure path would be a fresh
@@ -37,7 +36,7 @@
 //! [`ViewSpec`]: pwr_plugin_protocol::ViewSpec
 //!
 //! [`Navigation::Exit`]: crate::bot::navigation::Navigation::Exit
-//! [`Navigation::SettingsMain`]: crate::bot::navigation::Navigation::SettingsMain
+//! [`Navigation::SettingsSection`]: crate::bot::navigation::Navigation::SettingsSection
 //! [`Navigation::Back`]: crate::bot::navigation::Navigation::Back
 
 use std::sync::Arc;
@@ -55,10 +54,6 @@ use crate::plugin::RunningPlugin;
 use crate::plugin::SerenityHostIo;
 use crate::plugin::edit_body_for_transport;
 use crate::plugin::validate_view_data;
-
-/// The plugin whose hub view the handoff adopts the message into: the
-/// settings core plugin, and the `settings` command it registers.
-pub const SETTINGS_PLUGIN: &str = "settings";
 
 /// The end-of-session action the root dismissal takes for a message.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -85,8 +80,8 @@ fn dismissal_for(message: &serenity::Message) -> Dismissal {
     }
 }
 
-/// Ends the session on a root Back, or on a failed hub handoff: deletes the
-/// public view so no dead Back button stays behind, and leaves an ephemeral
+/// Ends the session on a root Back, or on a failed section handoff: deletes
+/// the public view so no dead button stays behind, and leaves an ephemeral
 /// one alone.
 ///
 /// `message` is the reply's message, fetched by the caller: the
@@ -110,63 +105,80 @@ pub async fn dismiss_root_view(
     }
 }
 
-/// Hands the live view message to the settings plugin's hub: resolves the
-/// running plugin, then adopts the message into its hub view (see
-/// [`adopt_message_into_hub`]).
+/// Hands the live view message to a settings section's panel: resolves the
+/// running plugin, then adopts the message into the view its command
+/// renders (see [`adopt_message_into_section`]). The invoke args carry the
+/// invocation's guild when the interaction ran in one — the panel plugins
+/// key their settings by guild.
 ///
 /// Fails when the plugin is not running, the invoke fails, the Gate rejects
 /// the payload, or the edit fails — the caller decides what a failed handoff
 /// means for the session.
-pub async fn handoff_to_hub(ctx: &Context<'_>, message: &serenity::Message) -> Result<(), Error> {
+pub async fn handoff_to_section(
+    ctx: &Context<'_>,
+    plugin: &str,
+    command: &str,
+    message: &serenity::Message,
+) -> Result<(), Error> {
     let data = ctx.data();
-    let Some(plugin) = data.plugin_manager.get(SETTINGS_PLUGIN).await else {
-        return Err(Error::from(format!(
-            "the `{SETTINGS_PLUGIN}` plugin is not running"
-        )));
+    let Some(running) = data.plugin_manager.get(plugin).await else {
+        return Err(Error::from(format!("the `{plugin}` plugin is not running")));
     };
+    let mut args = json!({});
+    if let Some(guild_id) = ctx.guild_id() {
+        args["guild_id"] = json!(guild_id.get());
+    }
     let io = SerenityHostIo::new(ctx.serenity_context().http.clone());
-    adopt_message_into_hub(
+    adopt_message_into_section(
         &data.plugin_engine,
-        plugin,
+        running,
+        command,
+        args,
         &io,
-        serenity::ChannelId::new(message.channel_id.get()),
-        message.id,
+        Some(data.previews.as_ref()),
+        message,
     )
     .await
 }
 
 /// The adoption half of the handoff, at the seam tests can drive offline:
 /// invokes the plugin command for its [`ViewSpec`], sends the raw payload
-/// through the Gate, morphs the message into it through the Discord-edit
-/// seam, and only then registers the engine session on the message id.
+/// through the Gate, resolves the body's declared attachment slots like
+/// every other transport (ADR-0012 — never a dangling slot), morphs the
+/// message into it through the Discord-edit seam, and only then registers
+/// the engine session on the message id.
 ///
 /// The order is the failure story: a payload the Gate rejects, or an edit
 /// that fails, leaves the message untouched and the engine sessionless, so
-/// clicks on a message that never became the hub are stale-dropped rather
+/// clicks on a message that never became the panel are stale-dropped rather
 /// than routed to a session whose view the user cannot see.
 ///
 /// [`ViewSpec`]: pwr_plugin_protocol::ViewSpec
-pub async fn adopt_message_into_hub(
+pub async fn adopt_message_into_section(
     engine: &InteractionEngine<RunningPlugin>,
     plugin: Arc<RunningPlugin>,
+    command: &str,
+    args: serde_json::Value,
     io: &dyn HostIo,
-    channel_id: serenity::ChannelId,
-    message_id: serenity::MessageId,
+    previews: Option<&crate::plugin::preview::PreviewResolver>,
+    message: &serenity::Message,
 ) -> Result<(), Error> {
-    let spec = engine
-        .invoke(plugin.clone(), SETTINGS_PLUGIN, json!({}))
-        .await?;
+    let channel_id = serenity::ChannelId::new(message.channel_id.get());
+    let message_id = message.id;
+    let guild_id = args.get("guild_id").and_then(serde_json::Value::as_u64);
+    let spec = engine.invoke(plugin.clone(), command, args).await?;
     validate_view_data(&spec.data)?;
-    io.edit_message(
-        channel_id.get(),
-        message_id.get(),
-        edit_body_for_transport(&spec.data),
-        Vec::new(),
-    )
-    .await?;
-    engine
-        .register(message_id, plugin, SETTINGS_PLUGIN, spec)
-        .await;
+    let (body, attachments) = match previews {
+        Some(previews) => {
+            previews
+                .resolve(edit_body_for_transport(&spec.data), guild_id)
+                .await
+        }
+        None => (edit_body_for_transport(&spec.data), Vec::new()),
+    };
+    io.edit_message(channel_id.get(), message_id.get(), body, attachments)
+        .await?;
+    engine.register(message_id, plugin, command, spec).await;
     Ok(())
 }
 

@@ -6,10 +6,10 @@
 #
 #   ./dev.sh preview                     # render the `hello` plugin view
 #   ./dev.sh preview -- --png            # also render a PNG (needs chromium)
-#   ./dev.sh preview -- --plugin settings
+#   ./dev.sh preview -- --plugin welcome
 
 cmd_preview() {
-    local build_args=(-p pwr-preview -p hello -p settings)
+    local build_args=(-p pwr-preview -p hello -p welcome)
     local run_args=()
     local arg
     for arg in "$@"; do

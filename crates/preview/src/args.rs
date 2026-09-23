@@ -133,7 +133,7 @@ fn usage() -> String {
         "\nExamples:\n\
          \x20 ./dev.sh preview\n\
          \x20 ./dev.sh preview -- --png\n\
-         \x20 ./dev.sh preview -- --plugin settings\n",
+         \x20 ./dev.sh preview -- --plugin welcome\n",
     );
     text.push_str("\nFixtures land in ./.scratch/preview/ beside the rendered HTML.\n");
     text
@@ -178,8 +178,8 @@ mod tests {
     #[test]
     fn plugin_flag_takes_the_next_argument_as_a_name() {
         assert_eq!(
-            run(&["--plugin", "settings"]).plugin,
-            PluginSpec::Name("settings".into())
+            run(&["--plugin", "welcome"]).plugin,
+            PluginSpec::Name("welcome".into())
         );
     }
 
@@ -206,8 +206,8 @@ mod tests {
     #[test]
     fn a_repeated_flag_wins_with_its_last_value() {
         assert_eq!(
-            run(&["--plugin", "hello", "--plugin", "settings"]).plugin,
-            PluginSpec::Name("settings".into())
+            run(&["--plugin", "hello", "--plugin", "welcome"]).plugin,
+            PluginSpec::Name("welcome".into())
         );
     }
 
@@ -249,9 +249,9 @@ mod tests {
 
     #[test]
     fn positional_arguments_are_rejected() {
-        let message = err(&["settings"]);
+        let message = err(&["welcome"]);
         assert!(
-            message.contains("unexpected argument `settings`"),
+            message.contains("unexpected argument `welcome`"),
             "got: {message}"
         );
     }

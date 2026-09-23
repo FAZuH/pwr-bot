@@ -56,6 +56,7 @@ fn main() -> ExitCode {
             }],
             event_handlers: vec![],
             tasks: vec![],
+            settings: vec![],
             api_version: API_VERSION,
         }),
     };

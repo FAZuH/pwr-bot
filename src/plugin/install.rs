@@ -442,6 +442,7 @@ mod tests {
             }],
             event_handlers: vec!["view.timeout".into()],
             tasks: vec![],
+            settings: vec![],
             api_version: pwr_plugin_protocol::API_VERSION,
         }
     }

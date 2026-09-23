@@ -42,3 +42,12 @@ pinned positions: the config buttons, the whole toggle row, and the
 `Option`-gated nav row. The components library's runtime-assembly role is
 superseded by `component!`/splices; the crate stays as the reusable library
 for shared pieces the grammar still does not fit (pagination, for example).
+
+## Update (2026-09-23)
+
+The settings hub plugin is retired (#165). The live exemplars of the
+`view!`-with-splices pattern are now the panel plugins
+(`crates/plugin/feed`, `voice`, `welcome`): a single `view!` literal with
+runtime splices at pinned positions and `Option`-gated rows. The host
+Settings GUI (`src/bot/gui/settings.rs`) assembles its view from
+`component!` pieces the same way.

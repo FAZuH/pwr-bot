@@ -59,3 +59,17 @@ plugin protocol has no modal op. The capability must land before welcome
 migrates. ADR-0011 records it.
 
 ADR-0005 records the TEA runtime these panels leave behind.
+
+## Update (2026-09-23)
+
+The migration is complete (#165): all three panels live in plugin crates,
+and the settings hub plugin itself is retired. The host `/settings`
+command now runs a host Settings GUI (`src/bot/gui/settings.rs`) that
+lists the settings sections the loaded plugin manifests declare; a
+section click hands the live message to the section's panel through the
+Settings section handoff (`adopt_message_into_section` in
+`src/bot/command/session_exit.rs`), replacing the hub handoff. The
+panels declare their own guild-only commands (`feed-settings`,
+`voice-settings`, `welcome-settings`) and their settings sections in
+the manifest, so the host builds the list from data, not a plugin
+inventory call.

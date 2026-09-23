@@ -1,13 +1,11 @@
 //! End-to-end tests for the welcome settings panel plugin (#151, the
-//! panel-migration's third panel): the hub and the panel plugin are spawned
-//! over the real stdio wire — no database, no Discord — through one plugin
-//! manager, like the two core plugins the host spawns at startup. The
-//! welcome settings seam is served by a mockall mock of the host's
-//! [`WelcomeSettingsSource`] and the Discord I/O seam by a mock [`HostIo`].
+//! panel-migration's third panel): the panel plugin is spawned over the real
+//! stdio wire — no database, no Discord — through the plugin manager, like
+//! the core plugins the host spawns at startup. The welcome settings seam is
+//! served by a mockall mock of the host's [`WelcomeSettingsSource`] and the
+//! Discord I/O seam by a mock [`HostIo`].
 //!
 //! Assertions mirror the documented contract:
-//! - the hub's Welcome button (`settings:open:welcome`) opens the
-//!   panel plugin through `host.open_view`, forwarding the source `guild_id`;
 //! - the panel's invoke loads the guild's snapshot through
 //!   `host.welcome.get_settings` and renders the monolith `/welcome` panel as
 //!   Components V2, declaring the preview attachment slot by filename
@@ -20,23 +18,18 @@
 //!   answers the click with the `ModalOpened` marker, so the host sends
 //!   nothing (ADR-0011); the later `view.modal_submit` re-reads, persists the
 //!   answer, and carries the stashed removal selection across the round trip;
-//! - Back re-opens the hub and persists nothing;
 //! - a failed load fails the open with the host's typed error forwarded;
 //! - `bye` exits cleanly with status 0.
 
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use async_trait::async_trait;
 use mockall::predicate::eq;
 use pwr_bot::plugin::HostConfig;
 use pwr_bot::plugin::HostIo;
 use pwr_bot::plugin::HostServices;
 use pwr_bot::plugin::InteractionEngine;
-use pwr_bot::plugin::KvError;
-use pwr_bot::plugin::KvStore;
 use pwr_bot::plugin::PluginManager;
 use pwr_bot::plugin::RespawnPolicy;
 use pwr_bot::plugin::RunningPlugin;
@@ -80,44 +73,10 @@ fn sample_settings() -> ServerSettings {
     }
 }
 
-/// A stateful in-memory [`KvStore`], for the hub's load/persist chain.
-#[derive(Default)]
-struct SharedKv {
-    inner: Mutex<HashMap<(String, String), String>>,
-}
-
-#[async_trait]
-impl KvStore for SharedKv {
-    async fn get(&self, namespace: &str, key: &str) -> Result<Option<String>, KvError> {
-        Ok(self
-            .inner
-            .lock()
-            .expect("kv lock")
-            .get(&(namespace.to_string(), key.to_string()))
-            .cloned())
-    }
-
-    async fn set(&self, namespace: &str, key: &str, value: &str) -> Result<(), KvError> {
-        self.inner
-            .lock()
-            .expect("kv lock")
-            .insert((namespace.to_string(), key.to_string()), value.to_string());
-        Ok(())
-    }
-
-    async fn delete(&self, namespace: &str, key: &str) -> Result<(), KvError> {
-        self.inner
-            .lock()
-            .expect("kv lock")
-            .remove(&(namespace.to_string(), key.to_string()));
-        Ok(())
-    }
-}
-
-/// The services both core plugins share, like the host's one
+/// The services the panel shares with its host calls, like the host's one
 /// [`HostServices`] arc: the io seam posts placeholders and edits payloads,
-/// the engine tracks sessions, the kv store backs the hub, and the welcome
-/// seam serves the panel's settings RPCs. No preview resolver: the
+/// the engine backs the modal open, and the welcome seam serves the panel's
+/// settings RPCs. No preview resolver: the
 /// declaration passes through the transport untouched, which is what the
 /// envelope assertions pin.
 fn shared_services(
@@ -132,32 +91,26 @@ fn shared_services(
             data_path: PathBuf::from("/tmp/pwr-bot-test"),
             poll_interval: std::time::Duration::from_secs(30),
         }),
-        kv: Some(Arc::new(SharedKv::default())),
+        kv: None,
         engine: Some(Arc::new(engine)),
         stats: Arc::new(StatsHandle::default()),
         feeds: None,
         voice: None,
         welcome: Some(welcome),
         previews: None,
+        settings_returns: None,
     })
 }
 
-/// Spawns the hub and the panel plugin under one manager wired with the
-/// shared services, like the host's startup loop spawns its core plugins.
-async fn spawn_core_plugins(
-    services: Arc<HostServices>,
-) -> (Arc<PluginManager>, Arc<RunningPlugin>, Arc<RunningPlugin>) {
+/// Spawns the panel plugin under a manager wired with the shared services,
+/// like the host's startup loop spawns its core plugins.
+async fn spawn_panel(services: Arc<HostServices>) -> Arc<RunningPlugin> {
     let manager =
         Arc::new(PluginManager::new(None, RespawnPolicy::default()).with_host_services(services));
-    let hub = manager
-        .spawn("settings", probe_binary("settings"), None, &[], &[])
-        .await
-        .expect("spawn settings hub");
-    let panel = manager
+    manager
         .spawn("welcome", probe_binary("welcome"), None, &[], &[])
         .await
-        .expect("spawn welcome panel");
-    (manager, hub, panel)
+        .expect("spawn welcome panel")
 }
 
 /// Asserts a resp is an ok view envelope answering its own invoke id, and
@@ -201,76 +154,6 @@ fn declared_attachments(data: &Value) -> &Value {
     &data["data"]["attachments"]
 }
 
-/// The hub's Welcome click, proven end to end: `host.open_view` resolves the
-/// panel through the manager, forwards the source `guild_id`, and the panel's
-/// invoke loads the guild's snapshot through the welcome seam before its
-/// first render — the io mock pins the placeholder post and the final edit of
-/// the panel onto the produced message, attachment declaration included
-/// (previews unresolved here, so the slot rides the edit verbatim).
-#[tokio::test]
-async fn hub_welcome_click_opens_the_panel_with_the_guild_settings() {
-    let channel_id = 555_000_111_u64;
-    let produced = 777_000_222_u64;
-
-    let mut welcome = MockWelcomeSettingsSource::new();
-    welcome
-        .expect_get_settings()
-        .with(eq(GUILD_ID))
-        .times(1)
-        .returning(|_| Ok(sample_settings()));
-
-    let mut io = MockHostIo::new();
-    io.expect_send_message()
-        .with(eq(channel_id), eq("Loading…"))
-        .times(1)
-        .returning(move |_, _| Ok(Some(json!({ "message_id": produced }))));
-    io.expect_edit_message()
-        .with(
-            eq(channel_id),
-            eq(produced),
-            mockall::predicate::function(|data: &Value| {
-                data["components"][0]["components"][0]["content"]
-                    == json!("-# **Settings > Welcome**\n## Welcome Settings\n\n> 🛈  Welcome cards are **active**.")
-                    && data["attachments"] == json!([{ "id": 0, "filename": WELCOME_FILE }])
-            }),
-            mockall::predicate::always(),
-        )
-        .times(1)
-        .returning(|_, _, _, _| Ok(Some(json!({}))));
-
-    let (_manager, hub, _panel) = spawn_core_plugins(shared_services(
-        Arc::new(io),
-        Arc::new(welcome),
-        InteractionEngine::new(),
-    ))
-    .await;
-
-    hub.call("invoke", Some("settings"), Some(json!({})))
-        .await
-        .expect("hub invoke answered");
-
-    // The Welcome click: the rewired config button rides the nav id, and the
-    // interaction carries the channel and guild like a real one does.
-    let resp = hub
-        .call(
-            "view.interact",
-            Some("settings"),
-            Some(json!({
-                "custom_id": "settings:open:welcome",
-                "channel_id": channel_id,
-                "guild_id": GUILD_ID,
-            })),
-        )
-        .await
-        .expect("welcome click answered");
-
-    // The hub answers the click with its own envelope (the hub stays the
-    // hub); the panel rendered onto the produced message — the edit mock
-    // above pins the payload, the get-settings mock pins the load.
-    let view = assert_envelope(&resp, 1);
-    assert_eq!(view["page"], json!("hub"));
-}
-
 /// The panel's first render, pinned on the wire: the invoke loads the
 /// snapshot, the envelope carries the monolith's status copy, declares the
 /// preview slot by filename while cards are enabled (ADR-0012), and echoes a
@@ -284,7 +167,7 @@ async fn invoke_renders_the_panel_and_declares_the_preview_slot() {
         .times(1)
         .returning(|_| Ok(sample_settings()));
 
-    let (_manager, _hub, panel) = spawn_core_plugins(shared_services(
+    let panel = spawn_panel(shared_services(
         Arc::new(MockHostIo::new()),
         Arc::new(welcome),
         InteractionEngine::new(),
@@ -294,7 +177,7 @@ async fn invoke_renders_the_panel_and_declares_the_preview_slot() {
     let resp = panel
         .call(
             "invoke",
-            Some("welcome"),
+            Some("welcome-settings"),
             Some(json!({ "guild_id": GUILD_ID })),
         )
         .await
@@ -333,7 +216,7 @@ async fn a_toggle_persists_immediately_and_renders_the_off_copy() {
         .times(1)
         .returning(|_, _| Ok(()));
 
-    let (_manager, _hub, panel) = spawn_core_plugins(shared_services(
+    let panel = spawn_panel(shared_services(
         Arc::new(MockHostIo::new()),
         Arc::new(welcome),
         InteractionEngine::new(),
@@ -343,7 +226,7 @@ async fn a_toggle_persists_immediately_and_renders_the_off_copy() {
     let resp = panel
         .call(
             "invoke",
-            Some("welcome"),
+            Some("welcome-settings"),
             Some(json!({ "guild_id": GUILD_ID })),
         )
         .await
@@ -353,7 +236,7 @@ async fn a_toggle_persists_immediately_and_renders_the_off_copy() {
     let resp = panel
         .call(
             "view.interact",
-            Some("welcome"),
+            Some("welcome-settings"),
             Some(json!({
                 "custom_id": "welcome:toggle",
                 "view": view,
@@ -398,7 +281,7 @@ async fn a_modal_trigger_opens_the_modal_and_answers_with_the_marker() {
         .times(1)
         .returning(|_| Ok(sample_settings()));
 
-    let (_manager, _hub, panel) = spawn_core_plugins(shared_services(
+    let panel = spawn_panel(shared_services(
         Arc::new(io),
         Arc::new(welcome),
         InteractionEngine::new(),
@@ -408,7 +291,7 @@ async fn a_modal_trigger_opens_the_modal_and_answers_with_the_marker() {
     let resp = panel
         .call(
             "invoke",
-            Some("welcome"),
+            Some("welcome-settings"),
             Some(json!({ "guild_id": GUILD_ID })),
         )
         .await
@@ -418,7 +301,7 @@ async fn a_modal_trigger_opens_the_modal_and_answers_with_the_marker() {
     let resp = panel
         .call(
             "view.interact",
-            Some("welcome"),
+            Some("welcome-settings"),
             Some(json!({
                 "custom_id": "welcome:add",
                 "id": 9001,
@@ -494,7 +377,7 @@ async fn a_modal_submission_persists_the_answer_and_carries_the_stash() {
         .times(1)
         .returning(|_, _| Ok(()));
 
-    let (_manager, _hub, panel) = spawn_core_plugins(shared_services(
+    let panel = spawn_panel(shared_services(
         Arc::new(io),
         Arc::new(welcome),
         InteractionEngine::new(),
@@ -504,7 +387,7 @@ async fn a_modal_submission_persists_the_answer_and_carries_the_stash() {
     let resp = panel
         .call(
             "invoke",
-            Some("welcome"),
+            Some("welcome-settings"),
             Some(json!({ "guild_id": GUILD_ID })),
         )
         .await
@@ -515,7 +398,7 @@ async fn a_modal_submission_persists_the_answer_and_carries_the_stash() {
     let resp = panel
         .call(
             "view.interact",
-            Some("welcome"),
+            Some("welcome-settings"),
             Some(json!({
                 "custom_id": "welcome:remove",
                 "data": { "values": ["1"] },
@@ -531,7 +414,7 @@ async fn a_modal_submission_persists_the_answer_and_carries_the_stash() {
     let resp = panel
         .call(
             "view.interact",
-            Some("welcome"),
+            Some("welcome-settings"),
             Some(json!({
                 "custom_id": "welcome:add",
                 "id": 9002,
@@ -605,7 +488,7 @@ async fn saving_removals_persists_the_survivors_once_and_clears_the_marks() {
         .times(1)
         .returning(|_, _| Ok(()));
 
-    let (_manager, _hub, panel) = spawn_core_plugins(shared_services(
+    let panel = spawn_panel(shared_services(
         Arc::new(MockHostIo::new()),
         Arc::new(welcome),
         InteractionEngine::new(),
@@ -615,7 +498,7 @@ async fn saving_removals_persists_the_survivors_once_and_clears_the_marks() {
     let resp = panel
         .call(
             "invoke",
-            Some("welcome"),
+            Some("welcome-settings"),
             Some(json!({ "guild_id": GUILD_ID })),
         )
         .await
@@ -625,7 +508,7 @@ async fn saving_removals_persists_the_survivors_once_and_clears_the_marks() {
     let resp = panel
         .call(
             "view.interact",
-            Some("welcome"),
+            Some("welcome-settings"),
             Some(json!({
                 "custom_id": "welcome:remove",
                 "data": { "values": ["0"] },
@@ -640,7 +523,7 @@ async fn saving_removals_persists_the_survivors_once_and_clears_the_marks() {
     let resp = panel
         .call(
             "view.interact",
-            Some("welcome"),
+            Some("welcome-settings"),
             Some(json!({
                 "custom_id": "welcome:save",
                 "view": view,
@@ -652,66 +535,8 @@ async fn saving_removals_persists_the_survivors_once_and_clears_the_marks() {
     assert_eq!(view, json!({ "guild_id": GUILD_ID, "marked_removal": [] }));
 }
 
-/// Back re-opens the hub beside the panel and persists nothing: the terminal
-/// messages hand off without a settings write (the persist-on-change already
-/// happened on every earlier click).
-#[tokio::test]
-async fn back_reopens_the_hub_without_persisting() {
-    let channel_id = 555_000_333_u64;
-    let produced = 777_000_444_u64;
-
-    let mut welcome = MockWelcomeSettingsSource::new();
-    welcome
-        .expect_get_settings()
-        .with(eq(GUILD_ID))
-        .times(2)
-        .returning(|_| Ok(sample_settings()));
-    welcome.expect_update_settings().never();
-
-    let mut io = MockHostIo::new();
-    io.expect_send_message()
-        .with(eq(channel_id), eq("Loading…"))
-        .times(1)
-        .returning(move |_, _| Ok(Some(json!({ "message_id": produced }))));
-    io.expect_edit_message()
-        .times(1)
-        .returning(|_, _, _, _| Ok(Some(json!({}))));
-
-    let (_manager, _hub, panel) = spawn_core_plugins(shared_services(
-        Arc::new(io),
-        Arc::new(welcome),
-        InteractionEngine::new(),
-    ))
-    .await;
-
-    let resp = panel
-        .call(
-            "invoke",
-            Some("welcome"),
-            Some(json!({ "guild_id": GUILD_ID })),
-        )
-        .await
-        .expect("panel invoke answered");
-    let view = assert_envelope(&resp, 0);
-
-    let resp = panel
-        .call(
-            "view.interact",
-            Some("welcome"),
-            Some(json!({
-                "custom_id": "welcome:back",
-                "channel_id": channel_id,
-                "view": view,
-            })),
-        )
-        .await
-        .expect("back answered");
-    let view = assert_envelope(&resp, 1);
-    assert_eq!(view, json!({ "guild_id": GUILD_ID, "marked_removal": [] }));
-}
-
 /// A failed settings load fails the open with the host's typed error
-/// forwarded: the hub's Welcome button shows what the service said.
+/// forwarded: the Settings section handoff surfaces what the service said.
 #[tokio::test]
 async fn a_failed_load_fails_the_open_with_the_forwarded_error() {
     let mut welcome = MockWelcomeSettingsSource::new();
@@ -727,7 +552,7 @@ async fn a_failed_load_fails_the_open_with_the_forwarded_error() {
             ))
         });
 
-    let (_manager, _hub, panel) = spawn_core_plugins(shared_services(
+    let panel = spawn_panel(shared_services(
         Arc::new(MockHostIo::new()),
         Arc::new(welcome),
         InteractionEngine::new(),
@@ -737,7 +562,7 @@ async fn a_failed_load_fails_the_open_with_the_forwarded_error() {
     let resp = panel
         .call(
             "invoke",
-            Some("welcome"),
+            Some("welcome-settings"),
             Some(json!({ "guild_id": GUILD_ID })),
         )
         .await

@@ -15,5 +15,11 @@ use crate::plugin::command::open_plugin_view;
 )]
 pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
     let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?.get();
-    open_plugin_view(ctx, "feed", "feed", json!({ "guild_id": guild_id })).await
+    open_plugin_view(
+        ctx,
+        "feed",
+        "feed-settings",
+        json!({ "guild_id": guild_id }),
+    )
+    .await
 }

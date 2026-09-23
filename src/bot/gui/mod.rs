@@ -39,6 +39,7 @@ pub mod feed_batch;
 pub mod feed_list;
 pub mod register;
 pub mod rt;
+pub mod settings;
 pub mod unregister;
 pub mod voice_leaderboard;
 pub mod voice_stats;

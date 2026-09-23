@@ -35,7 +35,8 @@ Commands are organized by domain. Each top-level module is a command group; subc
 |--------|----------|
 | `feed.rs` | `/feed` group — `list`, `subscribe`, `unsubscribe`, `settings` |
 | `voice.rs` | `/vc` group — `leaderboard`, `stats`, `settings` |
-| `settings.rs` | `/settings` group — `feeds`, `voice` |
+| `settings.rs` | `/settings` — the host Settings GUI |
+| `welcome/mod.rs` | `/welcome` |
 | `about.rs` | `/about` |
 | `register.rs` | `/register` |
 | `register_owner.rs` | `/register_owner` |
@@ -48,7 +49,7 @@ Interactive commands follow a **Router → CommandHandler → Host** flow:
 
 - **`Router`** — receives the Poise context, owns navigation state, drives handlers. Its session loop keeps the frames open on the message: each target that runs becomes the newest frame, and `Back` closes the newest frame and re-runs the one beneath it, morphing the same message. Defined in `src/bot/command/mod.rs`.
 - **`CommandHandler`** — trait for handler run loops. Each domain has a concrete handler (e.g. `FeedListHandler`, `VoiceStatsHandler`).
-- **`Navigation`** — enum signalling the next navigation step (e.g. `Back`, `Exit`, `SettingsMain`). `SettingsMain` hands the live message to the settings plugin's hub view, and a `Back` over the last open frame dismisses the message. Both terminal steps live in `src/bot/command/session_exit.rs`. Defined in `src/bot/navigation.rs`.
+- **`Navigation`** — enum signalling the next navigation step (e.g. `Back`, `Exit`, `SettingsSection`). `SettingsSection` hands the live message to a settings section's panel plugin (the session then parks until the panel's Back returns the message through the host-reserved `settings` `host.open_view` target), and a `Back` over the last open frame dismisses the message. The handoff and dismissal live in `src/bot/command/session_exit.rs`. Defined in `src/bot/navigation.rs`.
 - **`Host`** — the TEA event loop that runs one interactive view. Defined in `src/bot/gui/rt.rs`.
 
 ### Interactive Views (TEA — `src/update/` cores + `src/bot/gui/` shell)
@@ -73,7 +74,7 @@ The `sealed::Sealed` supertrait closes `GuiFeature` to external implementors —
    - **Other events**: Modals, messages, and reactions go through `Feature::on_event`, which returns a `Msg` or nothing. The collector timeout becomes `Feature::timeout_msg()` — expiry is one more update, not a special path.
    - **Effect follow-ups**: The adapter executes each returned effect. Fast effects return their result `Msg`s directly; slow effects `tokio::spawn` the work and deliver the result on the host's message channel.
 5. **Update and render**: The host applies each `Msg` through `Feature::update` — the only writer of the model — executes the returned effects through the adapter, re-renders through `view`, and edits the live message.
-6. **Exit**: `Feature::exit_navigation(msg)` returns the next `Navigation` when a message ends the feature (e.g. `Back` → `Navigation::SettingsMain`, the hub handoff). The host navigates the router and the loop ends; the session loop then resolves the target — `Back` re-runs the parent frame, `SettingsMain` morphs the message into the settings plugin's hub and ends the session as a plugin view session, and a root `Back` dismisses the message (see `src/bot/command/session_exit.rs`). No feature returns a plain `Navigation::Back` today; on an empty stack it is the root dismissal.
+6. **Exit**: `Feature::exit_navigation(msg)` returns the next `Navigation` when a message ends the feature (e.g. a section click → `Navigation::SettingsSection`, the section handoff). The host navigates the router and the loop ends; the session loop then resolves the target — `Back` re-runs the parent frame, `SettingsSection` invokes the section's plugin command, morphs the message into the returned panel view, and parks the session until the panel's Back wakes it — the host-reserved `settings` open_view target re-runs the Settings GUI on the same message — and a root `Back` dismisses the message (see `src/bot/command/session_exit.rs`). The Settings view returns a plain `Navigation::Back`; on an empty stack it is the root dismissal.
 
 #### Interaction Substrate (`src/bot/view/mod.rs`)
 
@@ -98,7 +99,7 @@ Every interactive view message belongs to exactly one live session runtime — a
 | Live Host session | The Host loop, after handling — except modal-triggering actions, where opening the modal is itself the response, and modal submissions, which the poise modal task the feature spawned acknowledges while the session is live (a submission that arrives after the session ends is stale: the global handler acknowledges it and routes it to the engine, poise's own ack then fails `AlreadyResponded`, and the feature's modal task swallows both) | Skips the interaction entirely |
 | Everything else (plugin session, or no session) | The global handler, before the plugin round trip | Acknowledges, then routes through the plugin view engine (a "no open session" there means a genuinely stale view) |
 
-ADR-0006 records this ownership decision, including the accepted ghost window between the Host claim drop and the hub handoff's plugin registration.
+ADR-0006 records this ownership decision, including the accepted ghost window between the Host claim drop and the Settings section handoff's plugin registration.
 
 ---
 
@@ -223,7 +224,7 @@ core, not a layer of it.
 |----------|------|
 | `crates/pwr-plugin-protocol` | Wire types: `Msg`, `Manifest`, `ViewSpec`, `HostCap`, `WireError` |
 | `src/plugin/` | Plugin host: `manager` (spawn, health, respawn, unload), `interaction` (session engine), `host` (`host.*` ops), `command` (slash dispatch), `events` (gateway fan-out), `install` (pinned catalog), `view` (gate) |
-| `crates/plugin/` | Plugins: `hello` (fixture), `settings` (settings core) |
+| `crates/plugin/` | Plugins: `hello` (fixture), `feed`/`voice`/`welcome` (settings panels) |
 | `crates/pwr-poise-components` | Reusable components library on pwr-ext (typed builders, pagination) |
 
 ### Plugin Data Flow
@@ -249,8 +250,8 @@ Component / modal interaction
 
 `validate_view_data` (`src/plugin/view.rs`) parses a clone of
 `ViewSpec.data` through pwr-ext `CreateMessageDe` at every raw-send
-boundary: initial dispatch, component and modal re-render,
-`host.open_view`, and the hub handoff's message morph. It discards the
+boundary: initial dispatch, component and modal re-render, and the
+Settings section handoff's message morph. It discards the
 parsed value and sends the original JSON verbatim. A failure is a
 `WireError` with kind `InvalidView`. The host never partially sends,
 registers, or commits. An invalid re-render keeps the prior session
@@ -260,8 +261,8 @@ view and `last_active` unchanged.
 
 | View kind | Surface | Example |
 |-----------|---------|---------|
-| Fixed view | pwr-ext `view!` → `CreateMessage` → `ViewSpec.data` | `hello` view, settings `about_view`, settings hub |
-| Runtime-assembled | pwr-ext `component!` + splices inside a `view!` literal | Settings hub nav row (0..N) |
+| Fixed view | pwr-ext `view!` → `CreateMessage` → `ViewSpec.data` | `hello` view |
+| Runtime-assembled | pwr-ext `component!` + splices inside a `view!` literal | panel plugin views (conditional rows, 0..N) |
 
 No in-repo view is library-composed any more: `crates/pwr-poise-components`
 no longer assembles a live view, and stays as the reusable library for

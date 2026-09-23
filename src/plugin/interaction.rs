@@ -461,6 +461,20 @@ impl<P: PluginHandle> InteractionEngine<P> {
         Ok(())
     }
 
+    /// Drops the session for `message_id` without notifying the plugin.
+    /// Unlike [`InteractionEngine::abandon`], no `view.timeout` is pushed:
+    /// the host took the message back (the Settings return) after the panel
+    /// already persisted on its Back, so a silent removal also keeps the
+    /// reaper from expiring the stale session into a second persist.
+    pub async fn deregister(&self, message_id: serenity::MessageId) -> bool {
+        self.inner
+            .sessions
+            .lock()
+            .await
+            .remove(&message_id)
+            .is_some()
+    }
+
     /// Snapshots the session for `message_id` under the sessions lock, for
     /// working with it outside the lock. Errors with
     /// [`InteractionError::NoSession`] when no session is open.

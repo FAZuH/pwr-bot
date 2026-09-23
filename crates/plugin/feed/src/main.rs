@@ -3,29 +3,29 @@
 //! bullet for typed service RPCs (ADR-0010).
 //!
 //! Speaks the pwr-bot plugin wire protocol over JSON-Lines stdio, like the
-//! `settings` hub plugin: one compact JSON object per line on stdout,
-//! terminated by a single `\n` and flushed after every write; stderr is the
-//! free logging channel.
+//! `hello` plugin: one compact JSON object per line on stdout, terminated by
+//! a single `\n` and flushed after every write; stderr is the free logging
+//! channel.
 //!
 //! Behavior:
-//! - announces `hello` (`v`, `name`, `caps`) as its first line after spawn;
-//!   the plugin is a core plugin with no slash command — it opens through
-//!   the settings hub's `host.open_view` (ADR-0009), which forwards the
-//!   source interaction's `guild_id` in the invoke args;
-//! - answers `invoke` of `feed` by loading the guild's whole
+//! - announces `hello` (`v`, `name`, `caps`, `manifest`) as its first line
+//!   after spawn; the manifest declares the `feed-settings` command and the
+//!   settings section the host Settings GUI opens the panel through, which
+//!   forwards the source interaction's `guild_id` in the invoke args;
+//! - answers `invoke` of `feed-settings` by loading the guild's whole
 //!   [`ServerSettings`] snapshot through `host.feed.get_settings` and
 //!   rendering the monolith `/feed settings` panel as Components V2;
 //! - answers `view.interact` by applying the monolith update vocabulary
 //!   (toggle, channel, subscribe role, unsubscribe role) to the session's
 //!   own model copy and re-rendering — a plain edit makes no host call;
-//! - the terminal exits — `Back`, `About`, and the engine's `view.timeout`
-//!   event — persist the session's snapshot exactly once through
-//!   `host.feed.update_settings` (the monolith's save-on-exit semantics);
-//! - `Back` then returns to the settings hub and `About` opens the hub's
-//!   About page, both through `host.open_view` (the hub seeds its session
-//!   page from the invoke args); after either, the panel's message keeps
-//!   answering its own interactions — the hub opens next to it, like every
-//!   plugin→plugin navigation;
+//! - `Back` and the engine's `view.timeout` event persist the session's
+//!   snapshot through `host.feed.update_settings` (the monolith's
+//!   save-on-exit semantics);
+//! - `Back` then hands the message back to the host Settings GUI through
+//!   `host.open_view` against the host-reserved `settings` target,
+//!   answering its own interaction with the `ViewMoved` marker when the
+//!   open replaced the panel's message; when no live Settings session
+//!   takes the message back, the panel re-renders and stays;
 //! - treats `event` (`view.timeout`) as one-way, never answering it: the
 //!   persist it triggers rides a `host.feed.update_settings` call whose
 //!   resp is only logged;
@@ -45,25 +45,30 @@ use pwr_ext::view_support::CreateSelectMenuKind;
 use pwr_ext::view_support::GenericChannelId;
 use pwr_ext::view_support::RoleId;
 use pwr_plugin_protocol::API_VERSION;
+use pwr_plugin_protocol::CommandDef;
 use pwr_plugin_protocol::Manifest;
 use pwr_plugin_protocol::Msg;
 use pwr_plugin_protocol::ServerSettings;
+use pwr_plugin_protocol::SettingsSection;
 use pwr_plugin_protocol::VIEW_MOVED_KIND;
 use pwr_plugin_protocol::WireError;
-use pwr_plugin_support::HubPage;
 use pwr_plugin_support::Panel;
+use pwr_plugin_support::back_exit;
 use pwr_plugin_support::id_as_u64;
 use pwr_plugin_support::issue_host_call;
-use pwr_plugin_support::open_hub_args;
 use pwr_plugin_support::reply_err;
-use pwr_plugin_support::source_message_id;
 use pwr_plugin_support::write_msg;
 use serde_json::Value;
 use serde_json::json;
 
-/// The plugin's name: the hello `name`, the hub's `host.open_view` target,
-/// and the handle the host keeps it under.
+/// The plugin's name: the hello `name` and the handle the host keeps it
+/// under.
 const PLUGIN_NAME: &str = "feed";
+
+/// The command the panel serves: the manifest's slash command and the
+/// invoke command the host Settings section and the `/feed settings`
+/// deep-link dispatch.
+const COMMAND_NAME: &str = "feed-settings";
 
 /// Custom ids for the panel's interactive components.
 const CUSTOM_ID_TOGGLE: &str = "feeds:toggle";
@@ -71,7 +76,6 @@ const CUSTOM_ID_CHANNEL: &str = "feeds:channel";
 const CUSTOM_ID_SUB_ROLE: &str = "feeds:sub-role";
 const CUSTOM_ID_UNSUB_ROLE: &str = "feeds:unsub-role";
 const CUSTOM_ID_BACK: &str = "feeds:back";
-const CUSTOM_ID_ABOUT: &str = "feeds:about";
 
 /// Panel copy, verbatim from the monolith's feed settings view.
 const CHANNEL_TEXT: &str =
@@ -121,7 +125,6 @@ enum PanelMsg {
     SetSubRole(Option<String>),
     SetUnsubRole(Option<String>),
     Back,
-    About,
     Expired,
 }
 
@@ -132,9 +135,9 @@ enum Effect {
     Persist(ServerSettings),
 }
 
-/// The pure update function — the only writer of the model. Terminal exits
-/// (`Back`, `About`, `Expired`) persist the current snapshot exactly once;
-/// every edit applies in place with no effect.
+/// The pure update function — the only writer of the model. `Back` and
+/// `Expired` persist the current snapshot; every edit applies in place with
+/// no effect.
 fn update(msg: PanelMsg, model: &mut Model) -> Vec<Effect> {
     match msg {
         PanelMsg::ToggleEnabled => {
@@ -154,12 +157,12 @@ fn update(msg: PanelMsg, model: &mut Model) -> Vec<Effect> {
             model.settings.feeds.unsubscribe_role_id = id;
             Vec::new()
         }
-        PanelMsg::Back | PanelMsg::About | PanelMsg::Expired => persist(model),
+        PanelMsg::Back | PanelMsg::Expired => persist(model),
     }
 }
 
-/// The persist-on-exit behavior shared by `Back`, `About`, and expiry:
-/// snapshot the current settings exactly once.
+/// The persist behavior shared by `Back` and expiry: snapshot the current
+/// settings exactly once.
 fn persist(model: &Model) -> Vec<Effect> {
     vec![Effect::Persist(model.settings.clone())]
 }
@@ -191,7 +194,7 @@ type HostCall = pwr_plugin_support::HostCall<Model>;
 /// `/feed settings` view: the status header (whose copy reflects the
 /// enabled state and the configured channel), the toggle button, the
 /// notification-channel select, the two permission-role selects, and the
-/// Back/About row outside the container. The select kinds are built at
+/// Back row outside the container. The select kinds are built at
 /// runtime so the current selection rides each menu's default values.
 fn view_data(model: &Model) -> Value {
     let is_enabled = model.is_enabled();
@@ -298,11 +301,6 @@ fn view_data(model: &Model) -> Value {
                     label: "❮ Back",
                     style: ButtonStyle::Secondary
                 }
-                button {
-                    custom_id: CUSTOM_ID_ABOUT,
-                    label: "🛈 About",
-                    style: ButtonStyle::Secondary
-                }
             }
         }
     };
@@ -334,13 +332,23 @@ fn manifest() -> Manifest {
         name: PLUGIN_NAME.into(),
         description: "Manage feed subscription settings".into(),
         version: "0.1.0".into(),
-        // No slash command: the panel opens through the settings hub
-        // (ADR-0009). A direct slash invoke carries no `guild_id` in its
-        // re-parsed args, so a command would open a panel with no guild to
-        // edit.
-        commands: vec![],
+        // The guild-only slash command the host Settings section dispatches:
+        // a direct invoke carries no `guild_id` in its re-parsed args, so
+        // the host injects the invocation's guild into the args.
+        commands: vec![CommandDef {
+            create_command: json!({
+                "name": COMMAND_NAME,
+                "description": "Manage feed subscription settings",
+                "dm_permission": false,
+            }),
+        }],
         event_handlers: vec!["view.timeout".into()],
         tasks: vec![],
+        settings: vec![SettingsSection {
+            name: "Feed".into(),
+            description: "Manage feed subscription settings".into(),
+            command: COMMAND_NAME.into(),
+        }],
         api_version: API_VERSION,
     }
 }
@@ -399,11 +407,13 @@ fn main() -> ExitCode {
             Msg::Bye => break,
             Msg::Call { id, op, cmd, args } => {
                 // An invoke with the model loaded first renders the panel;
-                // a plain edit re-renders without a host call; the terminal
-                // exits persist, then re-open the hub.
+                // a plain edit re-renders without a host call; a Back press
+                // persists, then hands the message back to the host
+                // Settings GUI (the re-render is the no-channel-id
+                // fallback).
                 let host_call = match (op.as_str(), cmd.as_deref()) {
-                    ("invoke", Some(PLUGIN_NAME)) => {
-                        // The hub forwards the source interaction's guild
+                    ("invoke", Some(COMMAND_NAME)) => {
+                        // The host forwards the source interaction's guild
                         // id; the model loads before the first render.
                         let Some(guild_id) = args
                             .as_ref()
@@ -423,7 +433,7 @@ fn main() -> ExitCode {
                             get_settings_args(guild_id),
                         ))
                     }
-                    ("view.interact", Some(PLUGIN_NAME)) => {
+                    ("view.interact", Some(COMMAND_NAME)) => {
                         // The session state the host echoed back.
                         let Some(session) =
                             SessionState::from_value(args.as_ref().and_then(|a| a.get("view")))
@@ -459,7 +469,6 @@ fn main() -> ExitCode {
                             Some(CUSTOM_ID_SUB_ROLE) => PanelMsg::SetSubRole(selected_id()),
                             Some(CUSTOM_ID_UNSUB_ROLE) => PanelMsg::SetUnsubRole(selected_id()),
                             Some(CUSTOM_ID_BACK) => PanelMsg::Back,
-                            Some(CUSTOM_ID_ABOUT) => PanelMsg::About,
                             Some(other) => {
                                 if !reply_err(
                                     &mut out,
@@ -478,17 +487,6 @@ fn main() -> ExitCode {
                                 continue;
                             }
                         };
-                        let hub_page = match custom_id {
-                            Some(CUSTOM_ID_ABOUT) => HubPage::About,
-                            _ => HubPage::Hub,
-                        };
-                        let channel_id = args
-                            .as_ref()
-                            .and_then(|a| a.get("channel_id"))
-                            .and_then(id_as_u64);
-                        // The message the click fired on: Back/About edit it
-                        // in place instead of posting a fresh hub message.
-                        let message_id = source_message_id(args.as_ref());
                         let mut session = session;
                         let effects = update(msg, &mut session.model);
                         if effects.is_empty() {
@@ -498,18 +496,17 @@ fn main() -> ExitCode {
                             }
                             continue;
                         }
-                        // A terminal exit persists first, then re-opens the
-                        // hub: the channel the source interaction came from,
-                        // and the hub page About asks for.
+                        // A Back press persists first (the save-on-exit
+                        // semantics), then hands the message back to the
+                        // host Settings GUI.
+                        let back = back_exit(args.as_ref(), session.guild_id);
                         let persist_args =
                             update_settings_args(session.guild_id, &session.model.settings);
                         Some(HostCall::new(
                             Pending::Persist {
                                 invoke_id: id,
                                 session,
-                                channel_id,
-                                message_id,
-                                hub_page,
+                                back,
                             },
                             persist_args,
                         ))
@@ -593,7 +590,7 @@ fn main() -> ExitCode {
                             continue;
                         }
                         // A failed load fails the open: the panel has no
-                        // settings to edit, so the hub's Feeds button shows
+                        // settings to edit, so the Settings section shows
                         // the error it forwarded.
                         let Some(settings) = data.as_ref().and_then(parse_settings) else {
                             eprintln!("host.feed.get_settings resp carried no snapshot");
@@ -618,52 +615,50 @@ fn main() -> ExitCode {
                     Pending::Persist {
                         invoke_id,
                         session,
-                        channel_id,
-                        message_id,
-                        hub_page,
+                        back,
                     } => {
-                        // The persist left the session: a failure logs but
-                        // does not strand the user in a panel that thinks
-                        // it is closed — the hub still opens.
+                        // A failed persist logs but the exit continues: the
+                        // user asked to leave, so the panel still hands the
+                        // message back to the host Settings GUI.
                         if !ok {
                             eprintln!("host.feed.update_settings failed: {error:?}");
                         }
-                        let Some(channel_id) = channel_id else {
-                            eprintln!("back/about without a channel id: panel stays");
+                        let Some(back) = back else {
+                            eprintln!("back without a channel id: panel stays");
                             if !reply_envelope(&mut out, invoke_id, &session) {
                                 return ExitCode::FAILURE;
                             }
                             continue;
                         };
-                        let guild_id = session.guild_id;
                         let call = HostCall::new(
-                            Pending::OpenHub {
+                            Pending::OpenSettings {
                                 invoke_id,
                                 session,
-                                message_id,
+                                message_id: back.message_id,
                             },
-                            open_hub_args(channel_id, guild_id, hub_page, message_id),
+                            back.args,
                         );
                         if !issue_host_call(&mut out, &mut pending, &mut next_call_id, call) {
                             return ExitCode::FAILURE;
                         }
                     }
-                    Pending::OpenHub {
+                    Pending::OpenSettings {
                         invoke_id,
                         session,
                         message_id,
                     } => {
                         if !ok {
-                            eprintln!("host.open_view failed: {error:?}");
+                            eprintln!("host.open_view(settings) failed: {error:?}");
                         }
                         // In place: the open replaced this panel's message
-                        // with the hub, so answering with the panel's own
-                        // render would overwrite it — the host skips its
-                        // render on the marker kind. Without a source
-                        // message the hub opened next to the panel, which
-                        // keeps answering its own interactions.
+                        // with the host Settings GUI, so answering with the
+                        // panel's own render would overwrite it — the host
+                        // skips its render on the marker kind. Without a
+                        // source message (or when no live Settings session
+                        // took the message back) the panel stays and keeps
+                        // answering its own interactions.
                         if ok && message_id.is_some() {
-                            if !reply_err(&mut out, invoke_id, VIEW_MOVED_KIND, "hub opened") {
+                            if !reply_err(&mut out, invoke_id, VIEW_MOVED_KIND, "settings opened") {
                                 return ExitCode::FAILURE;
                             }
                             continue;
@@ -687,6 +682,7 @@ fn main() -> ExitCode {
 
 #[cfg(test)]
 mod tests {
+    use pwr_plugin_support::open_settings_args;
     use pwr_poise_components::IS_COMPONENTS_V2;
 
     use super::*;
@@ -740,8 +736,8 @@ mod tests {
     }
 
     #[test]
-    fn terminal_exits_persist_the_snapshot_exactly_once() {
-        for msg in [PanelMsg::Back, PanelMsg::About, PanelMsg::Expired] {
+    fn back_and_expiry_persist_the_snapshot_exactly_once() {
+        for msg in [PanelMsg::Back, PanelMsg::Expired] {
             let mut m = model();
             let effects = update(msg.clone(), &mut m);
             assert_eq!(effects.len(), 1, "{msg:?}");
@@ -834,8 +830,6 @@ mod tests {
         let nav = components[1]["components"].as_array().expect("nav");
         assert_eq!(nav[0]["custom_id"], json!(CUSTOM_ID_BACK));
         assert_eq!(nav[0]["label"], json!("❮ Back"));
-        assert_eq!(nav[1]["custom_id"], json!(CUSTOM_ID_ABOUT));
-        assert_eq!(nav[1]["label"], json!("🛈 About"));
     }
 
     #[test]
@@ -907,22 +901,37 @@ mod tests {
             Pending::Persist {
                 invoke_id: 0,
                 session: session.clone(),
-                channel_id: None,
-                message_id: None,
-                hub_page: HubPage::Hub,
+                back: None,
             }
             .op(),
             "host.feed.update_settings"
         );
         assert_eq!(
-            Pending::OpenHub {
+            Pending::OpenSettings {
                 invoke_id: 0,
-                session,
+                session: session.clone(),
                 message_id: None,
             }
             .op(),
             "host.open_view"
         );
         assert_eq!(Pending::Expire.op(), "host.feed.update_settings");
+    }
+
+    #[test]
+    fn open_settings_args_target_the_host_reserved_settings_and_edit_in_place() {
+        assert_eq!(
+            open_settings_args(5, 42, Some(777)),
+            json!({
+                "channel_id": 5,
+                "plugin": "settings",
+                "args": { "guild_id": 42 },
+                "message_id": 777,
+            })
+        );
+        assert_eq!(
+            open_settings_args(5, 42, None)["message_id"],
+            serde_json::Value::Null
+        );
     }
 }

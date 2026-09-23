@@ -105,6 +105,10 @@ pub struct Data {
     /// event handler skips their interactions and the Host acknowledges them
     /// exactly once. See [`crate::bot::translate`].
     pub translate_layer: Arc<TranslateLayer>,
+    /// The Settings section-handoff return waiters: the Router parks one per
+    /// handed-off message, and the host-reserved `settings` open_view target
+    /// completes it.
+    pub settings_returns: Arc<translate::SettingsReturns>,
     /// Fills the attachment slots a plugin envelope declares at transport
     /// (ADR-0012).
     pub previews: Arc<crate::plugin::preview::PreviewResolver>,
@@ -193,10 +197,15 @@ impl Bot {
         let stats_handle = Arc::new(StatsHandle::default());
         // The welcome card renderer both the host ops and the view transports
         // share: one generator for the process (ADR-0012).
-        let previews = Arc::new(crate::plugin::preview::PreviewResolver::new(
-            service.feed_subscription.clone(),
-            Arc::new(crate::bot::command::welcome::image_generator::WelcomeImageGenerator::new()),
-        ));
+        let previews = Arc::new(crate::plugin::preview::PreviewResolver::new(vec![
+            Arc::new(crate::plugin::preview::WelcomeAttachmentRenderer::new(
+                service.feed_subscription.clone(),
+                Arc::new(
+                    crate::bot::command::welcome::image_generator::WelcomeImageGenerator::new(),
+                ),
+            )),
+        ]));
+        let settings_returns = Arc::new(translate::SettingsReturns::default());
         let host_services = Arc::new(HostServices {
             io: Some(Arc::new(SerenityHostIo::new(http.clone()))),
             config: Some(HostConfig::from(&*config)),
@@ -213,6 +222,7 @@ impl Bot {
                 service.feed_subscription.clone(),
             ))),
             previews: Some(previews.clone()),
+            settings_returns: Some(settings_returns.clone()),
         });
         let plugin_manager = Arc::new(
             PluginManager::new(Some(http.clone()), RespawnPolicy::default())
@@ -264,6 +274,7 @@ impl Bot {
             plugin_routes,
             core_manifests,
             translate_layer: Arc::new(TranslateLayer::new()),
+            settings_returns,
             previews: previews.clone(),
             start_time,
         });

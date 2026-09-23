@@ -21,50 +21,55 @@ graph TB
         FeedUnsubCmd["/feed unsubscribe"]
         VoiceLBCmd["/voice leaderboard"]
         VoiceStatsCmd["/voice stats"]
+        AboutCmd["/about"]
     end
-    
+
     subgraph Navigation["Navigation Flow"]
         direction TB
-        
+
         subgraph SettingsFlow["Settings Flow"]
             direction TB
-            SettingsMain["SettingsMain<br/>(hub handoff: the host message morphs<br/>into the settings plugin's hub view)"]
+            SettingsMain["SettingsMain<br/>(the host Settings GUI: one tile per<br/>settings section the manifests declare)"]
             SettingsAbout["SettingsAbout"]
 
-            SettingsAbout -->|"Back — hub handoff"| SettingsMain
+            SettingsAbout -->|"Back"| SettingsMain
+            SettingsMain -->|"section click — handoff"| SectionHandoff["SettingsSection<br/>(the host message morphs into<br/>the section's plugin panel view;<br/>the session parks until the panel's<br/>Back returns via the host-reserved<br/>`settings` open_view target)"]
+            SectionHandoff -->|"panel Back — return"| SettingsMain
         end
-        
+
         subgraph FeedFlow["Feed Flow"]
             direction TB
             FeedList["FeedList"]
             FeedSubscribe["FeedSubscribe"]
             FeedUnsubscribe["FeedUnsubscribe"]
             FeedBatch["FeedSubscriptionBatch"]
-            
+
             FeedList <-->|Subscribe| FeedSubscribe
             FeedList <-->|Unsubscribe| FeedUnsubscribe
             FeedSubscribe -->|Multiple| FeedBatch
         end
-        
+
         subgraph VoiceFlow["Voice Flow"]
             direction TB
             VoiceLeaderboard["VoiceLeaderboard"]
             VoiceStats["VoiceStats"]
-            
+
             VoiceLeaderboard -->|Stats| VoiceStats
         end
 
-        Back["Navigation::Back<br/>(the session walk: pop one frame;<br/>over the last open frame the root view<br/>is dismissed) — no live producer today"]
+        Back["Navigation::Back<br/>(the session walk: pop one frame;<br/>over the last open frame the root view<br/>is dismissed)"]
     end
-    
+
     Commands -->|settings| SettingsMain
     Commands -->|list| FeedList
     Commands -->|subscribe| FeedSubscribe
     Commands -->|unsubscribe| FeedUnsubscribe
     Commands -->|leaderboard| VoiceLeaderboard
     Commands -->|stats| VoiceStats
-    
+    Commands -->|about| SettingsAbout
+
     style SettingsMain fill:#2d2d2d,stroke:#ffffff,stroke-width:3px
+    style SectionHandoff fill:#1e1e1e,stroke:#ffffff,stroke-dasharray: 5 5
     style SettingsAbout fill:#1e1e1e,stroke:#ffffff
     style FeedList fill:#1e1e1e,stroke:#ffffff
     style FeedSubscribe fill:#1e1e1e,stroke:#ffffff
@@ -72,4 +77,4 @@ graph TB
     style FeedBatch fill:#1e1e1e,stroke:#ffffff
     style VoiceLeaderboard fill:#2d2d2d,stroke:#ffffff,stroke-width:3px
     style VoiceStats fill:#1e1e1e,stroke:#ffffff
-    style Back fill:#1e1e1e,stroke:#ffffff,stroke-dasharray: 5 5
+    style Back fill:#1e1e1e,stroke:#ffffff
