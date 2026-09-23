@@ -1,9 +1,9 @@
 [package]
-name = "welcome-settings"
+name = "voice"
 version = "0.1.0"
 edition = "2024"
 authors = ["FAZuH <mail@fazuh.com>"]
-description = "The welcome settings panel plugin for pwr-bot: per-guild welcome-card settings served as a plugin view"
+description = "The voice settings panel plugin for pwr-bot: per-guild voice tracking settings served as a plugin view"
 license = "MIT"
 repository = "https://github.com/FAZuH/pwr-bot"
 

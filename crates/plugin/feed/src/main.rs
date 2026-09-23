@@ -12,7 +12,7 @@
 //!   the plugin is a core plugin with no slash command — it opens through
 //!   the settings hub's `host.open_view` (ADR-0009), which forwards the
 //!   source interaction's `guild_id` in the invoke args;
-//! - answers `invoke` of `feed-settings` by loading the guild's whole
+//! - answers `invoke` of `feed` by loading the guild's whole
 //!   [`ServerSettings`] snapshot through `host.feed.get_settings` and
 //!   rendering the monolith `/feed settings` panel as Components V2;
 //! - answers `view.interact` by applying the monolith update vocabulary
@@ -63,7 +63,7 @@ use serde_json::json;
 
 /// The plugin's name: the hello `name`, the hub's `host.open_view` target,
 /// and the handle the host keeps it under.
-const PLUGIN_NAME: &str = "feed-settings";
+const PLUGIN_NAME: &str = "feed";
 
 /// Custom ids for the panel's interactive components.
 const CUSTOM_ID_TOGGLE: &str = "feeds:toggle";
@@ -79,7 +79,7 @@ const CHANNEL_TEXT: &str =
 const SUB_ROLE_TEXT: &str = "### Subscribe Permission\n\n> 🛈  Who can add new feeds to this server. Leave empty to allow users with \"Manage Server\" permission.";
 const UNSUB_ROLE_TEXT: &str = "### Unsubscribe Permission\n\n> 🛈  Who can remove feeds from this server. Leave empty to allow users with \"Manage Server\" permission.";
 
-// ── the plugin's own update logic (ported from src/update/feed_settings.rs) ───────
+// ── the plugin's own update logic ─────────────────────────────────────────────
 
 /// The feed settings model: the guild's whole [`ServerSettings`] snapshot,
 /// as the monolith's `FeedSettingsModel` held it.

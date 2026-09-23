@@ -29,7 +29,7 @@ first place.
 
 The decision fixes the migration shape:
 
-1. **One plugin crate per panel.** `feed-settings`, `voice-settings`, and
+1. **One plugin crate per panel.** `feed`, `voice`, and
    `welcome` become separate plugins under `crates/plugin/`.
 2. **Hub discovery is automatic.** The hub's nav row already builds itself
    from the running plugins through `host.list_plugins`, so each panel

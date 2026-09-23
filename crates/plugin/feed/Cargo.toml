@@ -1,5 +1,5 @@
 [package]
-name = "feed-settings"
+name = "feed"
 version = "0.1.0"
 edition = "2024"
 authors = ["FAZuH <mail@fazuh.com>"]

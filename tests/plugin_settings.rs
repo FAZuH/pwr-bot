@@ -269,9 +269,9 @@ fn assert_hub(data: &Value, enabled: &[bool; 3]) {
     // All three features migrated (ADR-0009): their buttons open the panel
     // plugins.
     let config_ids = [
-        "settings:open:feed-settings",
-        "settings:open:voice-settings",
-        "settings:open:welcome-settings",
+        "settings:open:feed",
+        "settings:open:voice",
+        "settings:open:welcome",
     ];
     for (button, custom_id) in config_buttons.iter().zip(config_ids) {
         assert_eq!(button["type"], json!(2));

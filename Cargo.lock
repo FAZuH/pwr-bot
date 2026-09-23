@@ -1730,7 +1730,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "feed-settings"
+name = "feed"
 version = "0.1.0"
 dependencies = [
  "pwr-ext",
@@ -6695,7 +6695,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
-name = "voice-settings"
+name = "voice"
 version = "0.1.0"
 dependencies = [
  "pwr-ext",
@@ -6946,7 +6946,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a28ac98ddc8b9274cb41bb4d9d4d5c425b6020c50c46f25559911905610b4a88"
 
 [[package]]
-name = "welcome-settings"
+name = "welcome"
 version = "0.1.0"
 dependencies = [
  "pwr-ext",

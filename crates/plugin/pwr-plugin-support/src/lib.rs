@@ -8,7 +8,7 @@
 //! [`Pending`], and [`issue_host_call`] pre-wired to its service RPC pair
 //! (ADR-0010).
 //!
-//! Known fork: welcome-settings duplicates [`SessionState`], [`Pending`],
+//! Known fork: welcome duplicates [`SessionState`], [`Pending`],
 //! [`HostCall`], and [`issue_host_call`] locally. The shared session echo
 //! carries the panel's whole model, but a welcome modal submission must
 //! re-read settings rather than persist a stale snapshot, and the shared

@@ -22,10 +22,6 @@ pub struct Config {
     pub logs_path: PathBuf,
     pub plugins_toml: PathBuf,
     pub plugins_dir: PathBuf,
-    pub settings_plugin_path: PathBuf,
-    pub feed_settings_plugin_path: PathBuf,
-    pub voice_settings_plugin_path: PathBuf,
-    pub welcome_settings_plugin_path: PathBuf,
     /// Core plugins the host spawns at startup, in order.
     pub core_plugins: Vec<CorePluginSpec>,
     pub features: Features,
@@ -33,6 +29,9 @@ pub struct Config {
 }
 
 /// One core plugin the host spawns at startup: its name and binary path.
+/// The set of core plugins is configuration, not source: `CORE_PLUGINS`
+/// lists their names, and each binary's path resolves through
+/// [`Config::core_plugin_path`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CorePluginSpec {
     /// Plugin name, e.g. `settings`.
@@ -97,60 +96,13 @@ impl Config {
             );
         });
 
-        self.settings_plugin_path = std::env::var("SETTINGS_PLUGIN_PATH")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| {
-                std::env::current_exe()
-                    .ok()
-                    .and_then(|exe| exe.parent().map(|p| p.to_path_buf()))
-                    .map(|dir| dir.join("settings"))
-                    .unwrap_or_else(|| self.data_path.join("settings"))
-            });
-        self.feed_settings_plugin_path = std::env::var("FEED_SETTINGS_PLUGIN_PATH")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| {
-                std::env::current_exe()
-                    .ok()
-                    .and_then(|exe| exe.parent().map(|p| p.to_path_buf()))
-                    .map(|dir| dir.join("feed-settings"))
-                    .unwrap_or_else(|| self.data_path.join("feed-settings"))
-            });
-        self.voice_settings_plugin_path = std::env::var("VOICE_SETTINGS_PLUGIN_PATH")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| {
-                std::env::current_exe()
-                    .ok()
-                    .and_then(|exe| exe.parent().map(|p| p.to_path_buf()))
-                    .map(|dir| dir.join("voice-settings"))
-                    .unwrap_or_else(|| self.data_path.join("voice-settings"))
-            });
-        self.welcome_settings_plugin_path = std::env::var("WELCOME_SETTINGS_PLUGIN_PATH")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| {
-                std::env::current_exe()
-                    .ok()
-                    .and_then(|exe| exe.parent().map(|p| p.to_path_buf()))
-                    .map(|dir| dir.join("welcome-settings"))
-                    .unwrap_or_else(|| self.data_path.join("welcome-settings"))
-            });
-        self.core_plugins = vec![
-            CorePluginSpec {
-                name: "settings".to_string(),
-                path: self.settings_plugin_path.clone(),
-            },
-            CorePluginSpec {
-                name: "feed-settings".to_string(),
-                path: self.feed_settings_plugin_path.clone(),
-            },
-            CorePluginSpec {
-                name: "voice-settings".to_string(),
-                path: self.voice_settings_plugin_path.clone(),
-            },
-            CorePluginSpec {
-                name: "welcome-settings".to_string(),
-                path: self.welcome_settings_plugin_path.clone(),
-            },
-        ];
+        self.core_plugins = parse_core_plugins(&std::env::var("CORE_PLUGINS").unwrap_or_default())
+            .into_iter()
+            .map(|name| CorePluginSpec {
+                path: self.core_plugin_path(&name),
+                name,
+            })
+            .collect();
 
         self.features = Features {
             voice_tracking: parse_bool_env("ENABLE_VOICE_TRACKING", true),
@@ -161,6 +113,21 @@ impl Config {
         self.version = env!("CARGO_PKG_VERSION").to_string();
 
         Ok(())
+    }
+
+    /// Resolves a core plugin's binary path: the `<NAME>_PLUGIN_PATH` env
+    /// var (the plugin's uppercased name) when set, else the binary shipped
+    /// next to the bot binary, else one under the data path.
+    fn core_plugin_path(&self, name: &str) -> PathBuf {
+        std::env::var(format!("{}_PLUGIN_PATH", name.to_uppercase()))
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| {
+                std::env::current_exe()
+                    .ok()
+                    .and_then(|exe| exe.parent().map(|p| p.to_path_buf()))
+                    .map(|dir| dir.join(name))
+                    .unwrap_or_else(|| self.data_path.join(name))
+            })
     }
 
     /// Gets a directory path from environment variable, creating it if needed.
@@ -186,6 +153,16 @@ impl Config {
     }
 }
 
+/// The core plugin names from a `CORE_PLUGINS` value: a comma-separated
+/// list, trimmed, empty entries dropped.
+fn parse_core_plugins(list: &str) -> Vec<String> {
+    list.split(',')
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
 /// Parse boolean from environment variable.
 /// Accepts: "true", "1", "yes", "on" (case-insensitive) as true.
 fn parse_bool_env(var: &str, default: bool) -> bool {
@@ -200,4 +177,23 @@ fn parse_bool_env(var: &str, default: bool) -> bool {
             }
         })
         .unwrap_or(default)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_core_plugins;
+
+    #[test]
+    fn core_plugins_list_is_split_trimmed_and_empties_dropped() {
+        assert_eq!(
+            parse_core_plugins(" settings , feed ,,voice"),
+            vec![
+                "settings".to_string(),
+                "feed".to_string(),
+                "voice".to_string()
+            ]
+        );
+        assert!(parse_core_plugins("").is_empty());
+        assert!(parse_core_plugins(" , ,").is_empty());
+    }
 }

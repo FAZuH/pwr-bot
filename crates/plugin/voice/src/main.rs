@@ -1,6 +1,6 @@
 //! The voice settings panel plugin (#149): per-guild voice tracking settings
 //! served as a plugin view — the panel-migration program's second panel,
-//! replicating the feed-settings tracer (ADR-0009/0010).
+//! replicating the feed tracer (ADR-0009/0010).
 //!
 //! Speaks the pwr-bot plugin wire protocol over JSON-Lines stdio, like the
 //! `settings` hub plugin: one compact JSON object per line on stdout,
@@ -12,7 +12,7 @@
 //!   the plugin is a core plugin with no slash command — it opens through
 //!   the settings hub's `host.open_view` (ADR-0009), which forwards the
 //!   source interaction's `guild_id` in the invoke args;
-//! - answers `invoke` of `voice-settings` by loading the guild's whole
+//! - answers `invoke` of `voice` by loading the guild's whole
 //!   [`ServerSettings`] snapshot through `host.voice.get_settings` and
 //!   rendering the monolith `/vc settings` panel as Components V2;
 //! - answers `view.interact` by applying the monolith update vocabulary
@@ -58,14 +58,14 @@ use serde_json::json;
 
 /// The plugin's name: the hello `name`, the hub's `host.open_view` target,
 /// and the handle the host keeps it under.
-const PLUGIN_NAME: &str = "voice-settings";
+const PLUGIN_NAME: &str = "voice";
 
 /// Custom ids for the panel's interactive components.
 const CUSTOM_ID_TOGGLE: &str = "voice:toggle";
 const CUSTOM_ID_BACK: &str = "voice:back";
 const CUSTOM_ID_ABOUT: &str = "voice:about";
 
-// ── the plugin's own update logic (ported from src/update/voice_settings.rs) ─────
+// ── the plugin's own update logic ─────────────────────────────────────────────
 
 /// The voice settings model: the guild's whole [`ServerSettings`] snapshot,
 /// as the monolith's `VoiceSettingsModel` held it.
