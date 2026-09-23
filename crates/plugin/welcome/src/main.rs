@@ -13,7 +13,7 @@
 //!   the plugin is a core plugin with no slash command — it opens through
 //!   the settings hub's `host.open_view` (ADR-0009), which forwards the
 //!   source interaction's `guild_id` in the invoke args;
-//! - answers `invoke` of `welcome-settings` by loading the guild's whole
+//! - answers `invoke` of `welcome` by loading the guild's whole
 //!   [`ServerSettings`] snapshot through `host.welcome.get_settings` and
 //!   rendering the monolith `/welcome` panel as Components V2;
 //! - unlike the feed and voice panels, the session state it echoes carries
@@ -78,7 +78,7 @@ use serde_json::json;
 
 /// The plugin's name: the hello `name`, the hub's `host.open_view` target,
 /// and the handle the host keeps it under.
-const PLUGIN_NAME: &str = "welcome-settings";
+const PLUGIN_NAME: &str = "welcome";
 
 /// Filename of the welcome preview attachment, matching the monolith's
 /// `WELCOME_FILE`. The envelope declares this slot; the host fills it.
@@ -110,7 +110,7 @@ const VARIABLES_TEXT: &str = "### Template Variables\n> `{{ username }}` - User'
 /// The message cap, verbatim from the monolith's update logic.
 const MAX_MESSAGES: usize = 25;
 
-// ── the plugin's own update logic (ported from src/update/welcome_settings.rs) ────
+// ── the plugin's own update logic ─────────────────────────────────────────────
 
 /// The welcome settings model: the guild's whole [`ServerSettings`] snapshot
 /// plus the pending removal selection, as the monolith's
@@ -1370,7 +1370,7 @@ mod tests {
         indices.iter().copied().collect()
     }
 
-    // ── update logic (ported from src/update/welcome_settings.rs) ───────────────
+    // ── update logic ────────────────────────────────────────────────────────────
 
     #[test]
     fn toggling_enabled_persists_the_flip() {

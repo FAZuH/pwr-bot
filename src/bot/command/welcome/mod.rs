@@ -11,11 +11,5 @@ pub mod image_generator;
 #[poise::command(slash_command)]
 pub async fn welcome(ctx: Context<'_>) -> Result<(), Error> {
     let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?.get();
-    open_plugin_view(
-        ctx,
-        "welcome-settings",
-        "welcome-settings",
-        json!({ "guild_id": guild_id }),
-    )
-    .await
+    open_plugin_view(ctx, "welcome", "welcome", json!({ "guild_id": guild_id })).await
 }

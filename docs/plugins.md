@@ -24,6 +24,15 @@ entry pins:
 
 Set `auto_enable = true` to enable the plugin in every guild by default.
 
+## Core plugins
+
+The built-in plugins that ship with the host binary (`settings`, `feed`,
+`voice`, `welcome`) are not in the catalog. The host spawns the plugins
+named in `CORE_PLUGINS` (a comma-separated list) at startup; each binary's
+path resolves as [Configuration](configuration.md) documents. An unknown
+name or a binary that fails to spawn is skipped with a warning and the
+bot stays up.
+
 ## Missing or invalid catalog
 
 The bot still starts when the catalog is missing or invalid. Plugin commands

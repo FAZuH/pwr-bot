@@ -6,7 +6,7 @@
 //! [`FeedSettingsSource`] and the Discord I/O seam by a mock [`HostIo`].
 //!
 //! Assertions mirror the documented contract:
-//! - the hub's Feeds button (`settings:open:feed-settings`) opens the panel
+//! - the hub's Feeds button (`settings:open:feed`) opens the panel
 //!   plugin through `host.open_view`, forwarding the source `guild_id`;
 //! - the panel's invoke loads the guild's snapshot through
 //!   `host.feed.get_settings` and renders the monolith `/feed settings`
@@ -139,15 +139,9 @@ async fn spawn_core_plugins(
         .await
         .expect("spawn settings hub");
     let panel = manager
-        .spawn(
-            "feed-settings",
-            probe_binary("feed-settings"),
-            None,
-            &[],
-            &[],
-        )
+        .spawn("feed", probe_binary("feed"), None, &[], &[])
         .await
-        .expect("spawn feed-settings panel");
+        .expect("spawn feed panel");
     (manager, hub, panel)
 }
 
@@ -230,7 +224,7 @@ async fn hub_feeds_click_opens_the_panel_with_the_guild_settings() {
             "view.interact",
             Some("settings"),
             Some(json!({
-                "custom_id": "settings:open:feed-settings",
+                "custom_id": "settings:open:feed",
                 "channel_id": channel_id,
                 "guild_id": GUILD_ID,
             })),
@@ -290,7 +284,7 @@ async fn open_edit_and_back_persist_the_snapshot_once_and_reopen_the_hub() {
     let resp = panel
         .call(
             "invoke",
-            Some("feed-settings"),
+            Some("feed"),
             Some(json!({ "guild_id": GUILD_ID })),
         )
         .await
@@ -304,7 +298,7 @@ async fn open_edit_and_back_persist_the_snapshot_once_and_reopen_the_hub() {
     let resp = panel
         .call(
             "view.interact",
-            Some("feed-settings"),
+            Some("feed"),
             Some(json!({
                 "custom_id": "feeds:toggle",
                 "channel_id": channel_id,
@@ -322,7 +316,7 @@ async fn open_edit_and_back_persist_the_snapshot_once_and_reopen_the_hub() {
     let resp = panel
         .call(
             "view.interact",
-            Some("feed-settings"),
+            Some("feed"),
             Some(json!({
                 "custom_id": "feeds:back",
                 "channel_id": channel_id,
@@ -379,7 +373,7 @@ async fn back_with_a_source_message_reopens_the_hub_in_place() {
     let resp = panel
         .call(
             "invoke",
-            Some("feed-settings"),
+            Some("feed"),
             Some(json!({ "guild_id": GUILD_ID })),
         )
         .await
@@ -391,7 +385,7 @@ async fn back_with_a_source_message_reopens_the_hub_in_place() {
     let resp = panel
         .call(
             "view.interact",
-            Some("feed-settings"),
+            Some("feed"),
             Some(json!({
                 "custom_id": "feeds:back",
                 "channel_id": channel_id,
@@ -465,7 +459,7 @@ async fn about_persists_and_opens_the_hub_on_its_about_page() {
     let resp = panel
         .call(
             "invoke",
-            Some("feed-settings"),
+            Some("feed"),
             Some(json!({ "guild_id": GUILD_ID })),
         )
         .await
@@ -475,7 +469,7 @@ async fn about_persists_and_opens_the_hub_on_its_about_page() {
     let resp = panel
         .call(
             "view.interact",
-            Some("feed-settings"),
+            Some("feed"),
             Some(json!({
                 "custom_id": "feeds:about",
                 "channel_id": channel_id,
@@ -550,7 +544,7 @@ async fn a_failed_load_fails_the_open_with_the_forwarded_error() {
     let resp = panel
         .call(
             "invoke",
-            Some("feed-settings"),
+            Some("feed"),
             Some(json!({ "guild_id": GUILD_ID })),
         )
         .await

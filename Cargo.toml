@@ -4,9 +4,9 @@ members = [
     "crates/pwr-poise-components",
     "crates/plugin/hello",
     "crates/plugin/settings",
-    "crates/plugin/feed-settings",
-    "crates/plugin/voice-settings",
-    "crates/plugin/welcome-settings",
+    "crates/plugin/feed",
+    "crates/plugin/voice",
+    "crates/plugin/welcome",
     "crates/plugin/pwr-plugin-support",
     "crates/preview",
 ]

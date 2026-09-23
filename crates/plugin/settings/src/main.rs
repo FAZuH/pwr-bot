@@ -28,8 +28,8 @@
 //!   a failed op renders the fallback copy — `settings:about:back` returns
 //!   to the hub, neither touching the model;
 //! - every per-feature config button rides the nav id
-//!   (`settings:open:feed-settings`, `settings:open:voice-settings`,
-//!   `settings:open:welcome-settings`) and opens the migrated panel plugin
+//!   (`settings:open:feed`, `settings:open:voice`,
+//!   `settings:open:welcome`) and opens the migrated panel plugin
 //!   (ADR-0009);
 //! - a `settings:open:<plugin>` nav click issues `host.open_view` for the
 //!   target plugin (the settings hub's promise: navigate to any panel),
@@ -109,9 +109,9 @@ const CUSTOM_ID_ABOUT_BACK: &str = "settings:about:back";
 /// message is the toggle it applies, and the target is the panel plugin the
 /// button opens through the nav id (`settings:open:<target>`).
 const FEATURES: [(&str, SettingsMsg, &str); 3] = [
-    ("Feeds", SettingsMsg::Feeds, "feed-settings"),
-    ("Voice", SettingsMsg::Voice, "voice-settings"),
-    ("Welcome", SettingsMsg::Welcome, "welcome-settings"),
+    ("Feeds", SettingsMsg::Feeds, "feed"),
+    ("Voice", SettingsMsg::Voice, "voice"),
+    ("Welcome", SettingsMsg::Welcome, "welcome"),
 ];
 
 /// Custom id prefix for the nav button: the target plugin name follows the
@@ -1466,18 +1466,9 @@ mod tests {
         }
         // All three features migrated (ADR-0009): their buttons open the
         // panel plugins.
-        assert_eq!(
-            buttons[0]["custom_id"],
-            json!("settings:open:feed-settings")
-        );
-        assert_eq!(
-            buttons[1]["custom_id"],
-            json!("settings:open:voice-settings")
-        );
-        assert_eq!(
-            buttons[2]["custom_id"],
-            json!("settings:open:welcome-settings")
-        );
+        assert_eq!(buttons[0]["custom_id"], json!("settings:open:feed"));
+        assert_eq!(buttons[1]["custom_id"], json!("settings:open:voice"));
+        assert_eq!(buttons[2]["custom_id"], json!("settings:open:welcome"));
     }
 
     #[test]
@@ -1510,13 +1501,13 @@ mod tests {
 
     #[test]
     fn discovered_nav_renders_one_button_per_running_plugin() {
-        let nav = NavTargets::Discovered(vec!["hello".into(), "feed".into()]);
+        let nav = NavTargets::Discovered(vec!["hello".into(), "greet".into()]);
         let data = view_data(&SettingsModel::default(), &nav);
         let children = data["components"][0]["components"].as_array().unwrap();
         let buttons = children[5]["components"].as_array().unwrap();
         assert_eq!(buttons.len(), 2, "one button per running plugin");
         assert_eq!(buttons[0]["custom_id"], json!("settings:open:hello"));
-        assert_eq!(buttons[1]["custom_id"], json!("settings:open:feed"));
+        assert_eq!(buttons[1]["custom_id"], json!("settings:open:greet"));
     }
 
     #[test]
@@ -1557,9 +1548,9 @@ mod tests {
     fn nav_row_skips_panel_targets_but_keeps_other_plugins() {
         let nav = NavTargets::Discovered(vec![
             "hello".into(),
-            "feed-settings".into(),
-            "voice-settings".into(),
-            "welcome-settings".into(),
+            "feed".into(),
+            "voice".into(),
+            "welcome".into(),
         ]);
         let data = view_data(&SettingsModel::default(), &nav);
         let children = data["components"][0]["components"].as_array().unwrap();
@@ -1808,7 +1799,7 @@ mod tests {
             "no source message: the host posts a placeholder"
         );
 
-        let args = open_view_args(1, Some(42), "feed-settings", None);
+        let args = open_view_args(1, Some(42), "feed", None);
         assert_eq!(
             args["args"],
             json!({ "guild_id": 42 }),
@@ -1818,7 +1809,7 @@ mod tests {
 
     #[test]
     fn open_view_args_carry_the_source_message_for_an_in_place_open() {
-        let args = open_view_args(1, Some(42), "feed-settings", Some(777));
+        let args = open_view_args(1, Some(42), "feed", Some(777));
         assert_eq!(args["message_id"], json!(777));
     }
 

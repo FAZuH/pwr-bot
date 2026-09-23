@@ -1232,7 +1232,7 @@ fn stats_err(err: StatsError) -> WireError {
     }
 }
 
-/// Runs one feed-settings op against the seam and turns the outcome into a
+/// Runs one feed settings op against the seam and turns the outcome into a
 /// wire value: `Ok(data)` for a successful `resp_ok` (the settings snapshot
 /// for a read, `None` for a write), `Err(wire)` for a failed `resp_err`
 /// (`InvalidArgs` or `FeedSettingsError`). A cap outside the feed pair is a
@@ -1266,7 +1266,7 @@ async fn feed_call(
         }
         other => Err(WireError {
             kind: "UnknownOp".into(),
-            msg: format!("op `{}` is not a feed-settings op", other.as_str()),
+            msg: format!("op `{}` is not a feed settings op", other.as_str()),
         }),
     }
 }
@@ -1315,7 +1315,7 @@ fn feed_settings_err(err: FeedSettingsError) -> WireError {
     }
 }
 
-/// Runs one voice-settings op against the seam and turns the outcome into a
+/// Runs one voice settings op against the seam and turns the outcome into a
 /// wire value: `Ok(data)` for a successful `resp_ok` (the settings snapshot
 /// for a read, `None` for a write), `Err(wire)` for a failed `resp_err`
 /// (`InvalidArgs` or `VoiceSettingsError`). A cap outside the voice pair is a
@@ -1349,7 +1349,7 @@ async fn voice_call(
         }
         other => Err(WireError {
             kind: "UnknownOp".into(),
-            msg: format!("op `{}` is not a voice-settings op", other.as_str()),
+            msg: format!("op `{}` is not a voice settings op", other.as_str()),
         }),
     }
 }
@@ -1362,7 +1362,7 @@ fn voice_settings_err(err: VoiceSettingsError) -> WireError {
     }
 }
 
-/// Runs one welcome-settings op against the seam and turns the outcome into a
+/// Runs one welcome settings op against the seam and turns the outcome into a
 /// wire value: `Ok(data)` for a successful `resp_ok` (the settings snapshot
 /// for a read, `None` for a write), `Err(wire)` for a failed `resp_err`
 /// (`InvalidArgs` or `WelcomeSettingsError`). A cap outside the welcome pair
@@ -1396,7 +1396,7 @@ async fn welcome_call(
         }
         other => Err(WireError {
             kind: "UnknownOp".into(),
-            msg: format!("op `{}` is not a welcome-settings op", other.as_str()),
+            msg: format!("op `{}` is not a welcome settings op", other.as_str()),
         }),
     }
 }

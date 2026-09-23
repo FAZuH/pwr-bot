@@ -6,7 +6,7 @@
 //! [`WelcomeSettingsSource`] and the Discord I/O seam by a mock [`HostIo`].
 //!
 //! Assertions mirror the documented contract:
-//! - the hub's Welcome button (`settings:open:welcome-settings`) opens the
+//! - the hub's Welcome button (`settings:open:welcome`) opens the
 //!   panel plugin through `host.open_view`, forwarding the source `guild_id`;
 //! - the panel's invoke loads the guild's snapshot through
 //!   `host.welcome.get_settings` and renders the monolith `/welcome` panel as
@@ -154,15 +154,9 @@ async fn spawn_core_plugins(
         .await
         .expect("spawn settings hub");
     let panel = manager
-        .spawn(
-            "welcome-settings",
-            probe_binary("welcome-settings"),
-            None,
-            &[],
-            &[],
-        )
+        .spawn("welcome", probe_binary("welcome"), None, &[], &[])
         .await
-        .expect("spawn welcome-settings panel");
+        .expect("spawn welcome panel");
     (manager, hub, panel)
 }
 
@@ -262,7 +256,7 @@ async fn hub_welcome_click_opens_the_panel_with_the_guild_settings() {
             "view.interact",
             Some("settings"),
             Some(json!({
-                "custom_id": "settings:open:welcome-settings",
+                "custom_id": "settings:open:welcome",
                 "channel_id": channel_id,
                 "guild_id": GUILD_ID,
             })),
@@ -300,7 +294,7 @@ async fn invoke_renders_the_panel_and_declares_the_preview_slot() {
     let resp = panel
         .call(
             "invoke",
-            Some("welcome-settings"),
+            Some("welcome"),
             Some(json!({ "guild_id": GUILD_ID })),
         )
         .await
@@ -349,7 +343,7 @@ async fn a_toggle_persists_immediately_and_renders_the_off_copy() {
     let resp = panel
         .call(
             "invoke",
-            Some("welcome-settings"),
+            Some("welcome"),
             Some(json!({ "guild_id": GUILD_ID })),
         )
         .await
@@ -359,7 +353,7 @@ async fn a_toggle_persists_immediately_and_renders_the_off_copy() {
     let resp = panel
         .call(
             "view.interact",
-            Some("welcome-settings"),
+            Some("welcome"),
             Some(json!({
                 "custom_id": "welcome:toggle",
                 "view": view,
@@ -414,7 +408,7 @@ async fn a_modal_trigger_opens_the_modal_and_answers_with_the_marker() {
     let resp = panel
         .call(
             "invoke",
-            Some("welcome-settings"),
+            Some("welcome"),
             Some(json!({ "guild_id": GUILD_ID })),
         )
         .await
@@ -424,7 +418,7 @@ async fn a_modal_trigger_opens_the_modal_and_answers_with_the_marker() {
     let resp = panel
         .call(
             "view.interact",
-            Some("welcome-settings"),
+            Some("welcome"),
             Some(json!({
                 "custom_id": "welcome:add",
                 "id": 9001,
@@ -510,7 +504,7 @@ async fn a_modal_submission_persists_the_answer_and_carries_the_stash() {
     let resp = panel
         .call(
             "invoke",
-            Some("welcome-settings"),
+            Some("welcome"),
             Some(json!({ "guild_id": GUILD_ID })),
         )
         .await
@@ -521,7 +515,7 @@ async fn a_modal_submission_persists_the_answer_and_carries_the_stash() {
     let resp = panel
         .call(
             "view.interact",
-            Some("welcome-settings"),
+            Some("welcome"),
             Some(json!({
                 "custom_id": "welcome:remove",
                 "data": { "values": ["1"] },
@@ -537,7 +531,7 @@ async fn a_modal_submission_persists_the_answer_and_carries_the_stash() {
     let resp = panel
         .call(
             "view.interact",
-            Some("welcome-settings"),
+            Some("welcome"),
             Some(json!({
                 "custom_id": "welcome:add",
                 "id": 9002,
@@ -621,7 +615,7 @@ async fn saving_removals_persists_the_survivors_once_and_clears_the_marks() {
     let resp = panel
         .call(
             "invoke",
-            Some("welcome-settings"),
+            Some("welcome"),
             Some(json!({ "guild_id": GUILD_ID })),
         )
         .await
@@ -631,7 +625,7 @@ async fn saving_removals_persists_the_survivors_once_and_clears_the_marks() {
     let resp = panel
         .call(
             "view.interact",
-            Some("welcome-settings"),
+            Some("welcome"),
             Some(json!({
                 "custom_id": "welcome:remove",
                 "data": { "values": ["0"] },
@@ -646,7 +640,7 @@ async fn saving_removals_persists_the_survivors_once_and_clears_the_marks() {
     let resp = panel
         .call(
             "view.interact",
-            Some("welcome-settings"),
+            Some("welcome"),
             Some(json!({
                 "custom_id": "welcome:save",
                 "view": view,
@@ -693,7 +687,7 @@ async fn back_reopens_the_hub_without_persisting() {
     let resp = panel
         .call(
             "invoke",
-            Some("welcome-settings"),
+            Some("welcome"),
             Some(json!({ "guild_id": GUILD_ID })),
         )
         .await
@@ -703,7 +697,7 @@ async fn back_reopens_the_hub_without_persisting() {
     let resp = panel
         .call(
             "view.interact",
-            Some("welcome-settings"),
+            Some("welcome"),
             Some(json!({
                 "custom_id": "welcome:back",
                 "channel_id": channel_id,
@@ -743,7 +737,7 @@ async fn a_failed_load_fails_the_open_with_the_forwarded_error() {
     let resp = panel
         .call(
             "invoke",
-            Some("welcome-settings"),
+            Some("welcome"),
             Some(json!({ "guild_id": GUILD_ID })),
         )
         .await

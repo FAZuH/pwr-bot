@@ -20,7 +20,7 @@ settings flow, and none has a migration ticket.
 
 The retired panels still leave one piece of live machinery behind: the
 welcome preview resolver (`PreviewResolver`, ADR-0012). It fills the
-attachment slot the welcome-settings plugin declares, and the plugin
+attachment slot the welcome plugin declares, and the plugin
 transport paths call it. It cannot die with the panel.
 
 ## Decision
