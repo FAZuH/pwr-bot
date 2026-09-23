@@ -88,6 +88,13 @@ for the layering rules. Existing modules: `about`, `feed_batch`,
 - See `.agents/skills/db-schema/SKILL.md` for migration and model patterns
 - Migration script: `scripts/migrate.py` (SQLite → PostgreSQL data migration)
 
+## Branching & PRs
+
+Follow `docs/dev/branching.md`: PRs target the active integration branch
+(conventionally `development`, or a version branch like `v0.5` for a large
+effort) — never `main`, except hotfixes, which then merge back into the
+integration branch immediately. Merge-only PRs everywhere.
+
 ## Commit Conventions
 
 See `docs/dev/commit-changelog.md` for full conventions.

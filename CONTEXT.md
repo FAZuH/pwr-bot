@@ -29,7 +29,7 @@ _Avoid_: view payload
 **Gate**:
 The host's validate-only check of `ViewSpec.data` at every raw-send
 boundary: initial slash dispatch, component and modal re-render,
-`host.open_view`, and the hub handoff's message morph. The host parses a
+`host.open_view`, and the view handoff's message morph. The host parses a
 clone of the payload through
 `pwr_ext::prelude::CreateMessageDe`, discards the parsed value, and sends
 the original JSON unchanged. A failure is a `WireError` with kind
@@ -57,7 +57,7 @@ The reusable typed builders in `crates/pwr-poise-components`, rebuilt on
 (pagination). Runtime assembly now composes `pwr-ext` `component!`/splices
 plus the typed `view_support` builders inside a single `view!` literal:
 plugins author the whole view with `view!` and splice runtime data (such
-as the settings hub nav row) at its pinned positions, `Option`-gated on
+as the Settings nav row) at its pinned positions, `Option`-gated on
 discovery. No in-repo view is library-composed any more.
 See ADR-0004.
 _Avoid_: pwr-ext
@@ -98,7 +98,7 @@ the root view, so Back dismisses it instead of navigating to a parent
 frame. A public root view is deleted; an ephemeral one is left for the
 user, because it belongs to the interaction that produced it. No host
 feature returns the plain Back navigation today — every Back-capable
-view hands off to the settings hub — so Root Back stays the navigation
+view hands off to the Settings root — so Root Back stays the navigation
 walk's well-defined empty-history branch.
 _Avoid_: exit Back, root dismissal
 
@@ -137,3 +137,21 @@ service data through service RPCs. The panel migration turns the three
 host-side panels into panel plugins, one crate each. See Service RPC and
 ADR-0009.
 _Avoid_: host panel, feature panel
+
+**Settings**:
+The host's centralized settings GUI. One Discord message the host renders
+itself, listing every plugin's registered settings sections. The host owns
+the view; no plugin renders the list. Opening a section morphs the message
+into that section's panel through the plugin view engine. The name is
+`settings` everywhere: the `/settings` command, the manifest `settings`
+field. The capability lives in the host because it is generic — it never
+knows what a panel contains, only which command opens it.
+_Avoid_: settings hub, hub, settings panel (for the list)
+
+**Settings section**:
+A plugin's registered entry in the host Settings GUI. Declared in the
+plugin manifest as `{name, description, command}`, where `command` names
+one of that plugin's own registered commands. A section is navigation
+only: settings values live wherever the plugin stores them, and the host
+never reads or writes plugin settings data.
+_Avoid_: settings entry, hub entry
