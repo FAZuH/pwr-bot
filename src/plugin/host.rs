@@ -38,10 +38,11 @@ use crate::plugin::InteractionError;
 use crate::plugin::PluginManager;
 use crate::plugin::RunningPlugin;
 use crate::plugin::edit_body_for_transport;
+use crate::plugin::interaction::author_id_from_payload;
 use crate::plugin::reject_content_on_edit;
 use crate::plugin::validate_view_data;
 use crate::service::error::ServiceError;
-use crate::service::traits::FeedSubscriptionProvider;
+use crate::service::traits::SettingsProvider;
 use crate::service::traits::VoiceTracker;
 /// The seam between plugin `host.*` ops and Discord. The real implementation
 /// wraps [`serenity::Http`]; tests use the mockall mock generated from this
@@ -70,6 +71,9 @@ pub trait HostIo: Send + Sync {
         data: Value,
         attachments: Vec<serenity::CreateAttachment<'static>>,
     ) -> Result<Option<Value>, HostError>;
+
+    /// Opens or resolves a user's DM channel and returns its id.
+    async fn open_dm(&self, user_id: u64) -> Result<u64, HostError>;
 
     /// Edits a previously sent message in place. `data` is the edit body:
     /// only the fields it provides are applied, so partial shapes are legal.
@@ -149,6 +153,14 @@ impl HostIo for SerenityHostIo {
             )
             .await?;
         Ok(Some(json!({ "message_id": message.id.get() })))
+    }
+
+    async fn open_dm(&self, user_id: u64) -> Result<u64, HostError> {
+        Ok(serenity::UserId::new(user_id)
+            .create_dm_channel(&self.http)
+            .await?
+            .id
+            .get())
     }
 
     async fn edit_message(
@@ -401,71 +413,9 @@ impl StatsHandle {
     }
 }
 
-/// An error from a [`FeedSettingsSource`] operation.
-#[derive(Debug, thiserror::Error)]
-pub enum FeedSettingsError {
-    /// The feed service failed (database or feed-layer error).
-    #[error(transparent)]
-    Service(#[from] ServiceError),
-}
-
-/// The seam between the `host.feed.*` ops and the feed subscription service,
-/// mirroring `FeedSubscriptionProvider::get_server_settings` /
-/// `update_server_settings` one-to-one (ADR-0010: ops are shaped by
-/// services). The real implementation wraps the service the host already
-/// holds; tests use the mockall mock generated from this trait.
-#[automock]
-#[async_trait]
-pub trait FeedSettingsSource: Send + Sync {
-    /// Reads a guild's whole settings snapshot, as
-    /// `FeedSubscriptionProvider::get_server_settings` does.
-    async fn get_settings(&self, guild_id: u64) -> Result<ServerSettings, FeedSettingsError>;
-
-    /// Writes a guild's whole settings snapshot, as
-    /// `FeedSubscriptionProvider::update_server_settings` does.
-    async fn update_settings(
-        &self,
-        guild_id: u64,
-        settings: ServerSettings,
-    ) -> Result<(), FeedSettingsError>;
-}
-
-/// The real [`FeedSettingsSource`]: a thin adapter over the feed subscription
-/// service the host holds at construction. No post-start attachment — the
-/// service Arc exists at `Bot::new`, so the field is wired once.
-pub struct ServiceFeedSettingsSource {
-    service: Arc<dyn FeedSubscriptionProvider>,
-}
-
-impl ServiceFeedSettingsSource {
-    /// Wraps the host's feed subscription service.
-    pub fn new(service: Arc<dyn FeedSubscriptionProvider>) -> Self {
-        Self { service }
-    }
-}
-
-#[async_trait]
-impl FeedSettingsSource for ServiceFeedSettingsSource {
-    async fn get_settings(&self, guild_id: u64) -> Result<ServerSettings, FeedSettingsError> {
-        Ok(self.service.get_server_settings(guild_id).await?)
-    }
-
-    async fn update_settings(
-        &self,
-        guild_id: u64,
-        settings: ServerSettings,
-    ) -> Result<(), FeedSettingsError> {
-        Ok(self
-            .service
-            .update_server_settings(guild_id, settings)
-            .await?)
-    }
-}
-
 /// An error from a [`VoiceSettingsSource`] operation.
 ///
-/// The voice service pair returns `anyhow::Result` rather than
-/// `Result<_, ServiceError>` (the one asymmetry with the feed seam), so this
+/// The voice service pair returns `anyhow::Result`, so this
 /// carries the service's opaque error: `Display` renders the anyhow chain's
 /// top message, which is what crosses the wire as the [`WireError`] msg.
 #[derive(Debug, thiserror::Error)]
@@ -531,28 +481,23 @@ impl VoiceSettingsSource for ServiceVoiceSettingsSource {
 /// An error from a [`WelcomeSettingsSource`] operation.
 #[derive(Debug, thiserror::Error)]
 pub enum WelcomeSettingsError {
-    /// The welcome settings failed (database or feed-layer error). Welcome
-    /// settings ride the same [`FeedSubscriptionProvider`] service the feed
-    /// panel persists through, so this mirrors [`FeedSettingsError`].
+    /// The shared settings service failed.
     #[error(transparent)]
     Service(#[from] ServiceError),
 }
 
-/// The seam between the `host.welcome.*` ops and the settings service,
-/// mirroring the monolith welcome panel's persistence through
-/// `FeedSubscriptionProvider::get_server_settings` / `update_server_settings`
-/// one-to-one (ADR-0010: ops are shaped by services). The real
-/// implementation wraps the service the host already holds; tests use the
+/// The seam between the `host.welcome.*` ops and the shared settings service.
+/// The real implementation wraps the service the host holds; tests use the
 /// mockall mock generated from this trait.
 #[automock]
 #[async_trait]
 pub trait WelcomeSettingsSource: Send + Sync {
     /// Reads a guild's whole settings snapshot, as
-    /// `FeedSubscriptionProvider::get_server_settings` does.
+    /// `SettingsProvider::get_server_settings` does.
     async fn get_settings(&self, guild_id: u64) -> Result<ServerSettings, WelcomeSettingsError>;
 
     /// Writes a guild's whole settings snapshot, as
-    /// `FeedSubscriptionProvider::update_server_settings` does.
+    /// `SettingsProvider::update_server_settings` does.
     async fn update_settings(
         &self,
         guild_id: u64,
@@ -560,16 +505,15 @@ pub trait WelcomeSettingsSource: Send + Sync {
     ) -> Result<(), WelcomeSettingsError>;
 }
 
-/// The real [`WelcomeSettingsSource`]: a thin adapter over the feed
-/// subscription service the host holds at construction — the same service the
-/// monolith's welcome `EffectHandler` persists through.
+/// The real [`WelcomeSettingsSource`]: a thin adapter over the shared settings
+/// service the host holds at construction.
 pub struct ServiceWelcomeSettingsSource {
-    service: Arc<dyn FeedSubscriptionProvider>,
+    service: Arc<dyn SettingsProvider>,
 }
 
 impl ServiceWelcomeSettingsSource {
-    /// Wraps the host's feed subscription service.
-    pub fn new(service: Arc<dyn FeedSubscriptionProvider>) -> Self {
+    /// Wraps the host's shared settings service.
+    pub fn new(service: Arc<dyn SettingsProvider>) -> Self {
         Self { service }
     }
 }
@@ -612,15 +556,11 @@ pub struct HostServices {
     /// Live bot stats for `host.stats`; serves `Unavailable` until the real
     /// gateway cache is attached after client start.
     pub stats: Arc<StatsHandle>,
-    /// Feed settings for the `host.feed.*` ops, mirroring the feed
-    /// subscription service; absent when the host holds no feed service.
-    pub feeds: Option<Arc<dyn FeedSettingsSource>>,
     /// Voice settings for the `host.voice.*` ops, mirroring the voice
     /// tracking service; absent when the host holds no voice service.
     pub voice: Option<Arc<dyn VoiceSettingsSource>>,
-    /// Welcome settings for the `host.welcome.*` ops, mirroring the monolith
-    /// welcome panel's persistence (the feed subscription service); absent
-    /// when the host holds no welcome service.
+    /// Welcome settings for the `host.welcome.*` ops, backed by the shared
+    /// settings service; absent when the host holds no welcome service.
     pub welcome: Option<Arc<dyn WelcomeSettingsSource>>,
     /// Fills the attachment slots a plugin envelope declares at transport
     /// (ADR-0012); absent when the host holds no preview renderer.
@@ -679,7 +619,11 @@ pub async fn handle_host_call(
                 })),
             )
         }
-        HostCap::Defer | HostCap::Acknowledge | HostCap::SendMessage | HostCap::EditMessage => {
+        HostCap::Defer
+        | HostCap::Acknowledge
+        | HostCap::SendMessage
+        | HostCap::OpenDm
+        | HostCap::EditMessage => {
             let Some(io) = host.and_then(|host| host.io.clone()) else {
                 return resp_err(id, "HostUnavailable", "host io is not configured");
             };
@@ -791,24 +735,6 @@ pub async fn handle_host_call(
                 Err(e) => Msg::resp_err(id, stats_err(e)),
             }
         }
-        HostCap::FeedGetSettings => {
-            let Some(feeds) = host.and_then(|host| host.feeds.clone()) else {
-                return resp_err(id, "HostUnavailable", "feed settings are not configured");
-            };
-            match feed_call(cap, args, &*feeds).await {
-                Ok(data) => Msg::resp_ok(id, data),
-                Err(wire) => Msg::resp_err(id, wire),
-            }
-        }
-        HostCap::FeedUpdateSettings => {
-            let Some(feeds) = host.and_then(|host| host.feeds.clone()) else {
-                return resp_err(id, "HostUnavailable", "feed settings are not configured");
-            };
-            match feed_call(cap, args, &*feeds).await {
-                Ok(data) => Msg::resp_ok(id, data),
-                Err(wire) => Msg::resp_err(id, wire),
-            }
-        }
         HostCap::VoiceGetSettings => {
             let Some(voice) = host.and_then(|host| host.voice.clone()) else {
                 return resp_err(id, "HostUnavailable", "voice settings are not configured");
@@ -879,6 +805,14 @@ async fn io_call(
             io.send_message(channel_id, data, attachments)
                 .await
                 .map_err(host_io_err)
+        }
+        HostCap::OpenDm => {
+            let user_id = args
+                .and_then(|args| args.get("user_id"))
+                .and_then(Value::as_u64)
+                .ok_or_else(|| invalid_args("missing `user_id` (u64)"))?;
+            let channel_id = io.open_dm(user_id).await.map_err(host_io_err)?;
+            Ok(Some(json!({ "channel_id": channel_id })))
         }
         HostCap::EditMessage => {
             let (channel_id, message_id, data) = parse_edit_message(args)?;
@@ -966,6 +900,8 @@ async fn open_view_call(
             msg: format!("target plugin `{plugin_name}` is not running"),
         });
     };
+    let author_id = author_id_from_payload(&call_args)
+        .ok_or_else(|| invalid_args("open_view args are missing their interaction author"))?;
     let spec = match engine.invoke(target.clone(), &command, call_args).await {
         Ok(spec) => spec,
         Err(e) => return Err(open_view_err(e)),
@@ -993,6 +929,7 @@ async fn open_view_call(
     engine
         .register(
             serenity::MessageId::new(message_id),
+            author_id,
             target,
             &command,
             spec.clone(),
@@ -1036,6 +973,13 @@ fn open_view_err(err: InteractionError) -> WireError {
             msg: detail,
         },
         InteractionError::InvalidView { kind, msg } => WireError { kind, msg },
+        InteractionError::MissingAuthor { .. } => {
+            invalid_args("open_view args are missing their interaction author")
+        }
+        InteractionError::NotAuthor { .. } => WireError {
+            kind: "NotAuthor".into(),
+            msg: "interaction is not owned by the view session".into(),
+        },
         InteractionError::NoSession { .. } => WireError {
             kind: "NoSession".into(),
             msg: err.to_string(),
@@ -1378,45 +1322,6 @@ fn stats_err(err: StatsError) -> WireError {
     }
 }
 
-/// Runs one feed settings op against the seam and turns the outcome into a
-/// wire value: `Ok(data)` for a successful `resp_ok` (the settings snapshot
-/// for a read, `None` for a write), `Err(wire)` for a failed `resp_err`
-/// (`InvalidArgs` or `FeedSettingsError`). A cap outside the feed pair is a
-/// dispatch bug, so it answers `UnknownOp` rather than panicking the dispatch
-/// task.
-async fn feed_call(
-    cap: HostCap,
-    args: Option<&Value>,
-    feeds: &dyn FeedSettingsSource,
-) -> Result<Option<Value>, WireError> {
-    match cap {
-        HostCap::FeedGetSettings => {
-            let guild_id = parse_guild_id(args)?;
-            let settings = feeds
-                .get_settings(guild_id)
-                .await
-                .map_err(feed_settings_err)?;
-            let value = serde_json::to_value(&settings).map_err(|e| WireError {
-                kind: "FeedSettingsError".into(),
-                msg: e.to_string(),
-            })?;
-            Ok(Some(value))
-        }
-        HostCap::FeedUpdateSettings => {
-            let (guild_id, settings) = parse_update_settings(args)?;
-            feeds
-                .update_settings(guild_id, settings)
-                .await
-                .map_err(feed_settings_err)?;
-            Ok(None)
-        }
-        other => Err(WireError {
-            kind: "UnknownOp".into(),
-            msg: format!("op `{}` is not a feed settings op", other.as_str()),
-        }),
-    }
-}
-
 /// Reads a Discord id from a wire value: a number, or the string form
 /// serenity's ids serialize to — the same rule the plugins' id parsing uses,
 /// so the host accepts exactly what a plugin may legitimately send.
@@ -1426,8 +1331,8 @@ fn id_as_u64(value: &Value) -> Option<u64> {
         .or_else(|| value.as_str().and_then(|s| s.parse().ok()))
 }
 
-/// Parses the `guild_id` (u64) shared by the `host.feed.*`, `host.voice.*`,
-/// and `host.welcome.*` ops. Accepts a numeric id or serenity's string form. A
+/// Parses the `guild_id` (u64) shared by the `host.voice.*` and
+/// `host.welcome.*` ops. Accepts a numeric id or serenity's string form. A
 /// present id that is neither is a wrong type, not a missing one.
 fn parse_guild_id(args: Option<&Value>) -> Result<u64, WireError> {
     let Some(value) = args
@@ -1439,7 +1344,7 @@ fn parse_guild_id(args: Option<&Value>) -> Result<u64, WireError> {
     id_as_u64(value).ok_or_else(|| invalid_args("`guild_id` must be a u64 or its string form"))
 }
 
-/// Parses the `host.feed.update_settings`, `host.voice.update_settings`, and
+/// Parses the `host.voice.update_settings` and
 /// `host.welcome.update_settings` args: `guild_id` (u64) plus the whole
 /// [`ServerSettings`] snapshot under `settings`.
 fn parse_update_settings(args: Option<&Value>) -> Result<(u64, ServerSettings), WireError> {
@@ -1451,14 +1356,6 @@ fn parse_update_settings(args: Option<&Value>) -> Result<(u64, ServerSettings), 
     serde_json::from_value(settings.clone())
         .map_err(|e| invalid_args(format!("`settings` is not a ServerSettings: {e}")))
         .map(|settings| (guild_id, settings))
-}
-
-/// Maps a [`FeedSettingsError`] to its wire error.
-fn feed_settings_err(err: FeedSettingsError) -> WireError {
-    WireError {
-        kind: "FeedSettingsError".into(),
-        msg: err.to_string(),
-    }
 }
 
 /// Runs one voice settings op against the seam and turns the outcome into a
@@ -1585,7 +1482,6 @@ mod tests {
             kv: None,
             engine: None,
             stats: Arc::new(StatsHandle::default()),
-            feeds: None,
             voice: None,
             welcome: None,
             previews: None,
@@ -1604,7 +1500,6 @@ mod tests {
             kv,
             engine: None,
             stats: Arc::new(StatsHandle::default()),
-            feeds: None,
             voice: None,
             welcome: None,
             previews: None,
@@ -1621,7 +1516,6 @@ mod tests {
             kv: None,
             engine: Some(Arc::new(InteractionEngine::new())),
             stats: Arc::new(StatsHandle::default()),
-            feeds: None,
             voice: None,
             welcome: None,
             previews: None,
@@ -1741,6 +1635,50 @@ mod tests {
         )
         .await;
         assert_eq!(assert_ok(resp, 7), None);
+    }
+
+    #[tokio::test]
+    async fn open_dm_resolves_a_user_through_the_seam() {
+        let mut mock = MockHostIo::new();
+        mock.expect_open_dm()
+            .with(eq(42_u64))
+            .times(1)
+            .returning(|_| Ok(84));
+        let host = services(Some(Arc::new(mock)), Some(sample_config()));
+
+        let resp = handle_host_call(
+            7,
+            "feed",
+            "host.open_dm",
+            Some(&json!({ "user_id": 42 })),
+            Some(&host),
+            None,
+        )
+        .await;
+
+        assert_eq!(assert_ok(resp, 7), Some(json!({ "channel_id": 84 })));
+    }
+
+    #[tokio::test]
+    async fn open_dm_api_failure_crosses_as_a_typed_wire_error() {
+        let mut mock = MockHostIo::new();
+        mock.expect_open_dm()
+            .with(eq(42_u64))
+            .times(1)
+            .returning(|_| Err(HostError::InvalidModal("unknown user".into())));
+        let host = services(Some(Arc::new(mock)), Some(sample_config()));
+
+        let resp = handle_host_call(
+            7,
+            "feed",
+            "host.open_dm",
+            Some(&json!({ "user_id": 42 })),
+            Some(&host),
+            None,
+        )
+        .await;
+
+        assert_err(resp, 7, "HostIoError");
     }
 
     // ── send_message ──────────────────────────────────────────────────────────
@@ -2728,7 +2666,6 @@ mod tests {
             kv: None,
             engine: None,
             stats: Arc::new(handle),
-            feeds: None,
             voice: None,
             welcome: None,
             previews: None,
@@ -2780,7 +2717,6 @@ mod tests {
             kv: None,
             engine: None,
             stats: Arc::new(handle),
-            feeds: None,
             voice: None,
             welcome: None,
             previews: None,
@@ -2792,35 +2728,6 @@ mod tests {
         assert!(msg.contains("webhook"), "msg: {msg}");
     }
 
-    // ── feed settings ─────────────────────────────────────────────────────────
-
-    fn sample_settings() -> ServerSettings {
-        ServerSettings {
-            feeds: pwr_plugin_protocol::FeedsSettings {
-                enabled: Some(true),
-                channel_id: Some("123456789".into()),
-                subscribe_role_id: Some("987654321".into()),
-                unsubscribe_role_id: None,
-            },
-            ..ServerSettings::default()
-        }
-    }
-
-    fn feed_services(feeds: Arc<dyn FeedSettingsSource>) -> HostServices {
-        HostServices {
-            io: None,
-            config: Some(sample_config()),
-            kv: None,
-            engine: None,
-            stats: Arc::new(StatsHandle::default()),
-            feeds: Some(feeds),
-            voice: None,
-            welcome: None,
-            previews: None,
-            settings_returns: None,
-        }
-    }
-
     fn welcome_services(welcome: Arc<dyn WelcomeSettingsSource>) -> HostServices {
         HostServices {
             io: None,
@@ -2828,7 +2735,6 @@ mod tests {
             kv: None,
             engine: None,
             stats: Arc::new(StatsHandle::default()),
-            feeds: None,
             voice: None,
             welcome: Some(welcome),
             previews: None,
@@ -2836,190 +2742,15 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn feed_get_settings_routes_through_the_seam() {
-        let mut mock = MockFeedSettingsSource::new();
-        mock.expect_get_settings()
-            .with(eq(42u64))
-            .times(1)
-            .returning(|_| Ok(sample_settings()));
-        let host = feed_services(Arc::new(mock));
-
-        let resp = handle_host_call(
-            7,
-            "hello",
-            "host.feed.get_settings",
-            Some(&json!({ "guild_id": 42 })),
-            Some(&host),
-            None,
-        )
-        .await;
-        assert_eq!(
-            assert_ok(resp, 7),
-            Some(json!({
-                "feeds": {
-                    "enabled": true,
-                    "channel_id": "123456789",
-                    "subscribe_role_id": "987654321",
-                    "unsubscribe_role_id": null,
-                },
-                "voice": { "enabled": null },
-                "welcome": {
-                    "enabled": null,
-                    "channel_id": null,
-                    "primary_color": null,
-                    "template_id": null,
-                    "messages": null,
-                },
-            }))
-        );
-    }
-
-    #[tokio::test]
-    async fn feed_update_settings_routes_through_the_seam() {
-        let settings = sample_settings();
-        let mut mock = MockFeedSettingsSource::new();
-        mock.expect_update_settings()
-            .with(eq(42u64), eq(settings.clone()))
-            .times(1)
-            .returning(|_, _| Ok(()));
-        let host = feed_services(Arc::new(mock));
-
-        let resp = handle_host_call(
-            7,
-            "hello",
-            "host.feed.update_settings",
-            Some(&json!({ "guild_id": 42, "settings": settings })),
-            Some(&host),
-            None,
-        )
-        .await;
-        assert_eq!(assert_ok(resp, 7), None);
-    }
-
-    #[tokio::test]
-    async fn feed_settings_without_services_is_host_unavailable() {
-        let resp = handle_host_call(
-            7,
-            "hello",
-            "host.feed.get_settings",
-            Some(&json!({ "guild_id": 42 })),
-            None,
-            None,
-        )
-        .await;
-        assert_err(resp, 7, "HostUnavailable");
-
-        let resp = handle_host_call(
-            7,
-            "hello",
-            "host.feed.update_settings",
-            Some(&json!({ "guild_id": 42, "settings": ServerSettings::default() })),
-            None,
-            None,
-        )
-        .await;
-        assert_err(resp, 7, "HostUnavailable");
-    }
-
-    #[tokio::test]
-    async fn feed_settings_without_source_is_host_unavailable() {
-        let host = services(None, Some(sample_config()));
-
-        let resp = handle_host_call(
-            7,
-            "hello",
-            "host.feed.get_settings",
-            Some(&json!({ "guild_id": 42 })),
-            Some(&host),
-            None,
-        )
-        .await;
-        assert_err(resp, 7, "HostUnavailable");
-    }
-
-    #[tokio::test]
-    async fn feed_settings_missing_guild_id_is_invalid_args() {
-        let mock = MockFeedSettingsSource::new();
-        let host = feed_services(Arc::new(mock));
-
-        let resp = handle_host_call(
-            7,
-            "hello",
-            "host.feed.get_settings",
-            None,
-            Some(&host),
-            None,
-        )
-        .await;
-        assert_err(resp, 7, "InvalidArgs");
-    }
-
-    #[tokio::test]
-    async fn feed_settings_malformed_snapshot_is_invalid_args() {
-        let mock = MockFeedSettingsSource::new();
-        let host = feed_services(Arc::new(mock));
-
-        let resp = handle_host_call(
-            7,
-            "hello",
-            "host.feed.update_settings",
-            Some(&json!({ "guild_id": 42, "settings": "not-a-snapshot" })),
-            Some(&host),
-            None,
-        )
-        .await;
-        assert_err(resp, 7, "InvalidArgs");
-    }
-
-    #[tokio::test]
-    async fn feed_settings_service_failure_is_feed_settings_error() {
-        let mut mock = MockFeedSettingsSource::new();
-        mock.expect_get_settings()
-            .with(eq(42u64))
-            .times(1)
-            .returning(|_| {
-                Err(FeedSettingsError::Service(ServiceError::UnexpectedResult {
-                    message: "no such guild".into(),
-                }))
-            });
-        let host = feed_services(Arc::new(mock));
-
-        let resp = handle_host_call(
-            7,
-            "hello",
-            "host.feed.get_settings",
-            Some(&json!({ "guild_id": 42 })),
-            Some(&host),
-            None,
-        )
-        .await;
-        let msg = assert_err(resp, 7, "FeedSettingsError");
-        assert!(msg.contains("no such guild"), "msg: {msg}");
-    }
-
-    #[tokio::test]
-    async fn feed_settings_string_guild_id_parses() {
-        let mut mock = MockFeedSettingsSource::new();
-        mock.expect_get_settings()
-            .with(eq(42u64))
-            .times(1)
-            .returning(|_| Ok(sample_settings()));
-        let host = feed_services(Arc::new(mock));
-
-        let resp = handle_host_call(
-            7,
-            "hello",
-            "host.feed.get_settings",
-            Some(&json!({ "guild_id": "42" })),
-            Some(&host),
-            None,
-        )
-        .await;
-        assert_ok(resp, 7);
-    }
-
     // ── voice settings ────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn retired_feed_caps_are_unknown_host_ops() {
+        for op in ["host.feed.get_settings", "host.feed.update_settings"] {
+            let response = handle_host_call(7, "hello", op, None, None, None).await;
+            assert_err(response, 7, "UnknownOp");
+        }
+    }
 
     fn voice_sample_settings() -> ServerSettings {
         ServerSettings {
@@ -3037,7 +2768,6 @@ mod tests {
             kv: None,
             engine: None,
             stats: Arc::new(StatsHandle::default()),
-            feeds: None,
             voice: Some(voice),
             welcome: None,
             previews: None,

@@ -124,19 +124,20 @@ _Avoid_: host command, host method
 
 **Service RPC**:
 A host op that mirrors one method of a host service, for example
-`host.feed.get_settings`. The service stays the single source of truth,
+`host.voice.get_settings`. The service stays the single source of truth,
 and the plugin stays a thin client. Ops are shaped by services, never by
-plugins: the host API grows only when the host domain grows. See Host op,
-Panel plugin, and ADR-0010.
+plugins: the host API grows only when the host domain grows. Feed settings
+are plugin-owned and do not use this seam. See Host op, Panel plugin, and
+ADR-0010.
 _Avoid_: bespoke op, plugin-shaped op
 
 **Panel plugin**:
-A plugin crate that owns one settings panel end to end — the interactive
-settings view for one feature, such as feed settings, voice settings, or
-welcome. It renders the view, answers its interactions, and reaches
-service data through service RPCs. The panel migration turns the three
-host-side panels into panel plugins, one crate each. See Service RPC and
-ADR-0009.
+A plugin crate that owns one settings panel end to end, such as feed
+settings, voice settings, or welcome. It renders the view and answers its
+interactions. Voice and Welcome reach host data through service RPCs; Feed
+uses its own repository and embedded migrations. The panel migration turns
+the three host-side panels into panel plugins, one crate each. See Service
+RPC and ADR-0009.
 _Avoid_: host panel, feature panel
 
 **Settings**:

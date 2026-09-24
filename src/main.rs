@@ -11,18 +11,13 @@ use log::debug;
 use log::info;
 use pwr_bot::bot::Bot;
 use pwr_bot::config::Config;
-use pwr_bot::event::FeedUpdateEvent;
 use pwr_bot::event::VoiceStateEvent;
 use pwr_bot::event::event_bus::EventBus;
-use pwr_bot::feed::Platforms;
 use pwr_bot::logging::setup_logging;
 use pwr_bot::repo::PgRepos;
 use pwr_bot::repo::traits::Repos;
 use pwr_bot::service::Services;
-use pwr_bot::subscriber::discord_dm::DiscordDmSubscriber;
-use pwr_bot::subscriber::discord_guild::DiscordGuildSubscriber;
 use pwr_bot::subscriber::voice_state::VoiceStateSubscriber;
-use pwr_bot::task::series_feed_publisher::SeriesFeedPublisher;
 use pwr_bot::task::voice_heartbeat::VoiceHeartbeatManager;
 
 #[tokio::main]
@@ -41,16 +36,14 @@ async fn main() -> Result<()> {
     let event_bus = Arc::new(EventBus::new());
 
     let repos = setup_database(&config, init_start).await?;
-    let platforms = Arc::new(Platforms::new());
-    let services = setup_services(repos.clone(), platforms.clone()).await?;
+    let services = setup_services(repos.clone()).await?;
 
     let voice_heartbeat = setup_voice_tracking(&services, init_start).await?;
 
     let voice_subscriber = Arc::new(VoiceStateSubscriber::new(services.clone()));
-    let bot = setup_bot(
+    setup_bot(
         &config,
         event_bus.clone(),
-        platforms,
         services.clone(),
         repos.clone(),
         voice_subscriber.clone(),
@@ -58,14 +51,7 @@ async fn main() -> Result<()> {
     )
     .await?;
 
-    setup_subscribers(
-        event_bus.clone(),
-        bot.clone(),
-        services.clone(),
-        voice_subscriber,
-    )
-    .await?;
-    setup_publishers(&config, &services, event_bus.clone(), init_start)?;
+    setup_subscribers(event_bus.clone(), voice_subscriber).await?;
 
     info!(
         "pwr-bot is up in {:.2}s. Press Ctrl+C to stop.",
@@ -105,12 +91,9 @@ async fn setup_database(
     Ok(Arc::new(repos))
 }
 
-async fn setup_services(
-    repos: Arc<dyn Repos + Send + Sync>,
-    platforms: Arc<Platforms>,
-) -> Result<Arc<Services>> {
+async fn setup_services(repos: Arc<dyn Repos + Send + Sync>) -> Result<Arc<Services>> {
     debug!("Setting up Services...");
-    Ok(Arc::new(Services::new(repos, platforms).await?))
+    Ok(Arc::new(Services::new(repos).await?))
 }
 
 async fn setup_voice_tracking(
@@ -140,22 +123,13 @@ async fn setup_voice_tracking(
 async fn setup_bot(
     config: &Arc<Config>,
     event_bus: Arc<EventBus>,
-    platforms: Arc<Platforms>,
     services: Arc<Services>,
     repos: Arc<dyn Repos + Send + Sync>,
     voice_subscriber: Arc<VoiceStateSubscriber>,
     init_start: Instant,
 ) -> Result<Arc<Bot>> {
     info!("Starting bot...");
-    let mut bot = Bot::new(
-        config.clone(),
-        event_bus,
-        platforms,
-        services,
-        repos,
-        voice_subscriber,
-    )
-    .await?;
+    let mut bot = Bot::new(config.clone(), event_bus, services, repos, voice_subscriber).await?;
 
     bot.start();
     let bot = Arc::new(bot);
@@ -169,44 +143,9 @@ async fn setup_bot(
 
 async fn setup_subscribers(
     event_bus: Arc<EventBus>,
-    bot: Arc<Bot>,
-    services: Arc<Services>,
     voice_subscriber: Arc<VoiceStateSubscriber>,
 ) -> Result<()> {
     debug!("Setting up Subscribers...");
-
-    let discord_dm_subscriber = Arc::new(DiscordDmSubscriber::new(bot.clone(), services.clone()));
-    let discord_channel_subscriber = Arc::new(DiscordGuildSubscriber::new(bot, services));
-
-    event_bus
-        .register_subcriber::<FeedUpdateEvent, _>(discord_dm_subscriber)
-        .register_subcriber::<FeedUpdateEvent, _>(discord_channel_subscriber)
-        .register_subcriber::<VoiceStateEvent, _>(voice_subscriber);
-
-    Ok(())
-}
-
-fn setup_publishers(
-    config: &Config,
-    services: &Services,
-    event_bus: Arc<EventBus>,
-    init_start: Instant,
-) -> Result<()> {
-    if !config.features.feed_publisher {
-        return Ok(());
-    }
-    debug!("Setting up Publishers...");
-
-    SeriesFeedPublisher::new(
-        services.feed_subscription.clone(),
-        event_bus,
-        config.poll_interval,
-    )
-    .start()?;
-
-    info!(
-        "Publishers setup complete ({:.2}s).",
-        init_start.elapsed().as_secs_f64()
-    );
+    event_bus.register_subcriber::<VoiceStateEvent, _>(voice_subscriber);
     Ok(())
 }

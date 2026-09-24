@@ -44,13 +44,12 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
+use std::time::Instant;
 
 pub use error::InstallError;
 pub use error::PluginError;
 pub use events::PluginEventRouter;
 pub use events::VOICE_STATE_EVENT;
-pub use host::FeedSettingsError;
-pub use host::FeedSettingsSource;
 pub use host::HostConfig;
 pub use host::HostError;
 pub use host::HostIo;
@@ -60,7 +59,6 @@ pub use host::KvStore;
 pub use host::PgKvStore;
 pub use host::SerenityHostIo;
 pub use host::SerenityStatsSource;
-pub use host::ServiceFeedSettingsSource;
 pub use host::ServiceVoiceSettingsSource;
 pub use host::ServiceWelcomeSettingsSource;
 pub use host::StatsError;
@@ -102,6 +100,7 @@ use tokio::process::ChildStdin;
 use tokio::process::ChildStdout;
 use tokio::process::Command;
 use tokio::sync::Mutex;
+use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::sync::watch;
 pub use view::ViewValidationError;
@@ -124,6 +123,12 @@ const CALL_TIMEOUT: Duration = Duration::from_secs(10);
 /// grace, then SIGKILL to the group.
 const STOP_TIMEOUT: Duration = Duration::from_secs(10);
 
+struct PendingCall {
+    response: oneshot::Sender<Msg>,
+    progress: Option<mpsc::UnboundedSender<Value>>,
+    last_progress: Arc<Mutex<Instant>>,
+}
+
 /// A running plugin subprocess: owns the stdio pipes, the reader/waiter
 /// tasks, and call correlation.
 pub struct RunningPlugin {
@@ -136,7 +141,7 @@ pub struct RunningPlugin {
     /// closes the pipe, and the plugin treats stdin EOF as exit.
     stdin: Arc<Mutex<Option<ChildStdin>>>,
     /// In-flight calls: correlation id -> the oneshot awaiting its resp.
-    inflight: Arc<Mutex<HashMap<u64, oneshot::Sender<Msg>>>>,
+    inflight: Arc<Mutex<HashMap<u64, PendingCall>>>,
     /// Host-side monotonic call-id source.
     ids: Mutex<CallIdSeq>,
     /// The child handle; taken by the waiter task once the plugin dies.
@@ -329,9 +334,37 @@ impl RunningPlugin {
         cmd: Option<&str>,
         args: Option<Value>,
     ) -> Result<Msg, PluginError> {
+        self.call_inner(op, cmd, args, None).await
+    }
+
+    pub async fn call_with_progress(
+        &self,
+        op: &str,
+        cmd: Option<&str>,
+        args: Option<Value>,
+        progress: mpsc::UnboundedSender<Value>,
+    ) -> Result<Msg, PluginError> {
+        self.call_inner(op, cmd, args, Some(progress)).await
+    }
+
+    async fn call_inner(
+        &self,
+        op: &str,
+        cmd: Option<&str>,
+        args: Option<Value>,
+        progress: Option<mpsc::UnboundedSender<Value>>,
+    ) -> Result<Msg, PluginError> {
         let id = self.ids.lock().await.next_id();
-        let (tx, rx) = oneshot::channel();
-        self.inflight.lock().await.insert(id, tx);
+        let (response, mut receiver) = oneshot::channel();
+        let last_progress = Arc::new(Mutex::new(Instant::now()));
+        self.inflight.lock().await.insert(
+            id,
+            PendingCall {
+                response,
+                progress,
+                last_progress: last_progress.clone(),
+            },
+        );
 
         let msg = Msg::Call {
             id,
@@ -360,20 +393,27 @@ impl RunningPlugin {
             }
         }
 
-        match tokio::time::timeout(CALL_TIMEOUT, rx).await {
-            Ok(Ok(msg)) => Ok(msg),
-            // The sender was dropped without a response — the plugin died
-            // while the call was in flight.
-            Ok(Err(_)) => Err(PluginError::PluginDied {
-                name: self.name.clone(),
-            }),
-            Err(_) => {
-                self.inflight.lock().await.remove(&id);
-                Err(PluginError::CallTimeout {
-                    name: self.name.clone(),
-                    op: op.to_string(),
-                    timeout: CALL_TIMEOUT,
-                })
+        loop {
+            let idle = last_progress.lock().await.elapsed();
+            let remaining = CALL_TIMEOUT.saturating_sub(idle);
+            match tokio::time::timeout(remaining, &mut receiver).await {
+                Ok(Ok(message)) => return Ok(message),
+                Ok(Err(_)) => {
+                    return Err(PluginError::PluginDied {
+                        name: self.name.clone(),
+                    });
+                }
+                Err(_) => {
+                    if last_progress.lock().await.elapsed() < CALL_TIMEOUT {
+                        continue;
+                    }
+                    self.inflight.lock().await.remove(&id);
+                    return Err(PluginError::CallTimeout {
+                        name: self.name.clone(),
+                        op: op.to_string(),
+                        timeout: CALL_TIMEOUT,
+                    });
+                }
             }
         }
     }
@@ -663,7 +703,7 @@ async fn run_stderr(stderr: ChildStderr, name: String) {
 #[allow(clippy::too_many_arguments)] // private reader loop; parameters mirror the protocol roles
 async fn run_reader(
     mut reader: BufReader<ChildStdout>,
-    inflight: Arc<Mutex<HashMap<u64, oneshot::Sender<Msg>>>>,
+    inflight: Arc<Mutex<HashMap<u64, PendingCall>>>,
     pongs: Arc<AtomicU64>,
     name: String,
     died: oneshot::Sender<()>,
@@ -703,9 +743,9 @@ async fn run_reader(
         }
     }
 
-    let pending: Vec<(u64, oneshot::Sender<Msg>)> = inflight.lock().await.drain().collect();
-    for (id, tx) in pending {
-        let _ = tx.send(Msg::resp_err(
+    let pending: Vec<(u64, PendingCall)> = inflight.lock().await.drain().collect();
+    for (id, pending) in pending {
+        let _ = pending.response.send(Msg::resp_err(
             id,
             WireError {
                 kind: "PluginDied".into(),
@@ -725,7 +765,7 @@ async fn run_reader(
 #[allow(clippy::too_many_arguments)] // private dispatch; parameters mirror the protocol roles
 async fn dispatch(
     msg: &Msg,
-    inflight: &Arc<Mutex<HashMap<u64, oneshot::Sender<Msg>>>>,
+    inflight: &Arc<Mutex<HashMap<u64, PendingCall>>>,
     pongs: &Arc<AtomicU64>,
     name: &str,
     stdin: &Arc<Mutex<Option<ChildStdin>>>,
@@ -735,10 +775,21 @@ async fn dispatch(
 ) {
     match msg {
         Msg::Resp { id, .. } => {
-            if let Some(tx) = inflight.lock().await.remove(id) {
-                let _ = tx.send(msg.clone());
+            if let Some(pending) = inflight.lock().await.remove(id) {
+                let _ = pending.response.send(msg.clone());
             } else {
                 debug!("plugin {name} answered id {id} which has no waiting call");
+            }
+        }
+        Msg::Progress { id, data } => {
+            let pending = inflight.lock().await;
+            let Some(pending) = pending.get(id) else {
+                debug!("plugin {name} progressed id {id} which has no waiting call");
+                return;
+            };
+            *pending.last_progress.lock().await = Instant::now();
+            if let Some(progress) = &pending.progress {
+                let _ = progress.send(data.clone());
             }
         }
         Msg::Call { id, op, args, .. } => {
@@ -850,13 +901,13 @@ mod tests {
         };
         assert_eq!(v, API_VERSION);
         assert_eq!(name, "host");
-        assert_eq!(caps.len(), 18, "every v1 host cap must be announced");
+        assert_eq!(caps.len(), 17, "every v1 host cap must be announced");
         assert!(caps.iter().any(|c| c == "host.defer"));
+        assert!(caps.iter().any(|c| c == "host.open_dm"));
         assert!(caps.iter().any(|c| c == "host.kv.get"));
         assert!(caps.iter().any(|c| c == "host.get_config"));
         assert!(caps.iter().any(|c| c == "host.list_plugins"));
         assert!(caps.iter().any(|c| c == "host.stats"));
-        assert!(caps.iter().any(|c| c == "host.feed.get_settings"));
         assert!(caps.iter().any(|c| c == "host.voice.get_settings"));
         assert!(caps.iter().any(|c| c == "host.voice.update_settings"));
         assert!(caps.iter().any(|c| c == "host.welcome.get_settings"));
@@ -883,6 +934,43 @@ mod tests {
         )
         .await;
         assert_eq!(pongs.load(Ordering::Relaxed), 1);
+    }
+
+    #[tokio::test]
+    async fn progress_routes_to_the_waiting_call() {
+        let inflight = Arc::new(Mutex::new(HashMap::new()));
+        let (response, _receiver) = oneshot::channel();
+        let (progress_tx, mut progress_rx) = mpsc::unbounded_channel();
+        inflight.lock().await.insert(
+            7,
+            PendingCall {
+                response,
+                progress: Some(progress_tx),
+                last_progress: Arc::new(Mutex::new(Instant::now())),
+            },
+        );
+        let pongs = Arc::new(AtomicU64::new(0));
+        let stdin = Arc::new(Mutex::new(None::<ChildStdin>));
+
+        dispatch(
+            &Msg::Progress {
+                id: 7,
+                data: serde_json::json!({ "phase": "working" }),
+            },
+            &inflight,
+            &pongs,
+            "feed",
+            &stdin,
+            None,
+            None,
+            None,
+        )
+        .await;
+
+        assert_eq!(
+            progress_rx.recv().await,
+            Some(serde_json::json!({ "phase": "working" }))
+        );
     }
 
     // ── plugin→host event broadcast ────────────────────────────────────────

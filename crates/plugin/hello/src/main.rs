@@ -308,6 +308,7 @@ fn main() -> ExitCode {
                     }
                 }
                 Msg::Pong => {}
+                Msg::Progress { .. } => {}
                 // The host answers our hello with its own; tolerate it silently.
                 // Logging it would be noise, and the stderr test asserts on a
                 // dedicated fixture line instead.

@@ -77,7 +77,6 @@ fn services(
         kv: None,
         engine: None,
         stats: Arc::new(StatsHandle::default()),
-        feeds: None,
         voice: Some(voice),
         welcome: None,
         previews: None,

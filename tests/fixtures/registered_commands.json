@@ -182,6 +182,7 @@
     "contexts": [
       0
     ],
+    "default_member_permissions": "40",
     "description": "Manage feed subscription settings",
     "description_localizations": {},
     "name": "feed-settings",

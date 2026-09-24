@@ -1,8 +1,7 @@
 //! End-to-end test for the host-session exit seam (`#165`): the Router's
 //! Settings section handoff adopts a live host message into a section's
-//! panel plugin view. The plugin is spawned over the real stdio wire with a
-//! mockall mock of the host's [`FeedSettingsSource`]; the Discord edit is a
-//! mock ([`MockHostIo`]). Pure stdio — no database, no Discord.
+//! panel plugin view. The plugin is spawned over the real stdio wire and owns
+//! its test database; the Discord edit is a mock ([`MockHostIo`]).
 //!
 //! Assertions mirror the handoff contract:
 //! - `adopt_message_into_section` invokes the section's command, morphs the
@@ -15,6 +14,8 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use feed::repo::Repository;
+use feed::service::feed_settings::FeedSettingsService;
 use mockall::predicate::eq;
 use poise::serenity_prelude as serenity;
 use pwr_bot::bot::command::session_exit::adopt_message_into_section;
@@ -24,47 +25,39 @@ use pwr_bot::plugin::InteractionEngine;
 use pwr_bot::plugin::PluginManager;
 use pwr_bot::plugin::RespawnPolicy;
 use pwr_bot::plugin::StatsHandle;
-use pwr_bot::plugin::host::MockFeedSettingsSource;
 use pwr_bot::plugin::host::MockHostIo;
-use pwr_plugin_protocol::ServerSettings;
+use pwr_plugin_protocol::FeedsSettings;
 use pwr_poise_components::IS_COMPONENTS_V2;
 use serde_json::Value;
 use serde_json::json;
 
 mod probe;
 use probe::probe_binary;
+#[path = "support/db.rs"]
+mod support_db;
 
 /// The guild the panel keys its settings by.
 const GUILD_ID: u64 = 42;
 
-/// A settings snapshot with every feeds field set, so wire round trips are
-/// observable end to end.
-fn sample_settings() -> ServerSettings {
-    ServerSettings {
-        feeds: pwr_plugin_protocol::FeedsSettings {
-            enabled: Some(true),
-            channel_id: Some("123456789".into()),
-            subscribe_role_id: Some("987654321".into()),
-            unsubscribe_role_id: None,
-        },
-        ..ServerSettings::default()
-    }
+fn admin_context() -> Value {
+    json!({
+        "user_id": 7,
+        "member_roles": [],
+        "member_permissions": 1 << 5,
+    })
 }
 
-/// The services the panel shares with the handoff: the feed seam serves the
-/// panel's settings RPCs, the io seam is the mock the adoption edits through.
-fn services(io: Arc<MockHostIo>, feeds: Arc<MockFeedSettingsSource>) -> Arc<HostServices> {
+fn services(io: Arc<MockHostIo>, db_url: String) -> Arc<HostServices> {
     Arc::new(HostServices {
         io: Some(io),
         config: Some(HostConfig {
-            db_url: "postgres://test".into(),
+            db_url,
             data_path: PathBuf::from("/tmp/pwr-bot-test"),
             poll_interval: std::time::Duration::from_secs(30),
         }),
         kv: None,
         engine: None,
         stats: Arc::new(StatsHandle::default()),
-        feeds: Some(feeds),
         voice: None,
         welcome: None,
         previews: None,
@@ -81,12 +74,23 @@ async fn the_adopted_message_answers_toggles_like_any_panel() {
     let channel_id = 987_654_321_u64;
     let message_id = 123_456_789_u64;
 
-    let mut feeds = MockFeedSettingsSource::new();
-    feeds
-        .expect_get_settings()
-        .with(eq(GUILD_ID))
-        .times(1)
-        .returning(|_| Ok(sample_settings()));
+    let db_url = support_db::db_url().await;
+    let repository = Repository::connect(&db_url)
+        .await
+        .expect("connect feed plugin database");
+    repository.migrate().await.expect("migrate feed database");
+    FeedSettingsService::new(repository)
+        .update(
+            GUILD_ID,
+            FeedsSettings {
+                enabled: Some(true),
+                channel_id: Some("123456789".into()),
+                subscribe_role_id: Some("987654321".into()),
+                unsubscribe_role_id: None,
+            },
+        )
+        .await
+        .expect("seed feed settings");
 
     let mut mock = MockHostIo::new();
     mock.expect_edit_message()
@@ -112,7 +116,7 @@ async fn the_adopted_message_answers_toggles_like_any_panel() {
     let engine = InteractionEngine::new();
     let manager = Arc::new(
         PluginManager::new(None, RespawnPolicy::default())
-            .with_host_services(services(io.clone(), Arc::new(feeds))),
+            .with_host_services(services(io.clone(), db_url)),
     );
     let panel = manager
         .spawn("feed", probe_binary("feed"), None, &[], &[])
@@ -126,7 +130,7 @@ async fn the_adopted_message_answers_toggles_like_any_panel() {
         &engine,
         panel.clone(),
         "feed-settings",
-        json!({ "guild_id": GUILD_ID }),
+        json!({ "guild_id": GUILD_ID, "_context": admin_context() }),
         io.as_ref(),
         Some(&pwr_bot::plugin::preview::PreviewResolver::new(Vec::new())),
         &message,
@@ -141,9 +145,12 @@ async fn the_adopted_message_answers_toggles_like_any_panel() {
     );
 
     let toggled = engine
-        .interact_validated(message_id, "feeds:toggle", json!({}), |data| {
-            pwr_bot::plugin::validate_view_data(data).map_err(Into::into)
-        })
+        .interact_validated(
+            message_id,
+            "feeds:toggle",
+            json!({ "_context": admin_context() }),
+            |data| pwr_bot::plugin::validate_view_data(data).map_err(Into::into),
+        )
         .await
         .expect("the toggle click routes to the adopted session");
     assert_eq!(

@@ -56,29 +56,37 @@ impl Cog for Cogs {
 }
 ```
 
-## UI Views (TEA host runtime)
+## UI Views
 
-Interactive views follow the Elm Architecture (see `docs/adr/0005-tea-gui-architecture.md`):
+Interactive views follow the Elm Architecture (see `docs/adr/0005-tea-gui-architecture.md`).
+
+### Host-owned views
 
 - **Core** `src/update/<feature>.rs` — pure `fn update(msg, &mut model) -> Vec<Effect>`; imports no serenity/tokio/diesel/poise (image bytes OK, serenity types not)
 - **Shell** `src/bot/gui/` — sealed `GuiFeature` trait (pure `view`, `translate`, `attachments`, `open_modal` hook) + `Host` event loop in `rt.rs`
 - **Adapters** — per-feature `EffectHandler` impls executing effects against `ctx.data().service`
 - Interaction substrate (Action, ActionRegistry, SelectValues, ViewChannel, ViewEvent) lives in `src/bot/view/` — the collectors the Host runs on
-- Snapshot tests in each feature pin rendered component JSON (custom_id timestamps normalized) — run them when touching any view
+- Snapshot tests in each host feature pin rendered component JSON (custom_id timestamps normalized) — run them when touching any host view
+
+### Plugin views
+
+- Plugin-side pure updates live in `crates/plugin/<name>/src/update/`.
+- Plugin render functions live beside those updates in `src/view/`.
+- The plugin command loop executes effects directly against its service/repository; plugin views do not run through the host `GuiFeature` or `Host` runtime.
+- Plugin interaction sessions are author-bound; the interaction engine rejects clicks from a different user before the plugin sees them.
 
 ## Business Logic (Update Pattern)
 
-Pure, testable state mutations live in `src/update/<feature>.rs` as free
-`fn update(msg, &mut Model) -> Vec<Effect>` functions (plus `Model`, `Msg`,
-`Effect` vocabularies and unit tests). Handlers in `src/bot/command/` parse
-Discord interactions into `Msg`s, and side effects execute only through the
-feature's `EffectHandler` adapter. See `docs/adr/0005-tea-gui-architecture.md`
-for the layering rules. Existing modules: `about`, `feed_batch`,
-`register`, `unregister`, `feed_list`, `voice_stats`,
-`voice_leaderboard`, `plugins`, `pagination`.
+Pure, testable state mutations live in `src/update/<feature>.rs` for host features
+and in the plugin's `src/update/` for plugin features. Handlers parse Discord
+interactions into `Msg` values, run `update`, and execute returned effects
+through the feature's adapter or the plugin's direct service loop. Existing host
+modules include `about`, `register`, `unregister`, `settings`, `voice_stats`,
+`voice_leaderboard`, `plugins`, and `pagination`; feed list and batch updates
+live in the feed plugin.
 
-- Place pure logic in `src/update/<feature>.rs` (Model, Msg, Effect, `update` fn, tests)
-- Handlers in `src/bot/command/` parse Discord interactions into `Msg`s, run `update`, and route returned `Effect`s to the feature's `EffectHandler` adapter (never execute effects inline)
+- Place host pure logic in `src/update/<feature>.rs` (Model, Msg, Effect, `update` fn, tests)
+- Place plugin pure logic in `crates/plugin/<name>/src/update/` with the plugin's direct service adapter
 
 ## Database
 

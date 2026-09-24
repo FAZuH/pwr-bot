@@ -204,6 +204,9 @@ impl PluginSession {
                         .with_context(|| "answering the plugin's ping")?;
                 }
                 Msg::Pong => {}
+                Msg::Progress { id: reply_id, .. } => {
+                    eprintln!("note: plugin progress for id {reply_id} ignored by preview");
+                }
                 Msg::Hello { .. } => {
                     eprintln!("note: plugin sent a second hello; ignored");
                 }

@@ -17,7 +17,7 @@ use serde_json::json;
 
 use crate::bot::command::welcome::image_generator::WelcomeCardData;
 use crate::bot::command::welcome::image_generator::WelcomeImageGenerator;
-use crate::service::traits::FeedSubscriptionProvider;
+use crate::service::traits::SettingsProvider;
 
 /// Filename for the welcome preview image attachment.
 pub const WELCOME_FILE: &str = "welcome_preview.png";
@@ -40,17 +40,14 @@ pub trait AttachmentRenderer: Send + Sync {
 /// plugin free of rendering dependencies; the registry keeps the transport
 /// renderer-agnostic.
 pub struct WelcomeAttachmentRenderer {
-    service: Arc<dyn FeedSubscriptionProvider>,
+    service: Arc<dyn SettingsProvider>,
     generator: Arc<WelcomeImageGenerator>,
 }
 
 impl WelcomeAttachmentRenderer {
     /// Wraps the settings source the card renders from and the generator
     /// that renders it.
-    pub fn new(
-        service: Arc<dyn FeedSubscriptionProvider>,
-        generator: Arc<WelcomeImageGenerator>,
-    ) -> Self {
+    pub fn new(service: Arc<dyn SettingsProvider>, generator: Arc<WelcomeImageGenerator>) -> Self {
         Self { service, generator }
     }
 }
@@ -282,7 +279,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_welcome_renderer_gates_on_enabled_cards() {
-        let mut mock = crate::service::traits::MockFeedSubscriptionProvider::new();
+        let mut mock = crate::service::traits::MockSettingsProvider::new();
         mock.expect_get_server_settings()
             .with(mockall::predicate::eq(42))
             .times(1)

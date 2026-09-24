@@ -52,6 +52,8 @@ use crate::plugin::HostIo;
 use crate::plugin::InteractionEngine;
 use crate::plugin::RunningPlugin;
 use crate::plugin::SerenityHostIo;
+use crate::plugin::command::ACTOR_CONTEXT_KEY;
+use crate::plugin::command::actor_context;
 use crate::plugin::edit_body_for_transport;
 use crate::plugin::validate_view_data;
 
@@ -108,8 +110,8 @@ pub async fn dismiss_root_view(
 /// Hands the live view message to a settings section's panel: resolves the
 /// running plugin, then adopts the message into the view its command
 /// renders (see [`adopt_message_into_section`]). The invoke args carry the
-/// invocation's guild when the interaction ran in one — the panel plugins
-/// key their settings by guild.
+/// invocation's guild and actor context when the interaction ran in a guild —
+/// the panel plugins key their settings by guild and authorize writes.
 ///
 /// Fails when the plugin is not running, the invoke fails, the Gate rejects
 /// the payload, or the edit fails — the caller decides what a failed handoff
@@ -127,6 +129,9 @@ pub async fn handoff_to_section(
     let mut args = json!({});
     if let Some(guild_id) = ctx.guild_id() {
         args["guild_id"] = json!(guild_id.get());
+    }
+    if let poise::Context::Application(app) = ctx {
+        args[ACTOR_CONTEXT_KEY] = actor_context(app.interaction);
     }
     let io = SerenityHostIo::new(ctx.serenity_context().http.clone());
     adopt_message_into_section(
@@ -166,6 +171,8 @@ pub async fn adopt_message_into_section(
     let channel_id = serenity::ChannelId::new(message.channel_id.get());
     let message_id = message.id;
     let guild_id = args.get("guild_id").and_then(serde_json::Value::as_u64);
+    let author_id = crate::plugin::interaction::author_id_from_payload(&args)
+        .ok_or_else(|| Error::from("settings handoff is missing its interaction author"))?;
     let spec = engine.invoke(plugin.clone(), command, args).await?;
     validate_view_data(&spec.data)?;
     let (body, attachments) = match previews {
@@ -178,7 +185,9 @@ pub async fn adopt_message_into_section(
     };
     io.edit_message(channel_id.get(), message_id.get(), body, attachments)
         .await?;
-    engine.register(message_id, plugin, command, spec).await;
+    engine
+        .register(message_id, author_id, plugin, command, spec)
+        .await;
     Ok(())
 }
 

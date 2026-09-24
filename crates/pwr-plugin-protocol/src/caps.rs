@@ -22,6 +22,8 @@ pub enum HostCap {
     /// attachments. `files` requires `data`: a prose-only send cannot carry
     /// files.
     SendMessage,
+    /// Open or resolve a user's DM channel and return its channel id.
+    OpenDm,
     /// Edit a previously sent message.
     EditMessage,
     /// Acknowledge an interaction without a visible reply.
@@ -50,12 +52,6 @@ pub enum HostCap {
     ListPlugins,
     /// Read the live bot statistics shown by the host's `/about` command.
     Stats,
-    /// Read a guild's feed settings (the whole [`crate::ServerSettings`]
-    /// snapshot), mirroring the feed service's `get_server_settings`.
-    FeedGetSettings,
-    /// Write a guild's feed settings snapshot, mirroring the feed service's
-    /// `update_server_settings`.
-    FeedUpdateSettings,
     /// Read a guild's voice settings (the whole [`crate::ServerSettings`]
     /// snapshot), mirroring the voice service's `get_server_settings`.
     VoiceGetSettings,
@@ -77,6 +73,7 @@ pub enum HostCap {
 pub const ALL_CAPS: &[HostCap] = &[
     HostCap::Defer,
     HostCap::SendMessage,
+    HostCap::OpenDm,
     HostCap::EditMessage,
     HostCap::Acknowledge,
     HostCap::KvGet,
@@ -87,8 +84,6 @@ pub const ALL_CAPS: &[HostCap] = &[
     HostCap::GetConfig,
     HostCap::ListPlugins,
     HostCap::Stats,
-    HostCap::FeedGetSettings,
-    HostCap::FeedUpdateSettings,
     HostCap::VoiceGetSettings,
     HostCap::VoiceUpdateSettings,
     HostCap::WelcomeGetSettings,
@@ -103,6 +98,7 @@ impl HostCap {
         match self {
             HostCap::Defer => "host.defer",
             HostCap::SendMessage => "host.send_message",
+            HostCap::OpenDm => "host.open_dm",
             HostCap::EditMessage => "host.edit_message",
             HostCap::Acknowledge => "host.acknowledge",
             HostCap::KvGet => "host.kv.get",
@@ -113,8 +109,6 @@ impl HostCap {
             HostCap::GetConfig => "host.get_config",
             HostCap::ListPlugins => "host.list_plugins",
             HostCap::Stats => "host.stats",
-            HostCap::FeedGetSettings => "host.feed.get_settings",
-            HostCap::FeedUpdateSettings => "host.feed.update_settings",
             HostCap::VoiceGetSettings => "host.voice.get_settings",
             HostCap::VoiceUpdateSettings => "host.voice.update_settings",
             HostCap::WelcomeGetSettings => "host.welcome.get_settings",
@@ -188,11 +182,22 @@ mod tests {
 
     #[test]
     fn all_caps_is_exactly_the_v1_surface() {
-        assert_eq!(ALL_CAPS.len(), 18);
+        assert_eq!(ALL_CAPS.len(), 17);
         let mut seen = std::collections::HashSet::new();
         for cap in ALL_CAPS {
             assert!(seen.insert(*cap), "duplicate op in ALL_CAPS");
         }
+    }
+
+    #[test]
+    fn open_dm_cap_parses() {
+        assert_eq!(HostCap::parse("host.open_dm"), Some(HostCap::OpenDm));
+    }
+
+    #[test]
+    fn retired_feed_host_caps_do_not_parse() {
+        assert_eq!(HostCap::parse("host.feed.get_settings"), None);
+        assert_eq!(HostCap::parse("host.feed.update_settings"), None);
     }
 
     #[test]

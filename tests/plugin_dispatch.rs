@@ -76,7 +76,13 @@ async fn echo_args(command: &str, args: Value) -> (Arc<RunningPlugin>, Value) {
     );
     let engine = InteractionEngine::new();
     let spec = engine
-        .open(serenity::MessageId::new(1), plugin.clone(), command, args)
+        .open(
+            serenity::MessageId::new(1),
+            serenity::UserId::new(1),
+            plugin.clone(),
+            command,
+            args,
+        )
         .await
         .expect("open the view");
     let echoed = parse_echoed_args(&spec);

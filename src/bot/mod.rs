@@ -51,7 +51,6 @@ use crate::config::Config;
 use crate::entity::BotMetaKey;
 use crate::event::VoiceStateEvent;
 use crate::event::event_bus::EventBus;
-use crate::feed::Platforms;
 use crate::plugin::CatalogEntry;
 use crate::plugin::HostConfig;
 use crate::plugin::HostServices;
@@ -66,15 +65,16 @@ use crate::plugin::RespawnPolicy;
 use crate::plugin::RunningPlugin;
 use crate::plugin::SerenityHostIo;
 use crate::plugin::SerenityStatsSource;
-use crate::plugin::ServiceFeedSettingsSource;
 use crate::plugin::ServiceVoiceSettingsSource;
 use crate::plugin::ServiceWelcomeSettingsSource;
 use crate::plugin::StatsHandle;
 use crate::plugin::VOICE_STATE_EVENT;
+use crate::plugin::command::ACTOR_CONTEXT_KEY;
 use crate::plugin::command::PluginRoutes;
+use crate::plugin::command::actor_context_from_parts;
 use crate::plugin::command::commands_from_manifest;
 use crate::plugin::command::register_in_guild;
-use crate::plugin::command::routes_from_manifests;
+use crate::plugin::command::routes_from_manifests_with_reserved;
 use crate::plugin::edit_body_for_transport;
 use crate::plugin::interaction::DEFAULT_VIEW_TIMEOUT;
 use crate::plugin::validate_view_data;
@@ -86,7 +86,6 @@ use crate::update::about::AboutStats;
 /// Data shared across bot commands and contexts.
 pub struct Data {
     pub config: Arc<Config>,
-    pub platforms: Arc<Platforms>,
     pub service: Arc<Services>,
     pub repos: Arc<dyn Repos + Send + Sync>,
     pub plugin_manager: Arc<PluginManager>,
@@ -130,6 +129,7 @@ impl Data {
                 names.push(name.clone());
             }
         }
+        names.sort();
         names
     }
 
@@ -170,7 +170,6 @@ impl Bot {
     pub async fn new(
         config: Arc<Config>,
         event_bus: Arc<EventBus>,
-        platforms: Arc<Platforms>,
         service: Arc<Services>,
         repos: Arc<dyn Repos + Send + Sync>,
         voice_subscriber: Arc<VoiceStateSubscriber>,
@@ -199,7 +198,7 @@ impl Bot {
         // share: one generator for the process (ADR-0012).
         let previews = Arc::new(crate::plugin::preview::PreviewResolver::new(vec![
             Arc::new(crate::plugin::preview::WelcomeAttachmentRenderer::new(
-                service.feed_subscription.clone(),
+                service.settings.clone(),
                 Arc::new(
                     crate::bot::command::welcome::image_generator::WelcomeImageGenerator::new(),
                 ),
@@ -212,14 +211,11 @@ impl Bot {
             kv: Some(Arc::new(PgKvStore::new(repos.plugin_kv()))),
             engine: Some(plugin_engine.clone()),
             stats: stats_handle.clone(),
-            feeds: Some(Arc::new(ServiceFeedSettingsSource::new(
-                service.feed_subscription.clone(),
-            ))),
             voice: Some(Arc::new(ServiceVoiceSettingsSource::new(
                 service.voice_tracking.clone(),
             ))),
             welcome: Some(Arc::new(ServiceWelcomeSettingsSource::new(
-                service.feed_subscription.clone(),
+                service.settings.clone(),
             ))),
             previews: Some(previews.clone()),
             settings_returns: Some(settings_returns.clone()),
@@ -257,14 +253,25 @@ impl Bot {
         for (name, entry) in &catalog {
             route_sources.push((name.clone(), Some(entry.manifest.clone())));
         }
-        let plugin_routes = Arc::new(routes_from_manifests(route_sources));
+        route_sources.sort_by(|(left_name, _), (right_name, _)| {
+            let left_is_catalog = !core_manifests.contains_key(left_name);
+            let right_is_catalog = !core_manifests.contains_key(right_name);
+            right_is_catalog
+                .cmp(&left_is_catalog)
+                .then_with(|| left_name.cmp(right_name))
+        });
+        let host_command_names = host_command_names();
+        let plugin_routes = Arc::new(routes_from_manifests_with_reserved(
+            route_sources,
+            &host_command_names,
+        ));
 
-        let framework = Self::create_framework(&config, &catalog, &core_manifests)?;
+        let framework =
+            Self::create_framework(&config, &catalog, &core_manifests, &host_command_names)?;
 
         let start_time = Instant::now();
         let data = Arc::new(Data {
             config: config.clone(),
-            platforms,
             service,
             repos,
             plugin_manager,
@@ -363,9 +370,10 @@ impl Bot {
         config: &Config,
         catalog: &HashMap<String, CatalogEntry>,
         core_manifests: &HashMap<String, Manifest>,
+        host_command_names: &HashSet<String>,
     ) -> Result<Box<Framework<Data, Error>>> {
         let mut commands = Cogs.commands();
-        commands.extend(plugin_commands(core_manifests, catalog));
+        commands.extend(plugin_commands(core_manifests, catalog, host_command_names));
 
         let options = FrameworkOptions::<Data, Error> {
             commands,
@@ -419,24 +427,37 @@ impl Bot {
     }
 }
 
+pub(crate) fn host_command_names() -> HashSet<String> {
+    Cogs.commands()
+        .into_iter()
+        .map(|command| command.name.to_string())
+        .collect()
+}
+
 /// The plugin routing commands for the framework: core plugin manifests
 /// first, then catalog plugin manifests, each group sorted by plugin name
 /// so the assembled command order is stable across restarts.
 ///
-/// A catalog entry whose plugin also runs as a core plugin contributes
-/// nothing: its commands come from the core manifest only. Registering both
-/// copies makes `set_commands` fail with Discord's
-/// `APPLICATION_COMMANDS_DUPLICATE_NAME`. Catalog entries for core plugins
-/// exist so `/plugins list` and the install/update sources see them.
+/// Host Cog roots and earlier plugin roots are reserved. A catalog entry
+/// whose plugin also runs as a core plugin contributes nothing: its commands
+/// come from the core manifest only. Catalog entries for core plugins exist so
+/// `/plugins list` and the install/update sources see them.
 fn plugin_commands(
     core_manifests: &HashMap<String, Manifest>,
     catalog: &HashMap<String, CatalogEntry>,
+    reserved_names: &HashSet<String>,
 ) -> Vec<poise::Command<Data, Error>> {
     let mut commands = Vec::new();
+    let mut registered_names = HashSet::new();
     let mut core: Vec<&Manifest> = core_manifests.values().collect();
     core.sort_by(|a, b| a.name.cmp(&b.name));
     for manifest in core {
-        commands.extend(commands_from_manifest(manifest));
+        add_plugin_commands(
+            &mut commands,
+            &mut registered_names,
+            manifest,
+            reserved_names,
+        );
     }
     let mut entries: Vec<&CatalogEntry> = catalog.values().collect();
     entries.sort_by(|a, b| a.name.cmp(&b.name));
@@ -448,9 +469,34 @@ fn plugin_commands(
             );
             continue;
         }
-        commands.extend(commands_from_manifest(&entry.manifest));
+        add_plugin_commands(
+            &mut commands,
+            &mut registered_names,
+            &entry.manifest,
+            reserved_names,
+        );
     }
     commands
+}
+
+pub(crate) fn add_plugin_commands(
+    commands: &mut Vec<poise::Command<Data, Error>>,
+    registered_names: &mut HashSet<String>,
+    manifest: &Manifest,
+    reserved_names: &HashSet<String>,
+) {
+    for command in commands_from_manifest(manifest) {
+        let name = command.name.as_ref().to_string();
+        if reserved_names.contains(&name) {
+            warn!("skipping plugin command `{name}`: a host Cog owns that path");
+            continue;
+        }
+        if !registered_names.insert(name.clone()) {
+            warn!("skipping duplicate plugin command `{name}`: the first owner wins");
+            continue;
+        }
+        commands.push(command);
+    }
 }
 
 /// What a plugin's answer to a view interaction means for the message it
@@ -616,7 +662,12 @@ impl BotEventHandler {
                     stored_version.ok().flatten()
                 );
 
-                let commands = Cogs.commands();
+                let mut commands = Cogs.commands();
+                commands.extend(plugin_commands(
+                    &self.data.core_manifests,
+                    &self.data.plugin_catalog,
+                    &host_command_names(),
+                ));
                 match poise::builtins::register_globally(&self.http, &commands).await {
                     Ok(_) => {
                         info!("Commands registered globally successfully");
@@ -665,6 +716,8 @@ impl BotEventHandler {
         // register them in one bulk call: Discord's per-guild registration is
         // a bulk overwrite, so one call per plugin would clobber the others.
         let mut commands = Vec::new();
+        let mut registered_names = HashSet::new();
+        let host_command_names = host_command_names();
         for plugin_name in self.data.auto_enable_plugins() {
             let disabled = rows
                 .iter()
@@ -690,7 +743,12 @@ impl BotEventHandler {
                 );
                 continue;
             };
-            commands.extend(commands_from_manifest(manifest));
+            add_plugin_commands(
+                &mut commands,
+                &mut registered_names,
+                manifest,
+                &host_command_names,
+            );
         }
         if commands.is_empty() {
             return;
@@ -826,7 +884,13 @@ impl BotEventHandler {
         }
 
         let guild_id = interaction.guild_id.map(GuildId::get);
-        let raw = serde_json::to_value(interaction).unwrap_or_default();
+        let mut raw = serde_json::to_value(interaction).unwrap_or_default();
+        if let Some(raw_object) = raw.as_object_mut() {
+            raw_object.insert(
+                ACTOR_CONTEXT_KEY.into(),
+                actor_context_from_parts(interaction.user.id, interaction.member.as_deref()),
+            );
+        }
         let round_trip = self.data.plugin_engine.interact_validated(
             message_id,
             &interaction.data.custom_id,
@@ -1202,13 +1266,38 @@ mod tests {
             ("bravo".to_string(), entry_named("bravo")),
         ]);
 
-        let commands = plugin_commands(&core_manifests, &catalog);
+        let commands = plugin_commands(&core_manifests, &catalog, &HashSet::new());
         let names: Vec<&str> = commands
             .iter()
             .map(|command| command.name.as_ref())
             .collect();
 
         assert_eq!(names, ["alpha", "zeta", "bravo", "mike"]);
+    }
+
+    #[test]
+    fn host_cog_command_names_win_over_plugin_routes_and_registration() {
+        let mut manifest = manifest_named("plugin");
+        manifest.commands = vec![pwr_plugin_protocol::CommandDef {
+            create_command: serde_json::json!({
+                "name": "settings",
+                "description": "Plugin settings"
+            }),
+        }];
+        let core_manifests = HashMap::from([("plugin".to_string(), manifest.clone())]);
+        let reserved = host_command_names();
+        let routes = routes_from_manifests_with_reserved(
+            [("plugin".to_string(), Some(manifest))],
+            &reserved,
+        );
+        let commands = plugin_commands(&core_manifests, &HashMap::new(), &reserved);
+
+        assert!(!routes.contains_key("settings"));
+        assert!(
+            commands
+                .iter()
+                .all(|command| command.name.as_ref() != "settings")
+        );
     }
 
     /// A catalog entry for a plugin that also runs as a core plugin is
@@ -1219,7 +1308,7 @@ mod tests {
         let core_manifests = HashMap::from([("settings".to_string(), manifest_named("settings"))]);
         let catalog = HashMap::from([("settings".to_string(), entry_named("settings"))]);
 
-        let commands = plugin_commands(&core_manifests, &catalog);
+        let commands = plugin_commands(&core_manifests, &catalog, &HashSet::new());
         let names: Vec<&str> = commands
             .iter()
             .map(|command| command.name.as_ref())
@@ -1234,7 +1323,7 @@ mod tests {
         let core_manifests = HashMap::from([("settings".to_string(), manifest_named("settings"))]);
         let catalog = HashMap::from([("greet".to_string(), entry_named("greet"))]);
 
-        let commands = plugin_commands(&core_manifests, &catalog);
+        let commands = plugin_commands(&core_manifests, &catalog, &HashSet::new());
         let names: Vec<&str> = commands
             .iter()
             .map(|command| command.name.as_ref())
@@ -1256,7 +1345,11 @@ mod tests {
             (welcome::PLUGIN_NAME.to_string(), welcome::manifest()),
         ]);
         let mut commands = Cogs.commands();
-        commands.extend(plugin_commands(&core_manifests, &HashMap::new()));
+        commands.extend(plugin_commands(
+            &core_manifests,
+            &HashMap::new(),
+            &HashSet::new(),
+        ));
 
         let mut surface =
             serde_json::to_value(poise::builtins::create_application_commands(&commands))
