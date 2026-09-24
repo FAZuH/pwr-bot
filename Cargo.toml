@@ -69,14 +69,12 @@ libc = "0.2.182"
 log = "0.4.29"
 thiserror = "2.0.18"
 uuid = { version = "1.21.0", features = ["v4"] }
-governor = "0.10.4"
 tracing-appender = "0.2.4"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 wreq = { version = "0.16", features = ["stream", "query"] }
 wreq-util = "0.2"
 url = "2"
 image = "0.25"
-html2md = "0.2.15"
 sysinfo = "0.33"
 derive_builder = "0.20.2"
 contribution-grid = "2.0.1"

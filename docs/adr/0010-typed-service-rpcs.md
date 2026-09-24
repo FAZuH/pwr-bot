@@ -1,24 +1,19 @@
 # Publish typed service RPCs across the plugin boundary
 
 A plugin runs in a subprocess. It shares no memory with the host, and it
-cannot call a service directly. The only channel is the host-op protocol: a
-plugin sends a `Call` message with an op string, and the host answers it in
-`handle_host_call` (`src/plugin/host.rs`). The v1 surface holds eleven ops
-after `host.stats` landed — Discord I/O, the plugin kv store, host config,
-navigation, and live stats (`crates/pwr-plugin-protocol/src/caps.rs`). No
-op reaches the host's services.
-
-The panels from ADR-0009 read and write per-service settings. Their
-EffectHandlers call the service traits directly today —
-`get_server_settings` and `update_server_settings` on the feed and voice
-services (`src/service/traits.rs`) — through Context-free adapters
-(`src/bot/gui/feed_settings.rs`, `src/bot/gui/voice_settings.rs`,
-`src/bot/gui/welcome.rs`). Those calls must cross the process boundary,
-and the protocol must say how.
+cannot call a host service object directly. The only channel to host-owned
+services is the host-op protocol: a plugin sends a `Call` message with an op
+string, and the host answers it in `handle_host_call` (`src/plugin/host.rs`).
+The v1 surface holds
+seventeen ops after `host.open_dm` landed: Discord I/O, the plugin kv store,
+host config, navigation, live stats, and the voice and welcome settings pairs
+(`crates/pwr-plugin-protocol/src/caps.rs`). The voice and welcome ops dispatch
+to context-free adapters over the host services; feed no longer uses a host
+settings op and owns its repository directly.
 
 We decided that the host publishes typed RPC endpoints that mirror its own
-service methods — `host.feed.get_settings`, for example. Each endpoint has
-a fixed argument schema, like `parse_send_message` has today
+service methods, such as `host.voice.get_settings`. Each endpoint has a
+fixed argument schema, like `parse_send_message` has today
 (`src/plugin/host.rs`). A service stays the single source of truth for its
 data. A plugin stays a thin client: it calls the endpoint, gets typed data
 back, and renders. The calls map close to one-to-one onto the service
@@ -47,12 +42,11 @@ The consequences:
   after a plugin — `host.welcome.set_color`, for example — inverts the
   dependency. The host API grows because a plugin asked for it, and the
   op surface mirrors plugins instead of services.
-- **The rejected alternative is panels owning their settings state in the
-  plugin kv store** (`host.kv.get`, `host.kv.set`, `host.kv.delete`).
-  That inverts data ownership, splits the source of truth, and forces
-  service rewrites for code outside the panels that reads the same
-  settings — voice tracking checks `is_enabled` per guild
-  (`src/service/traits.rs`).
+- **The rejected alternative is host panels owning their settings state in
+  the plugin kv store** (`host.kv.get`, `host.kv.set`, `host.kv.delete`).
+  That inverts data ownership for Voice and Welcome and forces service
+  rewrites for code outside the panels that reads the same settings. Feed
+  now owns its settings table directly.
 
 ADR-0009 records the migration that creates the need. ADR-0011 records
 the modal capability the same seam needs.

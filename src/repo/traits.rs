@@ -36,101 +36,13 @@ pub trait CrudTable<T, ID>: TableBase {
     async fn replace(&self, model: &T) -> Result<ID, DatabaseError>;
 }
 
-/// Operations for the `feed` table.
+/// Read-only projections for the host database dump.
 #[async_trait]
-pub trait FeedRepository: CrudTable<FeedEntity, i32> + Send + Sync {
-    /// Returns all feeds associated with a specific tag.
-    async fn select_all_by_tag(&self, tag: &str) -> Result<Vec<FeedEntity>, DatabaseError>;
-    /// Finds a feed by its platform-specific source ID.
-    async fn select_by_source_id(
-        &self,
-        platform_id: &str,
-        source_id: &str,
-    ) -> Result<Option<FeedEntity>, DatabaseError>;
-    /// Searches for feeds by name within a subscriber's subscriptions.
-    async fn select_by_name_and_subscriber_id(
-        &self,
-        subscriber_id: &i32,
-        name_search: &str,
-        limit: Option<u32>,
-    ) -> Result<Vec<FeedEntity>, DatabaseError>;
-}
-
-/// Operations for the `feed_item` table.
-#[async_trait]
-pub trait FeedItemRepository: CrudTable<FeedItemEntity, i32> + Send + Sync {
-    /// Returns the most recently published item for a feed.
-    async fn select_latest_by_feed_id(
-        &self,
-        feed_id: i32,
-    ) -> Result<Option<FeedItemEntity>, DatabaseError>;
-    /// Returns all items for a specific feed.
-    async fn select_all_by_feed_id(
-        &self,
-        feed_id: i32,
-    ) -> Result<Vec<FeedItemEntity>, DatabaseError>;
-    /// Deletes all items associated with a feed.
-    async fn delete_all_by_feed_id(&self, feed_id: i32) -> Result<(), DatabaseError>;
-}
-
-/// Operations for the `subscriber` table (Guilds or DMs).
-#[async_trait]
-pub trait SubscriberRepository: CrudTable<SubscriberEntity, i32> + Send + Sync {
-    /// Returns all subscribers of a specific type that are subscribed to a feed.
-    async fn select_all_by_type_and_feed(
-        &self,
-        r#type: SubscriberType,
-        feed_id: i32,
-    ) -> Result<Vec<SubscriberEntity>, DatabaseError>;
-    /// Finds a subscriber by its type and Discord target ID (Guild ID or User ID).
-    async fn select_by_type_and_target(
-        &self,
-        r#type: &SubscriberType,
-        target_id: &str,
-    ) -> Result<Option<SubscriberEntity>, DatabaseError>;
-}
-
-/// Operations for the `feed_subscription` table.
-#[async_trait]
-pub trait FeedSubscriptionRepository: CrudTable<FeedSubscriptionEntity, i32> + Send + Sync {
-    /// Returns all subscriptions for a specific feed.
-    async fn select_all_by_feed_id(
-        &self,
-        feed_id: i32,
-    ) -> Result<Vec<FeedSubscriptionEntity>, DatabaseError>;
-    /// Returns all subscriptions for a specific subscriber.
-    async fn select_all_by_subscriber_id(
-        &self,
-        subscriber_id: i32,
-    ) -> Result<Vec<FeedSubscriptionEntity>, DatabaseError>;
-    /// Counts total subscriptions for a subscriber.
-    async fn count_by_subscriber_id(&self, subscriber_id: i32) -> Result<u32, DatabaseError>;
-    /// Returns a paginated list of subscriptions.
-    async fn select_paginated_by_subscriber_id(
-        &self,
-        subscriber_id: i32,
-        page: u32,
-        per_page: u32,
-    ) -> Result<Vec<FeedSubscriptionEntity>, DatabaseError>;
-    /// Returns a paginated list of subscriptions including the latest item for each feed.
-    async fn select_paginated_with_latest_by_subscriber_id(
-        &self,
-        subscriber_id: i32,
-        page: u32,
-        per_page: u32,
-    ) -> Result<Vec<FeedWithLatestItemRow>, DatabaseError>;
-    /// Checks if any subscriber is currently following a feed.
-    async fn exists_by_feed_id(&self, feed_id: i32) -> Result<bool, DatabaseError>;
-    /// Deletes a specific subscription link.
-    async fn delete_subscription(
-        &self,
-        feed_id: i32,
-        subscriber_id: i32,
-    ) -> Result<bool, DatabaseError>;
-    /// Deletes all subscriptions for a specific feed.
-    async fn delete_all_by_feed_id(&self, feed_id: i32) -> Result<(), DatabaseError>;
-    /// Deletes all subscriptions for a specific subscriber.
-    async fn delete_all_by_subscriber_id(&self, subscriber_id: i32) -> Result<(), DatabaseError>;
+pub trait FeedDumpRepository: Send + Sync {
+    async fn select_feeds(&self) -> Result<Vec<FeedEntity>, DatabaseError>;
+    async fn select_feed_items(&self) -> Result<Vec<FeedItemEntity>, DatabaseError>;
+    async fn select_subscribers(&self) -> Result<Vec<SubscriberEntity>, DatabaseError>;
+    async fn select_subscriptions(&self) -> Result<Vec<FeedSubscriptionEntity>, DatabaseError>;
 }
 
 /// Operations for the `server_settings` table.
@@ -270,10 +182,7 @@ pub trait GuildPluginRepository: TableBase + Send + Sync {
 /// Each method clones the underlying pool-backed handle and returns
 /// a boxed trait object. Call at service construction time, not per-operation.
 pub trait Repos: Send + Sync {
-    fn feed(&self) -> Box<dyn FeedRepository + Send + Sync>;
-    fn feed_item(&self) -> Box<dyn FeedItemRepository + Send + Sync>;
-    fn subscriber(&self) -> Box<dyn SubscriberRepository + Send + Sync>;
-    fn feed_subscription(&self) -> Box<dyn FeedSubscriptionRepository + Send + Sync>;
+    fn feed_dump(&self) -> Box<dyn FeedDumpRepository + Send + Sync>;
     fn server_settings(&self) -> Box<dyn ServerSettingsRepository + Send + Sync>;
     fn voice_sessions(&self) -> Box<dyn VoiceSessionsRepository + Send + Sync>;
     fn bot_meta(&self) -> Box<dyn BotMetaRepository + Send + Sync>;

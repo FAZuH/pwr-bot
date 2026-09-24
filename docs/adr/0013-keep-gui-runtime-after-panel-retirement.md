@@ -3,20 +3,14 @@
 ## Context
 
 ADR-0009 migrated the three settings panels — feed settings, voice
-settings, and welcome — into plugin crates. The host copies stayed
-behind: the `GuiFeature` shells (`src/bot/gui/feed_settings.rs`,
-`src/bot/gui/voice_settings.rs`, `src/bot/gui/welcome.rs`), their pure
-cores (`src/update/feed_settings.rs`, `src/update/voice_settings.rs`,
-`src/update/welcome_settings.rs`), and the `Navigation` targets that
-reached them. ADR-0009 left one question open: what happens to the host
-gui runtime once no features remain?
+settings, and welcome — into plugin crates. Their host shells and update
+modules were removed. The host still owns the `/settings` GUI and the
+remaining host views, so the runtime has users after the migration.
 
-This ticket retires the host copies. Before deleting anything, the
-runtime's remaining users were audited. Seven `GuiFeature` impls are
-live: `about`, `feed_batch`, `feed_list`, `voice_stats`, and
-`voice_leaderboard` drive the `Host` event loop, and `register` and
-`unregister` run one-shot on the same shell. None of them is in the
-settings flow, and none has a migration ticket.
+This ticket retires the host copies. The remaining host runtime has six
+`GuiFeature` implementations: `about`, `settings`, `voice_stats`,
+`voice_leaderboard`, `register`, and `unregister`. The last two are
+one-shot features; the other four use the host event loop.
 
 The retired panels still leave one piece of live machinery behind: the
 welcome preview resolver (`PreviewResolver`, ADR-0012). It fills the
@@ -28,9 +22,9 @@ transport paths call it. It cannot die with the panel.
 Keep the gui runtime. The host panel copies, their update cores, and
 their `Navigation` targets are deleted; the runtime is not.
 
-1. **The runtime earns its keep.** Seven live features run on
-   `GuiFeature` and the `Host` loop. Retiring the runtime means
-   migrating those features first — a future program, not this ticket.
+1. **The runtime earns its keep.** Six host features still use
+   `GuiFeature`; the `/settings` GUI is one of them. Retiring the runtime
+   means migrating those host features first.
 2. **The commands deep-link the plugins.** `/feed settings`,
    `/voice settings`, and `/welcome` no longer start a host session.
    They call `open_plugin_view` (`src/plugin/command.rs`), the shared
@@ -48,19 +42,24 @@ their `Navigation` targets are deleted; the runtime is not.
    `page_swap` stub arm, and their tests are deleted. `FEATURES` now
    carries each feature's plugin target directly.
 5. **The host-owned guards stay.** `TranslateLayer` and the
-   `host_owned` message checks keep routing interactions: the seven
-   live features still create `Host` sessions.
+   `host_owned` message checks keep routing interactions for the host
+   features that still create `Host` sessions.
+
+Plugin-side views use pure update functions, render functions, and direct
+service/repository calls. The sealed `GuiFeature` and `Host` loop remain the
+runtime for host-owned views; plugin views do not run through that host loop.
 
 ## Consequences
 
-- The settings flow is plugin-only: the hub, the three panels, and
-  their slash commands all speak the plugin protocol.
+- The settings flow has two runtimes: the host `/settings` GUI and
+  the three panel plugins. The host owns the hub and its section handoff;
+  panel views and their slash commands use the plugin protocol.
 - `Navigation::SettingsFeeds`, `SettingsVoice`, and `SettingsWelcome`
-  no longer exist. `SettingsMain` (the hub handoff) and `SettingsAbout`
-  remain for the About feature.
+  no longer exist. `SettingsSection` hands a section to a plugin, while
+  `SettingsMain` and `SettingsAbout` remain host navigation.
 - The runtime's retirement question returns when the last remaining
-  `GuiFeature` migrates. Until then, deleting it would break seven
-  working features.
+  host `GuiFeature` migrates. Until then, deleting it would break the
+  remaining host views.
 - `open_plugin_view` is now the single initial-render path for plugin
   views opened from a slash interaction; `plugin_slash_dispatch` and
   the three settings commands share it.
@@ -68,10 +67,8 @@ their `Navigation` targets are deleted; the runtime is not.
 ## Update (2026-09-23)
 
 The settings hub plugin is retired (#165). The host `/settings` command
-runs a new eighth `GuiFeature` — the Settings GUI
-(`src/bot/gui/settings.rs`, core `src/update/settings.rs`) — whose
-section click exits to `Navigation::SettingsSection`, the Settings
-section handoff. `SettingsMain` is now a runnable frame (the Settings
-GUI), not a terminal handoff, and it is the first feature that returns a
-plain `Navigation::Back`, making the root-dismissal branch live. The
-About feature's Back now lands on the Settings GUI instead of the hub.
+runs the `SettingsFeature` (`src/bot/gui/settings.rs`, core
+`src/update/settings.rs`), whose section click exits to
+`Navigation::SettingsSection`. `SettingsMain` is a runnable host frame,
+not a terminal handoff, and the About feature's Back lands on the
+Settings GUI.

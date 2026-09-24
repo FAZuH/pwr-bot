@@ -22,7 +22,8 @@ pub fn probe_binary(bin_name: &str) -> PathBuf {
     // packages: build the fixture so fresh checkouts have it and edited
     // fixtures never run stale.
     let mut cmd = std::process::Command::new("cargo");
-    cmd.arg("build").current_dir(env!("CARGO_MANIFEST_DIR"));
+    cmd.args(["build", "-j", "2"])
+        .current_dir(env!("CARGO_MANIFEST_DIR"));
     if bin_name == "arg-echo-plugin" {
         cmd.args(["--bin", "arg-echo-plugin"]);
     } else {

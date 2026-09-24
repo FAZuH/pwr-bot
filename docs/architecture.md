@@ -8,13 +8,13 @@
 │          bot/ — commands (Router → CommandHandler)          │
 ├─────────────────────────────────────────────────────────────┤
 │                   Application Layer                         │
-│         event/  subscriber/  task/  — cross-cutting         │
+│         event/  subscriber/  task/  — host cross-cutting    │
 ├─────────────────────────────────────────────────────────────┤
 │                    Service Layer                            │
 │                service/ — business logic                    │
 ├─────────────────────────────────────────────────────────────┤
 │                    Domain Layer                             │
-│           feed/  entity/ — models and platforms             │
+│           entity/ — host data contracts                    │
 ├─────────────────────────────────────────────────────────────┤
 │                 Infrastructure Layer                        │
 │                   repo/ — PostgreSQL via Diesel             │
@@ -33,8 +33,8 @@ Commands are organized by domain. Each top-level module is a command group; subc
 
 | Module | Commands |
 |--------|----------|
-| `feed.rs` | `/feed` group — `list`, `subscribe`, `unsubscribe`, `settings` |
 | `voice.rs` | `/vc` group — `leaderboard`, `stats`, `settings` |
+| `crates/plugin/feed` manifest | `/feed` group and `/feed-settings` |
 | `settings.rs` | `/settings` — the host Settings GUI |
 | `welcome/mod.rs` | `/welcome` |
 | `about.rs` | `/about` |
@@ -48,7 +48,7 @@ Commands are organized by domain. Each top-level module is a command group; subc
 Interactive commands follow a **Router → CommandHandler → Host** flow:
 
 - **`Router`** — receives the Poise context, owns navigation state, drives handlers. Its session loop keeps the frames open on the message: each target that runs becomes the newest frame, and `Back` closes the newest frame and re-runs the one beneath it, morphing the same message. Defined in `src/bot/command/mod.rs`.
-- **`CommandHandler`** — trait for handler run loops. Each domain has a concrete handler (e.g. `FeedListHandler`, `VoiceStatsHandler`).
+- **`CommandHandler`** — trait for handler run loops. Each domain has a concrete handler (e.g. `VoiceStatsHandler`).
 - **`Navigation`** — enum signalling the next navigation step (e.g. `Back`, `Exit`, `SettingsSection`). `SettingsSection` hands the live message to a settings section's panel plugin (the session then parks until the panel's Back or About press returns or re-renders the message through the host-reserved `settings` or `about` `host.open_view` target), and a `Back` over the last open frame dismisses the message. The handoff and dismissal live in `src/bot/command/session_exit.rs`. Defined in `src/bot/navigation.rs`.
 - **`Host`** — the TEA event loop that runs one interactive view. Defined in `src/bot/gui/rt.rs`.
 
@@ -60,9 +60,15 @@ Interactive views run on the Elm Architecture (TEA) in three layers with one-way
 |-------|----------|---------------|
 | Core | `src/update/<feature>.rs` | One `Model` per feature holding all session state, an exhaustive `Msg` enum, a data-only `Effect` enum, and a pure `update(msg, &mut model) -> Vec<Effect>`. Imports no serenity, tokio, diesel, or poise. |
 | Shell | `src/bot/gui/` | A sealed `GuiFeature` trait (pure `view`, `translate`, `update` via the core) plus the `Host` event loop: collectors, acknowledgement, and the reply handle. |
-| Adapter | Per feature, e.g. `src/bot/gui/feed_list.rs` | One `EffectHandler` executing effects against services via `ctx.data().service`. Effect results return as `Msg`s (e.g. `SubscriptionsLoaded`). |
+| Adapter | Per host feature, e.g. `src/bot/gui/voice_stats.rs` | One `EffectHandler` executing effects against services via `ctx.data().service`. |
 
 The `sealed::Sealed` supertrait closes `GuiFeature` to external implementors — only `src/bot/gui/` may add features. One-shot commands (`register`, `unregister`) drive `view` + `update` directly without the Host. Snapshot tests in each feature pin the rendered component JSON.
+
+Plugin views do not use the host's sealed `GuiFeature` or `Host` loop. The
+feed plugin keeps pure update modules in `crates/plugin/feed/src/update/`,
+renders views in `crates/plugin/feed/src/view/`, and its command loop invokes
+the feed service and repository directly. The host runtime remains only for
+host-owned views.
 
 #### Host Loop
 
@@ -88,7 +94,7 @@ The substrate collects Discord events for the Host. It never renders and never m
 | `ViewEvent` | One event that wakes the host loop: component, modal, message, reaction, async, or timeout. |
 | `ViewChannel` / `ViewChannelConfig` | Background collectors, spawned as tasks, that feed events into the loop. |
 
-Custom-id helpers live in `src/bot/gui/input.rs` (`build_custom_id`, `parse_custom_id`).
+Custom-id helpers live in `src/bot/view/mod.rs` (`build_custom_id`, `parse_custom_id`).
 
 #### Translation Layer (`src/bot/translate.rs`)
 
@@ -113,7 +119,6 @@ Type-safe pub/sub via `EventBus`. Publishers and subscribers are decoupled — n
 
 | Event | Published by | Consumed by |
 |-------|-------------|-------------|
-| `FeedUpdateEvent` | `SeriesFeedPublisher` | `DiscordGuildSubscriber`, `DiscordDmSubscriber` |
 | `VoiceStateEvent` | `BotEventHandler` | `VoiceStateSubscriber` |
 
 ### Subscribers (`subscriber/`)
@@ -122,15 +127,12 @@ React to application events, call services, send Discord messages.
 
 | Subscriber | Reacts to |
 |-----------|----------|
-| `DiscordGuildSubscriber` | `FeedUpdateEvent` → sends to guild channel |
-| `DiscordDmSubscriber` | `FeedUpdateEvent` → sends to DM |
 | `VoiceStateSubscriber` | `VoiceStateEvent` → tracks session lifecycle |
 
 ### Background Tasks (`task/`)
 
 | Task | Responsibility |
 |------|---------------|
-| `SeriesFeedPublisher` | Polls feed platforms on a schedule, publishes `FeedUpdateEvent` |
 | `VoiceHeartbeatManager` | Crash recovery for active voice sessions |
 
 ---
@@ -141,34 +143,36 @@ The only layer that enforces business rules. Handlers call services; services or
 
 | Service (trait) | Responsibility |
 |---------|---------------|
-| `FeedSubscriptionProvider` | Feed subscription lifecycle — create, delete, list, validate |
 | `VoiceTracker` | Voice session lifecycle — start, stop, query stats |
 | `SettingsProvider` | Server configuration management |
 | `InternalOps` | Bot metadata and internal operations |
 
 ---
 
-## Domain Layer (`src/feed/`, `src/entity.rs`)
+## Domain Contracts (`src/entity.rs`, `crates/plugin/feed/src/`)
 
-Plain domain objects and platform abstractions. Entities have no database concerns beyond `FromRow` (an acceptable tradeoff). Platform implementations depend on domain types, not the other way around.
+The host keeps shared entity contracts for settings, voice, and the
+transitional database dump. Feed entities, platform strategies, and the feed
+service live in `crates/plugin/feed/src/`, outside the host process.
 
 ### Entities (`src/entity.rs`)
 
 | Entity | Description |
 |--------|-------------|
-| `FeedEntity` | A content source on a platform |
-| `FeedItemEntity` | An individual update (chapter, episode) |
-| `SubscriberEntity` | A notification target (guild or DM) |
-| `FeedSubscriptionEntity` | Link between a feed and a subscriber |
+| `FeedEntity` | Feed plugin content source; host keeps a dump DTO |
+| `FeedItemEntity` | Feed plugin update; host keeps a dump DTO |
+| `SubscriberEntity` | Feed plugin notification target; host keeps a dump DTO |
+| `FeedSubscriptionEntity` | Feed plugin subscription link; host keeps a dump DTO |
 | `ServerSettingsEntity` | Per-guild configuration, includes nested `WelcomeSettings`, `FeedsSettings`, `VoiceSettings` |
 | `VoiceSessionsEntity` | Voice channel session record |
 | `BotMetaEntity` | Key-value bot metadata |
 | `DbVoiceSession` | Raw voice session for persistence |
 | `VoiceLeaderboardEntry` / `VoiceLeaderboardRow` | Leaderboard query results |
 
-### Platforms (`feed/`)
+### Feed Platforms (`crates/plugin/feed/src/feed/`)
 
-Implements the **Strategy pattern** — `FeedSubscriptionService` depends on the `Platform` trait, not concrete implementations.
+The feed plugin owns the platform strategy and its service. The host does
+not construct feed platforms or retain a platform registry.
 
 | Platform | API |
 |----------|-----|
@@ -186,28 +190,27 @@ A factory trait `Repos` defines the repo access interface. The concrete `PgRepos
 
 ```rust
 pub trait Repos: Send + Sync {
-    fn feed(&self) -> Box<dyn FeedRepository + Send + Sync>;
-    fn feed_item(&self) -> Box<dyn FeedItemRepository + Send + Sync>;
-    fn subscriber(&self) -> Box<dyn SubscriberRepository + Send + Sync>;
-    fn feed_subscription(&self) -> Box<dyn FeedSubscriptionRepository + Send + Sync>;
+    fn feed_dump(&self) -> Box<dyn FeedDumpRepository + Send + Sync>;
     fn server_settings(&self) -> Box<dyn ServerSettingsRepository + Send + Sync>;
     fn voice_sessions(&self) -> Box<dyn VoiceSessionsRepository + Send + Sync>;
     fn bot_meta(&self) -> Box<dyn BotMetaRepository + Send + Sync>;
+    fn plugin_kv(&self) -> Box<dyn PluginKvRepository + Send + Sync>;
+    fn guild_plugins(&self) -> Box<dyn GuildPluginRepository + Send + Sync>;
 }
 
 pub struct PgRepos {
-    pub feed: PgFeedRepo,
-    pub feed_item: PgFeedItemRepo,
-    pub subscriber: PgSubscriberRepo,
-    pub feed_subscription: PgFeedSubscriptionRepo,
+    feed_dump: PgFeedDumpRepo,
     pub server_settings: PgServerSettingsRepo,
     pub voice_sessions: PgVoiceSessionsRepo,
     pub bot_meta: PgBotMetaRepo,
+    pub plugin_kv: PgPluginKvRepo,
+    pub guild_plugins: PgGuildPluginRepo,
     pool: DbPool,
 }
 ```
 
-Each table struct (`Pg*Repo`) implements a `CrudTable<T, ID>` trait alongside domain-specific repository traits.
+`PgFeedDumpRepo` is read-only and exists for the transitional `/dump_db`
+projection. The feed plugin owns all feed writes through its own repository.
 
 ---
 
@@ -224,7 +227,7 @@ core, not a layer of it.
 |----------|------|
 | `crates/pwr-plugin-protocol` | Wire types: `Msg`, `Manifest`, `ViewSpec`, `HostCap`, `WireError` |
 | `src/plugin/` | Plugin host: `manager` (spawn, health, respawn, unload), `interaction` (session engine), `host` (`host.*` ops), `command` (slash dispatch), `events` (gateway fan-out), `install` (pinned catalog), `view` (gate) |
-| `crates/plugin/` | Plugins: `hello` (fixture), `feed`/`voice`/`welcome` (settings panels) |
+| `crates/plugin/` | Plugins: `hello` (fixture), `feed` (subscriptions, delivery, settings), `voice`/`welcome` (settings panels) |
 | `crates/pwr-poise-components` | Reusable components library on pwr-ext (typed builders, pagination) |
 
 ### Plugin Data Flow
@@ -312,12 +315,11 @@ Discord interaction
 ### Background Feed Update
 
 ```
-SeriesFeedPublisher (scheduled)
+Feed plugin SeriesFeedPublisher (scheduled)
   → Platform::fetch_latest()         poll external API
-  → FeedSubscriptionService          validate, find subscribers
-  → EventBus::publish(FeedUpdateEvent)
-  → DiscordGuildSubscriber / DiscordDmSubscriber
-  → Send Discord message via Serenity HTTP
+  → plugin FeedSubscriptionService   validate, find subscribers
+  → plugin EventBus                  publish FeedUpdateEvent
+  → plugin DM/Guild subscribers      host.send_message
 ```
 
 ### Voice State Change
@@ -340,8 +342,8 @@ Discord gateway event
 | Router → CommandHandler | Presentation | Navigation loop driving per-domain handlers |
 | TEA core (`src/update`) | Application | Pure `update -> Vec<Effect>` transitions, single-source-of-truth Models |
 | GuiFeature + Host (`src/bot/gui`) | Presentation | Sealed feature contract; host owns loop, acks, collectors |
-| EffectHandler adapter | Application | The only place effects execute (services, image gen) |
+| EffectHandler adapter | Application | Host features execute effects through service/image adapters; plugin commands invoke their own services directly |
 | Strategy | Domain | Swappable platform implementations |
 | Repository (factory) | Infrastructure | `Repos` trait with `PgRepos` concrete impl |
 | Event Bus | Application | Decoupled pub/sub communication |
-| Service | Application | Business logic via trait objects (`SettingsProvider`, `FeedSubscriptionProvider`, etc.) |
+| Service | Application | Business logic via trait objects (`SettingsProvider`, `VoiceTracker`, etc.) |

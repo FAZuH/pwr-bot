@@ -18,6 +18,9 @@
 //! bot-crate dependencies, and the host keeps its own copy of the id
 //! parsing twin.
 
+pub mod lifecycle;
+pub mod pagination;
+
 use std::collections::HashMap;
 use std::io::Write;
 
@@ -187,8 +190,14 @@ pub fn about_exit(args: Option<&Value>, guild_id: u64) -> Option<ReturnExit> {
 fn return_exit(target: &str, args: Option<&Value>, guild_id: u64) -> Option<ReturnExit> {
     let channel_id = args.and_then(|a| a.get("channel_id")).and_then(id_as_u64)?;
     let message_id = source_message_id(args);
+    let mut exit_args = return_args(target, channel_id, guild_id, message_id);
+    if let Some(context) = args.and_then(|args| args.get("_context")) {
+        exit_args["args"]["_context"] = context.clone();
+    } else if let Some(user) = args.and_then(|args| args.get("user")) {
+        exit_args["args"]["user"] = user.clone();
+    }
     Some(ReturnExit {
-        args: return_args(target, channel_id, guild_id, message_id),
+        args: exit_args,
         message_id,
     })
 }
@@ -252,14 +261,23 @@ pub fn issue_host_call<P: Panel>(
     call: HostCall<P>,
 ) -> bool {
     *next_call_id += 1;
+    issue_host_call_with_id(out, pending, *next_call_id, call)
+}
+
+pub fn issue_host_call_with_id<P: Panel>(
+    out: &mut impl Write,
+    pending: &mut HashMap<u64, Pending<P>>,
+    call_id: u64,
+    call: HostCall<P>,
+) -> bool {
     let HostCall {
         pending: pending_kind,
         args,
     } = call;
     let op = pending_kind.op();
-    pending.insert(*next_call_id, pending_kind);
+    pending.insert(call_id, pending_kind);
     let call_msg = Msg::Call {
-        id: *next_call_id,
+        id: call_id,
         op: op.into(),
         cmd: None,
         args: Some(args),
@@ -333,6 +351,19 @@ mod tests {
             })
         );
         assert_eq!(back.message_id, Some(555));
+    }
+
+    #[test]
+    fn panel_exits_carry_the_actor_context_to_the_host_session() {
+        let args = json!({
+            "channel_id": "5",
+            "message": { "id": "555" },
+            "_context": { "user_id": 7 },
+        });
+
+        let back = back_exit(Some(&args), 42).expect("channel id present");
+
+        assert_eq!(back.args["args"]["_context"], json!({ "user_id": 7 }));
     }
 
     #[test]

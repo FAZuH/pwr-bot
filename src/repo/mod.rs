@@ -29,10 +29,7 @@ const MIGRATIONS: EmbeddedMigrations = embed_migrations!("migrations");
 /// factory trait methods clone the inner handle and return a `Box<dyn Repo>`.
 /// Call factory methods at service construction time, not per-operation.
 pub struct PgRepos {
-    pub feed: PgFeedRepo,
-    pub feed_item: PgFeedItemRepo,
-    pub subscriber: PgSubscriberRepo,
-    pub feed_subscription: PgFeedSubscriptionRepo,
+    feed_dump: PgFeedDumpRepo,
     pub server_settings: PgServerSettingsRepo,
     pub voice_sessions: PgVoiceSessionsRepo,
     pub bot_meta: PgBotMetaRepo,
@@ -52,10 +49,7 @@ impl PgRepos {
         info!("connected to db");
 
         Ok(Self {
-            feed: PgFeedRepo::new(pool.clone()),
-            feed_item: PgFeedItemRepo::new(pool.clone()),
-            subscriber: PgSubscriberRepo::new(pool.clone()),
-            feed_subscription: PgFeedSubscriptionRepo::new(pool.clone()),
+            feed_dump: PgFeedDumpRepo::new(pool.clone()),
             server_settings: PgServerSettingsRepo::new(pool.clone()),
             voice_sessions: PgVoiceSessionsRepo::new(pool.clone()),
             bot_meta: PgBotMetaRepo::new(pool.clone()),
@@ -84,10 +78,6 @@ impl PgRepos {
     }
 
     pub async fn delete_all_tables(&self) -> anyhow::Result<()> {
-        self.feed.delete_all().await?;
-        self.feed_item.delete_all().await?;
-        self.subscriber.delete_all().await?;
-        self.feed_subscription.delete_all().await?;
         self.server_settings.delete_all().await?;
         self.voice_sessions.delete_all().await?;
         self.bot_meta.delete_all().await?;
@@ -98,20 +88,8 @@ impl PgRepos {
 }
 
 impl Repos for PgRepos {
-    fn feed(&self) -> Box<dyn FeedRepository + Send + Sync> {
-        Box::new(self.feed.clone())
-    }
-
-    fn feed_item(&self) -> Box<dyn FeedItemRepository + Send + Sync> {
-        Box::new(self.feed_item.clone())
-    }
-
-    fn subscriber(&self) -> Box<dyn SubscriberRepository + Send + Sync> {
-        Box::new(self.subscriber.clone())
-    }
-
-    fn feed_subscription(&self) -> Box<dyn FeedSubscriptionRepository + Send + Sync> {
-        Box::new(self.feed_subscription.clone())
+    fn feed_dump(&self) -> Box<dyn FeedDumpRepository + Send + Sync> {
+        Box::new(self.feed_dump.clone())
     }
 
     fn server_settings(&self) -> Box<dyn ServerSettingsRepository + Send + Sync> {

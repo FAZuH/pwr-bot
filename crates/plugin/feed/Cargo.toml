@@ -3,16 +3,43 @@ name = "feed"
 version = "0.1.0"
 edition = "2024"
 authors = ["FAZuH <mail@fazuh.com>"]
-description = "The feed settings panel plugin for pwr-bot: per-guild feed subscription settings served as a plugin view"
+description = "The pwr-bot feed plugin: subscriptions, delivery, commands, and settings"
 license = "MIT"
 repository = "https://github.com/FAZuH/pwr-bot"
 
+[lints.clippy]
+redundant_field_names = "allow"
+
 [dependencies]
+anyhow = "1.0.101"
+async-trait = "0.1.89"
+chrono = { version = "0.4.43", features = ["serde"] }
+diesel = { version = "2.3", features = ["chrono", "postgres", "serde_json"] }
+diesel-async = { version = "0.8", features = ["deadpool", "postgres"] }
+diesel_migrations = { version = "2.3", features = ["postgres"] }
+futures = "0.3.32"
+governor = "0.10.4"
+html2md = "0.2.15"
+log = "0.4.29"
 pwr-ext = { git = "https://github.com/FAZuH/pwr-ext", tag = "v0.1.0", features = ["macros"] }
 pwr-plugin-protocol = { path = "../../pwr-plugin-protocol" }
 pwr-plugin-support = { path = "../pwr-plugin-support" }
+serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
+thiserror = "2.0.18"
+tokio = { version = "1.49.0", features = ["macros", "rt-multi-thread", "sync"] }
+uuid = { version = "1.21.0", features = ["v4"] }
+wreq = { version = "0.16", features = ["stream", "query"] }
+wreq-util = "0.2"
 
 [dev-dependencies]
+dotenv = "0.15.0"
+httpmock = "0.7.0"
+libc = "0.2.182"
+postgresql_embedded = { version = "=0.20.1", default-features = false, features = ["zonky", "tokio", "rustls"] }
+rustls-native-certs = "0.8"
+serial_test = "3.3.1"
+tokio-postgres = "0.7"
+tokio-postgres-rustls = { version = "0.14", default-features = false, features = ["ring", "native-certs"] }
 # Only the tests read `IS_COMPONENTS_V2`; production is `view!`-authored.
 pwr-poise-components = { path = "../../pwr-poise-components" }

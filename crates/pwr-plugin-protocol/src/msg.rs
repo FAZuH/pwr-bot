@@ -38,7 +38,7 @@ pub const VIEW_MOVED_KIND: &str = "ViewMoved";
 
 /// A message on the plugin wire, serialized as one compact JSON object per
 /// line. The `t` discriminator names the variant: `hello`, `call`, `resp`,
-/// `event`, `ping`, `pong`, `bye`.
+/// `progress`, `event`, `ping`, `pong`, `bye`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "t", rename_all = "lowercase")]
 pub enum Msg {
@@ -81,6 +81,13 @@ pub enum Msg {
         /// First-class wire error.
         #[serde(skip_serializing_if = "Option::is_none")]
         error: Option<WireError>,
+    },
+    /// An intermediate result for a call that is still running.
+    Progress {
+        /// Correlation id of the pending [`Msg::Call`].
+        id: u64,
+        /// Opaque progress payload. View invokes use the [`crate::ViewSpec`] envelope.
+        data: Value,
     },
     /// One-way push; never answered.
     Event {
@@ -223,6 +230,18 @@ mod tests {
     }
 
     #[test]
+    fn progress_matches_wire_format() {
+        let msg = Msg::Progress {
+            id: 7,
+            data: json!({ "data": { "content": "working" } }),
+        };
+        assert_eq!(
+            serde_json::to_string(&msg).unwrap(),
+            r#"{"t":"progress","id":7,"data":{"data":{"content":"working"}}}"#
+        );
+    }
+
+    #[test]
     fn call_plugin_to_host_omits_missing_fields() {
         let msg = Msg::Call {
             id: 3,
@@ -353,6 +372,10 @@ mod tests {
                     kind: "UnknownOp".into(),
                     msg: "no such op".into(),
                 }),
+            },
+            Msg::Progress {
+                id: 1,
+                data: json!({"phase": "working"}),
             },
             Msg::Event {
                 name: "view.timeout".into(),

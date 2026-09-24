@@ -1,8 +1,9 @@
 //! Converts plugin manifest command blobs into routing [`poise::Command`]s.
 //!
 //! Each [`Manifest`] entry carries a Discord-native `CreateCommand` JSON blob
-//! (`create_command` field of [`CommandDef`](pwr_plugin_protocol::CommandDef)) — the single source of truth for both
-//! Discord registration and host-side argument re-parsing. This module parses
+//! (`create_command` field of
+//! [`CommandDef`](pwr_plugin_protocol::CommandDef)) — the single source of truth for both Discord
+//! registration and host-side argument re-parsing. This module parses
 //! such a blob into a [`HostCommandSpec`] and builds a framework `Command`
 //! from it, so plugins declare slash commands without host-side per-command
 //! code.
@@ -30,20 +31,18 @@
 //!   but not applied — `type_setter` is a non-capturing function pointer and
 //!   cannot ride per-option values (deferred to #114, documented).
 //!
-//! Deferred seams:
-//! - Every built command carries `plugin_slash_dispatch` as its action,
-//!   which routes the invocation to its plugin's view session via the
-//!   command-name → plugin-name route table built from loaded manifests
-//!   ([`routes_from_manifests`]; see the function's docs).
-//! - Merging built commands into the framework before
-//!   `Framework::builder().build()` is later work (#113);
-//!   [`commands_from_manifest`] documents that call site. The bot-side
-//!   registry that tracks per-plugin commands is #113 as well.
-//! - [`register_in_guild`] is wired by the `/plugins` command (#113).
-//! - Per-option autocomplete and min/max/length constraints are #114.
+//! Framework and command-registration seams:
+//! - `plugin_slash_dispatch` routes each built command through the manifest
+//!   route table.
+//! - `Bot::create_framework` merges host and plugin commands before the
+//!   framework is built; `/plugins` uses the same routing commands for
+//!   per-guild registration.
+//! - `plugin_slash_dispatch` also wires autocomplete responses; per-option
+//!   min/max/length constraints remain outside the v1 command parser.
 
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::collections::HashSet;
 
 use log::warn;
 use poise::Command;
@@ -51,14 +50,47 @@ use poise::CommandParameter;
 use poise::CommandParameterChoice;
 use poise::serenity_prelude as serenity;
 use pwr_plugin_protocol::Manifest;
+use pwr_plugin_protocol::Msg;
 use pwr_plugin_protocol::ViewSpec;
 use serde_json::Value;
 use serde_json::json;
 
 use crate::bot::Data;
+use crate::bot::checks::is_author_guild_admin;
 use crate::bot::command::Error;
 use crate::plugin::edit_body_for_transport;
 use crate::plugin::validate_view_data;
+
+pub(crate) const ACTOR_CONTEXT_KEY: &str = "_context";
+
+pub(crate) fn actor_context(interaction: &serenity::CommandInteraction) -> Value {
+    actor_context_from_parts(interaction.user.id, interaction.member.as_deref())
+}
+
+/// Builds the actor payload sent to a plugin for one Discord interaction.
+pub(crate) fn actor_context_from_parts(
+    user_id: serenity::UserId,
+    member: Option<&serenity::Member>,
+) -> Value {
+    let mut member_roles = member
+        .map(|member| {
+            member
+                .roles
+                .iter()
+                .map(|role| role.get())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    member_roles.sort_unstable();
+    let member_permissions = member
+        .and_then(|member| member.permissions)
+        .map(|permissions| permissions.bits());
+    json!({
+        "user_id": user_id.get(),
+        "member_roles": member_roles,
+        "member_permissions": member_permissions,
+    })
+}
 
 /// A parsed `CreateCommand` blob, before poise mapping.
 #[derive(Debug, Clone, PartialEq)]
@@ -151,6 +183,8 @@ pub struct OptionSpec {
     pub choices: Vec<String>,
     /// Channel types a channel option accepts.
     pub channel_types: Vec<serenity::ChannelType>,
+    /// Default member permissions for a subcommand row.
+    pub default_member_permissions: Option<serenity::Permissions>,
     /// Minimum numeric value (parsed, not applied — see module docs).
     pub min_value: Option<serde_json::Number>,
     /// Maximum numeric value (parsed, not applied — see module docs).
@@ -333,9 +367,9 @@ pub fn command_from_blob(blob: &Value) -> Result<Command<Data, Error>, CommandSp
 /// Builds a routing command for every valid blob in a manifest. Invalid blobs
 /// are logged and skipped so one bad plugin entry cannot take down the rest.
 ///
-/// The returned list is the merge seam: hand it to the framework before
-/// `Framework::builder().build()` (or fold it into the cog list). Wiring that
-/// merge — and tracking which commands belong to which plugin — is #113.
+/// The returned list is consumed by the framework merge in
+/// `Bot::create_framework`; `/plugins` uses the same routing commands for
+/// per-guild registration.
 pub fn commands_from_manifest(manifest: &Manifest) -> Vec<Command<Data, Error>> {
     let mut commands = Vec::new();
     for def in &manifest.commands {
@@ -557,9 +591,9 @@ pub fn select_commands<'a>(
 
 /// Registers `commands` in a guild via Discord's bulk-overwrite endpoint.
 ///
-/// Thin wrapper over [`poise::builtins::register_in_guild`] with the slice
-/// signature the `/plugins` command (#113) will call. An empty slice
-/// unregisters every plugin command in the guild.
+/// Thin wrapper over [`poise::builtins::register_in_guild`] used by the
+/// `/plugins` command. An empty slice unregisters every plugin command in the
+/// guild.
 pub async fn register_in_guild(
     http: &serenity::Http,
     commands: &[Command<Data, Error>],
@@ -568,18 +602,31 @@ pub async fn register_in_guild(
     poise::builtins::register_in_guild(http, commands.iter(), guild_id).await
 }
 
-/// Command-name → plugin-name routes. Built from the manifests of the plugins
-/// loaded at startup ([`routes_from_manifests`]); `plugin_slash_dispatch`
-/// looks an invoked command name up here to find its owning plugin.
+/// Qualified command-path → plugin-name routes. Built from the manifests of
+/// the plugins loaded at startup ([`routes_from_manifests`]);
+/// `plugin_slash_dispatch` looks the selected root/subcommand path up here to
+/// find its owning plugin.
 pub type PluginRoutes = HashMap<String, String>;
 
-/// Builds the command-name → plugin-name route table from per-plugin
+/// Builds the qualified command-path → plugin-name route table from per-plugin
 /// manifests. Plugins with a `None` manifest (spawned without one) and
 /// command blobs [`HostCommandSpec::parse`] rejects are skipped — the same
 /// acceptance the framework uses to build the commands themselves, so a
 /// route exists exactly when its command was registered.
 pub fn routes_from_manifests(
     manifests: impl IntoIterator<Item = (String, Option<Manifest>)>,
+) -> PluginRoutes {
+    routes_from_manifests_with_reserved(manifests, &HashSet::new())
+}
+
+/// Builds plugin routes while reserving command roots for the host.
+///
+/// Reserved roots belong to host Cogs and are never routed to a plugin. Plugin
+/// manifests are processed in order; the first owner of each qualified path
+/// wins, so a later manifest cannot silently replace an earlier command.
+pub fn routes_from_manifests_with_reserved(
+    manifests: impl IntoIterator<Item = (String, Option<Manifest>)>,
+    reserved_roots: &HashSet<String>,
 ) -> PluginRoutes {
     let mut routes = PluginRoutes::new();
     for (name, manifest) in manifests {
@@ -588,11 +635,41 @@ pub fn routes_from_manifests(
         };
         for command in &manifest.commands {
             if let Ok(spec) = HostCommandSpec::parse(&command.create_command) {
-                routes.insert(spec.name, name.clone());
+                if reserved_roots.contains(&spec.name) {
+                    warn!(
+                        "skipping plugin command `{}` from `{}`: host command owns that path",
+                        spec.name, name
+                    );
+                    continue;
+                }
+                insert_command_routes(&mut routes, &name, spec.name.clone(), spec.options);
             }
         }
     }
     routes
+}
+
+fn insert_command_routes(
+    routes: &mut PluginRoutes,
+    plugin: &str,
+    path: String,
+    options: Vec<OptionSpec>,
+) {
+    if let Some(owner) = routes.get(&path) {
+        if owner != plugin {
+            warn!("command path collision: `{path}` from `{plugin}`; `{owner}` keeps it");
+        }
+        return;
+    }
+    routes.insert(path.clone(), plugin.to_string());
+    for option in options {
+        insert_command_routes(
+            routes,
+            plugin,
+            format!("{path} {}", option.name),
+            option.options,
+        );
+    }
 }
 
 /// How the initial render of a plugin view reaches Discord: the ephemerality
@@ -620,6 +697,53 @@ fn view_presentation(spec: &ViewSpec) -> ViewPresentation {
     }
 }
 
+async fn edit_invoked_view(
+    ctx: &poise::Context<'_, Data, Error>,
+    token: &str,
+    spec: &ViewSpec,
+) -> Result<serenity::Message, Error> {
+    let (body, files) = ctx
+        .data()
+        .previews
+        .resolve(
+            edit_body_for_transport(&spec.data),
+            ctx.guild_id().map(serenity::GuildId::get),
+        )
+        .await;
+    Ok(ctx
+        .http()
+        .edit_original_interaction_response(
+            token,
+            &body,
+            files.into_iter().map(Into::into).collect(),
+        )
+        .await?)
+}
+
+async fn present_invoked_view(
+    ctx: &poise::Context<'_, Data, Error>,
+    token: &str,
+    spec: &ViewSpec,
+    deferred_ephemeral: Option<bool>,
+) -> Result<(serenity::Message, bool), Error> {
+    let presentation = view_presentation(spec);
+    validate_view_data(&presentation.edit_body)?;
+    if deferred_ephemeral.is_some_and(|ephemeral| ephemeral != spec.ephemeral) {
+        return Err(
+            anyhow::anyhow!("plugin changed response visibility after progress started").into(),
+        );
+    }
+    if deferred_ephemeral.is_none() {
+        if spec.ephemeral {
+            ctx.defer_ephemeral().await?;
+        } else {
+            ctx.defer().await?;
+        }
+    }
+    let message = edit_invoked_view(ctx, token, spec).await?;
+    Ok((message, spec.ephemeral))
+}
+
 /// Opens a plugin view from a slash interaction end to end: invoke the
 /// plugin for its spec, defer with the view's ephemerality, edit the
 /// deferred response with the spec payload (transport-stripped, with any
@@ -645,53 +769,171 @@ pub async fn open_plugin_view(
     let Some(plugin) = data.plugin_manager.get(plugin_name).await else {
         return Err(anyhow::anyhow!("plugin `{plugin_name}` is not running").into());
     };
+    args[ACTOR_CONTEXT_KEY] = actor_context(app.interaction);
     if args.get("guild_id").is_none()
         && let Some(guild_id) = ctx.guild_id()
     {
         args["guild_id"] = json!(guild_id.get());
     }
-    // The interaction token outlives the context borrows below and is
-    // needed to edit the reply through the interaction-webhook route.
-    let interaction_token = app.interaction.token.as_str();
-    // Invoke the plugin before responding, so the deferred response can
-    // carry the view's ephemerality — Discord honors it on the first
-    // interaction response only.
-    let spec = data
-        .plugin_engine
-        .invoke(plugin.clone(), command, args)
-        .await?;
-    validate_view_data(&spec.data)?;
-    let presentation = view_presentation(&spec);
-    if presentation.ephemeral {
-        ctx.defer_ephemeral().await?;
-    } else {
-        ctx.defer().await?;
-    }
-    // Ephemeral responses cannot be edited via the channel-message route
-    // (`PATCH /channels/{id}/messages/{id}` returns Unknown Message for
-    // ephemeral messages); the interaction-webhook route is the only one
-    // that works, for both ephemeral and public responses. The deferred
-    // response carries no components, so no interaction can reach the
-    // session before it is registered from the edit's message id.
-    let (body, files) = data
-        .previews
-        .resolve(
-            edit_body_for_transport(&presentation.edit_body),
-            ctx.guild_id().map(serenity::GuildId::get),
-        )
-        .await;
-    let message = ctx
-        .http()
-        .edit_original_interaction_response(
-            interaction_token,
-            &body,
-            files.into_iter().map(Into::into).collect(),
-        )
-        .await?;
+    let interaction_token = app.interaction.token.to_string();
+    let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel();
+    let invoke =
+        data.plugin_engine
+            .invoke_with_progress(plugin.clone(), command, args, progress_tx);
+    tokio::pin!(invoke);
+    let mut deferred_ephemeral = None;
+    let spec = loop {
+        tokio::select! {
+            response = &mut invoke => {
+                while let Ok(progress) = progress_rx.try_recv() {
+                    let _ = present_invoked_view(
+                        &ctx,
+                        &interaction_token,
+                        &progress,
+                        deferred_ephemeral,
+                    ).await?;
+                    deferred_ephemeral = Some(progress.ephemeral);
+                }
+                break response?;
+            }
+            progress = progress_rx.recv() => {
+                let Some(progress) = progress else {
+                    continue;
+                };
+                let _ = present_invoked_view(
+                    &ctx,
+                    &interaction_token,
+                    &progress,
+                    deferred_ephemeral,
+                ).await?;
+                deferred_ephemeral = Some(progress.ephemeral);
+            }
+        }
+    };
+    let (message, _) =
+        present_invoked_view(&ctx, &interaction_token, &spec, deferred_ephemeral).await?;
     data.plugin_engine
-        .register(message.id, plugin, command, spec)
+        .register(message.id, app.interaction.user.id, plugin, command, spec)
         .await;
     Ok(())
+}
+
+fn qualified_command_name(
+    command: &Command<Data, Error>,
+    parent_commands: &[&Command<Data, Error>],
+) -> String {
+    parent_commands
+        .iter()
+        .map(|parent| parent.name.as_ref())
+        .chain(std::iter::once(command.name.as_ref()))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// The two public command paths that open the feed settings panel.
+fn is_feed_settings_command(command_name: &str) -> bool {
+    matches!(command_name, "feed settings" | "feed-settings")
+}
+
+fn autocomplete_args(ctx: &poise::ApplicationContext<'_, Data, Error>, query: &str) -> Value {
+    let mut args = json!({
+        "query": query,
+        "option": ctx
+            .interaction
+            .data
+            .autocomplete()
+            .map(|option| option.name)
+            .unwrap_or_default(),
+        ACTOR_CONTEXT_KEY: actor_context(ctx.interaction),
+    });
+    if let Some(guild_id) = ctx.guild_id() {
+        args["guild_id"] = json!(guild_id.get());
+    }
+    args
+}
+
+fn parse_autocomplete_response<'a>(
+    response: Msg,
+) -> Result<serenity::CreateAutocompleteResponse<'a>, String> {
+    let data = match response {
+        Msg::Resp {
+            ok: true,
+            data: Some(data),
+            ..
+        } => data,
+        Msg::Resp {
+            ok: false, error, ..
+        } => {
+            return Err(error
+                .map(|error| format!("{}: {}", error.kind, error.msg))
+                .unwrap_or_else(|| "plugin rejected autocomplete without an error".into()));
+        }
+        other => {
+            return Err(format!(
+                "plugin returned an unexpected autocomplete reply: {other:?}"
+            ));
+        }
+    };
+    let choices = data
+        .get("choices")
+        .and_then(Value::as_array)
+        .ok_or("plugin autocomplete response has no choices array")?;
+    let mut response = serenity::CreateAutocompleteResponse::new();
+    for choice in choices {
+        let name = choice
+            .get("name")
+            .and_then(Value::as_str)
+            .ok_or("plugin autocomplete choice has no name")?;
+        let value = match choice.get("value") {
+            Some(Value::String(value)) => serenity::AutocompleteValue::String(value.clone().into()),
+            Some(Value::Number(value)) if value.is_u64() => {
+                serenity::AutocompleteValue::Integer(value.as_u64().expect("checked integer"))
+            }
+            Some(Value::Number(value)) if value.is_f64() => {
+                serenity::AutocompleteValue::Float(value.as_f64().expect("checked float"))
+            }
+            _ => return Err("plugin autocomplete choice has invalid value".into()),
+        };
+        response = response.add_choice(serenity::AutocompleteChoice::new(name.to_string(), value));
+    }
+    Ok(response)
+}
+
+fn plugin_autocomplete<'a>(
+    ctx: poise::ApplicationContext<'a, Data, Error>,
+    query: &'a str,
+) -> poise::BoxFuture<'a, serenity::CreateAutocompleteResponse<'a>> {
+    Box::pin(async move {
+        let command_name = qualified_command_name(ctx.command(), ctx.parent_commands);
+        let data = ctx.framework.user_data();
+        let Some(plugin_name) = data.plugin_routes.get(&command_name) else {
+            warn!("no plugin route for autocomplete command `{command_name}`");
+            return serenity::CreateAutocompleteResponse::new();
+        };
+        let Some(plugin) = data.plugin_manager.get(plugin_name).await else {
+            warn!("autocomplete plugin `{plugin_name}` is not running");
+            return serenity::CreateAutocompleteResponse::new();
+        };
+        let response = match plugin
+            .call(
+                "autocomplete",
+                Some(&command_name),
+                Some(autocomplete_args(&ctx, query)),
+            )
+            .await
+        {
+            Ok(response) => parse_autocomplete_response(response),
+            Err(error) => Err(error.to_string()),
+        };
+        let response: serenity::CreateAutocompleteResponse<'a> = match response {
+            Ok(response) => response,
+            Err(error) => {
+                warn!("autocomplete for `{command_name}` failed: {error}");
+                serenity::CreateAutocompleteResponse::new()
+            }
+        };
+        response
+    })
 }
 
 /// Routes a slash invocation to its owning plugin's view session.
@@ -707,9 +949,9 @@ fn plugin_slash_dispatch(
     ctx: poise::ApplicationContext<'_, Data, Error>,
 ) -> poise::BoxFuture<'_, Result<(), poise::FrameworkError<'_, Data, Error>>> {
     Box::pin(async move {
-        let command_name = ctx.command().name.as_ref();
+        let command_name = qualified_command_name(ctx.command(), ctx.parent_commands);
         let data = ctx.framework.user_data();
-        let Some(plugin_name) = data.plugin_routes.get(command_name) else {
+        let Some(plugin_name) = data.plugin_routes.get(&command_name) else {
             return Err(poise::FrameworkError::new_command_structure_mismatch(
                 ctx,
                 "command has no plugin route",
@@ -721,10 +963,16 @@ fn plugin_slash_dispatch(
             Ok(args) => args,
             Err(error) => return Err(poise::FrameworkError::new_command(ctx.into(), error.into())),
         };
-        let ctx: poise::Context<'_, Data, Error> = ctx.into();
-        open_plugin_view(ctx, plugin_name, command_name, args)
+        let command_ctx: poise::Context<'_, Data, Error> = ctx.into();
+        if is_feed_settings_command(&command_name)
+            && let Err(error) = is_author_guild_admin(command_ctx).await
+        {
+            return Err(poise::FrameworkError::new_command(command_ctx, error));
+        }
+        let error_ctx = command_ctx;
+        open_plugin_view(command_ctx, plugin_name, &command_name, args)
             .await
-            .map_err(|error| poise::FrameworkError::new_command(ctx, error))?;
+            .map_err(|error| poise::FrameworkError::new_command(error_ctx, error))?;
         Ok(())
     })
 }
@@ -820,6 +1068,9 @@ fn build_subcommand(option: &OptionSpec) -> Command<Data, Error> {
         parameters,
         custom_data: Box::new(leaf_specs),
         slash_action: Some(plugin_slash_dispatch),
+        default_member_permissions: option
+            .default_member_permissions
+            .unwrap_or_else(serenity::Permissions::empty),
         ..Default::default()
     }
 }
@@ -860,7 +1111,7 @@ fn build_parameter(option: &OptionSpec) -> CommandParameter<Data, Error> {
             .collect(),
         channel_types: (!option.channel_types.is_empty())
             .then(|| Cow::Owned(option.channel_types.clone())),
-        autocomplete_callback: None,
+        autocomplete_callback: option.autocomplete.then_some(plugin_autocomplete),
         __non_exhaustive: (),
     }
 }
@@ -1004,6 +1255,11 @@ fn parse_option(value: &Value, index: usize) -> Result<Option<OptionSpec>, Comma
         choices,
         channel_types: parse_enum_list(object.get("channel_types"), map_channel_type)
             .unwrap_or_default(),
+        default_member_permissions: object
+            .get("default_member_permissions")
+            .and_then(Value::as_str)
+            .and_then(|bits| bits.parse::<u64>().ok())
+            .map(serenity::Permissions::from_bits_truncate),
         min_value: object.get("min_value").and_then(Value::as_number).cloned(),
         max_value: object.get("max_value").and_then(Value::as_number).cloned(),
         min_length: parse_u16(object.get("min_length")),
@@ -1154,6 +1410,7 @@ mod tests {
             required: false,
             choices: Vec::new(),
             channel_types: Vec::new(),
+            default_member_permissions: None,
             min_value: None,
             max_value: None,
             min_length: None,
@@ -1911,6 +2168,27 @@ mod tests {
     }
 
     #[test]
+    fn qualified_command_name_joins_root_and_subcommands() {
+        let root = command_from_blob(&json!({
+            "name": "feed",
+            "description": "Feeds",
+            "options": [
+                {"name": "batch", "description": "Batch", "type": 1, "options": [
+                    {"name": "subscribe", "description": "Subscribe", "type": 1}
+                ]}
+            ],
+        }))
+        .unwrap();
+        let batch = &root.subcommands[0];
+        let subscribe = &batch.subcommands[0];
+
+        assert_eq!(
+            qualified_command_name(subscribe, &[&root, batch]),
+            "feed batch subscribe"
+        );
+    }
+
+    #[test]
     fn dispatch_descends_subcommands_before_reparsing() {
         let command = command_from_blob(&json!({
             "name": "settings",
@@ -2011,6 +2289,35 @@ mod tests {
         assert_eq!(args, json!({}));
     }
 
+    #[test]
+    fn feed_settings_command_names_match_the_monolith_paths() {
+        assert!(is_feed_settings_command("feed settings"));
+        assert!(is_feed_settings_command("feed-settings"));
+        assert!(!is_feed_settings_command("feed subscribe"));
+    }
+
+    #[test]
+    fn actor_context_carries_user_roles_and_permissions() {
+        let mut interaction = command_interaction(json!({"id": "1", "name": "feed", "type": 1}));
+        interaction.user.id = serenity::UserId::new(42);
+        let mut member = serenity::Member::default();
+        member.roles = serenity::small_fixed_array::FixedArray::from_vec_trunc(vec![
+            serenity::RoleId::new(9),
+            serenity::RoleId::new(7),
+        ]);
+        member.permissions = Some(serenity::Permissions::MANAGE_GUILD);
+        interaction.member = Some(Box::new(member));
+
+        let context = actor_context(&interaction);
+
+        assert_eq!(context["user_id"], json!(42));
+        assert_eq!(context["member_roles"], json!([7, 9]));
+        assert_eq!(
+            context["member_permissions"],
+            json!(serenity::Permissions::MANAGE_GUILD.bits())
+        );
+    }
+
     // ── commands_from_manifest / select_commands ────────────────────────────
 
     #[test]
@@ -2023,6 +2330,70 @@ mod tests {
 
         assert_eq!(commands.len(), 1);
         assert_eq!(commands[0].name, "ok");
+    }
+
+    #[test]
+    fn plugin_autocomplete_response_round_trips_choices() {
+        let response = serenity::CreateAutocompleteResponse::new()
+            .add_choice(serenity::AutocompleteChoice::new("One Piece", "one-piece"));
+        let wire = serde_json::to_value(&response).unwrap();
+
+        let parsed = parse_autocomplete_response(Msg::resp_ok(7, Some(wire))).unwrap();
+
+        assert_eq!(
+            serde_json::to_value(parsed).unwrap(),
+            serde_json::to_value(response).unwrap()
+        );
+    }
+
+    #[test]
+    fn plugin_autocomplete_failure_is_rejected() {
+        let error = parse_autocomplete_response(Msg::resp_err(
+            7,
+            pwr_plugin_protocol::WireError {
+                kind: "InvalidArgs".into(),
+                msg: "bad query".into(),
+            },
+        ))
+        .unwrap_err();
+
+        assert_eq!(error, "InvalidArgs: bad query");
+    }
+
+    #[test]
+    fn autocomplete_option_uses_the_plugin_callback() {
+        let command = command_from_blob(&json!({
+            "name": "feed",
+            "description": "Feeds",
+            "options": [
+                {"name": "url", "description": "URL", "type": 3, "autocomplete": true}
+            ],
+        }))
+        .unwrap();
+
+        assert!(command.parameters[0].autocomplete_callback.is_some());
+    }
+
+    #[test]
+    fn subcommand_keeps_manifest_permissions() {
+        let command = command_from_blob(&json!({
+            "name": "feed",
+            "description": "Feeds",
+            "options": [
+                {
+                    "name": "settings",
+                    "description": "Settings",
+                    "type": 1,
+                    "default_member_permissions": "40"
+                }
+            ],
+        }))
+        .unwrap();
+
+        assert_eq!(
+            command.subcommands[0].default_member_permissions,
+            serenity::Permissions::MANAGE_GUILD | serenity::Permissions::ADMINISTRATOR
+        );
     }
 
     #[test]
@@ -2057,6 +2428,53 @@ mod tests {
         assert_eq!(
             routes,
             PluginRoutes::from([("settings".to_string(), "settings".to_string())])
+        );
+    }
+
+    #[test]
+    fn routes_from_manifests_keeps_the_first_owner_on_collisions() {
+        let routes = routes_from_manifests([
+            (
+                "first".to_string(),
+                Some(manifest(vec![
+                    json!({"name": "settings", "description": "First"}),
+                ])),
+            ),
+            (
+                "second".to_string(),
+                Some(manifest(vec![
+                    json!({"name": "settings", "description": "Second"}),
+                ])),
+            ),
+        ]);
+
+        assert_eq!(routes.get("settings").map(String::as_str), Some("first"));
+    }
+
+    #[test]
+    fn routes_from_manifests_registers_every_qualified_command_path() {
+        let routes = routes_from_manifests([(
+            "feed".to_string(),
+            Some(manifest(vec![json!({
+                "name": "feed",
+                "description": "Feeds",
+                "options": [
+                    {"name": "list", "description": "List", "type": 1},
+                    {"name": "group", "description": "Group", "type": 1, "options": [
+                        {"name": "run", "description": "Run", "type": 1}
+                    ]}
+                ],
+            })])),
+        )]);
+
+        assert_eq!(
+            routes,
+            PluginRoutes::from([
+                ("feed".to_string(), "feed".to_string()),
+                ("feed list".to_string(), "feed".to_string()),
+                ("feed group".to_string(), "feed".to_string()),
+                ("feed group run".to_string(), "feed".to_string()),
+            ])
         );
     }
 

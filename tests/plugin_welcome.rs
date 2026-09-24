@@ -94,7 +94,6 @@ fn shared_services(
         kv: None,
         engine: Some(Arc::new(engine)),
         stats: Arc::new(StatsHandle::default()),
-        feeds: None,
         voice: None,
         welcome: Some(welcome),
         previews: None,

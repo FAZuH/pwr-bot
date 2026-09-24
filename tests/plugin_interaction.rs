@@ -67,7 +67,13 @@ async fn spawn_engine_and_open(
     );
     let engine = InteractionEngine::new();
     let spec = engine
-        .open(message_id, plugin.clone(), PLUGIN_NAME, json!({}))
+        .open(
+            message_id,
+            serenity::UserId::new(1),
+            plugin.clone(),
+            PLUGIN_NAME,
+            json!({"user": {"id": 1}}),
+        )
         .await
         .expect("open the view");
     (plugin, engine, spec)
@@ -149,7 +155,7 @@ async fn engine_drives_the_fixture_view_lifecycle() {
 
     // First click: view.interact round trip through the fixture.
     let spec = engine
-        .interact(message_id, BUTTON_CUSTOM_ID, json!({}))
+        .interact(message_id, BUTTON_CUSTOM_ID, json!({"user": {"id": 1}}))
         .await
         .expect("first click");
     assert!(
@@ -161,7 +167,7 @@ async fn engine_drives_the_fixture_view_lifecycle() {
 
     // Second click: the fixture's own counter, not a host-side one.
     let spec = engine
-        .interact(message_id, BUTTON_CUSTOM_ID, json!({}))
+        .interact(message_id, BUTTON_CUSTOM_ID, json!({"user": {"id": 1}}))
         .await
         .expect("second click");
     assert!(
@@ -203,7 +209,13 @@ async fn session_expires_after_inactivity_timeout() {
     );
     let engine = InteractionEngine::with_timeout(Duration::from_millis(200));
     engine
-        .open(message_id, plugin.clone(), PLUGIN_NAME, json!({}))
+        .open(
+            message_id,
+            serenity::UserId::new(1),
+            plugin.clone(),
+            PLUGIN_NAME,
+            json!({"user": {"id": 1}}),
+        )
         .await
         .expect("open the view");
     assert!(
@@ -230,7 +242,7 @@ async fn session_expires_after_inactivity_timeout() {
     assert!(timed_out, "the plugin never saw the view.timeout event");
 
     let err = engine
-        .interact(message_id, BUTTON_CUSTOM_ID, json!({}))
+        .interact(message_id, BUTTON_CUSTOM_ID, json!({"user": {"id": 1}}))
         .await
         .unwrap_err();
     assert!(
@@ -249,7 +261,7 @@ async fn engine_surfaces_unknown_custom_id_from_the_fixture() {
     let (plugin, engine, _) = spawn_engine_and_open(message_id).await;
 
     let err = engine
-        .interact(message_id, "hello:nope", json!({}))
+        .interact(message_id, "hello:nope", json!({"user": {"id": 1}}))
         .await
         .unwrap_err();
     assert!(
@@ -283,6 +295,7 @@ async fn modal_submit_round_trips_through_the_fixture() {
             "hello:modal",
             json!({
                 "custom_id": "hello:modal",
+                "user": {"id": 1},
                 "components": [{"type": 4, "custom_id": "note", "value": "hi"}],
             }),
         )
@@ -310,7 +323,13 @@ async fn concurrent_sessions_route_to_their_own_responses() {
     let b = serenity::MessageId::new(2);
     let (plugin, engine, _) = spawn_engine_and_open(a).await;
     engine
-        .open(b, plugin.clone(), PLUGIN_NAME, json!({}))
+        .open(
+            b,
+            serenity::UserId::new(1),
+            plugin.clone(),
+            PLUGIN_NAME,
+            json!({"user": {"id": 1}}),
+        )
         .await
         .expect("open b");
 
@@ -318,9 +337,9 @@ async fn concurrent_sessions_route_to_their_own_responses() {
     // serially, so only per-message routing plus call-id correlation resolve
     // each click to its own count.
     let (c1, c2, c3) = tokio::join!(
-        engine.interact(a, BUTTON_CUSTOM_ID, json!({})),
-        engine.interact(b, BUTTON_CUSTOM_ID, json!({})),
-        engine.interact(a, BUTTON_CUSTOM_ID, json!({})),
+        engine.interact(a, BUTTON_CUSTOM_ID, json!({"user": {"id": 1}})),
+        engine.interact(b, BUTTON_CUSTOM_ID, json!({"user": {"id": 1}})),
+        engine.interact(a, BUTTON_CUSTOM_ID, json!({"user": {"id": 1}})),
     );
     let mut counts: Vec<u64> = [c1, c2, c3]
         .map(|r| r.expect("click resolves"))

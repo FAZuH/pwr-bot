@@ -411,6 +411,7 @@ fn main() -> ExitCode {
                 }
             }
             Msg::Pong => {}
+            Msg::Progress { .. } => {}
             // The host answers our hello with its own; tolerate it silently.
             Msg::Hello { .. } => {}
             Msg::Resp {

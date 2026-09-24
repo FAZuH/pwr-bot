@@ -46,7 +46,6 @@ fn host_services(io: Arc<dyn HostIo>, kv: Option<Arc<dyn KvStore>>) -> Arc<HostS
         kv,
         engine: None,
         stats: Arc::new(StatsHandle::default()),
-        feeds: None,
         voice: None,
         welcome: None,
         previews: None,
@@ -70,7 +69,6 @@ fn view_host_services(
         kv: None,
         engine: Some(Arc::new(engine)),
         stats: Arc::new(StatsHandle::default()),
-        feeds: None,
         voice: None,
         welcome: None,
         previews: None,
@@ -264,7 +262,7 @@ async fn host_openview_opens_the_target_plugin_view_end_to_end() {
                 // Discord rejects them on edit.
                 data == &json!({
                     "attachments": [],
-                    "components": [{"content": "{}", "type": 10}],
+                    "components": [{"content": "{\"user\":{\"id\":7}}", "type": 10}],
                     "embeds": [],
                     "flags": 32768,
                 })
@@ -298,7 +296,7 @@ async fn host_openview_opens_the_target_plugin_view_end_to_end() {
                 "channel_id": channel_id,
                 "plugin": "arg-echo",
                 "command": "arg-echo",
-                "args": {},
+                "args": {"user": {"id": 7}},
             })),
         )
         .await
@@ -324,12 +322,12 @@ async fn host_openview_opens_the_target_plugin_view_end_to_end() {
         "the produced message has an open session"
     );
     let follow_up = engine
-        .interact(message_id, "arg-echo", json!({}))
+        .interact(message_id, "arg-echo", json!({"user": {"id": 7}}))
         .await
         .expect("follow-up interaction routes to the target plugin");
     assert_eq!(
         follow_up.data["components"][0]["content"],
-        "{\"custom_id\":\"arg-echo\",\"view\":{\"last_args\":{}}}"
+        "{\"custom_id\":\"arg-echo\",\"user\":{\"id\":7},\"view\":{\"last_args\":{\"user\":{\"id\":7}}}}"
     );
     assert_eq!(follow_up.data["tts"], false);
     assert_eq!(follow_up.data["enforce_nonce"], false);
@@ -356,7 +354,7 @@ async fn host_openview_edits_the_source_message_in_place() {
             mockall::predicate::function(|data: &serde_json::Value| {
                 data == &json!({
                     "attachments": [],
-                    "components": [{"content": "{}", "type": 10}],
+                    "components": [{"content": "{\"user\":{\"id\":7}}", "type": 10}],
                     "embeds": [],
                     "flags": 32768,
                 })
@@ -390,7 +388,7 @@ async fn host_openview_edits_the_source_message_in_place() {
                 "channel_id": channel_id,
                 "plugin": "arg-echo",
                 "command": "arg-echo",
-                "args": {},
+                "args": {"user": {"id": 7}},
                 "message_id": source,
             })),
         )
@@ -460,7 +458,7 @@ async fn host_openview_accepts_a_string_message_id() {
                 "channel_id": channel_id,
                 "plugin": "arg-echo",
                 "command": "arg-echo",
-                "args": {},
+                "args": {"user": {"id": 7}},
                 "message_id": source.to_string(),
             })),
         )
@@ -513,7 +511,7 @@ async fn host_openview_rejects_malformed_view_before_sending_or_registering() {
                 "channel_id": 987_654_321_u64,
                 "plugin": "arg-echo",
                 "command": "malformed",
-                "args": {},
+                "args": {"user": {"id": 7}},
             })),
         )
         .await

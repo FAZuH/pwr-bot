@@ -33,6 +33,16 @@ path resolves as [Configuration](configuration.md) documents. An unknown
 name or a binary that fails to spawn is skipped with a warning and the
 bot stays up.
 
+## Feed
+
+The `feed` core plugin owns feed subscriptions, delivery, and its settings
+storage. It applies the migrations under
+`crates/plugin/feed/migrations/` at startup and exposes the `/feed` command
+group plus the `/feed-settings` panel command. Its own service and repository
+write feed tables; the host bridges Discord and plugin operations. The
+owner-only `/dump_db` command is the exception: the host directly reads
+feed tables for its transitional database dump.
+
 ## Missing or invalid catalog
 
 The bot still starts when the catalog is missing or invalid. Plugin commands

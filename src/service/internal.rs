@@ -29,27 +29,18 @@ impl InternalOps for InternalService {
 
 /// Internal service for metadata and maintenance operations.
 pub struct InternalService {
-    feed: Arc<dyn FeedRepository + Send + Sync>,
-    feed_item: Arc<dyn FeedItemRepository + Send + Sync>,
-    subscriber: Arc<dyn SubscriberRepository + Send + Sync>,
-    feed_subscription: Arc<dyn FeedSubscriptionRepository + Send + Sync>,
+    feed_dump: Arc<dyn FeedDumpRepository + Send + Sync>,
     bot_meta: Arc<dyn BotMetaRepository + Send + Sync>,
 }
 
 impl InternalService {
     /// Creates a new internal service.
     pub fn new(
-        feed: Arc<dyn FeedRepository + Send + Sync>,
-        feed_item: Arc<dyn FeedItemRepository + Send + Sync>,
-        subscriber: Arc<dyn SubscriberRepository + Send + Sync>,
-        feed_subscription: Arc<dyn FeedSubscriptionRepository + Send + Sync>,
+        feed_dump: Arc<dyn FeedDumpRepository + Send + Sync>,
         bot_meta: Arc<dyn BotMetaRepository + Send + Sync>,
     ) -> Self {
         Self {
-            feed,
-            feed_item,
-            subscriber,
-            feed_subscription,
+            feed_dump,
             bot_meta,
         }
     }
@@ -76,10 +67,10 @@ impl InternalService {
 
     /// Dumps all database tables for inspection.
     pub async fn dump_database(&self) -> anyhow::Result<DatabaseDump> {
-        let feeds = self.feed.select_all().await?;
-        let feed_items = self.feed_item.select_all().await?;
-        let subscribers = self.subscriber.select_all().await?;
-        let subscriptions = self.feed_subscription.select_all().await?;
+        let feeds = self.feed_dump.select_feeds().await?;
+        let feed_items = self.feed_dump.select_feed_items().await?;
+        let subscribers = self.feed_dump.select_subscribers().await?;
+        let subscriptions = self.feed_dump.select_subscriptions().await?;
 
         Ok(DatabaseDump {
             feeds,

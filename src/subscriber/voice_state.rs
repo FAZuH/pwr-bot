@@ -299,7 +299,6 @@ mod tests {
     use poise::serenity_prelude::VoiceState;
 
     use super::*;
-    use crate::feed::Platforms;
     use crate::repo::PgRepos;
 
     async fn create_mock_subscriber() -> anyhow::Result<VoiceStateSubscriber> {
@@ -316,7 +315,7 @@ mod tests {
             .await
             .unwrap();
 
-        let services = Arc::new(Services::new(Arc::new(db), Arc::new(Platforms::new())).await?);
+        let services = Arc::new(Services::new(Arc::new(db)).await?);
         Ok(VoiceStateSubscriber::new(services))
     }
 

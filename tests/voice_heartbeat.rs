@@ -27,10 +27,7 @@ async fn heartbeat_read_write() {
         .expect("Failed to create service"),
     );
     let internal = Arc::new(InternalService::new(
-        Arc::new(db.feed.clone()),
-        Arc::new(db.feed_item.clone()),
-        Arc::new(db.subscriber.clone()),
-        Arc::new(db.feed_subscription.clone()),
+        Arc::from(db.feed_dump()),
         Arc::new(db.bot_meta.clone()),
     ));
     let heartbeat_manager = VoiceHeartbeatManager::new(internal, service);
@@ -58,10 +55,7 @@ async fn heartbeat_crash_recovery_no_sessions() {
         .expect("Failed to create service"),
     );
     let internal = Arc::new(InternalService::new(
-        Arc::new(db.feed.clone()),
-        Arc::new(db.feed_item.clone()),
-        Arc::new(db.subscriber.clone()),
-        Arc::new(db.feed_subscription.clone()),
+        Arc::from(db.feed_dump()),
         Arc::new(db.bot_meta.clone()),
     ));
 
@@ -97,10 +91,7 @@ async fn heartbeat_crash_recovery_with_active_sessions() {
         .expect("Failed to create service"),
     );
     let internal = Arc::new(InternalService::new(
-        Arc::new(db.feed.clone()),
-        Arc::new(db.feed_item.clone()),
-        Arc::new(db.subscriber.clone()),
-        Arc::new(db.feed_subscription.clone()),
+        Arc::from(db.feed_dump()),
         Arc::new(db.bot_meta.clone()),
     ));
 
@@ -188,10 +179,7 @@ async fn heartbeat_crash_recovery_no_heartbeat() {
         .expect("Failed to create service"),
     );
     let internal = Arc::new(InternalService::new(
-        Arc::new(db.feed.clone()),
-        Arc::new(db.feed_item.clone()),
-        Arc::new(db.subscriber.clone()),
-        Arc::new(db.feed_subscription.clone()),
+        Arc::from(db.feed_dump()),
         Arc::new(db.bot_meta.clone()),
     ));
 

@@ -6,7 +6,6 @@
 
 pub mod about;
 pub mod dump_db;
-pub mod feed;
 pub mod plugins;
 pub mod prelude;
 pub mod register;
@@ -41,9 +40,6 @@ use poise::ReplyHandle;
 
 use crate::bot::Data;
 use crate::bot::command::about::AboutHandler;
-use crate::bot::command::feed::list::FeedListHandler;
-use crate::bot::command::feed::subscribe::FeedSubscribeHandler;
-use crate::bot::command::feed::unsubscribe::FeedUnsubscribeHandler;
 use crate::bot::command::settings::SettingsHandler;
 use crate::bot::command::voice::leaderboard::VoiceLeaderboardHandler;
 use crate::bot::command::voice::stats::VoiceStatsHandler;
@@ -52,7 +48,7 @@ use crate::bot::translate::SettingsReturnPage;
 
 /// Trait for command modules (Cogs) that provide a set of Discord commands.
 ///
-/// A "Cog" is a collection of related commands (e.g., all feed-related commands).
+/// A "Cog" is a collection of related commands.
 pub trait Cog {
     /// Returns the list of commands provided by this cog.
     fn commands(&self) -> Vec<Command<Data, Error>>;
@@ -69,7 +65,6 @@ impl Cog for Cogs {
         vec![
             about::about(),
             dump_db::dump_db(),
-            feed::feed(),
             plugins::plugins(),
             register::register(),
             register_owner::register_owner(),
@@ -141,27 +136,14 @@ impl<'a> Router<'a> {
 
     /// Resolves a popped navigation target into the handler that renders it.
     ///
-    /// `None` ends the session: a feed list target that lost its delivery
-    /// channel has nothing to render. The terminal targets never reach this
-    /// map — [`pop_step`] resolves them into the section handoff, the root
+    /// `None` ends the session. Terminal targets never reach this map:
+    /// [`pop_step`] resolves them into the section handoff, the root
     /// dismissal, or the end of the session.
     fn handler_for(&self, target: Navigation) -> Option<Box<dyn CommandHandler>> {
         use Navigation::*;
         match target {
             SettingsMain => Some(Box::new(SettingsHandler::new())),
             SettingsAbout => Some(Box::new(AboutHandler::new())),
-            FeedSubscriptions { send_into } => {
-                send_into.map(|send_into| Box::new(FeedListHandler::new(send_into)) as Box<_>)
-            }
-            FeedSubscribe { links, send_into } => {
-                Some(Box::new(FeedSubscribeHandler::new(links, send_into)))
-            }
-            FeedUnsubscribe { links, send_into } => {
-                Some(Box::new(FeedUnsubscribeHandler::new(links, send_into)))
-            }
-            FeedList(send_into) => {
-                send_into.map(|send_into| Box::new(FeedListHandler::new(send_into)) as Box<_>)
-            }
             VoiceLeaderboard { time_range } => {
                 Some(Box::new(VoiceLeaderboardHandler::new(time_range)))
             }
@@ -410,23 +392,20 @@ mod tests {
         assert!(matches!(walk.back(), Popped::RootBack));
     }
 
-    /// Feed list → About → Back: the marker closes the About frame and
-    /// the parent beneath it runs again, morphing the same message back.
+    /// Voice leaderboard → About → Back: the marker closes the About frame
+    /// and the parent beneath it runs again, morphing the same message back.
     #[test]
     fn back_pops_one_level_to_the_parent() {
-        let mut walk = Walk::new(Navigation::FeedList(None));
-        assert!(matches!(
-            walk.opened(),
-            Popped::Run(Navigation::FeedList(None))
-        ));
+        let parent = Navigation::VoiceLeaderboard {
+            time_range: crate::bot::command::voice::VoiceLeaderboardTimeRange::Today,
+        };
+        let mut walk = Walk::new(parent.clone());
+        assert!(matches!(walk.opened(), Popped::Run(ref target) if target == &parent));
         assert!(matches!(
             walk.pushed(Navigation::SettingsAbout),
             Popped::Run(Navigation::SettingsAbout)
         ));
-        assert!(matches!(
-            walk.back(),
-            Popped::Run(Navigation::FeedList(None))
-        ));
+        assert!(matches!(walk.back(), Popped::Run(ref target) if target == &parent));
     }
 
     /// The parent a Back reveals stays the current frame rather than being
@@ -434,16 +413,16 @@ mod tests {
     /// the session instead of looping on the parent.
     #[test]
     fn a_revealed_parent_stays_the_current_frame() {
-        let mut walk = Walk::new(Navigation::FeedList(None));
+        let parent = Navigation::VoiceLeaderboard {
+            time_range: crate::bot::command::voice::VoiceLeaderboardTimeRange::Today,
+        };
+        let mut walk = Walk::new(parent.clone());
         walk.opened();
         walk.pushed(Navigation::SettingsAbout);
-        assert!(matches!(
-            walk.back(),
-            Popped::Run(Navigation::FeedList(None))
-        ));
+        assert!(matches!(walk.back(), Popped::Run(ref target) if target == &parent));
         assert_eq!(
             walk.history.back(),
-            Some(&Navigation::FeedList(None)),
+            Some(&parent),
             "the revealed parent is still the current frame"
         );
         assert!(matches!(walk.back(), Popped::RootBack));
@@ -455,19 +434,16 @@ mod tests {
     fn consecutive_backs_each_close_one_frame() {
         let mut walk = Walk::new(Navigation::SettingsAbout);
         walk.opened();
-        walk.pushed(Navigation::FeedSubscribe {
-            links: "a".into(),
-            send_into: None,
+        walk.pushed(Navigation::VoiceLeaderboard {
+            time_range: crate::bot::command::voice::VoiceLeaderboardTimeRange::Today,
         });
-        walk.pushed(Navigation::FeedUnsubscribe {
-            links: "b".into(),
-            send_into: None,
+        walk.pushed(Navigation::VoiceLeaderboard {
+            time_range: crate::bot::command::voice::VoiceLeaderboardTimeRange::Past7Days,
         });
         assert!(matches!(
             walk.back(),
-            Popped::Run(Navigation::FeedSubscribe {
-                links: _,
-                send_into: _,
+            Popped::Run(Navigation::VoiceLeaderboard {
+                time_range: crate::bot::command::voice::VoiceLeaderboardTimeRange::Today,
             })
         ));
         assert!(matches!(
@@ -520,7 +496,9 @@ mod tests {
         walk.opened();
         assert!(matches!(walk.pushed(Navigation::Exit), Popped::End));
 
-        let mut idle = Walk::new(Navigation::FeedList(None));
+        let mut idle = Walk::new(Navigation::VoiceLeaderboard {
+            time_range: crate::bot::command::voice::VoiceLeaderboardTimeRange::Today,
+        });
         idle.opened();
         assert!(matches!(
             pop_step(&mut idle.queue, &mut idle.history),
@@ -535,18 +513,16 @@ mod tests {
     fn history_is_capped_at_max_nav_history() {
         let mut walk = Walk::new(Navigation::SettingsAbout);
         walk.opened();
-        for step in 0..MAX_NAV_HISTORY {
-            walk.pushed(Navigation::FeedSubscribe {
-                links: step.to_string(),
-                send_into: None,
+        for _step in 0..MAX_NAV_HISTORY {
+            walk.pushed(Navigation::VoiceLeaderboard {
+                time_range: crate::bot::command::voice::VoiceLeaderboardTimeRange::Today,
             });
         }
         assert_eq!(walk.history.len(), MAX_NAV_HISTORY);
         assert_eq!(
             walk.history.front(),
-            Some(&Navigation::FeedSubscribe {
-                links: "0".into(),
-                send_into: None,
+            Some(&Navigation::VoiceLeaderboard {
+                time_range: crate::bot::command::voice::VoiceLeaderboardTimeRange::Today,
             }),
             "the initial frame is the oldest and the first to fall off"
         );

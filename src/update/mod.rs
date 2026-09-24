@@ -16,8 +16,6 @@ pub trait Update {
 }
 
 pub mod about;
-pub mod feed_batch;
-pub mod feed_list;
 pub mod lifecycle;
 pub mod pagination;
 pub mod plugins;
@@ -32,16 +30,6 @@ pub use about::AboutModel;
 pub use about::AboutMsg;
 pub use about::AboutStats;
 pub use about::update as about_update;
-pub use feed_batch::FeedBatchEffect;
-pub use feed_batch::FeedBatchModel;
-pub use feed_batch::FeedBatchMsg;
-pub use feed_batch::FeedBatchPhase;
-pub use feed_batch::update as feed_batch_update;
-pub use feed_list::FeedListEffect;
-pub use feed_list::FeedListModel;
-pub use feed_list::FeedListMsg;
-pub use feed_list::FeedListViewState;
-pub use feed_list::update as feed_list_update;
 pub use lifecycle::Lifecycle;
 pub use plugins::PluginsCmd;
 pub use plugins::PluginsModel;

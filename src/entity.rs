@@ -335,35 +335,6 @@ impl From<VoiceLeaderboardRow> for VoiceLeaderboardEntry {
     }
 }
 
-#[derive(QueryableByName)]
-pub struct FeedWithLatestItemRow {
-    #[diesel(sql_type = Integer)]
-    pub id: i32,
-    #[diesel(sql_type = Text)]
-    pub name: String,
-    #[diesel(sql_type = Text)]
-    pub description: String,
-    #[diesel(sql_type = Text)]
-    pub platform_id: String,
-    #[diesel(sql_type = Text)]
-    pub source_id: String,
-    #[diesel(sql_type = Text)]
-    pub items_id: String,
-    #[diesel(sql_type = Text)]
-    pub source_url: String,
-    #[diesel(sql_type = Text)]
-    pub cover_url: String,
-    #[diesel(sql_type = Text)]
-    pub tags: String,
-
-    #[diesel(sql_type = Nullable<Integer>)]
-    pub item_id: Option<i32>,
-    #[diesel(sql_type = Nullable<Text>)]
-    pub item_description: Option<String>,
-    #[diesel(sql_type = Nullable<Timestamptz>)]
-    pub item_published: Option<DateTime<Utc>>,
-}
-
 use derive_builder::Builder;
 
 #[derive(Builder, Clone)]

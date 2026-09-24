@@ -1,46 +1,44 @@
-//! The feed settings panel plugin (#148): per-guild feed subscription
-//! settings served as a plugin view — the panel-migration program's tracer
-//! bullet for typed service RPCs (ADR-0010).
+//! The feed plugin owns feed tables, feed settings, feed commands, and feed
+//! delivery. It speaks the pwr-bot plugin wire protocol over JSON-Lines stdio.
 //!
-//! Speaks the pwr-bot plugin wire protocol over JSON-Lines stdio, like the
-//! `hello` plugin: one compact JSON object per line on stdout, terminated by
-//! a single `\n` and flushed after every write; stderr is the free logging
-//! channel.
-//!
-//! Behavior:
-//! - announces `hello` (`v`, `name`, `caps`, `manifest`) as its first line
-//!   after spawn; the manifest declares the `feed-settings` command and the
-//!   settings section the host Settings GUI opens the panel through, which
-//!   forwards the source interaction's `guild_id` in the invoke args;
-//! - answers `invoke` of `feed-settings` by loading the guild's whole
-//!   [`ServerSettings`] snapshot through `host.feed.get_settings` and
-//!   rendering the monolith `/feed settings` panel as Components V2;
-//! - answers `view.interact` by applying the monolith update vocabulary
-//!   (toggle, channel, subscribe role, unsubscribe role) to the session's
-//!   own model copy and re-rendering — a plain edit makes no host call;
-//! - `Back`, `About`, and the engine's `view.timeout` event each persist the
-//!   session's snapshot exactly once through `host.feed.update_settings`;
-//! - `Back` then hands the message back to the host Settings GUI and
-//!   `About` opens the host About view on the panel's message, both
-//!   through `host.open_view` against their host-reserved targets,
-//!   answering the interaction with the `ViewMoved` marker when the open
-//!   replaced the panel's message; when no live Settings session takes the
-//!   message back, the panel re-renders and stays;
-//! - treats `event` (`view.timeout`) as one-way, never answering it: the
-//!   persist it triggers rides a `host.feed.update_settings` call whose
-//!   resp is only logged;
-//! - answers `ping` with `pong`, tolerates the host's hello ack silently,
-//!   and exits 0 on `bye` and on EOF.
+//! Startup announces the manifest, loads host configuration, applies the
+//! plugin's embedded migrations, and then serves queued calls. The feed
+//! settings panel persists directly through the plugin repository. The
+//! `/feed` command and its views use the same services, with batch invokes
+//! sending `Msg::Progress` updates before their final response. `Back` and
+//! `About` use the host's reserved `host.open_view` targets. Timeout events
+//! persist the current settings model without sending a response.
 
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::io::BufRead;
 use std::io::Write;
 use std::process::ExitCode;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
+use std::time::Duration;
 
 use feed::COMMAND_NAME;
+use feed::FEED_BATCH_COMMAND_NAME;
+use feed::FEED_LIST_COMMAND_NAME;
+use feed::FEED_SETTINGS_COMMAND_NAME;
+use feed::FEED_SUBSCRIBE_COMMAND_NAME;
+use feed::FEED_UNSUBSCRIBE_COMMAND_NAME;
 use feed::PLUGIN_NAME;
+use feed::Platforms;
+use feed::command;
+use feed::event::EventBus;
+use feed::host_client::HostResponse;
+use feed::host_client::SharedOutput;
+use feed::host_client::spawn_host_client;
 use feed::manifest;
+use feed::repo::Repository;
+use feed::service::feed_subscription::FeedSubscriptionService;
+use feed::subscriber::discord_dm::DiscordDmSubscriber;
+use feed::subscriber::discord_guild::DiscordGuildSubscriber;
+use feed::task::series_feed_publisher::SeriesFeedPublisher;
 use pwr_ext::view;
 use pwr_ext::view_support::ButtonStyle;
 use pwr_ext::view_support::ChannelType;
@@ -48,15 +46,12 @@ use pwr_ext::view_support::CreateSelectMenuKind;
 use pwr_ext::view_support::GenericChannelId;
 use pwr_ext::view_support::RoleId;
 use pwr_plugin_protocol::API_VERSION;
+use pwr_plugin_protocol::FeedsSettings;
 use pwr_plugin_protocol::Msg;
-use pwr_plugin_protocol::ServerSettings;
 use pwr_plugin_protocol::VIEW_MOVED_KIND;
-use pwr_plugin_protocol::WireError;
-use pwr_plugin_support::Panel;
 use pwr_plugin_support::about_exit;
 use pwr_plugin_support::back_exit;
 use pwr_plugin_support::id_as_u64;
-use pwr_plugin_support::issue_host_call;
 use pwr_plugin_support::reply_err;
 use pwr_plugin_support::write_msg;
 use serde_json::Value;
@@ -70,47 +65,50 @@ const CUSTOM_ID_UNSUB_ROLE: &str = "feeds:unsub-role";
 const CUSTOM_ID_BACK: &str = "feeds:back";
 const CUSTOM_ID_ABOUT: &str = "feeds:about";
 
-/// Panel copy, verbatim from the monolith's feed settings view.
+/// Panel copy for the feed settings view.
 const CHANNEL_TEXT: &str =
     "### Notification Channel\n\n> 🛈  Choose where feed updates will be posted.";
-const SUB_ROLE_TEXT: &str = "### Subscribe Permission\n\n> 🛈  Who can add new feeds to this server. Leave empty to allow users with \"Manage Server\" permission.";
-const UNSUB_ROLE_TEXT: &str = "### Unsubscribe Permission\n\n> 🛈  Who can remove feeds from this server. Leave empty to allow users with \"Manage Server\" permission.";
+const SUB_ROLE_TEXT: &str = concat!(
+    "### Subscribe Permission\n\n",
+    "> 🛈  Who can add new feeds to this server. Leave empty to allow users with ",
+    "\"Manage Server\" permission."
+);
+const UNSUB_ROLE_TEXT: &str = concat!(
+    "### Unsubscribe Permission\n\n",
+    "> 🛈  Who can remove feeds from this server. Leave empty to allow users with ",
+    "\"Manage Server\" permission."
+);
 
-// ── the plugin's own update logic ─────────────────────────────────────────────
-
-/// The feed settings model: the guild's whole [`ServerSettings`] snapshot,
-/// as the monolith's `FeedSettingsModel` held it.
+/// The feed settings model.
 #[derive(Debug, Clone, PartialEq)]
 struct Model {
-    settings: ServerSettings,
+    settings: FeedsSettings,
 }
 
 impl Model {
-    fn new(settings: ServerSettings) -> Self {
+    fn new(settings: FeedsSettings) -> Self {
         Self { settings }
     }
 
     /// Whether feed notifications are enabled (defaults to enabled).
     fn is_enabled(&self) -> bool {
-        self.settings.feeds.enabled.unwrap_or(true)
+        self.settings.enabled.unwrap_or(true)
     }
 
     fn channel_id(&self) -> Option<String> {
-        self.settings.feeds.channel_id.clone()
+        self.settings.channel_id.clone()
     }
 
     fn subscribe_role_id(&self) -> Option<String> {
-        self.settings.feeds.subscribe_role_id.clone()
+        self.settings.subscribe_role_id.clone()
     }
 
     fn unsubscribe_role_id(&self) -> Option<String> {
-        self.settings.feeds.unsubscribe_role_id.clone()
+        self.settings.unsubscribe_role_id.clone()
     }
 }
 
-/// Messages that drive the model: the monolith `FeedSettingsMsg` vocabulary
-/// (its lifecycle arm collapses to [`PanelMsg::Expired`], the only lifecycle
-/// moment a plugin receives).
+/// Messages handled by the feed settings view.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum PanelMsg {
     ToggleEnabled,
@@ -122,11 +120,10 @@ enum PanelMsg {
     Expired,
 }
 
-/// Effects the model can request: a persist of the whole snapshot, exactly
-/// like the monolith's single `PersistSettings` effect.
+/// A request to persist the current settings snapshot.
 #[derive(Debug, Clone, PartialEq)]
 enum Effect {
-    Persist(ServerSettings),
+    Persist(FeedsSettings),
 }
 
 /// The pure update function — the only writer of the model. `Back`, `About`,
@@ -135,20 +132,20 @@ enum Effect {
 fn update(msg: PanelMsg, model: &mut Model) -> Vec<Effect> {
     match msg {
         PanelMsg::ToggleEnabled => {
-            let current = model.settings.feeds.enabled.unwrap_or(true);
-            model.settings.feeds.enabled = Some(!current);
+            let current = model.settings.enabled.unwrap_or(true);
+            model.settings.enabled = Some(!current);
             Vec::new()
         }
         PanelMsg::SetChannel(id) => {
-            model.settings.feeds.channel_id = id;
+            model.settings.channel_id = id;
             Vec::new()
         }
         PanelMsg::SetSubRole(id) => {
-            model.settings.feeds.subscribe_role_id = id;
+            model.settings.subscribe_role_id = id;
             Vec::new()
         }
         PanelMsg::SetUnsubRole(id) => {
-            model.settings.feeds.unsubscribe_role_id = id;
+            model.settings.unsubscribe_role_id = id;
             Vec::new()
         }
         PanelMsg::Back | PanelMsg::About | PanelMsg::Expired => persist(model),
@@ -161,35 +158,75 @@ fn persist(model: &Model) -> Vec<Effect> {
     vec![Effect::Persist(model.settings.clone())]
 }
 
-// ── shared plumbing (crates/plugin/pwr-plugin-support) ────────────────────────
+#[derive(Debug, Clone, PartialEq)]
+struct SessionState {
+    guild_id: u64,
+    model: Model,
+}
 
-/// How this panel plugs into the support crate's generic plumbing: the model
-/// a session carries, and the service RPC pair that loads and persists it.
-impl Panel for Model {
-    const GET_SETTINGS_OP: &'static str = "host.feed.get_settings";
-    const UPDATE_SETTINGS_OP: &'static str = "host.feed.update_settings";
-
-    fn from_settings(settings: ServerSettings) -> Self {
-        Model::new(settings)
+impl SessionState {
+    fn new(guild_id: u64, settings: FeedsSettings) -> Self {
+        Self {
+            guild_id,
+            model: Model::new(settings),
+        }
     }
 
-    fn settings(&self) -> &ServerSettings {
-        &self.settings
+    fn to_value(&self) -> Value {
+        json!({
+            "guild_id": self.guild_id,
+            "settings": self.model.settings,
+        })
+    }
+
+    fn from_value(value: Option<&Value>) -> Option<Self> {
+        let value = value?;
+        let guild_id = value.get("guild_id").and_then(id_as_u64)?;
+        let settings = value.get("settings")?;
+        if settings.get("feeds").is_some() {
+            return None;
+        }
+        let settings = serde_json::from_value(settings.clone()).ok()?;
+        Some(Self::new(guild_id, settings))
     }
 }
 
-type SessionState = pwr_plugin_support::SessionState<Model>;
-type Pending = pwr_plugin_support::Pending<Model>;
-type HostCall = pwr_plugin_support::HostCall<Model>;
+enum Pending {
+    OpenSettings {
+        invoke_id: u64,
+        session: SessionState,
+        message_id: Option<u64>,
+    },
+}
 
-// ── view rendering ────────────────────────────────────────────────────────────
+struct HostCall {
+    pending: Pending,
+    args: Value,
+}
 
-/// Renders the panel as Components V2, mirroring the monolith's
-/// `/feed settings` view: the status header (whose copy reflects the
-/// enabled state and the configured channel), the toggle button, the
-/// notification-channel select, the two permission-role selects, and the
-/// Back/About row outside the container. The select kinds are built at
-/// runtime so the current selection rides each menu's default values.
+impl HostCall {
+    fn open_settings(
+        invoke_id: u64,
+        session: SessionState,
+        message_id: Option<u64>,
+        args: Value,
+    ) -> Self {
+        Self {
+            pending: Pending::OpenSettings {
+                invoke_id,
+                session,
+                message_id,
+            },
+            args,
+        }
+    }
+}
+
+/// Renders the feed settings panel as Components V2: the status header, the
+/// toggle button, the notification-channel select, the two permission-role
+/// selects, and the Back/About row outside the container. Select kinds are
+/// built at runtime so the current selection rides each menu's default
+/// values.
 fn view_data(model: &Model) -> Value {
     let is_enabled = model.is_enabled();
 
@@ -198,12 +235,25 @@ fn view_data(model: &Model) -> Value {
         if is_enabled {
             match model.channel_id() {
                 Some(id) => format!(
-                    "Feed notifications are currently **active**. Notifications will be sent to <#{id}>"
+                    concat!(
+                        "Feed notifications are currently **active**. ",
+                        "Notifications will be sent to <#",
+                        "{0}>"
+                    ),
+                    id
                 ),
-                None => "Feed notifications are currently **active**, but notification channel is not set.".to_string(),
+                None => concat!(
+                    "Feed notifications are currently **active**, but notification channel ",
+                    "is not set."
+                )
+                .to_string(),
             }
         } else {
-            "Feed notifications are currently **paused**. No notifications will be sent until it is re-enabled.".to_string()
+            concat!(
+                "Feed notifications are currently **paused**. ",
+                "No notifications will be sent until it is re-enabled."
+            )
+            .to_string()
         }
     );
 
@@ -319,93 +369,321 @@ fn envelope(session: &SessionState) -> Value {
 /// Writes an ok resp answering `invoke_id` with the session's envelope.
 /// Returns whether the write succeeded.
 fn reply_envelope(out: &mut impl Write, invoke_id: u64, session: &SessionState) -> bool {
-    let resp = Msg::resp_ok(invoke_id, Some(envelope(session)));
-    write_msg(out, &resp).is_ok()
+    reply_data(out, invoke_id, envelope(session))
 }
 
-// ── protocol helpers ───────────────────────────────────────────────────────────
-
-/// The `host.feed.get_settings` call args.
-fn get_settings_args(guild_id: u64) -> Value {
-    json!({ "guild_id": guild_id })
+fn reply_data(out: &mut impl Write, invoke_id: u64, data: Value) -> bool {
+    write_msg(out, &Msg::resp_ok(invoke_id, Some(data))).is_ok()
 }
 
-/// The `host.feed.update_settings` call args persisting a snapshot.
-fn update_settings_args(guild_id: u64, settings: &ServerSettings) -> Value {
-    json!({ "guild_id": guild_id, "settings": settings })
+struct OutputWriter(SharedOutput);
+
+impl Write for OutputWriter {
+    fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().expect("stdout lock poisoned").write(buffer)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.0.lock().expect("stdout lock poisoned").flush()
+    }
 }
 
-/// Parses a `host.feed.get_settings` resp payload into a snapshot.
-fn parse_settings(data: &Value) -> Option<ServerSettings> {
-    serde_json::from_value(data.clone()).ok()
+fn write_output(output: &SharedOutput, message: &Msg) -> std::io::Result<()> {
+    let mut output = output.lock().expect("stdout lock poisoned");
+    write_msg(&mut *output, message)
 }
 
-// ── the event loop ────────────────────────────────────────────────────────────
+fn issue_call(
+    output: &SharedOutput,
+    pending: &mut HashMap<u64, Pending>,
+    next_call_id: &AtomicU64,
+    call: HostCall,
+) -> bool {
+    let call_id = next_call_id.fetch_add(1, Ordering::Relaxed);
+    pending.insert(call_id, call.pending);
+    let message = Msg::Call {
+        id: call_id,
+        op: "host.open_view".into(),
+        cmd: None,
+        args: Some(call.args),
+    };
+    write_output(output, &message).is_ok()
+}
 
-fn main() -> ExitCode {
+fn load_host_config(
+    output: &SharedOutput,
+    next_call_id: &AtomicU64,
+    input: &mut impl BufRead,
+) -> Result<(String, Duration, Vec<Msg>), String> {
+    let call_id = next_call_id.fetch_add(1, Ordering::Relaxed);
+    write_output(
+        output,
+        &Msg::Call {
+            id: call_id,
+            op: "host.get_config".into(),
+            cmd: None,
+            args: None,
+        },
+    )
+    .map_err(|error| error.to_string())?;
+    let mut queued = Vec::new();
+    for line in input.lines() {
+        let line = line.map_err(|error| error.to_string())?;
+        let message: Msg = serde_json::from_str(&line).map_err(|error| error.to_string())?;
+        if matches!(&message, Msg::Hello { .. }) {
+            continue;
+        }
+        if let Msg::Resp {
+            id,
+            ok: true,
+            data: Some(data),
+            ..
+        } = &message
+            && *id == call_id
+        {
+            let db_url = data
+                .get("db_url")
+                .and_then(Value::as_str)
+                .ok_or("host.get_config response has no db_url")?
+                .to_string();
+            let poll_interval = data
+                .get("poll_interval")
+                .and_then(Value::as_u64)
+                .ok_or("host.get_config response has no poll_interval")?;
+            return Ok((db_url, Duration::from_secs(poll_interval), queued));
+        }
+        queued.push(message);
+    }
+    Err("host closed before returning config".into())
+}
+
+fn publisher_enabled() -> bool {
+    match std::env::var("ENABLE_FEED_PUBLISHER") {
+        Ok(value) => !matches!(
+            value.to_ascii_lowercase().as_str(),
+            "false" | "0" | "no" | "off"
+        ),
+        Err(_) => true,
+    }
+}
+
+#[tokio::main]
+async fn main() -> ExitCode {
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
-    let mut out = stdout.lock();
-    let mut next_call_id: u64 = 0;
-    // plugin->host calls in flight: our call id -> the pending kind whose
-    // resp completes this call chain.
+    let output: SharedOutput = Arc::new(Mutex::new(stdout));
+    let mut out = OutputWriter(Arc::clone(&output));
+    let next_call_id = Arc::new(AtomicU64::new(0));
     let mut pending: HashMap<u64, Pending> = HashMap::new();
+    let mut input = stdin.lock();
 
-    // Announce ourselves: the plugin, not the host, sends hello first.
     let hello = Msg::Hello {
         v: API_VERSION,
         name: PLUGIN_NAME.into(),
         caps: vec![
-            "host.feed.get_settings".into(),
-            "host.feed.update_settings".into(),
+            "host.get_config".into(),
+            "host.open_dm".into(),
             "host.open_view".into(),
+            "host.send_message".into(),
         ],
         manifest: Some(manifest()),
     };
-    if write_msg(&mut out, &hello).is_err() {
+    if write_output(&output, &hello).is_err() {
         return ExitCode::FAILURE;
     }
 
-    for line in stdin.lock().lines() {
-        let Ok(line) = line else { break }; // EOF => clean exit
-        let msg: Msg = match serde_json::from_str(&line) {
-            Ok(msg) => msg,
-            Err(e) => {
-                eprintln!("bad json: {e}");
-                continue;
+    let (db_url, poll_interval, queued_messages) =
+        match load_host_config(&output, &next_call_id, &mut input) {
+            Ok(config) => config,
+            Err(error) => {
+                eprintln!("failed to load host config: {error}");
+                return ExitCode::FAILURE;
+            }
+        };
+    let repository = match Repository::connect(&db_url).await {
+        Ok(repository) => repository,
+        Err(error) => {
+            eprintln!("failed to connect feed storage: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    if let Err(error) = repository.migrate().await {
+        eprintln!("failed to migrate feed storage: {error}");
+        return ExitCode::FAILURE;
+    }
+    let platforms = Arc::new(Platforms::new());
+    let service = Arc::new(FeedSubscriptionService::new(
+        &repository,
+        Arc::clone(&platforms),
+    ));
+    let event_bus = Arc::new(EventBus::new());
+    let host_client = Arc::new(spawn_host_client(
+        Arc::clone(&output),
+        Arc::clone(&next_call_id),
+    ));
+    event_bus.register_subscriber(Arc::new(DiscordDmSubscriber::new(
+        service.clone(),
+        host_client.clone(),
+    )));
+    event_bus.register_subscriber(Arc::new(DiscordGuildSubscriber::new(
+        service.clone(),
+        host_client.clone(),
+    )));
+    let publisher = SeriesFeedPublisher::new(service.clone(), event_bus, poll_interval);
+    if publisher_enabled()
+        && let Err(error) = publisher.clone().start()
+    {
+        eprintln!("failed to start feed publisher: {error}");
+        return ExitCode::FAILURE;
+    }
+
+    let mut queued_messages = queued_messages.into_iter();
+    let mut lines = input.lines();
+    loop {
+        let msg = if let Some(message) = queued_messages.next() {
+            message
+        } else {
+            let Some(Ok(line)) = lines.next() else {
+                break;
+            };
+            match serde_json::from_str(&line) {
+                Ok(msg) => msg,
+                Err(e) => {
+                    eprintln!("bad json: {e}");
+                    continue;
+                }
             }
         };
         match msg {
             Msg::Bye => break,
             Msg::Call { id, op, cmd, args } => {
+                if op == "autocomplete" {
+                    let command_name = cmd.as_deref().unwrap_or_default();
+                    let response = if matches!(
+                        command_name,
+                        FEED_SUBSCRIBE_COMMAND_NAME | FEED_UNSUBSCRIBE_COMMAND_NAME
+                    ) {
+                        command::autocomplete(
+                            &service,
+                            &platforms,
+                            command_name,
+                            args.as_ref().unwrap_or(&Value::Null),
+                        )
+                        .await
+                    } else {
+                        json!({ "choices": [] })
+                    };
+                    if !reply_data(&mut out, id, response) {
+                        return ExitCode::FAILURE;
+                    }
+                    continue;
+                }
+
+                let direct_result = match (op.as_str(), cmd.as_deref()) {
+                    ("invoke", Some(COMMAND_NAME))
+                    | ("invoke", Some(FEED_SETTINGS_COMMAND_NAME)) => Some(
+                        async {
+                            if matches!(
+                                cmd.as_deref(),
+                                Some(COMMAND_NAME) | Some(FEED_SETTINGS_COMMAND_NAME)
+                            ) {
+                                command::verify_settings_invocation(
+                                    args.as_ref().unwrap_or(&Value::Null),
+                                )?;
+                            }
+                            let guild_id = args
+                                .as_ref()
+                                .and_then(|args| args.get("guild_id"))
+                                .and_then(id_as_u64)
+                                .ok_or(command::CommandError::GuildOnly)?;
+                            let settings = service.get_feed_settings(guild_id).await?;
+                            Ok(envelope(&SessionState::new(guild_id, settings)))
+                        }
+                        .await,
+                    ),
+                    ("invoke", Some(FEED_LIST_COMMAND_NAME)) => Some(
+                        command::invoke_list(&service, args.as_ref().unwrap_or(&Value::Null)).await,
+                    ),
+                    ("invoke", Some(FEED_SUBSCRIBE_COMMAND_NAME)) => Some(
+                        command::invoke_batch(
+                            &service,
+                            args.as_ref().unwrap_or(&Value::Null),
+                            true,
+                            |data| {
+                                if let Err(error) =
+                                    write_output(&output, &Msg::Progress { id, data })
+                                {
+                                    eprintln!("failed to write feed batch progress: {error}");
+                                }
+                            },
+                        )
+                        .await,
+                    ),
+                    ("invoke", Some(FEED_UNSUBSCRIBE_COMMAND_NAME)) => Some(
+                        command::invoke_batch(
+                            &service,
+                            args.as_ref().unwrap_or(&Value::Null),
+                            false,
+                            |data| {
+                                if let Err(error) =
+                                    write_output(&output, &Msg::Progress { id, data })
+                                {
+                                    eprintln!("failed to write feed batch progress: {error}");
+                                }
+                            },
+                        )
+                        .await,
+                    ),
+                    ("view.interact", Some(FEED_LIST_COMMAND_NAME)) => Some(
+                        command::interact_list(&service, args.as_ref().unwrap_or(&Value::Null))
+                            .await,
+                    ),
+                    ("view.interact", Some(FEED_BATCH_COMMAND_NAME)) => Some(
+                        command::interact_batch(&service, args.as_ref().unwrap_or(&Value::Null))
+                            .await,
+                    ),
+                    ("view.interact", Some(FEED_SUBSCRIBE_COMMAND_NAME))
+                    | ("view.interact", Some(FEED_UNSUBSCRIBE_COMMAND_NAME)) => Some(
+                        command::interact_feed_view(
+                            &service,
+                            args.as_ref().unwrap_or(&Value::Null),
+                        )
+                        .await,
+                    ),
+                    _ => None,
+                };
+                if let Some(result) = direct_result {
+                    match result {
+                        Ok(data) => {
+                            if !reply_data(&mut out, id, data) {
+                                return ExitCode::FAILURE;
+                            }
+                        }
+                        Err(error) => {
+                            if !reply_err(&mut out, id, "CommandError", error.to_string()) {
+                                return ExitCode::FAILURE;
+                            }
+                        }
+                    }
+                    continue;
+                }
+
                 // An invoke with the model loaded first renders the panel;
                 // a plain edit re-renders without a host call; a Back press
                 // persists, then hands the message back to the host
                 // Settings GUI (the re-render is the no-channel-id
                 // fallback).
                 let host_call = match (op.as_str(), cmd.as_deref()) {
-                    ("invoke", Some(COMMAND_NAME)) => {
-                        // The host forwards the source interaction's guild
-                        // id; the model loads before the first render.
-                        let Some(guild_id) = args
-                            .as_ref()
-                            .and_then(|a| a.get("guild_id"))
-                            .and_then(id_as_u64)
-                        else {
-                            if !reply_err(&mut out, id, "InvalidArgs", "missing `guild_id` (u64)") {
+                    ("view.interact", Some(COMMAND_NAME))
+                    | ("view.interact", Some(FEED_SETTINGS_COMMAND_NAME)) => {
+                        if let Err(error) = command::verify_settings_interaction(
+                            args.as_ref().unwrap_or(&Value::Null),
+                        ) {
+                            if !reply_err(&mut out, id, "CommandError", error.to_string()) {
                                 return ExitCode::FAILURE;
                             }
                             continue;
-                        };
-                        Some(HostCall::new(
-                            Pending::LoadSettings {
-                                invoke_id: id,
-                                guild_id,
-                            },
-                            get_settings_args(guild_id),
-                        ))
-                    }
-                    ("view.interact", Some(COMMAND_NAME)) => {
+                        }
                         // The session state the host echoed back.
                         let Some(session) =
                             SessionState::from_value(args.as_ref().and_then(|a| a.get("view")))
@@ -469,22 +747,31 @@ fn main() -> ExitCode {
                             }
                             continue;
                         }
-                        // A Back or About press persists the snapshot,
-                        // then hands the message to the host page the press
-                        // asked for.
+                        let snapshot = match effects.into_iter().next() {
+                            Some(Effect::Persist(snapshot)) => snapshot,
+                            None => unreachable!("Back and About always persist"),
+                        };
+                        if let Err(error) = service
+                            .update_feed_settings(session.guild_id, snapshot)
+                            .await
+                        {
+                            eprintln!("failed to persist feed settings: {error}");
+                        }
                         let exit = match custom_id {
                             Some(CUSTOM_ID_ABOUT) => about_exit(args.as_ref(), session.guild_id),
                             _ => back_exit(args.as_ref(), session.guild_id),
                         };
-                        let persist_args =
-                            update_settings_args(session.guild_id, &session.model.settings);
-                        Some(HostCall::new(
-                            Pending::Persist {
-                                invoke_id: id,
-                                session,
-                                exit,
-                            },
-                            persist_args,
+                        let Some(exit) = exit else {
+                            if !reply_envelope(&mut out, id, &session) {
+                                return ExitCode::FAILURE;
+                            }
+                            continue;
+                        };
+                        Some(HostCall::open_settings(
+                            id,
+                            session,
+                            exit.message_id,
+                            exit.args,
                         ))
                     }
                     _ => None,
@@ -501,7 +788,7 @@ fn main() -> ExitCode {
                     }
                     continue;
                 };
-                if !issue_host_call(&mut out, &mut pending, &mut next_call_id, call) {
+                if !issue_call(&output, &mut pending, &next_call_id, call) {
                     return ExitCode::FAILURE;
                 }
             }
@@ -518,17 +805,15 @@ fn main() -> ExitCode {
                 };
                 let mut model = session.model.clone();
                 let effects = update(PanelMsg::Expired, &mut model);
-                let Effect::Persist(snapshot) = effects.first().cloned().unwrap_or_else(|| {
-                    // Unreachable — `Expired` always persists — but a failed
-                    // exit must never silently drop the save.
-                    Effect::Persist(model.settings.clone())
-                });
-                let call = HostCall::new(
-                    Pending::Expire,
-                    update_settings_args(session.guild_id, &snapshot),
-                );
-                if !issue_host_call(&mut out, &mut pending, &mut next_call_id, call) {
-                    return ExitCode::FAILURE;
+                let snapshot = match effects.into_iter().next() {
+                    Some(Effect::Persist(snapshot)) => snapshot,
+                    None => unreachable!("expiry always persists"),
+                };
+                if let Err(error) = service
+                    .update_feed_settings(session.guild_id, snapshot)
+                    .await
+                {
+                    eprintln!("failed to persist feed settings on expiry: {error}");
                 }
             }
             Msg::Ping => {
@@ -537,6 +822,7 @@ fn main() -> ExitCode {
                 }
             }
             Msg::Pong => {}
+            Msg::Progress { .. } => {}
             // The host answers our hello with its own; tolerate it silently.
             Msg::Hello { .. } => {}
             Msg::Resp {
@@ -546,78 +832,15 @@ fn main() -> ExitCode {
                 error,
             } => {
                 let Some(pending_kind) = pending.remove(&id) else {
-                    eprintln!("unexpected message: {line}");
+                    host_client.send_response(HostResponse {
+                        id,
+                        ok,
+                        data,
+                        error,
+                    });
                     continue;
                 };
                 match pending_kind {
-                    Pending::LoadSettings {
-                        invoke_id,
-                        guild_id,
-                    } => {
-                        if !ok {
-                            eprintln!("host.feed.get_settings failed: {error:?}");
-                            let error = error.unwrap_or_else(|| WireError {
-                                kind: "HostError".into(),
-                                msg: "host call failed".into(),
-                            });
-                            if !reply_err(&mut out, invoke_id, &error.kind, error.msg) {
-                                return ExitCode::FAILURE;
-                            }
-                            continue;
-                        }
-                        // A failed load fails the open: the panel has no
-                        // settings to edit, so the Settings section shows
-                        // the error it forwarded.
-                        let Some(settings) = data.as_ref().and_then(parse_settings) else {
-                            eprintln!("host.feed.get_settings resp carried no snapshot");
-                            if !reply_err(
-                                &mut out,
-                                invoke_id,
-                                "HostError",
-                                "host.feed.get_settings resp carried no snapshot",
-                            ) {
-                                return ExitCode::FAILURE;
-                            }
-                            continue;
-                        };
-                        if !reply_envelope(
-                            &mut out,
-                            invoke_id,
-                            &SessionState::new(guild_id, settings),
-                        ) {
-                            return ExitCode::FAILURE;
-                        }
-                    }
-                    Pending::Persist {
-                        invoke_id,
-                        session,
-                        exit,
-                    } => {
-                        // A failed persist logs but the exit continues: the
-                        // user asked to leave, so the panel still hands the
-                        // message to the host page the press asked for.
-                        if !ok {
-                            eprintln!("host.feed.update_settings failed: {error:?}");
-                        }
-                        let Some(exit) = exit else {
-                            eprintln!("return without a channel id: panel stays");
-                            if !reply_envelope(&mut out, invoke_id, &session) {
-                                return ExitCode::FAILURE;
-                            }
-                            continue;
-                        };
-                        let call = HostCall::new(
-                            Pending::OpenSettings {
-                                invoke_id,
-                                session,
-                                message_id: exit.message_id,
-                            },
-                            exit.args,
-                        );
-                        if !issue_host_call(&mut out, &mut pending, &mut next_call_id, call) {
-                            return ExitCode::FAILURE;
-                        }
-                    }
                     Pending::OpenSettings {
                         invoke_id,
                         session,
@@ -626,14 +849,6 @@ fn main() -> ExitCode {
                         if !ok {
                             eprintln!("host.open_view(settings) failed: {error:?}");
                         }
-                        // In place: the open replaced this panel's message
-                        // with the host page the exit asked for, so
-                        // answering with the panel's own render would
-                        // overwrite it — the host skips its render on the
-                        // marker kind. Without a source message (or when no
-                        // live Settings session took the message back) the
-                        // panel stays and keeps answering its own
-                        // interactions.
                         if ok && message_id.is_some() {
                             if !reply_err(&mut out, invoke_id, VIEW_MOVED_KIND, "settings opened") {
                                 return ExitCode::FAILURE;
@@ -644,16 +859,11 @@ fn main() -> ExitCode {
                             return ExitCode::FAILURE;
                         }
                     }
-                    Pending::Expire => {
-                        if !ok {
-                            eprintln!("host.feed.update_settings failed on expiry: {error:?}");
-                        }
-                        // Nothing to answer: the event was one-way.
-                    }
                 }
             }
         }
     }
+    let _ = publisher.stop();
     ExitCode::SUCCESS
 }
 
@@ -665,19 +875,13 @@ mod tests {
     use super::*;
 
     fn model() -> Model {
-        let settings = ServerSettings {
-            feeds: pwr_plugin_protocol::FeedsSettings {
-                enabled: Some(true),
-                channel_id: Some("123456789".into()),
-                subscribe_role_id: Some("987654321".into()),
-                unsubscribe_role_id: Some("987654322".into()),
-            },
-            ..ServerSettings::default()
-        };
-        Model::new(settings)
+        Model::new(FeedsSettings {
+            enabled: Some(true),
+            channel_id: Some("123456789".into()),
+            subscribe_role_id: Some("987654321".into()),
+            unsubscribe_role_id: Some("987654322".into()),
+        })
     }
-
-    // ── update logic (mirrors the monolith module's tests) ─────────────────
 
     #[test]
     fn toggle_flips_enabled() {
@@ -689,7 +893,7 @@ mod tests {
 
     #[test]
     fn toggle_defaults_to_enabled() {
-        let mut m = Model::new(ServerSettings::default());
+        let mut m = Model::new(FeedsSettings::default());
         update(PanelMsg::ToggleEnabled, &mut m);
         assert!(!m.is_enabled());
     }
@@ -719,12 +923,10 @@ mod tests {
             let effects = update(msg.clone(), &mut m);
             assert_eq!(effects.len(), 1, "{msg:?}");
             match &effects[0] {
-                Effect::Persist(s) => assert_eq!(s.feeds.channel_id.as_deref(), Some("123456789")),
+                Effect::Persist(s) => assert_eq!(s.channel_id.as_deref(), Some("123456789")),
             }
         }
     }
-
-    // ── session state ──────────────────────────────────────────────────────
 
     #[test]
     fn session_state_round_trips_through_value() {
@@ -743,12 +945,10 @@ mod tests {
         );
         assert_eq!(
             SessionState::from_value(Some(&json!({"guild_id": "42", "settings": {}}))),
-            Some(SessionState::new(42, ServerSettings::default())),
+            Some(SessionState::new(42, FeedsSettings::default())),
             "a string guild id parses, and sections default"
         );
     }
-
-    // ── view rendering ──────────────────────────────────────────────────────
 
     #[test]
     fn panel_is_components_v2_without_legacy_content() {
@@ -758,7 +958,7 @@ mod tests {
     }
 
     #[test]
-    fn panel_mirrors_the_monolith_layout() {
+    fn panel_has_the_expected_layout() {
         let data = view_data(&model());
         let components = data["components"].as_array().expect("components");
         assert_eq!(components.len(), 2, "container plus the nav row");
@@ -771,9 +971,11 @@ mod tests {
         );
         assert_eq!(
             children[0]["content"],
-            json!(
-                "-# **Settings > Feeds**\n## Feed Subscription Settings\n\n> 🛈  Feed notifications are currently **active**. Notifications will be sent to <#123456789>"
-            )
+            json!(concat!(
+                "-# **Settings > Feeds**\n## Feed Subscription Settings\n\n",
+                "> 🛈  Feed notifications are currently **active**. ",
+                "Notifications will be sent to <#123456789>"
+            ))
         );
 
         let toggle = &children[1]["components"][0];
@@ -813,12 +1015,9 @@ mod tests {
 
     #[test]
     fn paused_panel_renders_the_paused_copy_and_enable_button() {
-        let settings = ServerSettings {
-            feeds: pwr_plugin_protocol::FeedsSettings {
-                enabled: Some(false),
-                ..Default::default()
-            },
-            ..ServerSettings::default()
+        let settings = FeedsSettings {
+            enabled: Some(false),
+            ..Default::default()
         };
         let data = view_data(&Model::new(settings));
         let children = data["components"][0]["components"]
@@ -841,60 +1040,42 @@ mod tests {
         );
     }
 
-    // ── protocol args ───────────────────────────────────────────────────────
-
     #[test]
-    fn get_and_update_args_carry_the_guild_and_snapshot() {
-        assert_eq!(get_settings_args(7), json!({ "guild_id": 7 }));
+    fn session_payload_carries_the_guild_and_feed_settings() {
         let settings = model().settings;
-        let args = update_settings_args(7, &settings);
-        assert_eq!(args["guild_id"], json!(7));
+        let payload = SessionState::new(7, settings.clone()).to_value();
+        assert_eq!(payload["guild_id"], json!(7));
         assert_eq!(
-            serde_json::from_value::<ServerSettings>(args["settings"].clone()).unwrap(),
+            serde_json::from_value::<FeedsSettings>(payload["settings"].clone()).unwrap(),
             settings
         );
     }
 
     #[test]
-    fn parse_settings_accepts_a_snapshot_and_rejects_garbage() {
-        let settings = model().settings;
-        assert_eq!(
-            parse_settings(&serde_json::to_value(&settings).unwrap()),
-            Some(settings)
-        );
-        assert_eq!(parse_settings(&json!("nope")), None);
+    fn session_state_rejects_a_non_feed_settings_payload() {
+        let payload = json!({
+            "guild_id": 7,
+            "settings": { "feeds": { "enabled": true } },
+        });
+
+        assert_eq!(SessionState::from_value(Some(&payload)), None);
     }
 
     #[test]
-    fn pending_ops_name_their_host_ops() {
-        let session = SessionState::new(1, ServerSettings::default());
-        assert_eq!(
-            Pending::LoadSettings {
-                invoke_id: 0,
-                guild_id: 1
-            }
-            .op(),
-            "host.feed.get_settings"
-        );
-        assert_eq!(
-            Pending::Persist {
-                invoke_id: 0,
-                session: session.clone(),
-                exit: None,
-            }
-            .op(),
-            "host.feed.update_settings"
-        );
-        assert_eq!(
-            Pending::OpenSettings {
-                invoke_id: 0,
-                session: session.clone(),
-                message_id: None,
-            }
-            .op(),
-            "host.open_view"
-        );
-        assert_eq!(Pending::Expire.op(), "host.feed.update_settings");
+    fn open_settings_call_keeps_the_session_and_host_args() {
+        let session = SessionState::new(1, FeedsSettings::default());
+        let expected_session = session.clone();
+        let call = HostCall::open_settings(9, session, Some(77), json!({ "plugin": "settings" }));
+
+        let Pending::OpenSettings {
+            invoke_id,
+            session,
+            message_id,
+        } = call.pending;
+        assert_eq!(invoke_id, 9);
+        assert_eq!(session, expected_session);
+        assert_eq!(message_id, Some(77));
+        assert_eq!(call.args, json!({ "plugin": "settings" }));
     }
 
     #[test]
