@@ -6,6 +6,7 @@
 //! so each process owns its state without interference; this binary asserts
 //! on behaviour (not logs) and installs no recording logger.
 
+use std::collections::HashMap;
 #[cfg(unix)]
 use std::os::unix::process::ExitStatusExt;
 #[cfg(unix)]
@@ -16,12 +17,17 @@ use std::time::Duration;
 
 use pwr_bot::event::PluginEvent;
 use pwr_bot::event::event_bus::EventBus;
+use pwr_bot::plugin::AuthoritySnapshot;
+use pwr_bot::plugin::CatalogEntry;
 use pwr_bot::plugin::HealthConfig;
+use pwr_bot::plugin::PluginError;
 use pwr_bot::plugin::PluginManager;
 use pwr_bot::plugin::RespawnOutcome;
 use pwr_bot::plugin::RespawnPolicy;
 use pwr_bot::plugin::RunningPlugin;
+use pwr_bot::plugin::install;
 use pwr_plugin_protocol::BUTTON_CUSTOM_ID;
+use pwr_plugin_protocol::Manifest;
 use pwr_plugin_protocol::Msg;
 use pwr_plugin_protocol::PLUGIN_NAME;
 use pwr_plugin_protocol::TaskDef;
@@ -592,6 +598,100 @@ async fn respawn_of_an_unknown_plugin_fails_with_not_running() {
     );
 
     manager.unload("hello", &[]).await.expect("teardown");
+}
+
+// ── respawn: a granted plugin keeps exactly the authority it had ────────────
+
+/// A granted catalog entry for the env-probe fixture: the pin is the
+/// fixture's real digest and the embedded manifest declares the need, so
+/// both halves of the AND agree. `env_probe.sh` exits 42 when it can see
+/// `DISCORD_TOKEN`, which is how the grant is observed from outside.
+fn granted_probe_catalog() -> HashMap<String, CatalogEntry> {
+    let script = fixture_script("env_probe.sh");
+    let manifest = Manifest {
+        name: "env-probe".into(),
+        description: "Reports its child environment".into(),
+        version: "0.1.0".into(),
+        commands: vec![],
+        event_handlers: vec![],
+        tasks: vec![],
+        settings: vec![],
+        requires: vec![pwr_plugin_protocol::DISCORD_TOKEN.into()],
+        api_version: pwr_plugin_protocol::API_VERSION,
+    };
+    manifest.validate().expect("a valid manifest");
+    HashMap::from([(
+        "env-probe".to_string(),
+        CatalogEntry {
+            name: "env-probe".into(),
+            url: "https://example.com/env-probe".into(),
+            sha256: install::sha256_hex(&script).expect("pin the fixture"),
+            manifest,
+            auto_enable: false,
+            discord_token: true,
+        },
+    )])
+}
+
+#[tokio::test]
+async fn a_respawned_plugin_keeps_the_authority_it_was_granted() {
+    let script = fixture_script("env_probe.sh");
+    let manager = Arc::new(PluginManager::new(None, test_policy()).with_grants(
+        AuthoritySnapshot::from_catalog(&granted_probe_catalog(), "granted-token".to_string()),
+    ));
+    manager
+        .spawn("env-probe", &script, None, &[], &[])
+        .await
+        .expect("spawn the granted probe");
+    let first = manager.get("env-probe").await.expect("registered handle");
+    assert_eq!(
+        first.stop().await.expect("stop the probe").code(),
+        Some(42),
+        "the granted child must see the token"
+    );
+
+    let outcome = manager
+        .respawn("env-probe", &first)
+        .await
+        .expect("respawn after the crash");
+    assert_eq!(outcome, RespawnOutcome::Respawned);
+    let second = manager
+        .get("env-probe")
+        .await
+        .expect("the respawned handle");
+    assert_eq!(
+        second.stop().await.expect("stop the probe").code(),
+        Some(42),
+        "a respawn must reuse exactly the authority the first spawn used"
+    );
+}
+
+// ── a core plugin that declares the need is refused, not warned about ──────
+
+#[tokio::test]
+async fn a_core_plugin_declaring_the_token_need_is_refused() {
+    // `token_need_probe.sh` is spawned with no catalog behind it, exactly as
+    // `CORE_PLUGINS` spawns one, so its resolved authority is `none` while
+    // its own manifest declares the need. The host cannot learn that before
+    // the handshake, so the handshake itself must refuse it: the plugin does
+    // not run, rather than running on an ungranted declaration (ADR-0016).
+    let script = fixture_script("token_need_probe.sh");
+    let manager = Arc::new(PluginManager::new(None, test_policy()));
+    let err = match manager
+        .spawn("token-need-probe", &script, None, &[], &[])
+        .await
+    {
+        Err(err) => err,
+        Ok(_) => panic!("a core plugin declaring the token need must not run"),
+    };
+    assert!(
+        matches!(&err, PluginError::UngrantedDeclaration { name } if name == "token-need-probe"),
+        "an ungranted declaration must be refused, got {err}"
+    );
+    assert!(
+        !manager.is_running("token-need-probe").await,
+        "a refused plugin must not be registered"
+    );
 }
 
 // ── swap: unload old → spawn new → healthy ─────────────────────────────────

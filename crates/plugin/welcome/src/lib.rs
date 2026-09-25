@@ -41,6 +41,7 @@ pub fn manifest() -> Manifest {
             description: "Manage welcome card settings".into(),
             command: COMMAND_NAME.into(),
         }],
+        requires: vec![],
         api_version: API_VERSION,
     }
 }

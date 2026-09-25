@@ -133,6 +133,119 @@ struct PendingCall {
     last_progress: Arc<Mutex<Instant>>,
 }
 
+/// The authority one plugin spawn carries, resolved from the startup
+/// [`AuthoritySnapshot`] before the child environment is built.
+/// [`Authority::none`] is the default: no digest pin, no token.
+#[derive(Clone, Default)]
+pub struct Authority {
+    /// The catalog's pinned sha256, normalised (trimmed, lowercased) the
+    /// way [`install::sha256_hex`] emits it, so the spawn seam compares
+    /// without re-normalising. `None` for a plugin the catalog does not
+    /// pin — a `CORE_PLUGINS` plugin, which is never grantable.
+    pinned: Option<String>,
+    /// The Discord token to inject. Never `Some` without a digest pin:
+    /// authority attaches to bytes, so a grant only ever rides along with
+    /// the digest it was reviewed against.
+    token: Option<String>,
+}
+
+impl Authority {
+    /// A spawn with no elevated authority: no digest pin and no token.
+    pub fn none() -> Self {
+        Self::default()
+    }
+
+    /// Whether this spawn injects `DISCORD_TOKEN` into the child.
+    pub fn has_token(&self) -> bool {
+        self.token.is_some()
+    }
+
+    /// The digest the binary's bytes must match, when the plugin is a
+    /// catalog plugin.
+    pub fn pinned(&self) -> Option<&str> {
+        self.pinned.as_deref()
+    }
+}
+
+/// The catalog's authority facts, snapshotted at startup so a spawn decision
+/// never depends on live state: every spawn — including a respawn after a
+/// crash — resolves against this, and authority never changes mid-flight
+/// (ADR-0016).
+pub struct AuthoritySnapshot {
+    entries: HashMap<String, GrantFact>,
+    token: String,
+}
+
+/// One catalog entry's grant facts. Both halves of the grant are held, so
+/// the AND is decided from what the host knows before the child exists.
+struct GrantFact {
+    /// The pinned sha256, normalised as [`Authority::pinned`] documents.
+    pinned: String,
+    /// The operator's grant (`discord_token = true`).
+    granted: bool,
+    /// Whether the entry's embedded manifest declares the need.
+    declares: bool,
+}
+
+impl AuthoritySnapshot {
+    /// The snapshot a host with no catalog runs on: nothing is pinned and
+    /// nothing is granted.
+    pub fn none() -> Self {
+        Self {
+            entries: HashMap::new(),
+            token: String::new(),
+        }
+    }
+
+    /// Snapshots `catalog` against the bot's `token`. The token is held
+    /// here and only ever leaves the seam through a spawn that both halves
+    /// of the AND agree on.
+    pub fn from_catalog(catalog: &HashMap<String, CatalogEntry>, token: String) -> Self {
+        Self {
+            entries: catalog
+                .iter()
+                .map(|(name, entry)| {
+                    (
+                        name.clone(),
+                        GrantFact {
+                            pinned: entry.sha256.trim().to_ascii_lowercase(),
+                            granted: entry.discord_token,
+                            declares: entry.manifest.requires_discord_token(),
+                        },
+                    )
+                })
+                .collect(),
+            token,
+        }
+    }
+
+    /// Resolves one spawn. The declaration and the grant must agree in both
+    /// directions, and a plugin the catalog does not pin is never grantable:
+    /// there the host holds no manifest before spawn, so the declaration
+    /// half is unknowable. Either disagreement is a refusal.
+    pub fn resolve(&self, name: &str) -> Result<Authority, PluginError> {
+        let Some(fact) = self.entries.get(name) else {
+            return Ok(Authority::none());
+        };
+        match (fact.granted, fact.declares) {
+            (false, false) => Ok(Authority {
+                pinned: Some(fact.pinned.clone()),
+                token: None,
+            }),
+            (true, true) => Ok(Authority {
+                pinned: Some(fact.pinned.clone()),
+                token: Some(self.token.clone()),
+            }),
+            (true, false) => Err(PluginError::UndeclaredGrant {
+                name: name.to_string(),
+            }),
+            (false, true) => Err(PluginError::UngrantedDeclaration {
+                name: name.to_string(),
+            }),
+        }
+    }
+}
+
 /// A running plugin subprocess: owns the stdio pipes, the reader/waiter
 /// tasks, and call correlation.
 pub struct RunningPlugin {
@@ -169,8 +282,11 @@ impl RunningPlugin {
     /// a handle ready for calls. A rejected handshake kills the child before
     /// any work happens. Host services are absent, so `host.*` calls answer
     /// `HostUnavailable` / `ConfigUnavailable`.
+    ///
+    /// The binary's file stem names it in the logs; use
+    /// [`RunningPlugin::spawn_with`] to name it by its configured name.
     pub async fn spawn(path: impl AsRef<Path>) -> Result<RunningPlugin, PluginError> {
-        Self::spawn_with(path, None, None, None).await
+        Self::spawn_with(path, "", None, None, None, Authority::none()).await
     }
 
     /// Spawns the plugin binary like [`RunningPlugin::spawn`], but wires the
@@ -179,26 +295,70 @@ impl RunningPlugin {
     /// plugin→host `host.*` calls can be served, and the given event bus
     /// (if any) so plugin→host `Msg::Event`s are broadcast on it instead of
     /// being dropped.
+    ///
+    /// `name` is the plugin's configured name — the one a catalog entry, a
+    /// `CORE_PLUGINS` spec, and `/plugins list` use — so the spawn audit line
+    /// names the plugin rather than the binary's file stem. An empty `name`
+    /// falls back to the stem, for a caller holding no configured name.
+    ///
+    /// `authority` is the resolved grant ([`Authority::none`] for no
+    /// authority). It is enforced before the child exists: a binary that no
+    /// longer matches its pinned digest is refused, and the child
+    /// environment is an allowlist — `PATH` plus whatever the grant adds.
     pub async fn spawn_with(
         path: impl AsRef<Path>,
+        name: &str,
         host: Option<Arc<HostServices>>,
         manager: Option<Arc<PluginManager>>,
         event_bus: Option<Arc<EventBus>>,
+        authority: Authority,
     ) -> Result<RunningPlugin, PluginError> {
         let path = path.as_ref();
-        let label = path
-            .file_stem()
-            .and_then(|stem| stem.to_str())
-            .unwrap_or("plugin")
-            .to_string();
+        let label = if name.is_empty() {
+            path.file_stem()
+                .and_then(|stem| stem.to_str())
+                .unwrap_or("plugin")
+                .to_string()
+        } else {
+            name.to_string()
+        };
+
+        // Authority attaches to bytes: a binary swapped since the operator
+        // reviewed it is refused here rather than inheriting the grant.
+        let digest_verdict = match authority.pinned() {
+            Some(expected) => {
+                let read = install::sha256_hex(path).map_err(|source| PluginError::Digest {
+                    name: label.clone(),
+                    path: path.to_path_buf(),
+                    source,
+                })?;
+                if read != expected {
+                    return Err(PluginError::Digest {
+                        name: label.clone(),
+                        path: path.to_path_buf(),
+                        source: InstallError::Verify {
+                            name: label,
+                            expected: expected.to_string(),
+                            got: read,
+                        },
+                    });
+                }
+                "verified"
+            }
+            None => "unpinned",
+        };
 
         let mut command = Command::new(path);
         command
-            .env_remove("DISCORD_TOKEN")
+            .env_clear()
+            .env("PATH", std::env::var("PATH").unwrap_or_default())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
+        if let Some(token) = &authority.token {
+            command.env("DISCORD_TOKEN", token);
+        }
         #[cfg(unix)]
         command.process_group(0);
 
@@ -206,6 +366,15 @@ impl RunningPlugin {
             path: path.to_path_buf(),
             source,
         })?;
+        info!(
+            "spawned plugin {label} from {}: grant {}, digest {digest_verdict}",
+            path.display(),
+            if authority.has_token() {
+                "discord token"
+            } else {
+                "none"
+            }
+        );
         #[cfg(unix)]
         let pgid = child.id().expect("spawned child has a pid");
 
@@ -280,6 +449,18 @@ impl RunningPlugin {
             }
             None => None,
         };
+        // A declaration the operator never granted is refused, not warned
+        // about: the plugin would run without the authority it declared, and
+        // a refusal is what the ADR promises (ADR-0016). A catalog plugin is
+        // refused before spawn by the snapshot's AND, so this cannot
+        // double-fire; it chiefly catches a core plugin, which is never
+        // grantable and is unknowable before the handshake.
+        if let Some(manifest) = &manifest
+            && manifest.requires_discord_token()
+            && !authority.has_token()
+        {
+            return Err(reject(child, PluginError::UngrantedDeclaration { name }).await);
+        }
 
         // Acknowledge with the host's own hello (nushell-style both-sides
         // hello). Config values are not part of the ack — the `host.get_config`
@@ -863,6 +1044,73 @@ mod tests {
     use pwr_plugin_protocol::OpsError;
 
     use super::*;
+    use crate::test_helpers::entry_named;
+
+    // ── the grant AND (ADR-0016) ─────────────────────────────────────────────
+
+    /// A one-entry catalog: `discord_token` grants the token, `declares`
+    /// puts the matching entry in the embedded manifest, and the pin is
+    /// upper-case hex so the snapshot's normalisation is exercised.
+    fn snapshot(grants: bool, declares: bool) -> AuthoritySnapshot {
+        let mut entry = entry_named("pro");
+        entry.discord_token = grants;
+        entry.sha256 = "AB".repeat(32);
+        if declares {
+            entry.manifest.requires = vec![pwr_plugin_protocol::DISCORD_TOKEN.into()];
+        }
+        AuthoritySnapshot::from_catalog(
+            &HashMap::from([("pro".to_string(), entry)]),
+            "the-bot-token".to_string(),
+        )
+    }
+
+    #[test]
+    fn a_declared_and_granted_plugin_gets_the_token_and_the_pin() {
+        let authority = snapshot(true, true)
+            .resolve("pro")
+            .expect("the halves agree");
+        assert!(authority.has_token());
+        assert_eq!(authority.pinned(), Some("ab".repeat(32).as_str()));
+    }
+
+    #[test]
+    fn a_declared_but_ungranted_plugin_is_refused() {
+        assert!(matches!(
+            snapshot(false, true).resolve("pro"),
+            Err(PluginError::UngrantedDeclaration { ref name }) if name == "pro"
+        ));
+    }
+
+    #[test]
+    fn a_granted_but_undeclared_plugin_is_refused() {
+        assert!(matches!(
+            snapshot(true, false).resolve("pro"),
+            Err(PluginError::UndeclaredGrant { ref name }) if name == "pro"
+        ));
+    }
+
+    #[test]
+    fn a_core_plugin_is_never_grantable() {
+        // The snapshot holds only catalog entries: a name the catalog does
+        // not pin is a `CORE_PLUGINS` plugin, and there the host knows no
+        // manifest before spawn, so it gets no pin and no token.
+        let authority = snapshot(true, true)
+            .resolve("feed")
+            .expect("no halves to disagree");
+        assert!(!authority.has_token());
+        assert_eq!(authority.pinned(), None);
+        assert_eq!(
+            AuthoritySnapshot::none().resolve("pro").unwrap().pinned(),
+            None
+        );
+    }
+
+    #[test]
+    fn a_pinned_plugin_with_no_authority_still_gets_its_digest_check() {
+        let authority = snapshot(false, false).resolve("pro").expect("neither half");
+        assert!(!authority.has_token());
+        assert_eq!(authority.pinned(), Some("ab".repeat(32).as_str()));
+    }
 
     // ── hello validation (the reject-before-work decision) ─────────────────
 

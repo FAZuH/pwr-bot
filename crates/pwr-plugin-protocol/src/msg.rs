@@ -206,12 +206,13 @@ mod tests {
                 event_handlers: vec![],
                 tasks: vec![],
                 settings: vec![],
+                requires: vec![],
                 api_version: API_VERSION,
             }),
         };
         assert_eq!(
             serde_json::to_string(&msg).unwrap(),
-            r#"{"t":"hello","v":2,"name":"feed","ops":["command:feed"],"manifest":{"name":"feed","description":"Feed subscriptions","version":"0.1.0","commands":[{"create_command":{"description":"List feeds","name":"feed.list"}}],"event_handlers":[],"tasks":[],"settings":[],"api_version":2}}"#
+            r#"{"t":"hello","v":2,"name":"feed","ops":["command:feed"],"manifest":{"name":"feed","description":"Feed subscriptions","version":"0.1.0","commands":[{"create_command":{"description":"List feeds","name":"feed.list"}}],"event_handlers":[],"tasks":[],"settings":[],"requires":[],"api_version":2}}"#
         );
     }
 

@@ -457,16 +457,6 @@ fn load_host_config(
     Err("host closed before returning config".into())
 }
 
-fn publisher_enabled() -> bool {
-    match std::env::var("ENABLE_FEED_PUBLISHER") {
-        Ok(value) => !matches!(
-            value.to_ascii_lowercase().as_str(),
-            "false" | "0" | "no" | "off"
-        ),
-        Err(_) => true,
-    }
-}
-
 #[tokio::main]
 async fn main() -> ExitCode {
     let stdin = std::io::stdin();
@@ -530,9 +520,7 @@ async fn main() -> ExitCode {
         host_client.clone(),
     )));
     let publisher = SeriesFeedPublisher::new(service.clone(), event_bus, poll_interval);
-    if publisher_enabled()
-        && let Err(error) = publisher.clone().start()
-    {
+    if let Err(error) = publisher.clone().start() {
         eprintln!("failed to start feed publisher: {error}");
         return ExitCode::FAILURE;
     }

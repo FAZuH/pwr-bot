@@ -42,7 +42,11 @@ const MAX_DOWNLOAD_BYTES: u64 = 128 * 1024 * 1024;
 /// embedded in `plugins.toml` as a JSON string (its command blobs are
 /// Discord `CreateCommand` JSON), so the host can register a plugin's slash
 /// commands and validate it before install.
+///
+/// Parsing is strict: an unrecognised key fails the whole catalog at boot
+/// rather than producing a silently ungranted plugin (ADR-0016).
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CatalogEntry {
     /// Plugin name; also the installed binary's file name.
     pub name: String,
@@ -57,6 +61,11 @@ pub struct CatalogEntry {
     /// `guild_plugins` row means enabled). `false` by default.
     #[serde(default)]
     pub auto_enable: bool,
+    /// Whether the operator grants this plugin the bot's Discord token.
+    /// `false` by default; the grant is the operator's decision alone, so
+    /// the host's only catalog plugins that can hold it are pinned ones.
+    #[serde(default)]
+    pub discord_token: bool,
 }
 
 /// Deserializes a catalog `manifest` field: the manifest is embedded in
@@ -425,6 +434,7 @@ mod tests {
             sha256: "ab".repeat(32),
             manifest: valid_manifest(),
             auto_enable: false,
+            discord_token: false,
         }
     }
 
@@ -443,6 +453,7 @@ mod tests {
             event_handlers: vec!["view.timeout".into()],
             tasks: vec![],
             settings: vec![],
+            requires: vec![],
             api_version: pwr_plugin_protocol::API_VERSION,
         }
     }
@@ -724,6 +735,66 @@ mod tests {
                 ),
                 "ab".repeat(32),
                 serde_json::to_string(&manifest).unwrap()
+            ),
+        )
+        .unwrap();
+        let err = PluginCatalog::load(&path).unwrap_err();
+        assert!(matches!(err, InstallError::Catalog { .. }));
+    }
+
+    // ── the token grant line (ADR-0016) ──────────────────────────────────────
+
+    /// Writes a catalog file with `extra` appended to the single entry and
+    /// returns the load result.
+    fn load_with_extra(extra: &str) -> Result<HashMap<String, CatalogEntry>, InstallError> {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("plugins.toml");
+        let entry = format!(
+            concat!(
+                "[[plugins]]\nname = \"hello\"\nurl = \"https://example.com/hello\"\n",
+                "sha256 = \"{}\"\nmanifest = '{}'\n",
+            ),
+            "ab".repeat(32),
+            valid_manifest_json(),
+        );
+        fs::write(&path, entry + extra).unwrap();
+        PluginCatalog::load(&path)
+    }
+
+    #[test]
+    fn catalog_defaults_the_token_grant_to_false() {
+        let entries = load_with_extra("").expect("a catalog without a grant line");
+        assert!(!entries["hello"].discord_token);
+    }
+
+    #[test]
+    fn catalog_accepts_the_token_grant() {
+        let entries = load_with_extra("discord_token = true\n").expect("a granted entry");
+        assert!(entries["hello"].discord_token);
+    }
+
+    #[test]
+    fn catalog_rejects_an_unknown_key() {
+        let err = load_with_extra("discord_tokens = true\n")
+            .expect_err("a typo in a grant line must fail the whole catalog");
+        assert!(
+            matches!(err, InstallError::Catalog { .. }),
+            "an unknown key must be a catalog error, got {err}"
+        );
+    }
+
+    #[test]
+    fn a_granted_entry_still_needs_a_64_hex_sha() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("plugins.toml");
+        fs::write(
+            &path,
+            format!(
+                concat!(
+                    "[[plugins]]\nname = \"hello\"\nurl = \"https://example.com/hello\"\n",
+                    "sha256 = \"xyz\"\nmanifest = '{}'\ndiscord_token = true\n",
+                ),
+                valid_manifest_json(),
             ),
         )
         .unwrap();

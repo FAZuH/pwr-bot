@@ -25,7 +25,9 @@ pub mod settings;
 pub mod stats;
 pub mod view;
 
+pub use manifest::ALL_REQUIREMENTS;
 pub use manifest::CommandDef;
+pub use manifest::DISCORD_TOKEN;
 pub use manifest::Manifest;
 pub use manifest::SettingsSection;
 pub use manifest::TaskDef;

@@ -97,6 +97,7 @@ fn manifest() -> Manifest {
             command: "hello.tick".into(),
         }],
         settings: vec![],
+        requires: vec![],
         api_version: API_VERSION,
     }
 }

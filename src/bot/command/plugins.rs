@@ -60,17 +60,32 @@ pub async fn list(ctx: Context<'_>) -> Result<(), Error> {
         ctx.send(text_reply(reply)).await?;
         return Ok(());
     }
-    let mut lines = Vec::with_capacity(model.catalog.len());
-    for name in &model.catalog {
-        let state = if model.enabled.contains(name) {
+    ctx.send(text_reply(
+        list_lines(&data.plugin_catalog, &model.enabled).join("\n"),
+    ))
+    .await?;
+    Ok(())
+}
+
+/// The `/plugins list` body: one line per catalog plugin with its guild
+/// state and the authority the operator granted it — the Discord token, or
+/// the shaped `host.*` op surface alone.
+fn list_lines(catalog: &HashMap<String, CatalogEntry>, enabled: &[String]) -> Vec<String> {
+    let mut lines = Vec::with_capacity(catalog.len());
+    for (name, entry) in catalog {
+        let state = if enabled.contains(name) {
             "enabled"
         } else {
             "disabled"
         };
-        lines.push(format!("`{name}` — {state}"));
+        let authority = if entry.discord_token {
+            "discord token"
+        } else {
+            "host ops only"
+        };
+        lines.push(format!("`{name}` — {state}, {authority}"));
     }
-    ctx.send(text_reply(lines.join("\n"))).await?;
-    Ok(())
+    lines
 }
 
 /// Enables a catalog plugin for this guild, registering the union of all
@@ -399,6 +414,28 @@ mod tests {
         let reason = unknown_plugin_reason("hello", None, true);
 
         assert_eq!(reason, "`hello` is not in the plugin catalog");
+    }
+
+    #[test]
+    fn list_lines_shows_each_plugins_state_and_authority() {
+        let mut granted = entry_named("pro");
+        granted.discord_token = true;
+        let catalog = HashMap::from([
+            ("hello".to_string(), entry_named("hello")),
+            ("pro".to_string(), granted),
+        ]);
+
+        let lines = list_lines(&catalog, &["pro".to_string()]);
+
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert!(
+            lines.contains(&"`hello` — disabled, host ops only".to_string()),
+            "{lines:?}"
+        );
+        assert!(
+            lines.contains(&"`pro` — enabled, discord token".to_string()),
+            "{lines:?}"
+        );
     }
 
     #[test]

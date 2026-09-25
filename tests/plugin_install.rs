@@ -9,13 +9,16 @@
 //! httpmock and build their own client without `https_only`; production
 //! uses the https-only [`download_client`](pwr_bot::plugin::install::download_client).
 
+use std::collections::HashMap;
 use std::os::unix::fs::PermissionsExt;
 use std::sync::Arc;
 
 use httpmock::Method::GET;
 use httpmock::MockServer;
+use pwr_bot::plugin::AuthoritySnapshot;
 use pwr_bot::plugin::CatalogEntry;
 use pwr_bot::plugin::InstallError;
+use pwr_bot::plugin::PluginError;
 use pwr_bot::plugin::PluginManager;
 use pwr_bot::plugin::RespawnPolicy;
 use pwr_bot::plugin::install;
@@ -44,6 +47,7 @@ fn pinned_entry(name: &str, url: &str, bytes: &[u8]) -> CatalogEntry {
         sha256: install::sha256_hex(&pin_path).expect("pin sha256"),
         manifest: catalog_manifest(name),
         auto_enable: false,
+        discord_token: false,
     }
 }
 
@@ -62,6 +66,7 @@ fn catalog_manifest(name: &str) -> pwr_plugin_protocol::Manifest {
         event_handlers: vec![],
         tasks: vec![],
         settings: vec![],
+        requires: vec![],
         api_version: pwr_plugin_protocol::API_VERSION,
     }
 }
@@ -93,8 +98,16 @@ async fn install_verified_downloads_verifies_and_spawns() {
         & 0o777;
     assert_eq!(mode, 0o755, "installed binary must be executable");
 
-    // The installed binary is ready for PluginManager::spawn.
-    let manager = Arc::new(PluginManager::new(None, RespawnPolicy::default()));
+    // The installed binary is ready for PluginManager::spawn, and the
+    // catalog's pin is checked again at that seam.
+    let manager = Arc::new(
+        PluginManager::new(None, RespawnPolicy::default()).with_grants(
+            AuthoritySnapshot::from_catalog(
+                &HashMap::from([("hello".to_string(), entry.clone())]),
+                "test-token".to_string(),
+            ),
+        ),
+    );
     manager
         .spawn("hello", &installed, None, &[], &[])
         .await
@@ -104,8 +117,54 @@ async fn install_verified_downloads_verifies_and_spawns() {
     assert!(!manager.is_running("hello").await);
 }
 
-// ── tampered download: verify fails, nothing is installed ──────────────────
+// ── tampered after install: the spawn seam refuses the binary ──────────────
 
+#[tokio::test]
+async fn spawn_refuses_bytes_tampered_with_after_install() {
+    let server = MockServer::start();
+    let binary = std::fs::read(probe_binary("hello")).expect("read fixture binary");
+    server.mock(|when, then| {
+        when.method(GET).path("/hello_plugin");
+        then.status(200).body(&binary);
+    });
+
+    let plugins_dir = tempdir().expect("plugins dir");
+    let entry = pinned_entry("hello", &server.url("/hello_plugin"), &binary);
+    let installed = install::install_verified(&test_client(), &entry, plugins_dir.path())
+        .await
+        .expect("install verified binary");
+
+    // The pin is honest about the pristine bytes; the install's own
+    // re-verification passed, so only a swap after install escapes it.
+    let mut tampered = std::fs::read(&installed).expect("read installed binary");
+    tampered[0] ^= 0xff;
+    std::fs::write(&installed, &tampered).expect("tamper with the installed bytes");
+    let permissions = std::fs::metadata(&installed)
+        .expect("metadata")
+        .permissions();
+    std::fs::set_permissions(&installed, permissions).expect("keep it executable");
+
+    let manager = Arc::new(
+        PluginManager::new(None, RespawnPolicy::default()).with_grants(
+            AuthoritySnapshot::from_catalog(
+                &HashMap::from([("hello".to_string(), entry)]),
+                "test-token".to_string(),
+            ),
+        ),
+    );
+    let err = match manager.spawn("hello", &installed, None, &[], &[]).await {
+        Err(err) => err,
+        Ok(_) => panic!("tampered bytes must not run"),
+    };
+
+    let PluginError::Digest { source, .. } = &err else {
+        panic!("a digest refusal, got {err}");
+    };
+    assert!(matches!(source, InstallError::Verify { .. }), "{err}");
+    assert!(!manager.is_running("hello").await, "nothing may run");
+}
+
+// ── tampered download: verify fails, nothing is installed ──────────────────
 #[tokio::test]
 async fn install_verified_rejects_tampered_bytes_and_installs_nothing() {
     let server = MockServer::start();
