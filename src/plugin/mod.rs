@@ -194,6 +194,7 @@ impl RunningPlugin {
 
         let mut command = Command::new(path);
         command
+            .env_remove("DISCORD_TOKEN")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

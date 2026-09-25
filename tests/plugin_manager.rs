@@ -87,6 +87,27 @@ fn logs_contain(fragment: &str) -> bool {
 // ── spawn -> hello -> invoke -> resp -> bye ────────────────────────────────
 
 #[tokio::test]
+#[serial_test::serial]
+async fn plugin_children_do_not_inherit_discord_token() {
+    let previous = std::env::var_os("DISCORD_TOKEN");
+    unsafe {
+        std::env::set_var(
+            "DISCORD_TOKEN",
+            "test-token-must-not-cross-the-process-seam",
+        )
+    };
+    let spawned = RunningPlugin::spawn(fixture_script("env_probe.sh")).await;
+    match previous {
+        Some(value) => unsafe { std::env::set_var("DISCORD_TOKEN", value) },
+        None => unsafe { std::env::remove_var("DISCORD_TOKEN") },
+    }
+
+    let plugin = spawned.expect("spawn env probe");
+    let status = plugin.stop().await.expect("stop env probe");
+    assert_eq!(status.code(), Some(0), "child inherited the Discord token");
+}
+
+#[tokio::test]
 async fn spawn_hello_invoke_bye_round_trip() {
     let plugin = RunningPlugin::spawn(probe_binary("hello"))
         .await

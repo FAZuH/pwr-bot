@@ -15,12 +15,19 @@ contra ADR-0014). No data migration guards the rename of the settings
 panels — nothing pre-plugin runs in production, so `guild_plugins` rows are
 renamed freely.
 
-**Amendment (#167):** The feed plugin embeds a copy of the old
-`2026-04-29-122252-0000_initial_schema` migration under the same version string.
-Diesel records only the version and run time, not a content checksum, so an
-existing deployment that recorded that version skips the copy; a fresh
-deployment runs core migrations first and the plugin copy declares only its
-feed-owned tables. Feed copies a legacy `server_settings.feeds` value once into
-its own storage, then reads only that storage; this compatibility read ends in
-phase 6. Generic host enablement may still read `guild_plugins` during the
-transition.
+**Migration invariant:** Every migration version is globally unique and owned by
+one component, and each embed contains only its owner's versions. Diesel 2.x
+stores only `version` and `run_on` in `__diesel_schema_migrations`; pending
+migration ignores ledger rows whose versions are absent from the embeds. Every
+`up.sql` uses `CREATE TABLE IF NOT EXISTS` and creates only the owner's tables;
+every `down.sql` drops only those tables. Adoption migrations are idempotent, so
+pre-existing tables and data are never touched.
+
+Core uses `20260925-000000-0000_core_storage` for `server_settings`, `bot_meta`,
+`plugin_kv`, and `guild_plugins`. Feed uses
+`20260924-130100-0000_feed_owned_schema`; voice uses
+`20260924-140100-0000_voice_owned_schema`. Feed copies a legacy
+`server_settings.feeds` value once into its own storage, then reads only that
+storage. Voice imports the legacy `server_settings.voice` value once. The
+heartbeat marker is `$DATA_PATH/voice_heartbeat`; it is not a host table or a
+plugin-kv row.
