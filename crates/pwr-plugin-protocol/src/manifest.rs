@@ -11,6 +11,15 @@ use serde_json::Value;
 
 use crate::msg::API_VERSION;
 
+/// The `requires` entry for the bot's own Discord token: the one host
+/// authority a plugin may declare that the shaped `host.*` op surface does
+/// not already provide.
+pub const DISCORD_TOKEN: &str = "discord_token";
+
+/// The closed `requires` vocabulary. An entry outside it is rejected by
+/// [`Manifest::validate`], the way an unknown `host.*` op is.
+pub const ALL_REQUIREMENTS: &[&str] = &[DISCORD_TOKEN];
+
 /// A plugin's declaration, carried alongside the hello handshake. Every field
 /// is required; a manifest missing one fails to deserialize.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -33,6 +42,12 @@ pub struct Manifest {
     /// surface; each targets one of the plugin's own commands.
     #[serde(default)]
     pub settings: Vec<SettingsSection>,
+    /// Host authority the plugin declares it needs, over the closed
+    /// [`ALL_REQUIREMENTS`] vocabulary. A declaration is a request, never a
+    /// grant: the host withholds what the operator's catalog does not grant,
+    /// and refuses a plugin whose halves disagree (ADR-0016).
+    #[serde(default)]
+    pub requires: Vec<String>,
     /// Protocol version this manifest is written for; validated against
     /// [`API_VERSION`].
     pub api_version: u32,
@@ -40,8 +55,9 @@ pub struct Manifest {
 
 impl Manifest {
     /// Validates the manifest against this host: the `api_version` must equal
-    /// [`API_VERSION`] and every command blob must be a JSON object carrying at
-    /// least `name` and `description` strings.
+    /// [`API_VERSION`], every command blob must be a JSON object carrying at
+    /// least `name` and `description` strings, and every `requires` entry
+    /// must be in [`ALL_REQUIREMENTS`].
     pub fn validate(&self) -> Result<(), ManifestError> {
         if self.api_version != API_VERSION {
             return Err(ManifestError::UnsupportedApiVersion {
@@ -55,7 +71,19 @@ impl Manifest {
         for (index, section) in self.settings.iter().enumerate() {
             validate_settings_section(index, section, &self.commands)?;
         }
+        for requirement in &self.requires {
+            if !ALL_REQUIREMENTS.contains(&requirement.as_str()) {
+                return Err(ManifestError::UnknownRequirement {
+                    requirement: requirement.clone(),
+                });
+            }
+        }
         Ok(())
+    }
+
+    /// Whether the manifest declares that it needs the bot's Discord token.
+    pub fn requires_discord_token(&self) -> bool {
+        self.requires.iter().any(|entry| entry == DISCORD_TOKEN)
     }
 }
 
@@ -120,6 +148,12 @@ pub enum ManifestError {
         index: usize,
         /// Why the entry failed.
         reason: String,
+    },
+    /// A `requires` entry is outside the closed vocabulary.
+    #[error("unknown requirement `{requirement}`")]
+    UnknownRequirement {
+        /// The offending entry from `requires`.
+        requirement: String,
     },
 }
 
@@ -201,6 +235,7 @@ mod tests {
                 command: "feed.prune".into(),
             }],
             settings: vec![],
+            requires: vec![],
             api_version: API_VERSION,
         }
     }
@@ -211,7 +246,7 @@ mod tests {
     fn manifest_serializes_to_declared_shape() {
         assert_eq!(
             serde_json::to_string(&sample_manifest()).unwrap(),
-            r#"{"name":"feed","description":"Feed subscriptions","version":"0.1.0","commands":[{"create_command":{"description":"List feeds","name":"feed.list","options":[]}}],"event_handlers":["voice_state"],"tasks":[{"name":"prune","interval_secs":3600,"command":"feed.prune"}],"settings":[],"api_version":2}"#
+            r#"{"name":"feed","description":"Feed subscriptions","version":"0.1.0","commands":[{"create_command":{"description":"List feeds","name":"feed.list","options":[]}}],"event_handlers":["voice_state"],"tasks":[{"name":"prune","interval_secs":3600,"command":"feed.prune"}],"settings":[],"requires":[],"api_version":2}"#
         );
     }
 
@@ -359,6 +394,48 @@ mod tests {
                 reason: "`description` must be a string".into(),
             })
         );
+    }
+
+    // ── declared requirements (ADR-0016) ────────────────────────────────────
+
+    #[test]
+    fn manifest_without_requires_deserializes_with_an_empty_list() {
+        let json = r#"{"name":"feed","description":"d","version":"0.1.0","commands":[],"event_handlers":[],"tasks":[],"api_version":2}"#;
+        let manifest: Manifest = serde_json::from_str(json).unwrap();
+        assert_eq!(manifest.requires, Vec::<String>::new());
+        assert!(!manifest.requires_discord_token());
+        assert_eq!(manifest.validate(), Ok(()));
+    }
+
+    #[test]
+    fn declared_requirement_from_the_vocabulary_validates() {
+        let mut manifest = sample_manifest();
+        manifest.requires = vec![DISCORD_TOKEN.into()];
+        assert_eq!(manifest.validate(), Ok(()));
+        assert!(manifest.requires_discord_token());
+    }
+
+    #[test]
+    fn unknown_requirement_is_rejected() {
+        let mut manifest = sample_manifest();
+        manifest.requires = vec!["postgres_superuser".into()];
+        assert_eq!(
+            manifest.validate(),
+            Err(ManifestError::UnknownRequirement {
+                requirement: "postgres_superuser".into(),
+            })
+        );
+        assert!(!manifest.requires_discord_token());
+    }
+
+    #[test]
+    fn requires_round_trips_through_json() {
+        let mut manifest = sample_manifest();
+        manifest.requires = vec![DISCORD_TOKEN.into()];
+        let json = serde_json::to_string(&manifest).unwrap();
+        let decoded: Manifest = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded, manifest);
+        assert!(json.contains(r#""requires":["discord_token"]"#), "{json}");
     }
 
     // ── settings sections ────────────────────────────────────────────────────

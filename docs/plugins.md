@@ -22,7 +22,45 @@ entry pins:
 - the sha256 hash of the binary,
 - the plugin manifest as a JSON string.
 
-Set `auto_enable = true` to enable the plugin in every guild by default.
+Set `auto_enable = true` to enable the plugin in every guild by default. The
+catalog is strict: an unknown key fails the whole file at startup, so a typo
+in a field is an error and not a silent default.
+
+## Authority
+
+Most plugins need no Discord authority beyond the `host.*` operations. A
+plugin that needs more declares it in its manifest and you grant it in the
+catalog. The two must agree in both directions, and for a catalog plugin the
+host checks both before the plugin starts:
+
+- The manifest declares `"requires":["discord_token"]`.
+- The catalog entry sets `discord_token = true`.
+
+A declaration without a grant, or a grant without a declaration, refuses the
+plugin. The bot logs the refusal and stays up. Only catalog plugins can be
+granted: a core plugin has no pinned digest, so a grant would attach to
+whatever bytes happen to sit on disk. A core plugin that declares the need is
+refused at the handshake for the same reason. Move a first-party plugin into
+the catalog first, or give it a shaped `host.*` operation instead.
+
+The grant is snapshotted at startup and reused for every spawn, including
+respawns after a crash. The host logs one line per spawn naming the plugin,
+the binary, the grant decision, and the digest result, and `/plugins list`
+shows each plugin's authority. A plugin that declares a need nobody granted it
+is refused, so it never starts.
+
+## Environment
+
+A plugin's environment is an allowlist, not an inherited one. The child gets
+`PATH` plus whatever the grant adds: a granted plugin also gets
+`DISCORD_TOKEN`. Nothing else crosses the process seam — not `DB_URL`, not
+`DISCORD_APPLICATION_ID`, not `ADMIN_ID`. A plugin that needs its database
+URL, data path, or poll interval gets them from the `host.get_config`
+operation.
+
+The host also re-checks the entry's `sha256` against the binary every time
+it spawns it, so a binary swapped after install is refused at the seam rather
+than inheriting the grant you made for the bytes you reviewed.
 
 ## Core plugins
 

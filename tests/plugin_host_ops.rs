@@ -13,6 +13,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use poise::serenity_prelude as serenity;
+use pwr_bot::plugin::Authority;
 use pwr_bot::plugin::HostConfig;
 use pwr_bot::plugin::HostIo;
 use pwr_bot::plugin::HostServices;
@@ -104,9 +105,11 @@ async fn host_say_serves_send_message_through_the_seam() {
 
     let plugin = RunningPlugin::spawn_with(
         probe_binary("hello"),
+        "hello",
         Some(host_services(Arc::new(mock), None)),
         None,
         None,
+        Authority::none(),
     )
     .await
     .expect("spawn fixture");
@@ -155,9 +158,11 @@ async fn host_defer_invoke_serves_defer_through_the_seam() {
 
     let plugin = RunningPlugin::spawn_with(
         probe_binary("hello"),
+        "hello",
         Some(host_services(Arc::new(mock), None)),
         None,
         None,
+        Authority::none(),
     )
     .await
     .expect("spawn fixture");
@@ -205,9 +210,11 @@ async fn host_edit_invoke_serves_edit_message_through_the_seam() {
 
     let plugin = RunningPlugin::spawn_with(
         probe_binary("hello"),
+        "hello",
         Some(host_services(Arc::new(mock), None)),
         None,
         None,
+        Authority::none(),
     )
     .await
     .expect("spawn fixture");
@@ -290,9 +297,11 @@ async fn host_openview_opens_the_target_plugin_view_end_to_end() {
 
     let caller = RunningPlugin::spawn_with(
         probe_binary("hello"),
+        "hello",
         Some(services),
         Some(manager.clone()),
         None,
+        Authority::none(),
     )
     .await
     .expect("spawn caller plugin");
@@ -382,9 +391,11 @@ async fn host_openview_edits_the_source_message_in_place() {
 
     let caller = RunningPlugin::spawn_with(
         probe_binary("hello"),
+        "hello",
         Some(services),
         Some(manager.clone()),
         None,
+        Authority::none(),
     )
     .await
     .expect("spawn caller plugin");
@@ -452,9 +463,11 @@ async fn host_openview_accepts_a_string_message_id() {
 
     let caller = RunningPlugin::spawn_with(
         probe_binary("hello"),
+        "hello",
         Some(services),
         Some(manager.clone()),
         None,
+        Authority::none(),
     )
     .await
     .expect("spawn caller plugin");
@@ -504,9 +517,11 @@ async fn host_openview_rejects_malformed_view_before_sending_or_registering() {
         .expect("spawn target plugin");
     let caller = RunningPlugin::spawn_with(
         probe_binary("hello"),
+        "hello",
         Some(services),
         Some(manager.clone()),
         None,
+        Authority::none(),
     )
     .await
     .expect("spawn caller plugin");
@@ -551,9 +566,16 @@ async fn host_openview_rejects_malformed_view_before_sending_or_registering() {
 /// of panicking or hanging.
 #[tokio::test]
 async fn host_call_without_services_is_host_unavailable() {
-    let plugin = RunningPlugin::spawn_with(probe_binary("hello"), None, None, None)
-        .await
-        .expect("spawn fixture");
+    let plugin = RunningPlugin::spawn_with(
+        probe_binary("hello"),
+        "hello",
+        None,
+        None,
+        None,
+        Authority::none(),
+    )
+    .await
+    .expect("spawn fixture");
     let resp = plugin
         .call(
             "invoke",
@@ -602,9 +624,11 @@ async fn concurrent_host_calls_correlate_by_id() {
     let plugin = Arc::new(
         RunningPlugin::spawn_with(
             probe_binary("hello"),
+            "hello",
             Some(host_services(Arc::new(mock), None)),
             None,
             None,
+            Authority::none(),
         )
         .await
         .expect("spawn fixture"),
@@ -650,9 +674,11 @@ async fn call_after_stop_fails_fast() {
     let mock = MockHostIo::new();
     let plugin = RunningPlugin::spawn_with(
         probe_binary("hello"),
+        "hello",
         Some(host_services(Arc::new(mock), None)),
         None,
         None,
+        Authority::none(),
     )
     .await
     .expect("spawn fixture");
@@ -687,9 +713,11 @@ async fn host_kvget_invoke_serves_kv_get_through_the_seam() {
     let mock_io = MockHostIo::new();
     let plugin = RunningPlugin::spawn_with(
         probe_binary("hello"),
+        "hello",
         Some(host_services(Arc::new(mock_io), Some(Arc::new(mock_kv)))),
         None,
         None,
+        Authority::none(),
     )
     .await
     .expect("spawn fixture");
@@ -735,9 +763,11 @@ async fn host_kvset_invoke_serves_kv_set_through_the_seam() {
     let mock_io = MockHostIo::new();
     let plugin = RunningPlugin::spawn_with(
         probe_binary("hello"),
+        "hello",
         Some(host_services(Arc::new(mock_io), Some(Arc::new(mock_kv)))),
         None,
         None,
+        Authority::none(),
     )
     .await
     .expect("spawn fixture");
@@ -783,9 +813,11 @@ async fn host_kvdel_invoke_serves_kv_delete_through_the_seam() {
     let mock_io = MockHostIo::new();
     let plugin = RunningPlugin::spawn_with(
         probe_binary("hello"),
+        "hello",
         Some(host_services(Arc::new(mock_io), Some(Arc::new(mock_kv)))),
         None,
         None,
+        Authority::none(),
     )
     .await
     .expect("spawn fixture");

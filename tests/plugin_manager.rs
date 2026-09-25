@@ -5,6 +5,7 @@
 #[cfg(unix)]
 use std::os::unix::process::ExitStatusExt;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::Once;
 use std::sync::OnceLock;
@@ -13,6 +14,8 @@ use std::time::Duration;
 use log::LevelFilter;
 use log::Log;
 use pwr_bot::plugin::PluginError;
+use pwr_bot::plugin::PluginManager;
+use pwr_bot::plugin::RespawnPolicy;
 use pwr_bot::plugin::RunningPlugin;
 use pwr_plugin_protocol::BUTTON_CUSTOM_ID;
 use pwr_plugin_protocol::Msg;
@@ -88,23 +91,41 @@ fn logs_contain(fragment: &str) -> bool {
 
 #[tokio::test]
 #[serial_test::serial]
-async fn plugin_children_do_not_inherit_discord_token() {
-    let previous = std::env::var_os("DISCORD_TOKEN");
-    unsafe {
-        std::env::set_var(
+async fn plugin_children_do_not_inherit_the_hosts_secrets() {
+    // The child environment is an allowlist, not
+    // inherit-everything-minus-one: only `PATH` and the grant cross the
+    // seam, so none of the host's own secrets may be visible in a child.
+    let leaked = [
+        (
             "DISCORD_TOKEN",
             "test-token-must-not-cross-the-process-seam",
-        )
-    };
+        ),
+        ("DB_URL", "postgres://secret/host-db"),
+        ("DISCORD_APPLICATION_ID", "424242"),
+        ("ADMIN_ID", "7"),
+    ];
+    let previous: Vec<_> = leaked
+        .iter()
+        .map(|(name, _)| (*name, std::env::var_os(name)))
+        .collect();
+    for (name, value) in &leaked {
+        unsafe { std::env::set_var(name, value) };
+    }
     let spawned = RunningPlugin::spawn(fixture_script("env_probe.sh")).await;
-    match previous {
-        Some(value) => unsafe { std::env::set_var("DISCORD_TOKEN", value) },
-        None => unsafe { std::env::remove_var("DISCORD_TOKEN") },
+    for (name, value) in previous {
+        match value {
+            Some(value) => unsafe { std::env::set_var(name, value) },
+            None => unsafe { std::env::remove_var(name) },
+        }
     }
 
     let plugin = spawned.expect("spawn env probe");
     let status = plugin.stop().await.expect("stop env probe");
-    assert_eq!(status.code(), Some(0), "child inherited the Discord token");
+    assert_eq!(
+        status.code(),
+        Some(0),
+        "the child inherited a host secret (43 = one leaked, 42 = the token)"
+    );
 }
 
 #[tokio::test]
@@ -343,5 +364,38 @@ async fn spawn_rejects_a_binary_that_never_announces() {
     assert!(
         matches!(err, PluginError::HelloLost { .. }),
         "expected hello-lost rejection, got {err:?}"
+    );
+}
+
+// ── the spawn audit line names the configured plugin (ADR-0016) ─────────────
+
+#[tokio::test]
+#[serial_test::serial]
+async fn the_spawn_audit_line_names_the_plugin_not_the_binary() {
+    // `env_probe.sh`'s file stem is `env_probe`; it is configured as
+    // `env-probe`, the name `/plugins list` and its hello both use. The audit
+    // line must carry the configured name, or an operator reading the logs
+    // sees `env_probe` where the catalog says `env-probe`.
+    init_recording_logger();
+
+    let manager = Arc::new(PluginManager::new(None, RespawnPolicy::default()));
+    let plugin = manager
+        .spawn("env-probe", fixture_script("env_probe.sh"), None, &[], &[])
+        .await
+        .expect("spawn the probe");
+    let _ = plugin.stop().await;
+
+    // The line is logged before the handshake, so it is already recorded.
+    assert!(
+        logs_contain("spawned plugin env-probe"),
+        "the audit line must name the configured plugin"
+    );
+    assert!(
+        !logs_contain("spawned plugin env_probe"),
+        "the audit line must not name the binary's file stem"
+    );
+    assert!(
+        logs_contain("digest unpinned"),
+        "the audit line states the digest result"
     );
 }

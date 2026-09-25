@@ -19,6 +19,7 @@ pub(crate) fn manifest_named(name: &str) -> Manifest {
         event_handlers: Vec::new(),
         tasks: Vec::new(),
         settings: vec![],
+        requires: vec![],
         api_version: API_VERSION,
     }
 }
@@ -31,5 +32,6 @@ pub(crate) fn entry_named(name: &str) -> CatalogEntry {
         sha256: "a".repeat(64),
         manifest: manifest_named(name),
         auto_enable: false,
+        discord_token: false,
     }
 }

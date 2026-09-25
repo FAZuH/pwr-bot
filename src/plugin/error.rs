@@ -24,7 +24,8 @@ pub enum PluginError {
     /// The plugin never announced its `hello` within the handshake timeout.
     #[error("plugin `{name}` did not send hello within {timeout:?}")]
     HelloTimeout {
-        /// Plugin label (binary file stem) used for logging.
+        /// Plugin name used for logging: the configured name, or the binary's
+        /// file stem when the spawn carried none.
         name: String,
         /// How long the host waited.
         timeout: Duration,
@@ -54,6 +55,40 @@ pub enum PluginError {
     /// The hello declared a `host.*` op the host does not serve.
     #[error(transparent)]
     Ops(#[from] OpsError),
+
+    /// The installed binary did not match the sha256 the catalog pins, so
+    /// the plugin is refused at the spawn seam. Authority attaches to
+    /// bytes: a swapped binary never inherits a grant made for the bytes
+    /// the operator reviewed (ADR-0016).
+    #[error("plugin `{name}` binary `{path}` failed its catalog digest check: {source}")]
+    Digest {
+        /// Plugin name.
+        name: String,
+        /// The binary that failed the check.
+        path: PathBuf,
+        /// The read failure or the digest mismatch.
+        #[source]
+        source: InstallError,
+    },
+
+    /// The catalog granted the Discord token but the plugin's manifest
+    /// does not declare the need (`requires: ["discord_token"]`): authority
+    /// held on a technicality, which is as bad as a plugin that received it
+    /// by accident (ADR-0016).
+    #[error("plugin `{name}` is granted the discord token but declares no need for it")]
+    UndeclaredGrant {
+        /// Plugin name.
+        name: String,
+    },
+
+    /// The plugin's manifest declares the Discord token
+    /// (`requires: ["discord_token"]`) but the catalog grants it none, so the
+    /// plugin would run without the authority it asked for (ADR-0016).
+    #[error("plugin `{name}` declares a need for the discord token that is not granted it")]
+    UngrantedDeclaration {
+        /// Plugin name.
+        name: String,
+    },
 
     /// The hello carried a manifest that failed validation, or whose name
     /// does not match the hello's.

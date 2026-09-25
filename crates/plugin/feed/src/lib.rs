@@ -135,6 +135,7 @@ pub fn manifest() -> Manifest {
             description: "Manage feed subscription settings".into(),
             command: COMMAND_NAME.into(),
         }],
+        requires: vec![],
         api_version: API_VERSION,
     }
 }

@@ -50,6 +50,7 @@ use crate::bot::translate::TranslateLayer;
 use crate::config::Config;
 use crate::entity::BotMetaKey;
 use crate::event::event_bus::EventBus;
+use crate::plugin::AuthoritySnapshot;
 use crate::plugin::CatalogEntry;
 use crate::plugin::GUILD_CREATE_EVENT;
 use crate::plugin::HostConfig;
@@ -224,7 +225,11 @@ impl Bot {
             PluginManager::new(Some(http.clone()), RespawnPolicy::default())
                 .with_host_services(host_services)
                 .with_event_bus(event_bus.clone())
-                .with_event_router(plugin_events.clone()),
+                .with_event_router(plugin_events.clone())
+                .with_grants(AuthoritySnapshot::from_catalog(
+                    &catalog,
+                    config.discord_token.clone(),
+                )),
         );
 
         // Core plugins are spawned once at startup. Their manifest event

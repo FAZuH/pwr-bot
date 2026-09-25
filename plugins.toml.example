@@ -18,6 +18,15 @@
 #   auto_enable  Optional (default false). When true, the plugin is enabled
 #                in every guild unless a guild disables it with
 #                `/plugins disable <name>`.
+#   discord_token  Optional (default false). Grants the plugin the bot's own
+#                Discord token. The plugin's `manifest` must also declare
+#                `"requires":["discord_token"]`, and the two must agree in
+#                both directions or the plugin is refused. The host
+#                re-checks `sha256` at every spawn, so authority attaches to
+#                the bytes you reviewed. Core plugins cannot be granted.
+#
+# Unknown keys are rejected, so a typo fails the whole catalog at startup
+# instead of leaving a plugin silently ungranted.
 #
 # A missing or invalid catalog does not stop the bot: plugin commands stay
 # absent, the failure is logged, and the bot owner sees the exact path and
@@ -32,5 +41,6 @@
 name = "hello"
 url = "https://example.com/plugins/hello"
 sha256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-manifest = '{"name":"hello","description":"Canonical test plugin","version":"0.1.0","commands":[{"create_command":{"name":"hello","description":"Say hello from a plugin"}}],"event_handlers":["view.timeout"],"tasks":[{"name":"tick","interval_secs":1,"command":"hello.tick"}],"api_version":1}'
+manifest = '{"name":"hello","description":"Canonical test plugin","version":"0.1.0","commands":[{"create_command":{"name":"hello","description":"Say hello from a plugin"}}],"event_handlers":["view.timeout"],"tasks":[{"name":"tick","interval_secs":1,"command":"hello.tick"}],"api_version":2}'
 auto_enable = false
+discord_token = false
