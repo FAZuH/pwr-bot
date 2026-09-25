@@ -6,7 +6,6 @@ use std::ops::Deref;
 use byteorder::ReadBytesExt;
 use byteorder::WriteBytesExt;
 use chrono::DateTime;
-use chrono::SubsecRound;
 use chrono::Utc;
 use diesel::backend::Backend;
 use diesel::deserialize::FromSql;
@@ -26,7 +25,6 @@ use crate::repo::schema::feeds;
 use crate::repo::schema::guild_plugins;
 use crate::repo::schema::server_settings;
 use crate::repo::schema::subscribers;
-use crate::repo::schema::voice_sessions;
 
 // =============================================================================
 // Custom type wrappers
@@ -246,129 +244,6 @@ pub use pwr_plugin_protocol::ServerSettings;
 pub use pwr_plugin_protocol::VoiceSettings;
 pub use pwr_plugin_protocol::WelcomeSettings;
 
-/// Diesel-compatible struct for voice_sessions queries.
-#[derive(Queryable, Selectable)]
-#[diesel(table_name = voice_sessions)]
-#[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct DbVoiceSession {
-    pub id: i32,
-    pub user_id: DbU64,
-    pub guild_id: DbU64,
-    pub channel_id: DbU64,
-    pub join_time: DateTime<Utc>,
-    pub leave_time: DateTime<Utc>,
-    pub is_active: bool,
-}
-
-/// Diesel-compatible struct for inserting/updating voice sessions.
-#[derive(Insertable, AsChangeset)]
-#[diesel(table_name = voice_sessions)]
-pub struct NewDbVoiceSession {
-    pub user_id: DbU64,
-    pub guild_id: DbU64,
-    pub channel_id: DbU64,
-    pub join_time: DateTime<Utc>,
-    pub leave_time: DateTime<Utc>,
-    pub is_active: bool,
-}
-
-/// Domain entity for voice channel sessions.
-#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
-pub struct VoiceSessionsEntity {
-    pub id: i32,
-    pub user_id: u64,
-    pub guild_id: u64,
-    pub channel_id: u64,
-    pub join_time: DateTime<Utc>,
-    pub leave_time: DateTime<Utc>,
-    pub is_active: bool,
-}
-
-impl VoiceSessionsEntity {
-    pub fn to_insertable(&self) -> NewDbVoiceSession {
-        NewDbVoiceSession {
-            user_id: self.user_id.into(),
-            guild_id: self.guild_id.into(),
-            channel_id: self.channel_id.into(),
-            join_time: self.join_time.trunc_subsecs(6),
-            leave_time: self.leave_time.trunc_subsecs(6),
-            is_active: self.is_active,
-        }
-    }
-}
-
-impl From<DbVoiceSession> for VoiceSessionsEntity {
-    fn from(db: DbVoiceSession) -> Self {
-        Self {
-            id: db.id,
-            user_id: db.user_id.into(),
-            guild_id: db.guild_id.into(),
-            channel_id: db.channel_id.into(),
-            join_time: db.join_time,
-            leave_time: db.leave_time,
-            is_active: db.is_active,
-        }
-    }
-}
-
-#[derive(Serialize, Default, Clone, Debug, PartialEq, Eq)]
-pub struct VoiceLeaderboardEntry {
-    pub user_id: u64,
-    pub total_duration: i64,
-}
-
-#[derive(QueryableByName)]
-#[diesel(table_name = voice_sessions)]
-pub struct VoiceLeaderboardRow {
-    #[diesel(sql_type = BigInt)]
-    pub user_id: DbU64,
-    #[diesel(sql_type = BigInt)]
-    pub total_duration: i64,
-}
-
-impl From<VoiceLeaderboardRow> for VoiceLeaderboardEntry {
-    fn from(row: VoiceLeaderboardRow) -> Self {
-        Self {
-            user_id: row.user_id.into(),
-            total_duration: row.total_duration,
-        }
-    }
-}
-
-use derive_builder::Builder;
-
-#[derive(Builder, Clone)]
-#[builder(pattern = "immutable")]
-pub struct VoiceLeaderboardOpt {
-    pub guild_id: u64,
-    #[builder(default)]
-    pub offset: Option<u32>,
-    #[builder(default)]
-    pub limit: Option<u32>,
-    #[builder(default)]
-    pub since: Option<DateTime<Utc>>,
-    #[builder(default)]
-    pub until: Option<DateTime<Utc>>,
-}
-
-/// Daily voice activity aggregation for a specific user.
-#[derive(QueryableByName, Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
-pub struct VoiceDailyActivity {
-    #[diesel(sql_type = diesel::sql_types::Date)]
-    pub day: chrono::NaiveDate,
-    #[diesel(sql_type = BigInt)]
-    pub total_seconds: i64,
-}
-
-/// Guild daily statistics aggregation.
-#[derive(QueryableByName, Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
-pub struct GuildDailyStats {
-    #[diesel(sql_type = diesel::sql_types::Date)]
-    pub day: chrono::NaiveDate,
-    #[diesel(sql_type = BigInt)]
-    pub value: i64,
-}
-
 /// Key-value store for bot metadata.
 #[derive(Queryable, Selectable, Insertable, Identifiable, AsChangeset)]
 #[diesel(table_name = bot_meta)]
@@ -381,14 +256,12 @@ pub struct BotMetaEntity {
 }
 
 pub enum BotMetaKey {
-    VoiceHeartbeat,
     BotVersion,
 }
 
 impl From<&BotMetaKey> for String {
     fn from(value: &BotMetaKey) -> Self {
         match value {
-            BotMetaKey::VoiceHeartbeat => "voice_heartbeat".to_string(),
             BotMetaKey::BotVersion => "bot_version".to_string(),
         }
     }

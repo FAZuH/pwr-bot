@@ -49,96 +49,6 @@ pub trait FeedDumpRepository: Send + Sync {
 #[async_trait]
 pub trait ServerSettingsRepository: CrudTable<ServerSettingsEntity, u64> + Send + Sync {}
 
-/// Operations for tracking voice channel activity.
-#[async_trait]
-pub trait VoiceSessionsRepository: CrudTable<VoiceSessionsEntity, i32> + Send + Sync {
-    /// Generic leaderboard query with filters.
-    async fn get_leaderboard_opt(
-        &self,
-        opts: &VoiceLeaderboardOpt,
-    ) -> Result<Vec<VoiceLeaderboardEntry>, DatabaseError>;
-    /// Returns the top users by voice activity in a guild.
-    async fn get_leaderboard(
-        &self,
-        guild_id: u64,
-        limit: u32,
-    ) -> Result<Vec<VoiceLeaderboardEntry>, DatabaseError>;
-    /// Paginated leaderboard query.
-    async fn get_leaderboard_with_offset(
-        &self,
-        guild_id: u64,
-        offset: u32,
-        limit: u32,
-    ) -> Result<Vec<VoiceLeaderboardEntry>, DatabaseError>;
-    /// Returns a leaderboard of users who spent the most time in VCs with a target user.
-    async fn get_partner_leaderboard(
-        &self,
-        opts: &VoiceLeaderboardOpt,
-        target_user_id: u64,
-    ) -> Result<Vec<VoiceLeaderboardEntry>, DatabaseError>;
-    /// Updates the end time for an active voice session.
-    async fn update_leave_time(
-        &self,
-        user_id: u64,
-        channel_id: u64,
-        join_time: &chrono::DateTime<chrono::Utc>,
-        leave_time: &chrono::DateTime<chrono::Utc>,
-    ) -> Result<(), DatabaseError>;
-    /// Marks a session as closed.
-    async fn close_session(
-        &self,
-        user_id: u64,
-        channel_id: u64,
-        join_time: &chrono::DateTime<chrono::Utc>,
-        leave_time: &chrono::DateTime<chrono::Utc>,
-    ) -> Result<(), DatabaseError>;
-    /// Returns all sessions currently marked as active.
-    async fn find_active_sessions(&self) -> Result<Vec<VoiceSessionsEntity>, DatabaseError>;
-    /// Returns all active sessions for a specific user in a guild.
-    async fn find_active_sessions_by_user(
-        &self,
-        user_id: u64,
-        guild_id: u64,
-    ) -> Result<Vec<VoiceSessionsEntity>, DatabaseError>;
-    /// Returns all sessions within a specific time range.
-    async fn get_sessions_in_range(
-        &self,
-        guild_id: u64,
-        user_id: Option<u64>,
-        since: &chrono::DateTime<chrono::Utc>,
-        until: &chrono::DateTime<chrono::Utc>,
-    ) -> Result<Vec<VoiceSessionsEntity>, DatabaseError>;
-    /// Aggregates daily activity for a specific user.
-    async fn get_user_daily_activity(
-        &self,
-        user_id: u64,
-        guild_id: u64,
-        since: &chrono::DateTime<chrono::Utc>,
-        until: &chrono::DateTime<chrono::Utc>,
-    ) -> Result<Vec<VoiceDailyActivity>, DatabaseError>;
-    /// Aggregates daily total voice time for a guild.
-    async fn get_guild_daily_total_time(
-        &self,
-        guild_id: u64,
-        since: &chrono::DateTime<chrono::Utc>,
-        until: &chrono::DateTime<chrono::Utc>,
-    ) -> Result<Vec<GuildDailyStats>, DatabaseError>;
-    /// Aggregates daily average voice time per user for a guild.
-    async fn get_guild_daily_average_time(
-        &self,
-        guild_id: u64,
-        since: &chrono::DateTime<chrono::Utc>,
-        until: &chrono::DateTime<chrono::Utc>,
-    ) -> Result<Vec<GuildDailyStats>, DatabaseError>;
-    /// Aggregates daily unique user count in VCs for a guild.
-    async fn get_guild_daily_user_count(
-        &self,
-        guild_id: u64,
-        since: &chrono::DateTime<chrono::Utc>,
-        until: &chrono::DateTime<chrono::Utc>,
-    ) -> Result<Vec<GuildDailyStats>, DatabaseError>;
-}
-
 /// Operations for internal bot metadata.
 #[async_trait]
 pub trait BotMetaRepository: CrudTable<BotMetaEntity, String> + Send + Sync {
@@ -184,7 +94,6 @@ pub trait GuildPluginRepository: TableBase + Send + Sync {
 pub trait Repos: Send + Sync {
     fn feed_dump(&self) -> Box<dyn FeedDumpRepository + Send + Sync>;
     fn server_settings(&self) -> Box<dyn ServerSettingsRepository + Send + Sync>;
-    fn voice_sessions(&self) -> Box<dyn VoiceSessionsRepository + Send + Sync>;
     fn bot_meta(&self) -> Box<dyn BotMetaRepository + Send + Sync>;
     fn plugin_kv(&self) -> Box<dyn PluginKvRepository + Send + Sync>;
     fn guild_plugins(&self) -> Box<dyn GuildPluginRepository + Send + Sync>;

@@ -480,7 +480,7 @@ async fn main() -> ExitCode {
     let hello = Msg::Hello {
         v: API_VERSION,
         name: PLUGIN_NAME.into(),
-        caps: vec![
+        ops: vec![
             "host.get_config".into(),
             "host.open_dm".into(),
             "host.open_view".into(),

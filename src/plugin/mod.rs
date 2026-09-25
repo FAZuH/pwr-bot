@@ -7,7 +7,7 @@
 //! is forwarded into the host's `log` output.
 //!
 //! Spawn flow: the plugin announces `hello` first, the host validates it
-//! (version plus `host.*` caps, rejecting before any work) and answers with
+//! (version plus `host.*` ops, rejecting before any work) and answers with
 //! its own `hello` as the ack. Calls then flow host→plugin, correlated by
 //! monotonic ids; each `resp` is matched to its waiting call through a
 //! oneshot channel. Events flow host→plugin as one-way pushes; the
@@ -48,6 +48,7 @@ use std::time::Instant;
 
 pub use error::InstallError;
 pub use error::PluginError;
+pub use events::GUILD_CREATE_EVENT;
 pub use events::PluginEventRouter;
 pub use events::VOICE_STATE_EVENT;
 pub use host::HostConfig;
@@ -59,15 +60,18 @@ pub use host::KvStore;
 pub use host::PgKvStore;
 pub use host::SerenityHostIo;
 pub use host::SerenityStatsSource;
-pub use host::ServiceVoiceSettingsSource;
+pub use host::SerenityUserResolver;
 pub use host::ServiceWelcomeSettingsSource;
 pub use host::StatsError;
 pub use host::StatsHandle;
 pub use host::StatsSource;
-pub use host::VoiceSettingsError;
-pub use host::VoiceSettingsSource;
+pub use host::UserResolveError;
+pub use host::UserResolver;
+pub use host::UserResolverHandle;
 pub use host::WelcomeSettingsError;
 pub use host::WelcomeSettingsSource;
+pub(crate) use host::decode_runtime_files_with_existing;
+pub use host::validate_view_spec;
 pub use install::CatalogEntry;
 pub use install::PluginCatalog;
 pub use interaction::InteractionEngine;
@@ -83,13 +87,13 @@ pub use modal::ModalBinding;
 pub use modal::ModalDeliveryError;
 pub use modal::ModalRouteError;
 pub use modal::ModalRouter;
-use pwr_plugin_protocol::ALL_CAPS;
+use pwr_plugin_protocol::ALL_OPS;
 use pwr_plugin_protocol::API_VERSION;
 use pwr_plugin_protocol::CallIdSeq;
 use pwr_plugin_protocol::Manifest;
 use pwr_plugin_protocol::Msg;
 use pwr_plugin_protocol::WireError;
-use pwr_plugin_protocol::validate_caps;
+use pwr_plugin_protocol::validate_ops;
 use serde_json::Value;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::AsyncWriteExt;
@@ -161,7 +165,7 @@ pub struct RunningPlugin {
 
 impl RunningPlugin {
     /// Spawns the plugin binary at `path`, runs the hello handshake
-    /// (validate version + caps, then ack with the host's hello), and returns
+    /// (validate version + ops, then ack with the host's hello), and returns
     /// a handle ready for calls. A rejected handshake kills the child before
     /// any work happens. Host services are absent, so `host.*` calls answer
     /// `HostUnavailable` / `ConfigUnavailable`.
@@ -190,6 +194,7 @@ impl RunningPlugin {
 
         let mut command = Command::new(path);
         command
+            .env_remove("DISCORD_TOKEN")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -230,7 +235,7 @@ impl RunningPlugin {
         let Msg::Hello {
             v,
             name,
-            caps,
+            ops,
             manifest,
         } = hello
         else {
@@ -243,7 +248,7 @@ impl RunningPlugin {
             )
             .await);
         };
-        if let Err(reason) = validate_hello(&name, v, &caps) {
+        if let Err(reason) = validate_hello(&name, v, &ops) {
             return Err(reject(child, reason).await);
         }
         let manifest = match manifest {
@@ -596,18 +601,15 @@ fn host_hello() -> Msg {
     Msg::Hello {
         v: API_VERSION,
         name: "host".into(),
-        caps: ALL_CAPS
-            .iter()
-            .map(|cap| cap.as_str().to_string())
-            .collect(),
+        ops: ALL_OPS.iter().map(|op| op.as_str().to_string()).collect(),
         manifest: None,
     }
 }
 
 /// Validates a plugin's hello before any work happens: the version must match
-/// and every declared `host.*` cap must be in the v1 surface. Rejection is
+/// and every declared `host.*` op must be in the v2 surface. Rejection is
 /// decided here, before any other message is exchanged.
-fn validate_hello(name: &str, v: u32, caps: &[String]) -> Result<(), PluginError> {
+fn validate_hello(name: &str, v: u32, ops: &[String]) -> Result<(), PluginError> {
     if v != API_VERSION {
         return Err(PluginError::VersionMismatch {
             name: name.to_string(),
@@ -615,7 +617,7 @@ fn validate_hello(name: &str, v: u32, caps: &[String]) -> Result<(), PluginError
             expected: API_VERSION,
         });
     }
-    validate_caps(caps).map_err(PluginError::Caps)?;
+    validate_ops(ops).map_err(PluginError::Ops)?;
     Ok(())
 }
 
@@ -858,7 +860,7 @@ async fn run_reaper(
 
 #[cfg(test)]
 mod tests {
-    use pwr_plugin_protocol::CapsError;
+    use pwr_plugin_protocol::OpsError;
 
     use super::*;
 
@@ -866,17 +868,17 @@ mod tests {
 
     #[test]
     fn valid_hello_is_accepted() {
-        let caps = vec!["command:hello".into(), "host.kv.get".into()];
-        assert!(validate_hello("hello", API_VERSION, &caps).is_ok());
+        let ops = vec!["command:hello".into(), "host.kv.get".into()];
+        assert!(validate_hello("hello", API_VERSION, &ops).is_ok());
     }
 
     #[test]
     fn version_mismatch_is_rejected_before_any_work() {
-        let err = validate_hello("hello", 2, &[]).unwrap_err();
+        let err = validate_hello("hello", 3, &[]).unwrap_err();
         assert!(matches!(
             err,
             PluginError::VersionMismatch {
-                got: 2,
+                got: 3,
                 expected: API_VERSION,
                 ..
             }
@@ -884,35 +886,34 @@ mod tests {
     }
 
     #[test]
-    fn unknown_host_cap_is_rejected() {
+    fn unknown_host_op_is_rejected() {
         let err = validate_hello("hello", API_VERSION, &["host.frobnicate".into()]).unwrap_err();
         assert!(matches!(
             err,
-            PluginError::Caps(CapsError { ref op }) if op == "host.frobnicate"
+            PluginError::Ops(OpsError { ref op }) if op == "host.frobnicate"
         ));
     }
 
     // ── the host ack hello ──────────────────────────────────────────────────
 
     #[test]
-    fn host_hello_announces_the_full_cap_surface() {
-        let Msg::Hello { v, name, caps, .. } = host_hello() else {
+    fn host_hello_announces_the_full_op_surface() {
+        let Msg::Hello { v, name, ops, .. } = host_hello() else {
             panic!("host ack must be a hello")
         };
         assert_eq!(v, API_VERSION);
         assert_eq!(name, "host");
-        assert_eq!(caps.len(), 17, "every v1 host cap must be announced");
-        assert!(caps.iter().any(|c| c == "host.defer"));
-        assert!(caps.iter().any(|c| c == "host.open_dm"));
-        assert!(caps.iter().any(|c| c == "host.kv.get"));
-        assert!(caps.iter().any(|c| c == "host.get_config"));
-        assert!(caps.iter().any(|c| c == "host.list_plugins"));
-        assert!(caps.iter().any(|c| c == "host.stats"));
-        assert!(caps.iter().any(|c| c == "host.voice.get_settings"));
-        assert!(caps.iter().any(|c| c == "host.voice.update_settings"));
-        assert!(caps.iter().any(|c| c == "host.welcome.get_settings"));
-        assert!(caps.iter().any(|c| c == "host.welcome.update_settings"));
-        assert!(caps.iter().any(|c| c == "host.open_modal"));
+        assert_eq!(ops.len(), 16, "every v2 host op must be announced");
+        assert!(ops.iter().any(|c| c == "host.defer"));
+        assert!(ops.iter().any(|c| c == "host.open_dm"));
+        assert!(ops.iter().any(|c| c == "host.kv.get"));
+        assert!(ops.iter().any(|c| c == "host.get_config"));
+        assert!(ops.iter().any(|c| c == "host.list_plugins"));
+        assert!(ops.iter().any(|c| c == "host.stats"));
+        assert!(ops.iter().any(|c| c == "host.resolve_users"));
+        assert!(ops.iter().any(|c| c == "host.welcome.get_settings"));
+        assert!(ops.iter().any(|c| c == "host.welcome.update_settings"));
+        assert!(ops.iter().any(|c| c == "host.open_modal"));
     }
 
     // ── pong accounting (the health checker's liveness signal) ──────────────

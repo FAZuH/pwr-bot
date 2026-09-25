@@ -7,7 +7,7 @@
 # can assert the group signal reached it. Marker/pid paths derive from the
 # parent test process id (stable per test binary) plus a fixture tag, which
 # the test mirrors.
-echo '{"t":"hello","v":1,"name":"group-term","caps":[]}'
+echo '{"t":"hello","v":2,"name":"group-term","ops":[]}'
 BASE="/tmp/pwr_bot_plugin_group_${PPID}_term"
 sh -c 'trap "echo term > \"$1\"; exit 0" TERM; while :; do sleep 1; done' sh "$BASE.marker" &
 echo $! > "$BASE.pid"

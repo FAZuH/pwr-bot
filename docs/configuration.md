@@ -20,7 +20,6 @@ in the repository root. The bot reads the file at startup.
 | `FEED_PLUGIN_PATH` | Path to the feed core plugin binary. | `./feed` next to the bot binary, then `$DATA_PATH/feed` |
 | `VOICE_PLUGIN_PATH` | Path to the voice core plugin binary. | `./voice` next to the bot binary, then `$DATA_PATH/voice` |
 | `WELCOME_PLUGIN_PATH` | Path to the welcome core plugin binary. | `./welcome` next to the bot binary, then `$DATA_PATH/welcome` |
-| `ENABLE_VOICE_TRACKING` | Enable voice channel tracking and heartbeat. | `true` |
 | `ENABLE_FEED_PUBLISHER` | Enable feed polling and publishing. | `true` |
 | `ENABLE_AUTOREGISTER_CMD` | Enable command autoregistration. | `true` |
 | `DISCORD_APPLICATION_ID` | Discord application ID. Required for command autoregistration. | `1234567890` |

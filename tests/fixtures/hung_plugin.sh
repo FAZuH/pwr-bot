@@ -3,7 +3,7 @@
 # call (leaving it in flight), but exits 0 on `bye` or stdin EOF like the
 # canonical fixture. Unloading while a call is in flight must fail the call
 # with a PluginDied wire error rather than hang it.
-echo '{"t":"hello","v":1,"name":"hung","caps":[]}'
+echo '{"t":"hello","v":2,"name":"hung","ops":[]}'
 while IFS= read -r line; do
     case "$line" in
         *'"t":"bye"'*) exit 0 ;;

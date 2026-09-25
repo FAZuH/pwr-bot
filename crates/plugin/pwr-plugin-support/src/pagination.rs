@@ -22,7 +22,7 @@ pub enum PaginationAction {
 }
 
 /// Pure pagination state shared by a plugin view core and its renderer.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PaginationModel {
     /// The currently displayed page, one-based.
     pub current_page: u32,

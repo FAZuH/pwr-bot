@@ -22,8 +22,9 @@ use pwr_plugin_protocol::API_VERSION;
 use pwr_plugin_protocol::Manifest;
 use pwr_plugin_protocol::Msg;
 use pwr_plugin_protocol::ViewPayload;
+use pwr_plugin_protocol::ViewPayloadError;
 use pwr_plugin_protocol::WireError;
-use pwr_plugin_protocol::validate_caps;
+use pwr_plugin_protocol::validate_ops;
 use pwr_plugin_protocol::view_payload;
 use serde_json::Value;
 
@@ -48,7 +49,7 @@ pub struct PluginSession {
 impl PluginSession {
     /// Spawns the plugin at `path` and runs the hello handshake: the plugin
     /// announces first, then this side validates the version, the `host.*`
-    /// caps, and the manifest (all through `pwr_plugin_protocol`, mirroring
+    /// ops, and the manifest (all through `pwr_plugin_protocol`, mirroring
     /// the host's spawn gate in `src/plugin/mod.rs`) and acks with its own
     /// hello. The plugin's stderr is inherited, keeping its free logging
     /// channel visible in the terminal.
@@ -83,7 +84,7 @@ impl PluginSession {
         let Msg::Hello {
             v,
             name,
-            caps,
+            ops,
             manifest,
         } = hello
         else {
@@ -94,7 +95,7 @@ impl PluginSession {
                 "the `{name}` plugin speaks protocol version {v}; this tool speaks {API_VERSION}"
             );
         }
-        validate_caps(&caps).with_context(|| format!("validating the `{name}` plugin's caps"))?;
+        validate_ops(&ops).with_context(|| format!("validating the `{name}` plugin's ops"))?;
         if let Some(manifest) = &manifest {
             manifest
                 .validate()
@@ -110,12 +111,12 @@ impl PluginSession {
         session.manifest = manifest;
 
         // Acknowledge with this side's hello: the preview serves no host
-        // ops, so it announces no caps — the honest handshake, and the
+        // ops, so it announces no ops — the honest handshake, and the
         // plugins tolerate the ack silently either way.
         let ack = Msg::Hello {
             v: API_VERSION,
             name: "preview".into(),
-            caps: Vec::new(),
+            ops: Vec::new(),
             manifest: None,
         };
         session
@@ -297,15 +298,16 @@ impl Drop for PluginSession {
 /// Extracts the Discord message JSON from an invoke resp payload. Plugins
 /// answer in two shapes, both accepted: the full envelope
 /// `{"data": …, "ephemeral": …, "view": …}` (its `data` field is the message)
-/// and the v1 raw shape (the Discord message JSON itself). The
+/// and the legacy raw shape (the Discord message JSON itself). The
 /// envelope/raw split is [`view_payload`]'s shared contract — the host
 /// applies the same classification in `view_spec_from_data` — and this
-/// projection keeps only the message (`data`).
-pub fn message_from_resp_data(data: &Value) -> Value {
-    match view_payload(data) {
+/// projection keeps only the message (`data`). Malformed runtime-file
+/// entries are returned as an error.
+pub fn message_from_resp_data(data: &Value) -> Result<Value, ViewPayloadError> {
+    Ok(match view_payload(data)? {
         ViewPayload::Envelope { data, .. } => data,
         ViewPayload::Raw { data } => data,
-    }
+    })
 }
 
 /// The command an invoke should target by default: the manifest's single
@@ -368,7 +370,7 @@ mod tests {
             "view": {"page": 1},
         });
         assert_eq!(
-            message_from_resp_data(&payload),
+            message_from_resp_data(&payload).unwrap(),
             json!({"content": "Hello from plugin!", "components": []})
         );
     }
@@ -376,13 +378,13 @@ mod tests {
     #[test]
     fn envelope_payloads_pass_a_null_data_field_through() {
         let payload = json!({"data": null, "ephemeral": true, "view": {}});
-        assert_eq!(message_from_resp_data(&payload), Value::Null);
+        assert_eq!(message_from_resp_data(&payload).unwrap(), Value::Null);
     }
 
     #[test]
     fn raw_message_payloads_pass_through_verbatim() {
         let payload = json!({"content": "hi", "components": [{"type": 1}]});
-        assert_eq!(message_from_resp_data(&payload), payload);
+        assert_eq!(message_from_resp_data(&payload).unwrap(), payload);
     }
 
     #[test]
@@ -390,13 +392,13 @@ mod tests {
         // A raw message could carry arbitrary unknown fields; only the
         // top-level `data` key switches to envelope interpretation.
         let payload = json!({"content": "hi", "view": {"page": 1}});
-        assert_eq!(message_from_resp_data(&payload), payload);
+        assert_eq!(message_from_resp_data(&payload).unwrap(), payload);
     }
 
     #[test]
     fn non_object_payloads_pass_through_verbatim() {
         let payload = json!("just a string");
-        assert_eq!(message_from_resp_data(&payload), payload);
+        assert_eq!(message_from_resp_data(&payload).unwrap(), payload);
     }
 
     #[test]
@@ -429,10 +431,10 @@ mod tests {
 
     // ── real-io integration tests (a fake plugin over stdio) ─────────────────
 
-    /// A minimal fake plugin's valid hello: protocol version 1, one command
-    /// cap, and a manifest declaring the single `fake` command. It validates
-    /// cleanly through [`validate_caps`] and [`pwr_plugin_protocol::Manifest::validate`].
-    const FAKE_HELLO: &str = r#"{"t":"hello","v":1,"name":"fake","caps":["command:fake"],"manifest":{"name":"fake","description":"Fake test plugin","version":"0.1.0","commands":[{"create_command":{"name":"fake","description":"Fake"}}],"event_handlers":[],"tasks":[],"api_version":1}}"#;
+    /// A minimal fake plugin's valid hello: protocol version 2, one command
+    /// op, and a manifest declaring the single `fake` command. It validates
+    /// cleanly through [`validate_ops`] and [`pwr_plugin_protocol::Manifest::validate`].
+    const FAKE_HELLO: &str = r#"{"t":"hello","v":2,"name":"fake","ops":["command:fake"],"manifest":{"name":"fake","description":"Fake test plugin","version":"0.1.0","commands":[{"create_command":{"name":"fake","description":"Fake"}}],"event_handlers":[],"tasks":[],"api_version":2}}"#;
 
     /// Writes `body` as an executable shell script at `dir/name` and returns
     /// its path. [`PluginSession::spawn`] execs the path directly, so the
@@ -477,7 +479,7 @@ mod tests {
     /// busy on a loaded system. `ETXTBSY` is a specific transient OS error, so
     /// a short bounded retry with a small backoff is the deterministic
     /// handling — it cannot mask a plugin/protocol bug, because any real error
-    /// (bad version, unknown cap) surfaces immediately without retrying.
+    /// (bad version, unknown op) surfaces immediately without retrying.
     fn spawn_script(path: &Path) -> anyhow::Result<PluginSession> {
         const ATTEMPTS: usize = 8;
         for attempt in 0..ATTEMPTS {
@@ -568,12 +570,12 @@ mod tests {
             Msg::Hello {
                 v,
                 name,
-                caps,
+                ops,
                 manifest,
             } => {
                 assert_eq!(v, API_VERSION, "ack announces the same protocol version");
                 assert_eq!(name, "preview", "ack names the preview host");
-                assert!(caps.is_empty(), "preview serves no host ops");
+                assert!(ops.is_empty(), "preview serves no host ops");
                 assert!(manifest.is_none(), "preview carries no manifest");
             }
             other => panic!("expected the hello ack, got {other:?}"),
@@ -586,33 +588,33 @@ mod tests {
         let script = hello_plugin(
             dir.path(),
             "bad-version.sh",
-            r#"{"t":"hello","v":2,"name":"fake","caps":["command:fake"]}"#,
+            r#"{"t":"hello","v":1,"name":"fake","ops":["command:fake"]}"#,
         );
         let err = spawn_script(&script)
             .err()
             .expect("a bad version must fail the spawn");
         let text = err.to_string();
         assert!(
-            text.contains("protocol version 2"),
+            text.contains("protocol version 1"),
             "the version mismatch is reported, got: {text}"
         );
     }
 
     #[test]
-    fn spawn_rejects_an_unknown_host_capability() {
+    fn spawn_rejects_an_unknown_host_op() {
         let dir = tempdir().unwrap();
         let script = hello_plugin(
             dir.path(),
-            "bad-caps.sh",
-            r#"{"t":"hello","v":1,"name":"fake","caps":["host.frobnicate"]}"#,
+            "bad-ops.sh",
+            r#"{"t":"hello","v":2,"name":"fake","ops":["host.frobnicate"]}"#,
         );
         let err = spawn_script(&script)
             .err()
-            .expect("an unknown host cap must fail the spawn");
+            .expect("an unknown host op must fail the spawn");
         let text = format!("{err:#}");
         assert!(
-            text.contains("unknown host capability `host.frobnicate`"),
-            "the unknown cap is reported, got: {text}"
+            text.contains("unknown host op `host.frobnicate`"),
+            "the unknown op is reported, got: {text}"
         );
     }
 
@@ -657,7 +659,7 @@ mod tests {
         let before_answer = "\
       echo '{\"t\":\"ping\"}'\n\
       echo '{\"t\":\"event\",\"name\":\"view.timeout\"}'\n\
-      echo '{\"t\":\"hello\",\"v\":1,\"name\":\"fake\",\"caps\":[\"command:fake\"]}'\n";
+      echo '{\"t\":\"hello\",\"v\":2,\"name\":\"fake\",\"ops\":[\"command:fake\"]}'\n";
         let script = fake_plugin(dir.path(), "fake.sh", "", "", before_answer, "");
         let mut session = spawn_script(&script).expect("spawn the fake plugin");
         let data = session.invoke("fake", json!({})).expect("invoke answered");

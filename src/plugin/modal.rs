@@ -33,7 +33,7 @@ use tokio::sync::Mutex;
 use crate::plugin::PluginError;
 use crate::plugin::PluginManager;
 use crate::plugin::interaction::view_spec_from_resp;
-use crate::plugin::validate_view_data;
+use crate::plugin::validate_view_spec;
 
 /// One author's live modal route: the plugin that opened the modal and the
 /// custom_id of the open.
@@ -179,7 +179,7 @@ impl PluginManager {
     ///
     /// The route is consumed on the way in: exactly one submission is
     /// delivered per `host.open_modal`. The answer passes the view gate
-    /// ([`validate_view_data`]) before it is returned; the caller renders it
+    /// ([`validate_view_spec`]) before it is returned; the caller renders it
     /// against the submission's own interaction token.
     pub async fn deliver_modal_submission(
         &self,
@@ -209,9 +209,9 @@ impl PluginManager {
                 detail: other.to_string(),
             },
         })?;
-        validate_view_data(&spec.data).map_err(|error| ModalDeliveryError::InvalidResponse {
-            kind: "InvalidView".into(),
-            msg: error.to_string(),
+        validate_view_spec(&spec).map_err(|error| ModalDeliveryError::InvalidResponse {
+            kind: error.kind,
+            msg: error.msg,
         })?;
         Ok(spec)
     }

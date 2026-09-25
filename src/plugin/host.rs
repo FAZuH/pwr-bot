@@ -1,13 +1,13 @@
-//! Host capability ops: the `host.*` calls a plugin may make on the host.
+//! Host ops: the `host.*` calls a plugin may make on the host.
 //!
-//! The plugin announces the ops it needs in its hello `caps`; the host serves
+//! The plugin announces the ops it needs in its hello `ops`; the host serves
 //! them as plugin→host [`Msg::Call`]s. All Discord I/O (defer, acknowledge,
 //! send/edit message) lives behind the [`HostIo`] trait so tests can drive it
 //! with a mock instead of a live gateway; plugin key-value storage lives
 //! behind the [`KvStore`] trait with a Postgres-backed implementation.
 //! `host.get_config` is pure data and never touches a seam.
 //!
-//! Ops not in the v1 surface (unknown `host.*` strings, and non-`host.*` ops
+//! Ops not in the v2 surface (unknown `host.*` strings, and non-`host.*` ops
 //! like `invoke`, which only ever travel host→plugin) answer
 //! `UnknownOp`; and a missing service answers `HostUnavailable` /
 //! `ConfigUnavailable` / `KvUnavailable` instead of panicking.
@@ -19,15 +19,19 @@ use std::time::Duration;
 use std::time::Instant;
 
 use async_trait::async_trait;
+use base64::Engine as _;
 use log::debug;
 use log::warn;
 use mockall::automock;
 use poise::serenity_prelude as serenity;
 use pwr_ext::prelude::CreateModalDe;
-use pwr_plugin_protocol::HostCap;
+use pwr_plugin_protocol::HostOp;
 use pwr_plugin_protocol::HostStats;
 use pwr_plugin_protocol::Msg;
+use pwr_plugin_protocol::ResolvedUser;
+use pwr_plugin_protocol::RuntimeFile;
 use pwr_plugin_protocol::ServerSettings;
+use pwr_plugin_protocol::ViewSpec;
 use pwr_plugin_protocol::WireError;
 use serde_json::Value;
 use serde_json::json;
@@ -43,7 +47,6 @@ use crate::plugin::reject_content_on_edit;
 use crate::plugin::validate_view_data;
 use crate::service::error::ServiceError;
 use crate::service::traits::SettingsProvider;
-use crate::service::traits::VoiceTracker;
 /// The seam between plugin `host.*` ops and Discord. The real implementation
 /// wraps [`serenity::Http`]; tests use the mockall mock generated from this
 /// trait, so no plugin test ever touches a live gateway.
@@ -215,6 +218,157 @@ pub enum HostError {
 /// and rides the seam verbatim after the Gate.
 fn send_message_payload(content: &str) -> Value {
     pwr_poise_components::view_data_v2([pwr_poise_components::text_display(content)])
+}
+
+const MAX_RESOLVE_USERS: usize = 100;
+
+fn is_unknown_member_error(error: &serenity::Error) -> bool {
+    matches!(
+        error,
+        serenity::Error::Http(http)
+            if http.status_code() == Some(serenity::http::StatusCode::NOT_FOUND)
+    )
+}
+
+/// An error from the bounded user resolver.
+#[derive(Debug, thiserror::Error)]
+pub enum UserResolveError {
+    /// The gateway cache and HTTP client are not attached yet.
+    #[error("user resolver is not attached yet")]
+    Unavailable,
+    /// Discord rejected a bounded fallback request.
+    #[error("discord user lookup failed: {0}")]
+    Discord(String),
+}
+
+/// A cache-first user projection source used by `host.resolve_users`.
+#[async_trait]
+pub trait UserResolver: Send + Sync {
+    async fn resolve(
+        &self,
+        guild_id: Option<u64>,
+        user_ids: &[u64],
+    ) -> Result<Vec<ResolvedUser>, UserResolveError>;
+}
+
+/// A resolver handle whose cache-backed source is attached after gateway start.
+#[derive(Clone, Default)]
+pub struct UserResolverHandle {
+    source: Arc<OnceLock<Arc<dyn UserResolver>>>,
+}
+
+impl UserResolverHandle {
+    /// Attaches the live cache-backed resolver once.
+    pub fn attach(&self, source: Arc<dyn UserResolver>) {
+        let _ = self.source.set(source);
+    }
+
+    /// Resolves users through the attached source.
+    pub async fn resolve(
+        &self,
+        guild_id: Option<u64>,
+        user_ids: &[u64],
+    ) -> Result<Vec<ResolvedUser>, UserResolveError> {
+        self.source
+            .get()
+            .ok_or(UserResolveError::Unavailable)?
+            .resolve(guild_id, user_ids)
+            .await
+    }
+}
+
+/// The real resolver: guild members come from the gateway cache first; misses
+/// use a bounded Discord REST lookup through the shared HTTP client.
+pub struct SerenityUserResolver {
+    cache: Arc<serenity::Cache>,
+    http: Arc<serenity::Http>,
+}
+
+impl SerenityUserResolver {
+    /// Creates a resolver for one running client.
+    pub fn new(cache: Arc<serenity::Cache>, http: Arc<serenity::Http>) -> Self {
+        Self { cache, http }
+    }
+}
+
+#[async_trait]
+impl UserResolver for SerenityUserResolver {
+    async fn resolve(
+        &self,
+        guild_id: Option<u64>,
+        user_ids: &[u64],
+    ) -> Result<Vec<ResolvedUser>, UserResolveError> {
+        if user_ids.len() > MAX_RESOLVE_USERS {
+            return Err(UserResolveError::Discord(format!(
+                "at most {MAX_RESOLVE_USERS} users may be resolved at once"
+            )));
+        }
+        let mut users = Vec::with_capacity(user_ids.len());
+        for user_id in user_ids {
+            let id = serenity::UserId::new(*user_id);
+            let cached_member = guild_id
+                .and_then(|guild_id| self.cache.guild(serenity::GuildId::new(guild_id)))
+                .and_then(|guild| guild.members.get(&id).cloned());
+            if let Some(member) = cached_member {
+                users.push(ResolvedUser {
+                    id: member.user.id.get(),
+                    name: member.user.name.to_string(),
+                    display_name: member.display_name().to_string(),
+                    avatar_url: member.face(),
+                    is_bot: member.user.bot(),
+                    is_member: true,
+                });
+                continue;
+            }
+
+            let (user, is_member) = if let Some(guild_id) = guild_id {
+                match self
+                    .http
+                    .get_member(serenity::GuildId::new(guild_id), id)
+                    .await
+                {
+                    Ok(member) => {
+                        users.push(ResolvedUser {
+                            id: member.user.id.get(),
+                            name: member.user.name.to_string(),
+                            display_name: member.display_name().to_string(),
+                            avatar_url: member.face(),
+                            is_bot: member.user.bot(),
+                            is_member: true,
+                        });
+                        continue;
+                    }
+                    Err(error) if is_unknown_member_error(&error) => {
+                        let user = self
+                            .http
+                            .get_user(id)
+                            .await
+                            .map_err(|error| UserResolveError::Discord(error.to_string()))?;
+                        (user, false)
+                    }
+                    Err(error) => {
+                        return Err(UserResolveError::Discord(error.to_string()));
+                    }
+                }
+            } else {
+                let user = self
+                    .http
+                    .get_user(id)
+                    .await
+                    .map_err(|error| UserResolveError::Discord(error.to_string()))?;
+                (user, false)
+            };
+            users.push(ResolvedUser {
+                id: user.id.get(),
+                name: user.name.to_string(),
+                display_name: user.display_name().to_string(),
+                avatar_url: user.face(),
+                is_bot: user.bot(),
+                is_member,
+            });
+        }
+        Ok(users)
+    }
 }
 
 /// The seam between plugin `host.kv.*` ops and key-value storage. The real
@@ -413,71 +567,6 @@ impl StatsHandle {
     }
 }
 
-/// An error from a [`VoiceSettingsSource`] operation.
-///
-/// The voice service pair returns `anyhow::Result`, so this
-/// carries the service's opaque error: `Display` renders the anyhow chain's
-/// top message, which is what crosses the wire as the [`WireError`] msg.
-#[derive(Debug, thiserror::Error)]
-pub enum VoiceSettingsError {
-    /// The voice service failed (database or voice-layer error).
-    #[error(transparent)]
-    Service(#[from] anyhow::Error),
-}
-
-/// The seam between the `host.voice.*` ops and the voice tracking service,
-/// mirroring `VoiceTracker::get_server_settings` /
-/// `update_server_settings` one-to-one (ADR-0010: ops are shaped by
-/// services). The real implementation wraps the service the host already
-/// holds; tests use the mockall mock generated from this trait.
-#[automock]
-#[async_trait]
-pub trait VoiceSettingsSource: Send + Sync {
-    /// Reads a guild's whole settings snapshot, as
-    /// `VoiceTracker::get_server_settings` does.
-    async fn get_settings(&self, guild_id: u64) -> Result<ServerSettings, VoiceSettingsError>;
-
-    /// Writes a guild's whole settings snapshot, as
-    /// `VoiceTracker::update_server_settings` does.
-    async fn update_settings(
-        &self,
-        guild_id: u64,
-        settings: ServerSettings,
-    ) -> Result<(), VoiceSettingsError>;
-}
-
-/// The real [`VoiceSettingsSource`]: a thin adapter over the voice tracking
-/// service the host holds at construction. No post-start attachment — the
-/// service Arc exists at `Bot::new`, so the field is wired once.
-pub struct ServiceVoiceSettingsSource {
-    service: Arc<dyn VoiceTracker>,
-}
-
-impl ServiceVoiceSettingsSource {
-    /// Wraps the host's voice tracking service.
-    pub fn new(service: Arc<dyn VoiceTracker>) -> Self {
-        Self { service }
-    }
-}
-
-#[async_trait]
-impl VoiceSettingsSource for ServiceVoiceSettingsSource {
-    async fn get_settings(&self, guild_id: u64) -> Result<ServerSettings, VoiceSettingsError> {
-        Ok(self.service.get_server_settings(guild_id).await?)
-    }
-
-    async fn update_settings(
-        &self,
-        guild_id: u64,
-        settings: ServerSettings,
-    ) -> Result<(), VoiceSettingsError> {
-        Ok(self
-            .service
-            .update_server_settings(guild_id, settings)
-            .await?)
-    }
-}
-
 /// An error from a [`WelcomeSettingsSource`] operation.
 #[derive(Debug, thiserror::Error)]
 pub enum WelcomeSettingsError {
@@ -556,9 +645,8 @@ pub struct HostServices {
     /// Live bot stats for `host.stats`; serves `Unavailable` until the real
     /// gateway cache is attached after client start.
     pub stats: Arc<StatsHandle>,
-    /// Voice settings for the `host.voice.*` ops, mirroring the voice
-    /// tracking service; absent when the host holds no voice service.
-    pub voice: Option<Arc<dyn VoiceSettingsSource>>,
+    /// Cache-backed user projection for `host.resolve_users`.
+    pub users: UserResolverHandle,
     /// Welcome settings for the `host.welcome.*` ops, backed by the shared
     /// settings service; absent when the host holds no welcome service.
     pub welcome: Option<Arc<dyn WelcomeSettingsSource>>,
@@ -589,24 +677,44 @@ pub async fn handle_host_call(
     host: Option<&HostServices>,
     manager: Option<&PluginManager>,
 ) -> Msg {
-    let Some(cap) = HostCap::parse(op) else {
+    let Some(op) = HostOp::parse(op) else {
         return resp_err(
             id,
             "UnknownOp",
             format!("unknown op `{op}` (non-host.* and unknown host.* ops are not served)"),
         );
     };
-    match cap {
-        HostCap::KvGet | HostCap::KvSet | HostCap::KvDelete => {
+    match op {
+        HostOp::KvGet | HostOp::KvSet | HostOp::KvDelete => {
             let Some(kv) = host.and_then(|host| host.kv.clone()) else {
                 return resp_err(id, "KvUnavailable", "kv store is not configured");
             };
-            match kv_call(cap, args, &*kv).await {
+            match kv_call(op, args, &*kv).await {
                 Ok(data) => Msg::resp_ok(id, data),
                 Err(wire) => Msg::resp_err(id, wire),
             }
         }
-        HostCap::GetConfig => {
+        HostOp::ResolveUsers => {
+            let resolver = host.map(|host| host.users.clone());
+            let Some(resolver) = resolver else {
+                return resp_err(id, "HostUnavailable", "user resolver is not configured");
+            };
+            let (guild_id, user_ids) = match parse_resolve_users(args) {
+                Ok(request) => request,
+                Err(error) => return Msg::resp_err(id, error),
+            };
+            match resolver.resolve(guild_id, &user_ids).await {
+                Ok(users) => match serde_json::to_value(users) {
+                    Ok(data) => Msg::resp_ok(id, Some(data)),
+                    Err(error) => resp_err(id, "UserResolveError", error.to_string()),
+                },
+                Err(UserResolveError::Unavailable) => {
+                    resp_err(id, "HostUnavailable", "user resolver is not attached yet")
+                }
+                Err(error) => resp_err(id, "UserResolveError", error.to_string()),
+            }
+        }
+        HostOp::GetConfig => {
             let Some(config) = host.and_then(|host| host.config.as_ref()) else {
                 return resp_err(id, "ConfigUnavailable", "host config is not configured");
             };
@@ -619,16 +727,16 @@ pub async fn handle_host_call(
                 })),
             )
         }
-        HostCap::Defer
-        | HostCap::Acknowledge
-        | HostCap::SendMessage
-        | HostCap::OpenDm
-        | HostCap::EditMessage => {
+        HostOp::Defer
+        | HostOp::Acknowledge
+        | HostOp::SendMessage
+        | HostOp::OpenDm
+        | HostOp::EditMessage => {
             let Some(io) = host.and_then(|host| host.io.clone()) else {
                 return resp_err(id, "HostUnavailable", "host io is not configured");
             };
             match io_call(
-                cap,
+                op,
                 args,
                 &*io,
                 host.and_then(|host| host.previews.as_deref()),
@@ -639,7 +747,7 @@ pub async fn handle_host_call(
                 Err(wire) => Msg::resp_err(id, wire),
             }
         }
-        HostCap::OpenView => {
+        HostOp::OpenView => {
             let Some(io) = host.and_then(|host| host.io.clone()) else {
                 return resp_err(id, "HostUnavailable", "host io is not configured");
             };
@@ -690,7 +798,7 @@ pub async fn handle_host_call(
                 Err(wire) => Msg::resp_err(id, wire),
             }
         }
-        HostCap::OpenModal => {
+        HostOp::OpenModal => {
             let Some(io) = host.and_then(|host| host.io.clone()) else {
                 return resp_err(id, "HostUnavailable", "host io is not configured");
             };
@@ -706,7 +814,7 @@ pub async fn handle_host_call(
                 Err(wire) => Msg::resp_err(id, wire),
             }
         }
-        HostCap::ListPlugins => {
+        HostOp::ListPlugins => {
             let Some(manager) = manager else {
                 return resp_err(
                     id,
@@ -717,7 +825,7 @@ pub async fn handle_host_call(
             let names = manager.running_names().await;
             Msg::resp_ok(id, Some(json!({ "plugins": names })))
         }
-        HostCap::Stats => {
+        HostOp::Stats => {
             let Some(stats) = host.map(|host| host.stats.clone()) else {
                 return resp_err(id, "HostUnavailable", "host stats are not configured");
             };
@@ -735,38 +843,20 @@ pub async fn handle_host_call(
                 Err(e) => Msg::resp_err(id, stats_err(e)),
             }
         }
-        HostCap::VoiceGetSettings => {
-            let Some(voice) = host.and_then(|host| host.voice.clone()) else {
-                return resp_err(id, "HostUnavailable", "voice settings are not configured");
-            };
-            match voice_call(cap, args, &*voice).await {
-                Ok(data) => Msg::resp_ok(id, data),
-                Err(wire) => Msg::resp_err(id, wire),
-            }
-        }
-        HostCap::VoiceUpdateSettings => {
-            let Some(voice) = host.and_then(|host| host.voice.clone()) else {
-                return resp_err(id, "HostUnavailable", "voice settings are not configured");
-            };
-            match voice_call(cap, args, &*voice).await {
-                Ok(data) => Msg::resp_ok(id, data),
-                Err(wire) => Msg::resp_err(id, wire),
-            }
-        }
-        HostCap::WelcomeGetSettings => {
+        HostOp::WelcomeGetSettings => {
             let Some(welcome) = host.and_then(|host| host.welcome.clone()) else {
                 return resp_err(id, "HostUnavailable", "welcome settings are not configured");
             };
-            match welcome_call(cap, args, &*welcome).await {
+            match welcome_call(op, args, &*welcome).await {
                 Ok(data) => Msg::resp_ok(id, data),
                 Err(wire) => Msg::resp_err(id, wire),
             }
         }
-        HostCap::WelcomeUpdateSettings => {
+        HostOp::WelcomeUpdateSettings => {
             let Some(welcome) = host.and_then(|host| host.welcome.clone()) else {
                 return resp_err(id, "HostUnavailable", "welcome settings are not configured");
             };
-            match welcome_call(cap, args, &*welcome).await {
+            match welcome_call(op, args, &*welcome).await {
                 Ok(data) => Msg::resp_ok(id, data),
                 Err(wire) => Msg::resp_err(id, wire),
             }
@@ -776,37 +866,37 @@ pub async fn handle_host_call(
 
 /// Runs one I/O-backed host op against the seam and turns the outcome into a
 /// wire value: `Ok(data)` for a successful `resp_ok`, `Err(wire)` for a
-/// failed `resp_err` (`InvalidArgs` or `HostIoError`). A cap outside the I/O
+/// failed `resp_err` (`InvalidArgs` or `HostIoError`). An op outside the I/O
 /// set is a dispatch bug, so it answers `UnknownOp` rather than panicking the
 /// dispatch task.
 async fn io_call(
-    cap: HostCap,
+    op: HostOp,
     args: Option<&Value>,
     io: &dyn HostIo,
     previews: Option<&crate::plugin::preview::PreviewResolver>,
 ) -> Result<Option<Value>, WireError> {
-    match cap {
-        HostCap::Defer => {
+    match op {
+        HostOp::Defer => {
             let (interaction_id, token) = parse_id_token(args)?;
             io.defer(interaction_id, &token)
                 .await
                 .map_err(host_io_err)?;
             Ok(None)
         }
-        HostCap::Acknowledge => {
+        HostOp::Acknowledge => {
             let (interaction_id, token) = parse_id_token(args)?;
             io.acknowledge(interaction_id, &token)
                 .await
                 .map_err(host_io_err)?;
             Ok(None)
         }
-        HostCap::SendMessage => {
+        HostOp::SendMessage => {
             let (channel_id, data, attachments) = parse_send_message(args)?;
             io.send_message(channel_id, data, attachments)
                 .await
                 .map_err(host_io_err)
         }
-        HostCap::OpenDm => {
+        HostOp::OpenDm => {
             let user_id = args
                 .and_then(|args| args.get("user_id"))
                 .and_then(Value::as_u64)
@@ -814,7 +904,7 @@ async fn io_call(
             let channel_id = io.open_dm(user_id).await.map_err(host_io_err)?;
             Ok(Some(json!({ "channel_id": channel_id })))
         }
-        HostCap::EditMessage => {
+        HostOp::EditMessage => {
             let (channel_id, message_id, data) = parse_edit_message(args)?;
             reject_content_on_edit(&data).map_err(WireError::from)?;
             let guild_id = args
@@ -906,9 +996,16 @@ async fn open_view_call(
         Ok(spec) => spec,
         Err(e) => return Err(open_view_err(e)),
     };
-    if let Err(error) = validate_view_data(&spec.data) {
-        return Err(error.into());
-    }
+    validate_view_spec(&spec)?;
+    let (body, mut attachments) = match previews {
+        Some(previews) => {
+            previews
+                .resolve(edit_body_for_transport(&spec.data), guild_id)
+                .await
+        }
+        None => (edit_body_for_transport(&spec.data), Vec::new()),
+    };
+    let runtime_attachments = decode_runtime_files_with_existing(&spec.files, attachments.len())?;
     let message_id = match message_id {
         Some(message_id) => message_id,
         None => {
@@ -935,14 +1032,7 @@ async fn open_view_call(
             spec.clone(),
         )
         .await;
-    let (body, attachments) = match previews {
-        Some(previews) => {
-            previews
-                .resolve(edit_body_for_transport(&spec.data), guild_id)
-                .await
-        }
-        None => (edit_body_for_transport(&spec.data), Vec::new()),
-    };
+    attachments.splice(0..0, runtime_attachments);
     if let Err(e) = io
         .edit_message(channel_id, message_id, body, attachments)
         .await
@@ -1049,25 +1139,25 @@ fn parse_open_modal(args: Option<&Value>) -> Result<(u64, u64, String, Value), W
 /// wire value: `Ok(data)` for a successful `resp_ok`, `Err(wire)` for a
 /// failed `resp_err` (`InvalidArgs` or `KvStoreError`). An absent key is not
 /// an error: `host.kv.get` answers `{"value": null}` so the plugin can apply
-/// its default. A cap outside the KV set is a dispatch bug, so it answers
+/// its default. An op outside the KV set is a dispatch bug, so it answers
 /// `UnknownOp` rather than panicking the dispatch task.
 async fn kv_call(
-    cap: HostCap,
+    op: HostOp,
     args: Option<&Value>,
     kv: &dyn KvStore,
 ) -> Result<Option<Value>, WireError> {
-    match cap {
-        HostCap::KvGet => {
+    match op {
+        HostOp::KvGet => {
             let (namespace, key) = parse_kv_namespace_key(args)?;
             let value = kv.get(&namespace, &key).await.map_err(kv_err)?;
             Ok(Some(json!({ "value": value })))
         }
-        HostCap::KvSet => {
+        HostOp::KvSet => {
             let (namespace, key, value) = parse_kv_set(args)?;
             kv.set(&namespace, &key, &value).await.map_err(kv_err)?;
             Ok(None)
         }
-        HostCap::KvDelete => {
+        HostOp::KvDelete => {
             let (namespace, key) = parse_kv_namespace_key(args)?;
             kv.delete(&namespace, &key).await.map_err(kv_err)?;
             Ok(None)
@@ -1179,53 +1269,120 @@ fn parse_send_message(
     }
     if let Some(data) = data {
         validate_view_data(data).map_err(WireError::from)?;
-        return Ok((channel_id, data.clone(), files));
+        return Ok((channel_id, data.clone(), decode_runtime_files(&files)?));
     }
     Err(invalid_args(
         "missing `content` (string) or `data` (object)",
     ))
 }
 
-/// Decodes the `files` entries of a `host.send_message` call into
-/// attachments: each entry carries a `filename` and base64-encoded
-/// `data_base64` bytes. A malformed entry (missing fields, non-string
-/// values, invalid base64) fails the whole op with `InvalidArgs` — a
-/// half-decoded send is never attempted.
-fn parse_send_message_files(
-    files: Option<&Value>,
-) -> Result<Vec<serenity::CreateAttachment<'static>>, WireError> {
-    use base64::Engine as _;
+/// Maximum number of host-filled preview and runtime files in one message.
+pub(crate) const MAX_RUNTIME_FILES: usize = 10;
+const MAX_RUNTIME_FILE_BYTES: usize = 8 * 1024 * 1024;
+const MAX_RUNTIME_FILES_BYTES: usize = 25 * 1024 * 1024;
 
+/// Validates the complete plugin view before a host commits its opaque state.
+pub fn validate_view_spec(spec: &ViewSpec) -> Result<(), WireError> {
+    validate_view_data(&spec.data).map_err(WireError::from)?;
+    validate_runtime_files(&spec.files, declared_attachment_count(&spec.data)).map_err(|error| {
+        WireError {
+            kind: "InvalidView".into(),
+            msg: error.msg,
+        }
+    })
+}
+
+fn declared_attachment_count(data: &Value) -> usize {
+    data.get("attachments")
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len)
+}
+
+fn validate_attachment_count(preview_count: usize, runtime_count: usize) -> Result<(), WireError> {
+    let total = preview_count.checked_add(runtime_count).ok_or_else(|| {
+        invalid_args(format!(
+            "message exceeds the {MAX_RUNTIME_FILES}-file limit"
+        ))
+    })?;
+    if total > MAX_RUNTIME_FILES {
+        return Err(invalid_args(format!(
+            "message exceeds the {MAX_RUNTIME_FILES}-file limit"
+        )));
+    }
+    Ok(())
+}
+
+/// Decodes the `files` entries of a `host.send_message` call into the shared
+/// runtime-file shape. A malformed entry fails the whole call before any
+/// Discord write is attempted.
+fn parse_send_message_files(files: Option<&Value>) -> Result<Vec<RuntimeFile>, WireError> {
     let Some(files) = files else {
         return Ok(Vec::new());
     };
-    let entries = files
-        .as_array()
-        .ok_or_else(|| invalid_args("`files` must be an array"))?;
-    let mut attachments = Vec::with_capacity(entries.len());
-    for (index, entry) in entries.iter().enumerate() {
-        let obj = entry
-            .as_object()
-            .ok_or_else(|| invalid_args(format!("`files` entry {index} is not an object")))?;
-        let filename = obj
-            .get("filename")
-            .and_then(Value::as_str)
-            .ok_or_else(|| invalid_args(format!("`files` entry {index} is missing `filename`")))?;
-        let data_base64 = obj
-            .get("data_base64")
-            .and_then(Value::as_str)
-            .ok_or_else(|| {
-                invalid_args(format!("`files` entry {index} is missing `data_base64`"))
-            })?;
+    serde_json::from_value(files.clone())
+        .map_err(|error| invalid_args(format!("`files` must contain runtime files: {error}")))
+}
+
+/// Decodes runtime files into Discord attachments at the host trust boundary.
+pub(crate) fn decode_runtime_files(
+    files: &[RuntimeFile],
+) -> Result<Vec<serenity::CreateAttachment<'static>>, WireError> {
+    decode_runtime_files_with_existing(files, 0)
+}
+
+/// Decodes runtime files after accounting for files already filled by previews.
+pub(crate) fn decode_runtime_files_with_existing(
+    files: &[RuntimeFile],
+    preview_count: usize,
+) -> Result<Vec<serenity::CreateAttachment<'static>>, WireError> {
+    let decoded = decode_runtime_file_bytes(files, preview_count)?;
+    Ok(decoded
+        .into_iter()
+        .zip(files)
+        .map(|(bytes, file)| serenity::CreateAttachment::bytes(bytes, file.filename.clone()))
+        .collect())
+}
+
+/// Validates runtime files without constructing Discord attachments.
+pub(crate) fn validate_runtime_files(
+    files: &[RuntimeFile],
+    preview_count: usize,
+) -> Result<(), WireError> {
+    let _ = decode_runtime_file_bytes(files, preview_count)?;
+    Ok(())
+}
+
+fn decode_runtime_file_bytes(
+    files: &[RuntimeFile],
+    preview_count: usize,
+) -> Result<Vec<Vec<u8>>, WireError> {
+    validate_attachment_count(preview_count, files.len())?;
+    let mut decoded = Vec::with_capacity(files.len());
+    let mut total_bytes = 0usize;
+    for (index, file) in files.iter().enumerate() {
+        let max_encoded_len = MAX_RUNTIME_FILE_BYTES.div_ceil(3) * 4;
+        if file.data_base64.len() > max_encoded_len {
+            return Err(invalid_args(format!(
+                "runtime file {index} exceeds the 8 MiB limit"
+            )));
+        }
         let bytes = base64::engine::general_purpose::STANDARD
-            .decode(data_base64)
-            .map_err(|_| invalid_args(format!("`files` entry {index} has invalid base64")))?;
-        attachments.push(serenity::CreateAttachment::bytes(
-            bytes,
-            filename.to_owned(),
-        ));
+            .decode(&file.data_base64)
+            .map_err(|_| invalid_args(format!("runtime file {index} has invalid base64")))?;
+        if bytes.len() > MAX_RUNTIME_FILE_BYTES {
+            return Err(invalid_args(format!(
+                "runtime file {index} exceeds the 8 MiB limit"
+            )));
+        }
+        total_bytes = total_bytes
+            .checked_add(bytes.len())
+            .ok_or_else(|| invalid_args("runtime files exceed the 25 MiB limit"))?;
+        if total_bytes > MAX_RUNTIME_FILES_BYTES {
+            return Err(invalid_args("runtime files exceed the 25 MiB limit"));
+        }
+        decoded.push(bytes);
     }
-    Ok(attachments)
+    Ok(decoded)
 }
 
 /// Parses `host.edit_message` args: a channel id, message id, and the edit
@@ -1331,9 +1488,39 @@ fn id_as_u64(value: &Value) -> Option<u64> {
         .or_else(|| value.as_str().and_then(|s| s.parse().ok()))
 }
 
-/// Parses the `guild_id` (u64) shared by the `host.voice.*` and
-/// `host.welcome.*` ops. Accepts a numeric id or serenity's string form. A
-/// present id that is neither is a wrong type, not a missing one.
+/// Parses the bounded user projection request for `host.resolve_users`.
+fn parse_resolve_users(args: Option<&Value>) -> Result<(Option<u64>, Vec<u64>), WireError> {
+    let object = args
+        .and_then(Value::as_object)
+        .ok_or_else(|| invalid_args("expected args object with `user_ids`"))?;
+    let guild_id = match object.get("guild_id") {
+        None | Some(Value::Null) => None,
+        Some(value) => Some(
+            id_as_u64(value)
+                .ok_or_else(|| invalid_args("`guild_id` must be a u64 or its string form"))?,
+        ),
+    };
+    let values = object
+        .get("user_ids")
+        .and_then(Value::as_array)
+        .ok_or_else(|| invalid_args("`user_ids` must be an array"))?;
+    if values.len() > MAX_RESOLVE_USERS {
+        return Err(invalid_args(format!(
+            "`user_ids` may contain at most {MAX_RESOLVE_USERS} ids"
+        )));
+    }
+    let user_ids = values
+        .iter()
+        .map(|value| {
+            id_as_u64(value).ok_or_else(|| invalid_args("every user id must be a u64 or string"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok((guild_id, user_ids))
+}
+
+/// Parses the `guild_id` (u64) shared by the `host.welcome.*` op. Accepts a
+/// numeric id or serenity's string form. A present id that is neither is a
+/// wrong type, not a missing one.
 fn parse_guild_id(args: Option<&Value>) -> Result<u64, WireError> {
     let Some(value) = args
         .and_then(Value::as_object)
@@ -1344,9 +1531,8 @@ fn parse_guild_id(args: Option<&Value>) -> Result<u64, WireError> {
     id_as_u64(value).ok_or_else(|| invalid_args("`guild_id` must be a u64 or its string form"))
 }
 
-/// Parses the `host.voice.update_settings` and
-/// `host.welcome.update_settings` args: `guild_id` (u64) plus the whole
-/// [`ServerSettings`] snapshot under `settings`.
+/// Parses the `host.welcome.update_settings` args: `guild_id` (u64) plus the
+/// whole [`ServerSettings`] snapshot under `settings`.
 fn parse_update_settings(args: Option<&Value>) -> Result<(u64, ServerSettings), WireError> {
     let guild_id = parse_guild_id(args)?;
     let settings = args
@@ -1358,66 +1544,19 @@ fn parse_update_settings(args: Option<&Value>) -> Result<(u64, ServerSettings), 
         .map(|settings| (guild_id, settings))
 }
 
-/// Runs one voice settings op against the seam and turns the outcome into a
-/// wire value: `Ok(data)` for a successful `resp_ok` (the settings snapshot
-/// for a read, `None` for a write), `Err(wire)` for a failed `resp_err`
-/// (`InvalidArgs` or `VoiceSettingsError`). A cap outside the voice pair is a
-/// dispatch bug, so it answers `UnknownOp` rather than panicking the dispatch
-/// task.
-async fn voice_call(
-    cap: HostCap,
-    args: Option<&Value>,
-    voice: &dyn VoiceSettingsSource,
-) -> Result<Option<Value>, WireError> {
-    match cap {
-        HostCap::VoiceGetSettings => {
-            let guild_id = parse_guild_id(args)?;
-            let settings = voice
-                .get_settings(guild_id)
-                .await
-                .map_err(voice_settings_err)?;
-            let value = serde_json::to_value(&settings).map_err(|e| WireError {
-                kind: "VoiceSettingsError".into(),
-                msg: e.to_string(),
-            })?;
-            Ok(Some(value))
-        }
-        HostCap::VoiceUpdateSettings => {
-            let (guild_id, settings) = parse_update_settings(args)?;
-            voice
-                .update_settings(guild_id, settings)
-                .await
-                .map_err(voice_settings_err)?;
-            Ok(None)
-        }
-        other => Err(WireError {
-            kind: "UnknownOp".into(),
-            msg: format!("op `{}` is not a voice settings op", other.as_str()),
-        }),
-    }
-}
-
-/// Maps a [`VoiceSettingsError`] to its wire error.
-fn voice_settings_err(err: VoiceSettingsError) -> WireError {
-    WireError {
-        kind: "VoiceSettingsError".into(),
-        msg: err.to_string(),
-    }
-}
-
 /// Runs one welcome settings op against the seam and turns the outcome into a
 /// wire value: `Ok(data)` for a successful `resp_ok` (the settings snapshot
 /// for a read, `None` for a write), `Err(wire)` for a failed `resp_err`
-/// (`InvalidArgs` or `WelcomeSettingsError`). A cap outside the welcome pair
+/// (`InvalidArgs` or `WelcomeSettingsError`). An op outside the welcome pair
 /// is a dispatch bug, so it answers `UnknownOp` rather than panicking the
 /// dispatch task.
 async fn welcome_call(
-    cap: HostCap,
+    op: HostOp,
     args: Option<&Value>,
     welcome: &dyn WelcomeSettingsSource,
 ) -> Result<Option<Value>, WireError> {
-    match cap {
-        HostCap::WelcomeGetSettings => {
+    match op {
+        HostOp::WelcomeGetSettings => {
             let guild_id = parse_guild_id(args)?;
             let settings = welcome
                 .get_settings(guild_id)
@@ -1429,7 +1568,7 @@ async fn welcome_call(
             })?;
             Ok(Some(value))
         }
-        HostCap::WelcomeUpdateSettings => {
+        HostOp::WelcomeUpdateSettings => {
             let (guild_id, settings) = parse_update_settings(args)?;
             welcome
                 .update_settings(guild_id, settings)
@@ -1482,7 +1621,7 @@ mod tests {
             kv: None,
             engine: None,
             stats: Arc::new(StatsHandle::default()),
-            voice: None,
+            users: UserResolverHandle::default(),
             welcome: None,
             previews: None,
             settings_returns: None,
@@ -1500,7 +1639,7 @@ mod tests {
             kv,
             engine: None,
             stats: Arc::new(StatsHandle::default()),
-            voice: None,
+            users: UserResolverHandle::default(),
             welcome: None,
             previews: None,
             settings_returns: None,
@@ -1516,7 +1655,7 @@ mod tests {
             kv: None,
             engine: Some(Arc::new(InteractionEngine::new())),
             stats: Arc::new(StatsHandle::default()),
-            voice: None,
+            users: UserResolverHandle::default(),
             welcome: None,
             previews: None,
             settings_returns: None,
@@ -1568,7 +1707,157 @@ mod tests {
         }
     }
 
+    struct StaticUserResolver {
+        users: Vec<ResolvedUser>,
+    }
+
+    #[async_trait]
+    impl UserResolver for StaticUserResolver {
+        async fn resolve(
+            &self,
+            _guild_id: Option<u64>,
+            user_ids: &[u64],
+        ) -> Result<Vec<ResolvedUser>, UserResolveError> {
+            Ok(self
+                .users
+                .iter()
+                .filter(|user| user_ids.contains(&user.id))
+                .cloned()
+                .collect())
+        }
+    }
+
+    #[tokio::test]
+    async fn resolve_users_routes_the_projection_through_the_attached_source() {
+        let users = UserResolverHandle::default();
+        users.attach(Arc::new(StaticUserResolver {
+            users: vec![ResolvedUser {
+                id: 42,
+                name: "global".into(),
+                display_name: "nick".into(),
+                avatar_url: "https://cdn.example/avatar.png".into(),
+                is_bot: false,
+                is_member: true,
+            }],
+        }));
+        let mut host = services(None, Some(sample_config()));
+        host.users = users;
+
+        let resp = handle_host_call(
+            7,
+            "voice",
+            "host.resolve_users",
+            Some(&json!({ "guild_id": "9", "user_ids": [42] })),
+            Some(&host),
+            None,
+        )
+        .await;
+
+        assert_eq!(
+            assert_ok(resp, 7),
+            Some(json!([{
+                "id": 42,
+                "name": "global",
+                "display_name": "nick",
+                "avatar_url": "https://cdn.example/avatar.png",
+                "is_bot": false,
+                "is_member": true,
+            }]))
+        );
+    }
+
+    #[tokio::test]
+    async fn resolve_users_without_an_attached_source_is_host_unavailable() {
+        let host = services(None, Some(sample_config()));
+        let resp = handle_host_call(
+            7,
+            "voice",
+            "host.resolve_users",
+            Some(&json!({ "user_ids": [42] })),
+            Some(&host),
+            None,
+        )
+        .await;
+        assert_err(resp, 7, "HostUnavailable");
+    }
+
+    #[test]
+    fn non_not_found_member_errors_are_not_treated_as_missing_members() {
+        let error = serenity::Error::Http(serenity::http::HttpError::InvalidWebhook);
+        assert!(!is_unknown_member_error(&error));
+    }
+
+    struct FailingUserResolver;
+
+    #[async_trait::async_trait]
+    impl UserResolver for FailingUserResolver {
+        async fn resolve(
+            &self,
+            _guild_id: Option<u64>,
+            _user_ids: &[u64],
+        ) -> Result<Vec<ResolvedUser>, UserResolveError> {
+            Err(UserResolveError::Discord("rate limited".into()))
+        }
+    }
+
+    #[tokio::test]
+    async fn resolve_users_propagates_non_not_found_lookup_errors() {
+        let host = services(None, Some(sample_config()));
+        host.users.attach(Arc::new(FailingUserResolver));
+        let response = handle_host_call(
+            7,
+            "voice",
+            "host.resolve_users",
+            Some(&json!({ "guild_id": 9, "user_ids": [42] })),
+            Some(&host),
+            None,
+        )
+        .await;
+        let message = assert_err(response, 7, "UserResolveError");
+        assert!(message.contains("rate limited"), "message: {message}");
+    }
+
+    #[test]
+    fn resolve_users_rejects_oversized_requests() {
+        assert_eq!(
+            parse_resolve_users(Some(&json!({ "user_ids": [] })))
+                .unwrap()
+                .1,
+            Vec::<u64>::new()
+        );
+        let ids = (0..=MAX_RESOLVE_USERS)
+            .map(|_| json!(1))
+            .collect::<Vec<_>>();
+        assert!(parse_resolve_users(Some(&json!({ "user_ids": ids }))).is_err());
+    }
+
     // ── defer ─────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn resolve_users_rejects_missing_ids() {
+        assert!(parse_resolve_users(Some(&json!({}))).is_err());
+    }
+
+    #[test]
+    fn resolve_users_rejects_null_user_ids() {
+        assert!(parse_resolve_users(Some(&json!({ "user_ids": null }))).is_err());
+    }
+
+    #[test]
+    fn resolve_users_rejects_non_numeric_ids() {
+        assert!(parse_resolve_users(Some(&json!({ "user_ids": ["not-an-id"] }))).is_err());
+    }
+
+    #[test]
+    fn runtime_files_reject_oversized_encoded_input_before_decode() {
+        let encoded = "A".repeat(MAX_RUNTIME_FILE_BYTES.div_ceil(3) * 4 + 1);
+        let error = decode_runtime_files(&[RuntimeFile {
+            filename: "large.bin".into(),
+            data_base64: encoded,
+        }])
+        .expect_err("oversized encoded input must reject");
+        assert!(error.msg.contains("8 MiB"));
+    }
 
     #[tokio::test]
     async fn defer_routes_through_the_seam() {
@@ -2032,6 +2321,77 @@ mod tests {
         )
         .await;
         assert_err(resp, 7, "InvalidArgs");
+    }
+
+    #[test]
+    fn runtime_files_reject_invalid_base64() {
+        let error = decode_runtime_files(&[RuntimeFile {
+            filename: "bad.bin".into(),
+            data_base64: "not base64".into(),
+        }])
+        .expect_err("invalid base64 must reject");
+        assert!(error.msg.contains("invalid base64"));
+    }
+
+    #[test]
+    fn runtime_files_and_previews_accept_exactly_the_file_limit() {
+        let files = (0..MAX_RUNTIME_FILES - 1)
+            .map(|index| RuntimeFile {
+                filename: format!("{index}.bin"),
+                data_base64: String::new(),
+            })
+            .collect::<Vec<_>>();
+        let decoded = decode_runtime_files_with_existing(&files, 1)
+            .expect("one preview plus nine runtime files fits the limit");
+        assert_eq!(decoded.len(), MAX_RUNTIME_FILES - 1);
+    }
+
+    #[test]
+    fn runtime_files_reject_more_than_the_file_limit_before_decoding() {
+        let files = (0..=MAX_RUNTIME_FILES)
+            .map(|index| RuntimeFile {
+                filename: format!("{index}.bin"),
+                data_base64: String::new(),
+            })
+            .collect::<Vec<_>>();
+        let error = decode_runtime_files(&files).expect_err("the file count must reject");
+        assert!(error.msg.contains("10-file limit"));
+    }
+
+    #[test]
+    fn runtime_files_and_previews_share_the_file_limit() {
+        let file = RuntimeFile {
+            filename: "runtime.bin".into(),
+            data_base64: String::new(),
+        };
+        let error = decode_runtime_files_with_existing(&[file], MAX_RUNTIME_FILES)
+            .expect_err("preview and runtime files share the limit");
+        assert!(error.msg.contains("10-file limit"));
+    }
+
+    #[test]
+    fn runtime_files_reject_one_file_over_eight_mib() {
+        let bytes = vec![0; MAX_RUNTIME_FILE_BYTES + 1];
+        let file = RuntimeFile {
+            filename: "too-large.bin".into(),
+            data_base64: base64::engine::general_purpose::STANDARD.encode(bytes),
+        };
+        let error = decode_runtime_files(&[file]).expect_err("the per-file limit must reject");
+        assert!(error.msg.contains("8 MiB"));
+    }
+
+    #[test]
+    fn runtime_files_reject_a_message_over_twenty_five_mib() {
+        let bytes = vec![0; 7 * 1024 * 1024];
+        let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
+        let files = (0..4)
+            .map(|index| RuntimeFile {
+                filename: format!("{index}.bin"),
+                data_base64: encoded.clone(),
+            })
+            .collect::<Vec<_>>();
+        let error = decode_runtime_files(&files).expect_err("the message limit must reject");
+        assert!(error.msg.contains("25 MiB"));
     }
 
     #[tokio::test]
@@ -2666,7 +3026,7 @@ mod tests {
             kv: None,
             engine: None,
             stats: Arc::new(handle),
-            voice: None,
+            users: UserResolverHandle::default(),
             welcome: None,
             previews: None,
             settings_returns: None,
@@ -2717,7 +3077,7 @@ mod tests {
             kv: None,
             engine: None,
             stats: Arc::new(handle),
-            voice: None,
+            users: UserResolverHandle::default(),
             welcome: None,
             previews: None,
             settings_returns: None,
@@ -2735,227 +3095,124 @@ mod tests {
             kv: None,
             engine: None,
             stats: Arc::new(StatsHandle::default()),
-            voice: None,
+            users: UserResolverHandle::default(),
             welcome: Some(welcome),
             previews: None,
             settings_returns: None,
         }
     }
 
-    // ── voice settings ────────────────────────────────────────────────────────
+    // ── host op validation ────────────────────────────────────────────────────
 
     #[tokio::test]
-    async fn retired_feed_caps_are_unknown_host_ops() {
-        for op in ["host.feed.get_settings", "host.feed.update_settings"] {
+    async fn retired_plugin_settings_ops_are_unknown_host_ops() {
+        for op in [
+            "host.feed.get_settings",
+            "host.feed.update_settings",
+            "host.voice.get_settings",
+            "host.voice.update_settings",
+        ] {
             let response = handle_host_call(7, "hello", op, None, None, None).await;
             assert_err(response, 7, "UnknownOp");
         }
     }
 
-    fn voice_sample_settings() -> ServerSettings {
-        ServerSettings {
-            voice: pwr_plugin_protocol::VoiceSettings {
-                enabled: Some(false),
-            },
-            ..ServerSettings::default()
-        }
-    }
-
-    fn voice_services(voice: Arc<dyn VoiceSettingsSource>) -> HostServices {
-        HostServices {
-            io: None,
-            config: Some(sample_config()),
-            kv: None,
-            engine: None,
-            stats: Arc::new(StatsHandle::default()),
-            voice: Some(voice),
-            welcome: None,
-            previews: None,
-            settings_returns: None,
-        }
+    #[tokio::test]
+    async fn voice_get_settings_is_a_retired_host_op() {
+        let response =
+            handle_host_call(7, "voice", "host.voice.get_settings", None, None, None).await;
+        assert_err(response, 7, "UnknownOp");
     }
 
     #[tokio::test]
-    async fn voice_get_settings_routes_through_the_seam() {
-        let mut mock = MockVoiceSettingsSource::new();
-        mock.expect_get_settings()
-            .with(eq(42u64))
-            .times(1)
-            .returning(|_| Ok(voice_sample_settings()));
-        let host = voice_services(Arc::new(mock));
+    async fn voice_update_settings_is_a_retired_host_op() {
+        let response =
+            handle_host_call(7, "voice", "host.voice.update_settings", None, None, None).await;
+        assert_err(response, 7, "UnknownOp");
+    }
 
-        let resp = handle_host_call(
+    #[tokio::test]
+    async fn voice_get_settings_rejects_malformed_arguments() {
+        let response = handle_host_call(
             7,
-            "hello",
+            "voice",
             "host.voice.get_settings",
-            Some(&json!({ "guild_id": 42 })),
-            Some(&host),
+            Some(&json!({ "guild_id": [] })),
+            None,
             None,
         )
         .await;
-        assert_eq!(
-            assert_ok(resp, 7),
-            Some(json!({
-                "feeds": {
-                    "enabled": null,
-                    "channel_id": null,
-                    "subscribe_role_id": null,
-                    "unsubscribe_role_id": null,
-                },
-                "voice": { "enabled": false },
-                "welcome": {
-                    "enabled": null,
-                    "channel_id": null,
-                    "primary_color": null,
-                    "template_id": null,
-                    "messages": null,
-                },
-            }))
-        );
+        assert_err(response, 7, "UnknownOp");
     }
 
     #[tokio::test]
-    async fn voice_update_settings_routes_through_the_seam() {
-        let settings = voice_sample_settings();
-        let mut mock = MockVoiceSettingsSource::new();
-        mock.expect_update_settings()
-            .with(eq(42u64), eq(settings.clone()))
-            .times(1)
-            .returning(|_, _| Ok(()));
-        let host = voice_services(Arc::new(mock));
-
-        let resp = handle_host_call(
+    async fn voice_update_settings_rejects_a_missing_guild() {
+        let response = handle_host_call(
             7,
-            "hello",
+            "voice",
             "host.voice.update_settings",
-            Some(&json!({ "guild_id": 42, "settings": settings })),
-            Some(&host),
+            Some(&json!({ "settings": {} })),
+            None,
             None,
         )
         .await;
-        assert_eq!(assert_ok(resp, 7), None);
+        assert_err(response, 7, "UnknownOp");
     }
 
     #[tokio::test]
-    async fn voice_settings_without_services_is_host_unavailable() {
-        let resp = handle_host_call(
+    async fn voice_update_settings_rejects_a_malformed_snapshot() {
+        let response = handle_host_call(
             7,
-            "hello",
-            "host.voice.get_settings",
-            Some(&json!({ "guild_id": 42 })),
-            None,
-            None,
-        )
-        .await;
-        assert_err(resp, 7, "HostUnavailable");
-
-        let resp = handle_host_call(
-            7,
-            "hello",
+            "voice",
             "host.voice.update_settings",
-            Some(&json!({ "guild_id": 42, "settings": ServerSettings::default() })),
+            Some(&json!({ "guild_id": 42, "settings": "nope" })),
             None,
             None,
         )
         .await;
-        assert_err(resp, 7, "HostUnavailable");
+        assert_err(response, 7, "UnknownOp");
     }
 
     #[tokio::test]
-    async fn voice_settings_without_source_is_host_unavailable() {
-        let host = services(None, Some(sample_config()));
-
-        let resp = handle_host_call(
+    async fn voice_get_settings_rejects_a_string_guild_id() {
+        let response = handle_host_call(
             7,
-            "hello",
-            "host.voice.get_settings",
-            Some(&json!({ "guild_id": 42 })),
-            Some(&host),
-            None,
-        )
-        .await;
-        assert_err(resp, 7, "HostUnavailable");
-    }
-
-    #[tokio::test]
-    async fn voice_settings_missing_guild_id_is_invalid_args() {
-        let mock = MockVoiceSettingsSource::new();
-        let host = voice_services(Arc::new(mock));
-
-        let resp = handle_host_call(
-            7,
-            "hello",
-            "host.voice.get_settings",
-            None,
-            Some(&host),
-            None,
-        )
-        .await;
-        assert_err(resp, 7, "InvalidArgs");
-    }
-
-    #[tokio::test]
-    async fn voice_settings_malformed_snapshot_is_invalid_args() {
-        let mock = MockVoiceSettingsSource::new();
-        let host = voice_services(Arc::new(mock));
-
-        let resp = handle_host_call(
-            7,
-            "hello",
-            "host.voice.update_settings",
-            Some(&json!({ "guild_id": 42, "settings": "not-a-snapshot" })),
-            Some(&host),
-            None,
-        )
-        .await;
-        assert_err(resp, 7, "InvalidArgs");
-    }
-
-    #[tokio::test]
-    async fn voice_settings_service_failure_is_voice_settings_error() {
-        let mut mock = MockVoiceSettingsSource::new();
-        mock.expect_get_settings()
-            .with(eq(42u64))
-            .times(1)
-            .returning(|_| {
-                Err(VoiceSettingsError::Service(anyhow::anyhow!(
-                    "no such guild"
-                )))
-            });
-        let host = voice_services(Arc::new(mock));
-
-        let resp = handle_host_call(
-            7,
-            "hello",
-            "host.voice.get_settings",
-            Some(&json!({ "guild_id": 42 })),
-            Some(&host),
-            None,
-        )
-        .await;
-        let msg = assert_err(resp, 7, "VoiceSettingsError");
-        assert!(msg.contains("no such guild"), "msg: {msg}");
-    }
-
-    #[tokio::test]
-    async fn voice_settings_string_guild_id_parses() {
-        let mut mock = MockVoiceSettingsSource::new();
-        mock.expect_get_settings()
-            .with(eq(42u64))
-            .times(1)
-            .returning(|_| Ok(voice_sample_settings()));
-        let host = voice_services(Arc::new(mock));
-
-        let resp = handle_host_call(
-            7,
-            "hello",
+            "voice",
             "host.voice.get_settings",
             Some(&json!({ "guild_id": "42" })),
-            Some(&host),
+            None,
             None,
         )
         .await;
-        assert_ok(resp, 7);
+        assert_err(response, 7, "UnknownOp");
+    }
+
+    #[tokio::test]
+    async fn voice_get_settings_without_services_is_unknown() {
+        let response = handle_host_call(
+            7,
+            "voice",
+            "host.voice.get_settings",
+            Some(&json!({ "guild_id": 42 })),
+            None,
+            None,
+        )
+        .await;
+        assert_err(response, 7, "UnknownOp");
+    }
+
+    #[tokio::test]
+    async fn voice_update_settings_without_a_source_is_unknown() {
+        let response = handle_host_call(
+            7,
+            "voice",
+            "host.voice.update_settings",
+            Some(&json!({ "guild_id": 42, "settings": { "voice": {} } })),
+            None,
+            None,
+        )
+        .await;
+        assert_err(response, 7, "UnknownOp");
     }
 
     // ── welcome settings ────────────────────────────────────────────────────
@@ -3363,6 +3620,130 @@ mod tests {
         .await;
         let msg = assert_err(resp, 7, "HostIoError");
         assert!(msg.contains("webhook"), "msg: {msg}");
+    }
+
+    use crate::plugin::preview::AttachmentRenderer;
+    use crate::plugin::preview::PreviewResolver;
+
+    struct FixedPreview;
+
+    #[async_trait::async_trait]
+    impl AttachmentRenderer for FixedPreview {
+        fn filename(&self) -> &'static str {
+            "preview.png"
+        }
+
+        async fn render(&self, _guild_id: u64) -> Option<Vec<u8>> {
+            Some(b"preview".to_vec())
+        }
+    }
+
+    fn open_view_test_host(
+        io: Arc<dyn HostIo>,
+        engine: Arc<InteractionEngine<RunningPlugin>>,
+    ) -> (Arc<HostServices>, Arc<PluginManager>) {
+        let host = Arc::new(HostServices {
+            io: Some(io),
+            config: None,
+            kv: None,
+            engine: Some(engine),
+            stats: Arc::new(StatsHandle::default()),
+            users: UserResolverHandle::default(),
+            welcome: None,
+            previews: Some(Arc::new(PreviewResolver::new(vec![Arc::new(FixedPreview)]))),
+            settings_returns: None,
+        });
+        let manager = Arc::new(
+            PluginManager::new(None, RespawnPolicy::default()).with_host_services(host.clone()),
+        );
+        (host, manager)
+    }
+
+    fn open_view_test_args(command: &str) -> Value {
+        json!({
+            "channel_id": 9,
+            "plugin": "files",
+            "command": command,
+            "args": { "guild_id": 42, "_context": { "user_id": 1 } }
+        })
+    }
+
+    fn files_fixture() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/files_plugin.sh")
+    }
+
+    #[tokio::test]
+    async fn open_view_rejects_malformed_runtime_files_before_placeholder_or_edit() {
+        let mut mock = MockHostIo::new();
+        mock.expect_send_message().times(0);
+        let engine = Arc::new(InteractionEngine::new());
+        let (host, manager) = open_view_test_host(Arc::new(mock), engine);
+        let plugin = manager
+            .spawn("files", files_fixture(), None, &[], &[])
+            .await
+            .expect("spawn files fixture");
+        let args = open_view_test_args("malformed");
+
+        let response = handle_host_call(
+            7,
+            "files",
+            "host.open_view",
+            Some(&args),
+            Some(&host),
+            Some(&manager),
+        )
+        .await;
+        assert_err(response, 7, "InvalidView");
+        plugin.stop().await.expect("stop files fixture");
+    }
+
+    #[tokio::test]
+    async fn open_view_attaches_runtime_files_alongside_previews() {
+        let mut mock = MockHostIo::new();
+        mock.expect_send_message()
+            .with(
+                eq(9_u64),
+                eq(send_message_payload("Loading…")),
+                mockall::predicate::function(|attachments: &Vec<serenity::CreateAttachment>| {
+                    attachments.is_empty()
+                }),
+            )
+            .times(1)
+            .returning(|_, _, _| Ok(Some(json!({ "message_id": 1234 }))));
+        mock.expect_edit_message()
+            .with(
+                eq(9_u64),
+                eq(1234_u64),
+                mockall::predicate::function(|body: &Value| {
+                    body["attachments"]
+                        .as_array()
+                        .is_some_and(|attachments| attachments.len() == 1)
+                }),
+                mockall::predicate::function(|attachments: &Vec<serenity::CreateAttachment>| {
+                    attachments.len() == 2
+                }),
+            )
+            .times(1)
+            .returning(|_, _, _, _| Ok(Some(json!({ "message_id": 1234 }))));
+        let engine = Arc::new(InteractionEngine::new());
+        let (host, manager) = open_view_test_host(Arc::new(mock), engine);
+        let plugin = manager
+            .spawn("files", files_fixture(), None, &[], &[])
+            .await
+            .expect("spawn files fixture");
+        let args = open_view_test_args("valid");
+
+        let response = handle_host_call(
+            7,
+            "files",
+            "host.open_view",
+            Some(&args),
+            Some(&host),
+            Some(&manager),
+        )
+        .await;
+        assert_eq!(assert_ok(response, 7), Some(json!({ "message_id": 1234 })));
+        plugin.stop().await.expect("stop files fixture");
     }
 
     // ── config conversion ─────────────────────────────────────────────────────

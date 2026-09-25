@@ -5,7 +5,7 @@ use std::io;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use pwr_plugin_protocol::CapsError;
+use pwr_plugin_protocol::OpsError;
 
 /// An error from the plugin runtime: spawning a plugin subprocess,
 /// handshaking with it, or exchanging calls over the wire.
@@ -51,9 +51,9 @@ pub enum PluginError {
         expected: u32,
     },
 
-    /// The hello declared a `host.*` capability the host does not serve.
+    /// The hello declared a `host.*` op the host does not serve.
     #[error(transparent)]
-    Caps(#[from] CapsError),
+    Ops(#[from] OpsError),
 
     /// The hello carried a manifest that failed validation, or whose name
     /// does not match the hello's.

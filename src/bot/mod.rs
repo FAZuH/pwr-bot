@@ -49,14 +49,15 @@ use crate::bot::error_handler::ErrorHandler;
 use crate::bot::translate::TranslateLayer;
 use crate::config::Config;
 use crate::entity::BotMetaKey;
-use crate::event::VoiceStateEvent;
 use crate::event::event_bus::EventBus;
 use crate::plugin::CatalogEntry;
+use crate::plugin::GUILD_CREATE_EVENT;
 use crate::plugin::HostConfig;
 use crate::plugin::HostServices;
 use crate::plugin::InstallError;
 use crate::plugin::InteractionEngine;
 use crate::plugin::InteractionError;
+use crate::plugin::ModalDeliveryError;
 use crate::plugin::PgKvStore;
 use crate::plugin::PluginCatalog;
 use crate::plugin::PluginEventRouter;
@@ -65,22 +66,23 @@ use crate::plugin::RespawnPolicy;
 use crate::plugin::RunningPlugin;
 use crate::plugin::SerenityHostIo;
 use crate::plugin::SerenityStatsSource;
-use crate::plugin::ServiceVoiceSettingsSource;
+use crate::plugin::SerenityUserResolver;
 use crate::plugin::ServiceWelcomeSettingsSource;
 use crate::plugin::StatsHandle;
+use crate::plugin::UserResolverHandle;
 use crate::plugin::VOICE_STATE_EVENT;
 use crate::plugin::command::ACTOR_CONTEXT_KEY;
 use crate::plugin::command::PluginRoutes;
-use crate::plugin::command::actor_context_from_parts;
+use crate::plugin::command::actor_context_from_parts_with_guild;
 use crate::plugin::command::commands_from_manifest;
 use crate::plugin::command::register_in_guild;
 use crate::plugin::command::routes_from_manifests_with_reserved;
+use crate::plugin::decode_runtime_files_with_existing;
 use crate::plugin::edit_body_for_transport;
 use crate::plugin::interaction::DEFAULT_VIEW_TIMEOUT;
-use crate::plugin::validate_view_data;
+use crate::plugin::validate_view_spec;
 use crate::repo::traits::Repos;
 use crate::service::Services;
-use crate::subscriber::voice_state::VoiceStateSubscriber;
 use crate::update::about::AboutStats;
 
 /// Data shared across bot commands and contexts.
@@ -156,13 +158,13 @@ pub(crate) fn manifest_for<'a>(
 
 /// Discord bot client and framework.
 pub struct Bot {
-    pub cache: Arc<Cache>,
     pub http: Arc<Http>,
     client_builder: Option<ClientBuilder>,
     client: Arc<Mutex<Option<Client>>>,
     /// The real source behind the `host.stats` handle; its gateway cache is
     /// attached in [`Bot::start`] once the client is built.
     stats_source: Arc<SerenityStatsSource>,
+    user_resolver: UserResolverHandle,
 }
 
 impl Bot {
@@ -172,7 +174,6 @@ impl Bot {
         event_bus: Arc<EventBus>,
         service: Arc<Services>,
         repos: Arc<dyn Repos + Send + Sync>,
-        voice_subscriber: Arc<VoiceStateSubscriber>,
     ) -> Result<Self> {
         info!("Initializing bot...");
 
@@ -194,6 +195,7 @@ impl Bot {
         // is attached below once the command count is known, and the real
         // gateway cache attaches in `start()` after the client is built.
         let stats_handle = Arc::new(StatsHandle::default());
+        let user_resolver = UserResolverHandle::default();
         // The welcome card renderer both the host ops and the view transports
         // share: one generator for the process (ADR-0012).
         let previews = Arc::new(crate::plugin::preview::PreviewResolver::new(vec![
@@ -211,9 +213,7 @@ impl Bot {
             kv: Some(Arc::new(PgKvStore::new(repos.plugin_kv()))),
             engine: Some(plugin_engine.clone()),
             stats: stats_handle.clone(),
-            voice: Some(Arc::new(ServiceVoiceSettingsSource::new(
-                service.voice_tracking.clone(),
-            ))),
+            users: user_resolver.clone(),
             welcome: Some(Arc::new(ServiceWelcomeSettingsSource::new(
                 service.settings.clone(),
             ))),
@@ -227,10 +227,10 @@ impl Bot {
                 .with_event_router(plugin_events.clone()),
         );
 
-        // Core plugins are spawned once at startup with no event
-        // subscriptions; per-guild command registration follows in
-        // Ready/GuildCreate. A missing binary is not fatal: the bot stays up
-        // and the plugin's commands simply stay unregistered.
+        // Core plugins are spawned once at startup. Their manifest event
+        // handlers are subscribed after the handshake; per-guild command
+        // registration follows in Ready/GuildCreate. A missing binary is not
+        // fatal: the bot stays up and the plugin's commands stay unregistered.
         let mut manifest_sources: Vec<(String, Option<Manifest>)> = Vec::new();
         for spec in &config.core_plugins {
             match plugin_manager
@@ -238,6 +238,11 @@ impl Bot {
                 .await
             {
                 Ok(plugin) => {
+                    if let Some(manifest) = plugin.manifest() {
+                        plugin_events
+                            .subscribe(&spec.name, &manifest.event_handlers)
+                            .await;
+                    }
                     manifest_sources.push((spec.name.clone(), plugin.manifest().cloned()));
                 }
                 Err(e) => warn!("failed to spawn core plugin {}: {e}", spec.name),
@@ -299,9 +304,7 @@ impl Bot {
         stats_handle.attach(stats_source.clone());
 
         let event_handler = Arc::new(BotEventHandler::new(
-            event_bus,
             data.clone(),
-            voice_subscriber.clone(),
             http.clone(),
             plugin_events,
         ));
@@ -316,11 +319,11 @@ impl Bot {
             )));
 
         Ok(Self {
-            cache: Arc::new(Cache::default()),
             http,
             client_builder: Some(client_builder),
             client: Arc::new(Mutex::new(None)),
             stats_source,
+            user_resolver,
         })
     }
 
@@ -330,6 +333,8 @@ impl Bot {
         let client_builder = self.client_builder.take().expect("start() called twice");
         let client = self.client.clone();
         let stats_source = self.stats_source.clone();
+        let user_resolver = self.user_resolver.clone();
+        let http = self.http.clone();
 
         tokio::spawn(async move {
             info!("Connecting bot to Discord...");
@@ -341,6 +346,10 @@ impl Bot {
             // The gateway cache only exists after the build; from here the
             // `host.stats` gather serves live guild/user counts.
             stats_source.attach_cache(built_client.cache.clone());
+            user_resolver.attach(Arc::new(SerenityUserResolver::new(
+                built_client.cache.clone(),
+                http,
+            )));
 
             *client.lock().await = Some(built_client);
             info!("Bot connected to Discord.");
@@ -534,105 +543,28 @@ async fn within_ack_window<F: Future + Unpin>(
 
 /// Event handler for Discord gateway events.
 pub struct BotEventHandler {
-    event_bus: Arc<EventBus>,
     data: Arc<Data>,
-    voice_subscriber: Arc<VoiceStateSubscriber>,
     http: Arc<poise::serenity_prelude::Http>,
     plugin_events: Arc<PluginEventRouter>,
 }
 
 impl BotEventHandler {
     pub fn new(
-        event_bus: Arc<EventBus>,
         data: Arc<Data>,
-        voice_subscriber: Arc<VoiceStateSubscriber>,
         http: Arc<poise::serenity_prelude::Http>,
         plugin_events: Arc<PluginEventRouter>,
     ) -> Self {
         Self {
-            event_bus,
             data,
-            voice_subscriber,
             http,
             plugin_events,
         }
     }
 
-    /// Scans all guilds for users currently in voice channels.
-    async fn scan_voice_channels(&self, ctx: &poise::serenity_prelude::Context) {
-        let mut tracked = 0u32;
-        let guild_ids: Vec<_> = ctx.cache.guilds().into_iter().collect();
-
-        for guild_id in guild_ids {
-            let is_enabled = self
-                .data
-                .service
-                .voice_tracking
-                .is_enabled(guild_id.get())
-                .await;
-
-            if !is_enabled {
-                continue;
-            }
-
-            let voice_states = {
-                let Some(guild) = ctx.cache.guild(guild_id) else {
-                    continue;
-                };
-                self.collect_voice_states_from_guild(&guild)
-            };
-
-            for (user_id, guild_id, channel_id, session_id) in voice_states {
-                match self
-                    .voice_subscriber
-                    .track_existing_user(user_id, guild_id, channel_id, &session_id)
-                    .await
-                {
-                    Ok(_) => tracked += 1,
-                    Err(e) => {
-                        error!("Failed to track existing user {user_id} in guild {guild_id}: {e}")
-                    }
-                }
-            }
-        }
-
-        if tracked > 0 {
-            info!("Voice channel scan complete: {tracked} users now being tracked");
-        }
-    }
-
-    /// Collects voice state data from a guild reference.
-    /// For large guilds the member list may be incomplete on `GuildCreate`; in that case
-    /// we default to treating unknown users as non-bots (better to over-track than under-track).
-    fn collect_voice_states_from_guild(
-        &self,
-        guild: &Guild,
-    ) -> Vec<(u64, u64, u64, small_fixed_array::FixedString)> {
-        guild
-            .voice_states
-            .iter()
-            .filter_map(|voice_state| {
-                let channel_id = voice_state.channel_id?;
-                let user_id = voice_state.user_id;
-
-                let is_bot = guild
-                    .members
-                    .get(&user_id)
-                    .map(|m| m.user.bot())
-                    .unwrap_or(false);
-
-                if is_bot {
-                    return None;
-                }
-
-                Some((
-                    user_id.get(),
-                    guild.id.get(),
-                    channel_id.get(),
-                    voice_state.session_id.clone(),
-                ))
-            })
-            .collect()
+    async fn fan_out_guild_create(&self, payload: Value) {
+        self.plugin_events
+            .fan_out(&self.data.plugin_manager, GUILD_CREATE_EVENT, &payload)
+            .await;
     }
 
     /// Registers commands globally if the bot version has changed.
@@ -793,9 +725,7 @@ impl BotEventHandler {
         let result = self
             .data
             .plugin_engine
-            .interact_validated(message_id, custom_id, interaction, |data| {
-                validate_view_data(data).map_err(Into::into)
-            })
+            .interact_validated(message_id, custom_id, interaction, validate_view_spec)
             .await;
 
         if let ViewAnswer::Render(body, files) =
@@ -830,11 +760,18 @@ impl BotEventHandler {
             // strips the create-only fields Discord rejects on edit (error
             // 50080 for `sticker_ids`) before the body is sent.
             Ok(spec) => {
-                let (body, files) = self
+                let (body, mut files) = self
                     .data
                     .previews
                     .resolve(edit_body_for_transport(&spec.data), guild_id)
                     .await;
+                match decode_runtime_files_with_existing(&spec.files, files.len()) {
+                    Ok(runtime_files) => files.extend(runtime_files),
+                    Err(error) => {
+                        warn!("plugin returned invalid runtime files: {}", error.msg);
+                        return ViewAnswer::Nothing;
+                    }
+                }
                 ViewAnswer::Render(body, files)
             }
             // A modal trigger the plugin answered by opening the modal: the
@@ -888,14 +825,19 @@ impl BotEventHandler {
         if let Some(raw_object) = raw.as_object_mut() {
             raw_object.insert(
                 ACTOR_CONTEXT_KEY.into(),
-                actor_context_from_parts(interaction.user.id, interaction.member.as_deref()),
+                actor_context_from_parts_with_guild(
+                    interaction.user.id,
+                    interaction.member.as_deref(),
+                    interaction.guild_id,
+                    None,
+                ),
             );
         }
         let round_trip = self.data.plugin_engine.interact_validated(
             message_id,
             &interaction.data.custom_id,
             raw,
-            |data| validate_view_data(data).map_err(Into::into),
+            validate_view_spec,
         );
         tokio::pin!(round_trip);
 
@@ -991,9 +933,11 @@ impl BotEventHandler {
     /// consumed route bypasses the message-keyed route entirely: one
     /// submission, one session.
     ///
-    /// Everything else routes like a component interaction: acknowledge the
-    /// submit, then hand the interaction to the open view session for the
-    /// message the modal was attached to.
+    /// Everything except a terminal invalid owner response routes like a
+    /// component interaction: acknowledge the submit, then hand the
+    /// interaction to the open view session for the message the modal was
+    /// attached to. An invalid owner response returns without a second
+    /// acknowledgement or commit.
     ///
     /// Modal submissions on Host-owned messages are skipped — the poise
     /// modal task the Host's feature spawned acknowledges the submission
@@ -1007,8 +951,9 @@ impl BotEventHandler {
         }
 
         // Plugin-opened modal: deliver first, so the route consumption
-        // decides who answers. A typed failure (no route, expired route,
-        // dead owner) falls through to the message-keyed route below.
+        // decides who answers. A terminal invalid response must not fall
+        // through: the message-keyed route would call the plugin a second
+        // time and could commit a view that was already rejected.
         let raw = serde_json::to_value(interaction).unwrap_or_default();
         match self
             .data
@@ -1019,6 +964,10 @@ impl BotEventHandler {
             Ok(spec) => {
                 self.render_modal_submission_response(interaction, &spec)
                     .await;
+                return;
+            }
+            Err(ModalDeliveryError::InvalidResponse { kind, msg }) => {
+                warn!("plugin returned an invalid modal response ({kind}): {msg}");
                 return;
             }
             Err(error) => {
@@ -1065,7 +1014,7 @@ impl BotEventHandler {
         spec: &ViewSpec,
     ) {
         let kind = if interaction.message.is_some() { 7 } else { 4 };
-        let (mut data, files) = self
+        let (mut data, mut files) = self
             .data
             .previews
             .resolve(
@@ -1073,6 +1022,13 @@ impl BotEventHandler {
                 interaction.guild_id.map(GuildId::get),
             )
             .await;
+        match decode_runtime_files_with_existing(&spec.files, files.len()) {
+            Ok(runtime_files) => files.extend(runtime_files),
+            Err(error) => {
+                warn!("plugin returned invalid runtime files: {}", error.msg);
+                return;
+            }
+        }
         if kind == 4 && spec.ephemeral {
             let flags = data
                 .get("flags")
@@ -1101,62 +1057,28 @@ impl poise::serenity_prelude::EventHandler for BotEventHandler {
     async fn dispatch(&self, ctx: &poise::serenity_prelude::Context, event: &FullEvent) {
         match event {
             FullEvent::Ready { .. } => {
-                info!("Bot is ready, scanning voice channels...");
-                self.scan_voice_channels(ctx).await;
-
+                info!("Bot is ready");
                 for guild_id in ctx.cache.guilds() {
+                    let payload = ctx
+                        .cache
+                        .guild(guild_id)
+                        .map(|guild| json!({ "guild": &*guild }));
+                    if let Some(payload) = payload {
+                        self.fan_out_guild_create(payload).await;
+                    }
                     self.register_plugins_in_guild(guild_id).await;
                 }
-
-                // Check if commands need to be re-registered
                 self.register_commands_if_needed().await;
             }
             FullEvent::GuildCreate { guild, .. } => {
                 self.register_plugins_in_guild(guild.id).await;
-
-                let is_enabled = self
-                    .data
-                    .service
-                    .voice_tracking
-                    .is_enabled(guild.id.get())
-                    .await;
-
-                if !is_enabled {
-                    return;
-                }
-
-                let voice_states = self.collect_voice_states_from_guild(guild);
-                let mut tracked = 0u32;
-
-                for (user_id, guild_id, channel_id, session_id) in voice_states {
-                    match self
-                        .voice_subscriber
-                        .track_existing_user(user_id, guild_id, channel_id, &session_id)
-                        .await
-                    {
-                        Ok(_) => tracked += 1,
-                        Err(e) => error!(
-                            "Failed to track existing user {user_id} in guild {guild_id}: {e}"
-                        ),
-                    }
-                }
-
-                if tracked > 0 {
-                    info!(
-                        "Guild {} scan complete: {} users now being tracked",
-                        guild.id.get(),
-                        tracked
-                    );
-                }
+                let payload = json!({ "guild": guild });
+                self.fan_out_guild_create(payload).await;
             }
             FullEvent::VoiceStateUpdate { old, new, .. } => {
-                let event = VoiceStateEvent {
-                    old: old.clone(),
-                    new: new.clone(),
-                };
-                self.event_bus.publish(event.clone());
+                let payload = json!({ "old": old, "new": new });
                 self.plugin_events
-                    .fan_out(&self.data.plugin_manager, VOICE_STATE_EVENT, &event)
+                    .fan_out(&self.data.plugin_manager, VOICE_STATE_EVENT, &payload)
                     .await;
             }
             FullEvent::InteractionCreate { interaction, .. } => match interaction {
@@ -1177,12 +1099,122 @@ impl poise::serenity_prelude::EventHandler for BotEventHandler {
 mod tests {
     use std::fs;
     use std::path::PathBuf;
+    use std::sync::Arc;
 
+    use httpmock::Method;
+    use httpmock::MockServer;
+    use poise::serenity_prelude::Http;
     use tempfile::tempdir;
 
     use super::*;
+    use crate::repo::PgRepos;
+    use crate::service::Services;
     use crate::test_helpers::entry_named;
     use crate::test_helpers::manifest_named;
+
+    #[tokio::test]
+    async fn invalid_modal_response_does_not_fall_through_to_view_interaction() {
+        let server = MockServer::start();
+        let post = server.mock(|when, then| {
+            when.method(Method::POST);
+            then.status(200);
+        });
+        let patch = server.mock(|when, then| {
+            when.method(Method::PATCH);
+            then.status(200);
+        });
+
+        let manager = Arc::new(PluginManager::new(None, RespawnPolicy::default()));
+        let plugin = manager
+            .spawn(
+                "malformed-modal",
+                PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("tests/fixtures/malformed_modal_plugin.sh"),
+                None,
+                &[],
+                &[],
+            )
+            .await
+            .expect("spawn malformed modal fixture");
+        let engine: Arc<InteractionEngine<RunningPlugin>> = Arc::new(InteractionEngine::new());
+        let message_id = MessageId::new(42);
+        let user_id = UserId::new(7);
+        let prior = ViewSpec {
+            data: json!({"content": "prior"}),
+            ephemeral: false,
+            view: json!({"page": 1}),
+            files: vec![],
+        };
+        engine
+            .register(message_id, user_id, plugin.clone(), "modal", prior.clone())
+            .await;
+        manager
+            .bind_modal(user_id.get(), "malformed-modal", "modal:submit")
+            .await;
+
+        let repos: Arc<dyn Repos + Send + Sync> = Arc::new(
+            PgRepos::new("postgres://test.invalid/pwr_bot")
+                .await
+                .expect("construct test repositories"),
+        );
+        let data = Arc::new(Data {
+            config: Arc::new(Config::default()),
+            service: Arc::new(
+                Services::new(repos.clone())
+                    .await
+                    .expect("construct services"),
+            ),
+            repos,
+            plugin_manager: manager,
+            plugin_catalog: Arc::new(HashMap::new()),
+            plugin_catalog_error: None,
+            plugin_engine: engine.clone(),
+            plugin_routes: Arc::new(HashMap::new()),
+            core_manifests: Arc::new(HashMap::new()),
+            translate_layer: Arc::new(TranslateLayer::new()),
+            settings_returns: Arc::new(crate::bot::translate::SettingsReturns::default()),
+            previews: Arc::new(crate::plugin::preview::PreviewResolver::new(vec![])),
+            start_time: Instant::now(),
+        });
+        let mut http = Http::without_token();
+        http.ratelimiter = None;
+        http.proxy = Some(server.url("").parse().expect("test proxy address"));
+        let handler = BotEventHandler::new(
+            data,
+            Arc::new(http),
+            Arc::new(crate::plugin::PluginEventRouter::new()),
+        );
+
+        let mut interaction: ModalInteraction = serde_json::from_str(
+            &serde_json::to_string(&json!({
+                "id": "1",
+                "application_id": "1",
+                "data": {"custom_id": "modal:submit", "components": []},
+                "channel": {"id": "9", "type": 0},
+                "channel_id": "9",
+                "user": {"id": "7", "username": "tester"},
+                "token": "token",
+                "version": 1,
+                "app_permissions": "0",
+                "locale": "en-US",
+                "entitlements": [],
+                "attachment_size_limit": 1024
+            }))
+            .expect("serialize modal interaction"),
+        )
+        .expect("construct modal interaction");
+        let mut message = Message::default();
+        message.id = message_id;
+        message.channel_id = ChannelId::new(9).into();
+        interaction.message = Some(Box::new(message));
+
+        handler.handle_modal_submit_interaction(&interaction).await;
+
+        assert_eq!(engine.view_state(message_id).await, Some(prior.view));
+        post.assert_hits(0);
+        patch.assert_hits(0);
+        plugin.stop().await.expect("stop malformed modal fixture");
+    }
 
     /// A `Config` whose catalog path points at `path`, nothing else set.
     fn config_with_catalog(path: PathBuf) -> Config {
@@ -1339,11 +1371,16 @@ mod tests {
     /// rewrites the fixture instead of asserting.
     #[test]
     fn the_registered_command_surface_matches_the_committed_snapshot() {
-        let core_manifests = HashMap::from([
-            (feed::PLUGIN_NAME.to_string(), feed::manifest()),
-            (voice::PLUGIN_NAME.to_string(), voice::manifest()),
-            (welcome::PLUGIN_NAME.to_string(), welcome::manifest()),
-        ]);
+        let manifest_fixture = fs::read_to_string(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/core_manifests.json"),
+        )
+        .expect("core manifest fixture is readable");
+        let manifests: Vec<Manifest> =
+            serde_json::from_str(&manifest_fixture).expect("core manifest fixture is valid");
+        let core_manifests = manifests
+            .into_iter()
+            .map(|manifest| (manifest.name.clone(), manifest))
+            .collect();
         let mut commands = Cogs.commands();
         commands.extend(plugin_commands(
             &core_manifests,

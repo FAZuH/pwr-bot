@@ -1,7 +1,8 @@
-//! Shared settings wire types. Voice and Welcome still use the whole
-//! [`ServerSettings`] snapshot across their host operations. Feed settings
-//! have moved to the feed plugin; the feed section remains here only for the
-//! transitional legacy import from `server_settings`.
+//! Legacy shared settings wire types.
+//!
+//! The voice and feed plugins own their settings repositories. These types
+//! remain for the welcome host operation and for one-time legacy imports from
+//! `server_settings`; they are not a voice host-settings RPC.
 //!
 //! `current_year`-style render-only values never appear here. A payload field
 //! must be data the service itself stores.
@@ -10,9 +11,9 @@ use serde::Deserialize;
 use serde::Serialize;
 
 /// The whole per-guild settings snapshot: every feature section together.
-/// Voice and Welcome host operations use this aggregate. Feed settings are
-/// stored by the feed plugin; the `feeds` field remains for the transitional
-/// legacy import only.
+/// Welcome host operations use this aggregate. Feed and voice settings are
+/// owned by their plugins; their fields remain for transitional legacy
+/// imports only.
 #[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
 pub struct ServerSettings {
     #[serde(default)]

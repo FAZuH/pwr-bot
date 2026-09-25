@@ -1,7 +1,7 @@
-//! pwr-bot host process for Discord plugin and voice services.
+//! pwr-bot host process for Discord plugin services.
 //!
-//! Feed subscriptions and their settings live in the `feed` plugin. This
-//! crate owns host routing, shared voice services, and core plugin state.
+//! Plugin-owned domains live in separate plugin crates. This crate owns host
+//! routing, the Settings capability, and core plugin state.
 
 pub mod bot;
 pub mod config;
@@ -13,8 +13,6 @@ pub mod macros;
 pub mod plugin;
 pub mod repo;
 pub mod service;
-pub mod subscriber;
-pub mod task;
 pub mod update;
 
 #[cfg(test)]

@@ -502,6 +502,7 @@
     "contexts": [
       0
     ],
+    "default_member_permissions": "40",
     "description": "Manage voice tracking settings",
     "description_localizations": {},
     "name": "voice-settings",

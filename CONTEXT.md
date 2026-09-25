@@ -118,26 +118,27 @@ _Avoid_: loading message, placeholder reply
 **Host op**:
 One operation a plugin can call on the host over the protocol, written
 `host.<name>` on the wire, such as `host.kv.get`. A plugin declares the
-ops it calls in its hello `caps` list, and the host rejects an unknown
+ops it calls in its hello `ops` list, and the host rejects an unknown
 `host.*` op at spawn. See Host and ADR-0010.
 _Avoid_: host command, host method
 
 **Service RPC**:
 A host op that mirrors one method of a host service, for example
-`host.voice.get_settings`. The service stays the single source of truth,
+`host.welcome.get_settings`. The service stays the single source of truth,
 and the plugin stays a thin client. Ops are shaped by services, never by
-plugins: the host API grows only when the host domain grows. Feed settings
-are plugin-owned and do not use this seam. See Host op, Panel plugin, and
-ADR-0010.
+plugins: the host API grows only when the host domain grows. Feed and voice
+settings are plugin-owned; identity lookups use the typed
+`host.resolve_users` op. See Host op, Panel plugin, and ADR-0010.
 _Avoid_: bespoke op, plugin-shaped op
 
 **Panel plugin**:
 A plugin crate that owns one settings panel end to end, such as feed
 settings, voice settings, or welcome. It renders the view and answers its
-interactions. Voice and Welcome reach host data through service RPCs; Feed
-uses its own repository and embedded migrations. The panel migration turns
-the three host-side panels into panel plugins, one crate each. See Service
-RPC and ADR-0009.
+interactions. Voice owns its repository, embedded migrations, heartbeat
+file, and voice event subscriber; Welcome reaches shared host settings through
+service RPCs. Feed uses its own repository and embedded migrations. The panel
+migration turns the three host-side panels into panel plugins, one crate each.
+See Service RPC and ADR-0009.
 _Avoid_: host panel, feature panel
 
 **Settings**:

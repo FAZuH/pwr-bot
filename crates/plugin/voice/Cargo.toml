@@ -3,16 +3,44 @@ name = "voice"
 version = "0.1.0"
 edition = "2024"
 authors = ["FAZuH <mail@fazuh.com>"]
-description = "The voice settings panel plugin for pwr-bot: per-guild voice tracking settings served as a plugin view"
+description = "The pwr-bot voice plugin: tracking, statistics, leaderboards, and settings"
 license = "MIT"
 repository = "https://github.com/FAZuH/pwr-bot"
 
 [dependencies]
+anyhow = "1.0.101"
+async-trait = "0.1.89"
+base64 = "0.22.1"
+byteorder = "1.5.0"
+chrono = { version = "0.4.43", features = ["serde"] }
+contribution-grid = "2.0.1"
+derive_builder = "0.20.2"
+diesel = { version = "2.3", features = ["chrono", "postgres", "serde_json"] }
+diesel-async = { version = "0.8", features = ["deadpool", "postgres"] }
+diesel_migrations = { version = "2.3", features = ["postgres"] }
+futures = "0.3.32"
+image = "0.25"
+log = "0.4.29"
+minijinja = "2.15.1"
+plotters = "0.3.7"
 pwr-ext = { git = "https://github.com/FAZuH/pwr-ext", tag = "v0.1.0", features = ["macros"] }
 pwr-plugin-protocol = { path = "../../pwr-plugin-protocol" }
 pwr-plugin-support = { path = "../pwr-plugin-support" }
+resvg = "0.47.0"
+serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
+thiserror = "2.0.18"
+tokio = { version = "1.49.0", features = ["macros", "rt-multi-thread", "sync", "time"] }
+wreq = { version = "0.16", features = ["stream", "query"] }
+wreq-util = "0.2"
 
 [dev-dependencies]
-# Only the tests read `IS_COMPONENTS_V2`; production is `view!`-authored.
+dotenv = "0.15.0"
+libc = "0.2.189"
+postgresql_embedded = { version = "=0.20.1", default-features = false, features = ["zonky", "tokio", "rustls"] }
 pwr-poise-components = { path = "../../pwr-poise-components" }
+rustls-native-certs = "0.8"
+serial_test = "3.3.1"
+tempfile = "3.27.0"
+tokio-postgres = "0.7"
+tokio-postgres-rustls = { version = "0.14", default-features = false, features = ["ring", "native-certs"] }

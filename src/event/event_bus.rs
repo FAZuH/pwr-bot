@@ -10,8 +10,6 @@ use std::sync::RwLock;
 
 use anyhow::Result;
 
-use crate::subscriber::Subscriber;
-
 type AsyncSubscriber<E> =
     Box<dyn Fn(E) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> + Send + Sync>;
 type Subscribers = Arc<RwLock<HashMap<TypeId, Vec<Box<dyn Any + Send + Sync>>>>>;
@@ -45,18 +43,6 @@ impl EventBus {
             .or_default()
             .push(Box::new(wrapped_sub));
         self
-    }
-
-    /// Registers a subscriber that implements the Subscriber trait.
-    pub fn register_subcriber<E, S>(&self, subscriber: Arc<S>) -> &Self
-    where
-        E: 'static + Send + Sync + Clone,
-        S: Subscriber<E> + Send + Sync + 'static,
-    {
-        self.register_callback(move |event: E| {
-            let h = subscriber.clone();
-            async move { h.callback(event).await }
-        })
     }
 
     /// Publishes an event to all registered subscribers.

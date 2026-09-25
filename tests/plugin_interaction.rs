@@ -150,7 +150,7 @@ async fn engine_drives_the_fixture_view_lifecycle() {
     assert_eq!(
         engine.view_state(message_id).await,
         Some(Value::Null),
-        "the fixture serves the raw v1 shape: no envelope view state"
+        "the fixture serves the legacy raw shape: no envelope view state"
     );
 
     // First click: view.interact round trip through the fixture.

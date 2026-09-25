@@ -2,12 +2,6 @@
 //!
 //! Provides unified navigation enum for cross-domain handler navigation.
 
-use poise::serenity_prelude::User;
-
-use crate::bot::command::voice::GuildStatType;
-use crate::bot::command::voice::VoiceLeaderboardTimeRange;
-use crate::bot::command::voice::VoiceStatsTimeRange;
-
 /// Result type for handler navigation.
 ///
 /// Handlers return this enum to indicate where the coordinator should
@@ -31,18 +25,6 @@ pub enum Navigation {
     },
     /// Navigate to about page (within settings context)
     SettingsAbout,
-
-    // Voice commands section
-    VoiceLeaderboard {
-        time_range: VoiceLeaderboardTimeRange,
-    },
-
-    // -- /vc stats --
-    VoiceStats {
-        time_range: VoiceStatsTimeRange,
-        target_user: Box<Option<User>>,
-        stat_type: GuildStatType,
-    },
 
     // -- Universal navigation --
     /// Pop one navigation level: the target revealed behind the marker runs

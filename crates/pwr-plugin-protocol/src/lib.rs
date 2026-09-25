@@ -18,17 +18,13 @@
 //! only, stderr is the free logging channel. See the `hello` plugin
 //! (`crates/plugin/hello/src/main.rs`) for the reference implementation.
 
-pub mod caps;
 pub mod manifest;
 pub mod msg;
+pub mod ops;
 pub mod settings;
 pub mod stats;
 pub mod view;
 
-pub use caps::ALL_CAPS;
-pub use caps::CapsError;
-pub use caps::HostCap;
-pub use caps::validate_caps;
 pub use manifest::CommandDef;
 pub use manifest::Manifest;
 pub use manifest::SettingsSection;
@@ -42,6 +38,11 @@ pub use msg::Msg;
 pub use msg::PLUGIN_NAME;
 pub use msg::VIEW_MOVED_KIND;
 pub use msg::WireError;
+pub use ops::ALL_OPS;
+pub use ops::HostOp;
+pub use ops::OpsError;
+pub use ops::ResolvedUser;
+pub use ops::validate_ops;
 
 /// The host-reserved `host.open_view` target that hands a panel's message
 /// back to the host Settings GUI. Not a plugin name: the host answers the
@@ -59,6 +60,8 @@ pub use settings::ServerSettings;
 pub use settings::VoiceSettings;
 pub use settings::WelcomeSettings;
 pub use stats::HostStats;
+pub use view::RuntimeFile;
 pub use view::ViewPayload;
+pub use view::ViewPayloadError;
 pub use view::ViewSpec;
 pub use view::view_payload;

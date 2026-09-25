@@ -53,9 +53,10 @@ use crate::plugin::InteractionEngine;
 use crate::plugin::RunningPlugin;
 use crate::plugin::SerenityHostIo;
 use crate::plugin::command::ACTOR_CONTEXT_KEY;
-use crate::plugin::command::actor_context;
+use crate::plugin::command::actor_context_with_guild_name;
+use crate::plugin::decode_runtime_files_with_existing;
 use crate::plugin::edit_body_for_transport;
-use crate::plugin::validate_view_data;
+use crate::plugin::validate_view_spec;
 
 /// The end-of-session action the root dismissal takes for a message.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -131,7 +132,9 @@ pub async fn handoff_to_section(
         args["guild_id"] = json!(guild_id.get());
     }
     if let poise::Context::Application(app) = ctx {
-        args[ACTOR_CONTEXT_KEY] = actor_context(app.interaction);
+        let guild_name = ctx.guild().map(|guild| guild.name.to_string());
+        args[ACTOR_CONTEXT_KEY] =
+            actor_context_with_guild_name(app.interaction, guild_name.as_deref());
     }
     let io = SerenityHostIo::new(ctx.serenity_context().http.clone());
     adopt_message_into_section(
@@ -174,8 +177,8 @@ pub async fn adopt_message_into_section(
     let author_id = crate::plugin::interaction::author_id_from_payload(&args)
         .ok_or_else(|| Error::from("settings handoff is missing its interaction author"))?;
     let spec = engine.invoke(plugin.clone(), command, args).await?;
-    validate_view_data(&spec.data)?;
-    let (body, attachments) = match previews {
+    validate_view_spec(&spec).map_err(|error| Error::from(error.msg))?;
+    let (body, mut attachments) = match previews {
         Some(previews) => {
             previews
                 .resolve(edit_body_for_transport(&spec.data), guild_id)
@@ -183,6 +186,10 @@ pub async fn adopt_message_into_section(
         }
         None => (edit_body_for_transport(&spec.data), Vec::new()),
     };
+    attachments.extend(
+        decode_runtime_files_with_existing(&spec.files, attachments.len())
+            .map_err(|error| Error::from(error.msg))?,
+    );
     io.edit_message(channel_id.get(), message_id.get(), body, attachments)
         .await?;
     engine

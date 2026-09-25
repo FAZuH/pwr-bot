@@ -77,13 +77,13 @@ Interactive views follow the Elm Architecture (see `docs/adr/0005-tea-gui-archit
 
 ## Business Logic (Update Pattern)
 
-Pure, testable state mutations live in `src/update/<feature>.rs` for host features
-and in the plugin's `src/update/` for plugin features. Handlers parse Discord
-interactions into `Msg` values, run `update`, and execute returned effects
-through the feature's adapter or the plugin's direct service loop. Existing host
-modules include `about`, `register`, `unregister`, `settings`, `voice_stats`,
-`voice_leaderboard`, `plugins`, and `pagination`; feed list and batch updates
-live in the feed plugin.
+Pure, testable state mutations live in `src/update/<feature>.rs` for host
+features and in the plugin's `src/update/` for plugin features. Handlers parse
+Discord interactions into `Msg` values, run `update`, and execute returned
+effects through the feature's adapter or the plugin's direct service loop.
+Existing host modules include `about`, `register`, `unregister`, `settings`,
+`plugins`, and `pagination`; feed, voice, and welcome updates live in their
+respective plugin crates.
 
 - Place host pure logic in `src/update/<feature>.rs` (Model, Msg, Effect, `update` fn, tests)
 - Place plugin pure logic in `crates/plugin/<name>/src/update/` with the plugin's direct service adapter
@@ -92,7 +92,10 @@ live in the feed plugin.
 
 - PostgreSQL with Diesel (diesel-async 0.8 + deadpool)
 - Migrations: `diesel migration generate <name>` (requires `diesel_cli` installed with PostgreSQL support)
-- Schema source: `src/repo/schema.rs` — regenerate with `diesel print-schema` after migration changes, then manually correct `Nullable<Integer>` PKs to `Integer`
+- Core schema source: `src/repo/schema.rs`; plugin schemas and migrations live
+  under each plugin crate. Regenerate core schema with `diesel print-schema`
+  after core migration changes, then manually correct `Nullable<Integer>` PKs
+  to `Integer`.
 - See `.agents/skills/db-schema/SKILL.md` for migration and model patterns
 - Migration script: `scripts/migrate.py` (SQLite → PostgreSQL data migration)
 

@@ -6,7 +6,7 @@ use crate::manifest::Manifest;
 
 /// The wire protocol version announced in [`Msg::Hello`] as `v`. The host
 /// rejects a handshake that carries any other value.
-pub const API_VERSION: u32 = 1;
+pub const API_VERSION: u32 = 2;
 
 /// Name of the canonical test-plugin fixture: what it announces in
 /// [`Msg::Hello`] and what the host sends as `cmd` on `invoke`/`view.interact`.
@@ -48,8 +48,8 @@ pub enum Msg {
         v: u32,
         /// Plugin name.
         name: String,
-        /// Capabilities the plugin serves and host ops it requires.
-        caps: Vec<String>,
+        /// Operations the plugin serves and host ops it requires.
+        ops: Vec<String>,
         /// The plugin's manifest declaration, when the plugin carries one.
         /// Absent on old hellos, which the host accepts (validated only when
         /// present).
@@ -60,7 +60,7 @@ pub enum Msg {
     Call {
         /// Monotonic per-producer correlation id.
         id: u64,
-        /// Operation name, e.g. `invoke`, `view.interact`, `host.fetch_user`.
+        /// Operation name, e.g. `invoke`, `view.interact`, `host.resolve_users`.
         op: String,
         /// Command name for `invoke`; absent for host-service ops.
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -181,12 +181,12 @@ mod tests {
         let msg = Msg::Hello {
             v: API_VERSION,
             name: "feed".into(),
-            caps: vec!["command:feed".into()],
+            ops: vec!["command:feed".into()],
             manifest: None,
         };
         assert_eq!(
             serde_json::to_string(&msg).unwrap(),
-            r#"{"t":"hello","v":1,"name":"feed","caps":["command:feed"]}"#
+            r#"{"t":"hello","v":2,"name":"feed","ops":["command:feed"]}"#
         );
     }
 
@@ -195,7 +195,7 @@ mod tests {
         let msg = Msg::Hello {
             v: API_VERSION,
             name: "feed".into(),
-            caps: vec!["command:feed".into()],
+            ops: vec!["command:feed".into()],
             manifest: Some(Manifest {
                 name: "feed".into(),
                 description: "Feed subscriptions".into(),
@@ -211,7 +211,7 @@ mod tests {
         };
         assert_eq!(
             serde_json::to_string(&msg).unwrap(),
-            r#"{"t":"hello","v":1,"name":"feed","caps":["command:feed"],"manifest":{"name":"feed","description":"Feed subscriptions","version":"0.1.0","commands":[{"create_command":{"description":"List feeds","name":"feed.list"}}],"event_handlers":[],"tasks":[],"settings":[],"api_version":1}}"#
+            r#"{"t":"hello","v":2,"name":"feed","ops":["command:feed"],"manifest":{"name":"feed","description":"Feed subscriptions","version":"0.1.0","commands":[{"create_command":{"description":"List feeds","name":"feed.list"}}],"event_handlers":[],"tasks":[],"settings":[],"api_version":2}}"#
         );
     }
 
@@ -342,7 +342,7 @@ mod tests {
             Msg::Hello {
                 v: API_VERSION,
                 name: "feed".into(),
-                caps: vec!["command:feed".into()],
+                ops: vec!["command:feed".into()],
                 manifest: None,
             },
             Msg::Call {
@@ -392,7 +392,7 @@ mod tests {
 
     #[test]
     fn wire_decodes_unknown_fields_gracefully() {
-        let json = r#"{"t":"hello","v":1,"name":"feed","caps":[],"ver":"0.1.0"}"#;
+        let json = r#"{"t":"hello","v":2,"name":"feed","ops":[],"ver":"0.1.0"}"#;
         let msg: Msg = serde_json::from_str(json).unwrap();
         assert!(matches!(msg, Msg::Hello { .. }));
     }

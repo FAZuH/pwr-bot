@@ -4209,8 +4209,6 @@ dependencies = [
  "base64 0.22.1",
  "byteorder",
  "chrono",
- "contribution-grid",
- "derive_builder",
  "diesel",
  "diesel-async",
  "diesel_migrations",
@@ -4223,7 +4221,6 @@ dependencies = [
  "log",
  "minijinja",
  "mockall",
- "plotters",
  "poise",
  "postgresql_embedded",
  "pwr-ext",
@@ -4249,8 +4246,6 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "uuid",
- "voice",
- "welcome",
  "wreq",
  "wreq-util",
 ]
@@ -4292,6 +4287,7 @@ name = "pwr-plugin-support"
 version = "0.1.0"
 dependencies = [
  "pwr-plugin-protocol",
+ "serde",
  "serde_json",
 ]
 
@@ -6712,11 +6708,40 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 name = "voice"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "async-trait",
+ "base64 0.22.1",
+ "byteorder",
+ "chrono",
+ "contribution-grid",
+ "derive_builder",
+ "diesel",
+ "diesel-async",
+ "diesel_migrations",
+ "dotenv",
+ "futures",
+ "image 0.25.9",
+ "libc",
+ "log",
+ "minijinja",
+ "plotters",
+ "postgresql_embedded",
  "pwr-ext",
  "pwr-plugin-protocol",
  "pwr-plugin-support",
  "pwr-poise-components",
+ "resvg",
+ "rustls-native-certs",
+ "serde",
  "serde_json",
+ "serial_test",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-postgres",
+ "tokio-postgres-rustls",
+ "wreq",
+ "wreq-util",
 ]
 
 [[package]]
