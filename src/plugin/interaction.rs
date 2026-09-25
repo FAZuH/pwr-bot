@@ -12,7 +12,8 @@
 //! Success payloads come in two shapes, both accepted here:
 //! - the full envelope `{"data": ..., "ephemeral": ..., "view": ...}`, used
 //!   verbatim (recognized by a top-level `data` key);
-//! - the v1 raw shape: the Discord message JSON itself, wrapped as
+//! - runtime `files` in the envelope are decoded by the host at transport;
+//! - the legacy raw shape: the Discord message JSON itself, wrapped as
 //!   `{data, ephemeral: false, view: <stored view>}`. The canonical fixture
 //!   serves this shape today.
 //!
@@ -346,13 +347,15 @@ impl<P: PluginHandle> InteractionEngine<P> {
             tokio::select! {
                 response = &mut call => {
                     while let Ok(data) = receiver.try_recv() {
-                        let _ = progress.send(view_spec_from_data(data, None));
+                        let spec = view_spec_from_data(data, None)?;
+                        let _ = progress.send(spec);
                     }
                     return view_spec_from_resp(response?, None);
                 }
                 data = receiver.recv() => {
                     if let Some(data) = data {
-                        let _ = progress.send(view_spec_from_data(data, None));
+                        let spec = view_spec_from_data(data, None)?;
+                        let _ = progress.send(spec);
                     }
                 }
             }
@@ -469,15 +472,15 @@ impl<P: PluginHandle> InteractionEngine<P> {
         Ok(spec)
     }
 
-    /// Interacts with a session and validates the returned raw view before its
-    /// state is committed. The validator is supplied by the host boundary;
-    /// the engine remains independent of Discord and message schemas.
+    /// Interacts with a session and validates the complete returned view spec
+    /// before its state is committed. The validator is supplied by the host
+    /// boundary; the engine remains independent of Discord and message schemas.
     pub async fn interact_validated(
         &self,
         message_id: serenity::MessageId,
         custom_id: &str,
         interaction: Value,
-        validate: impl FnOnce(&Value) -> Result<(), WireError>,
+        validate: impl FnOnce(&ViewSpec) -> Result<(), WireError>,
     ) -> Result<ViewSpec, InteractionError> {
         let (lock, generation) = self.session_lock(message_id).await?;
         let _guard = lock.lock().await;
@@ -495,7 +498,7 @@ impl<P: PluginHandle> InteractionEngine<P> {
             .call("view.interact", Some(snapshot.command.as_str()), Some(args))
             .await?;
         let spec = view_spec_from_resp(resp, Some(snapshot.view))?;
-        validate(&spec.data).map_err(|error| InteractionError::InvalidView {
+        validate(&spec).map_err(|error| InteractionError::InvalidView {
             kind: error.kind,
             msg: error.msg,
         })?;
@@ -648,7 +651,7 @@ pub(crate) fn view_spec_from_resp(
             ok: true,
             data: Some(data),
             ..
-        } => Ok(view_spec_from_data(data, current_view)),
+        } => Ok(view_spec_from_data(data, current_view)?),
         Msg::Resp {
             ok: true,
             data: None,
@@ -675,28 +678,36 @@ pub(crate) fn view_spec_from_resp(
 }
 
 /// Interprets a success payload as a [`ViewSpec`]. A payload shaped like the
-/// full envelope (`{data, ephemeral, view}`) is used verbatim; anything else
-/// is the v1 raw shape (Discord message JSON) and is wrapped with defaults,
+/// full envelope (`{data, ephemeral, view, files}`) is used verbatim; anything
+/// else is the raw shape (Discord message JSON) and is wrapped with defaults,
 /// carrying the session's stored `view` through unchanged. `data` is not a
 /// top-level Discord message field, so the `data`-key check is unambiguous.
-/// The envelope/raw split is [`view_payload`]'s contract; this projection
-/// only adds the session's `current_view` fallback for the `view` field.
-fn view_spec_from_data(data: Value, current_view: Option<Value>) -> ViewSpec {
-    match view_payload(&data) {
+/// Runtime-file JSON is parsed at this trust boundary; malformed entries are
+/// rejected before a render can be attempted.
+fn view_spec_from_data(
+    data: Value,
+    current_view: Option<Value>,
+) -> Result<ViewSpec, InteractionError> {
+    match view_payload(&data).map_err(|error| InteractionError::UnexpectedReply {
+        detail: error.to_string(),
+    })? {
         ViewPayload::Envelope {
             data,
             ephemeral,
             view,
-        } => ViewSpec {
+            files,
+        } => Ok(ViewSpec {
             data,
             ephemeral,
             view: view.or(current_view).unwrap_or_default(),
-        },
-        ViewPayload::Raw { data } => ViewSpec {
+            files,
+        }),
+        ViewPayload::Raw { data } => Ok(ViewSpec {
             data,
             ephemeral: false,
             view: current_view.unwrap_or_default(),
-        },
+            files: vec![],
+        }),
     }
 }
 
@@ -760,6 +771,7 @@ mod tests {
         last_args: StdMutex<Option<Value>>,
         wrong_reply: AtomicBool,
         malformed_view: AtomicBool,
+        malformed_file: AtomicBool,
         dead_events: AtomicBool,
         /// While `gate_active` is set, each `view.interact` call waits for one
         /// message on `gate` before answering — tests use this to hold a call
@@ -806,6 +818,17 @@ mod tests {
                         ));
                     }
                     let clicks = self.clicks.fetch_add(1, Ordering::SeqCst) + 1;
+                    if self.malformed_file.load(Ordering::SeqCst) {
+                        return Ok(Msg::resp_ok(
+                            0,
+                            Some(json!({
+                                "data": {"content": format!("count={clicks}")},
+                                "ephemeral": false,
+                                "view": {"clicks": clicks},
+                                "files": [{"filename": "broken.bin", "data_base64": "not base64"}],
+                            })),
+                        ));
+                    }
                     if self.malformed_view.load(Ordering::SeqCst) {
                         return Ok(Msg::resp_ok(
                             0,
@@ -913,8 +936,8 @@ mod tests {
         plugin.malformed_view.store(true, Ordering::SeqCst);
 
         let error = engine
-            .interact_validated(id, BUTTON_CUSTOM_ID, json!({"user": {"id": 1}}), |data| {
-                crate::plugin::validate_view_data(data).map_err(Into::into)
+            .interact_validated(id, BUTTON_CUSTOM_ID, json!({"user": {"id": 1}}), |spec| {
+                crate::plugin::validate_view_spec(spec)
             })
             .await
             .unwrap_err();
@@ -923,6 +946,33 @@ mod tests {
             matches!(error, InteractionError::InvalidView { ref kind, .. } if kind == "InvalidView")
         );
         assert_eq!(engine.view_state(id).await, Some(prior_view));
+    }
+
+    #[tokio::test]
+    async fn validated_interaction_rejects_malformed_file_without_committing_view() {
+        let plugin = Arc::new(FakePlugin::default());
+        let engine = InteractionEngine::new();
+        let id = opened(&engine, plugin.clone()).await;
+
+        engine
+            .interact_validated(id, BUTTON_CUSTOM_ID, json!({"user": {"id": 1}}), |_| Ok(()))
+            .await
+            .expect("valid interaction commits its prior view");
+        let prior_view = engine.view_state(id).await;
+
+        plugin.malformed_file.store(true, Ordering::SeqCst);
+        let error = engine
+            .interact_validated(id, BUTTON_CUSTOM_ID, json!({"user": {"id": 1}}), |spec| {
+                crate::plugin::validate_view_spec(spec)
+            })
+            .await
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            InteractionError::InvalidView { ref kind, .. } if kind == "InvalidView"
+        ));
+        assert_eq!(engine.view_state(id).await, prior_view);
     }
 
     /// Parses the click count out of a spec's content string.
@@ -977,6 +1027,34 @@ mod tests {
         assert_eq!(spec.data, json!({"content": "hello"}));
         assert!(spec.ephemeral);
         assert_eq!(spec.view, json!({"page": 2}));
+    }
+
+    #[test]
+    fn runtime_files_in_a_view_envelope_survive_response_projection() {
+        let resp = Msg::resp_ok(
+            0,
+            Some(json!({
+                "data": {"components": []},
+                "view": {"page": 1},
+                "files": [{ "filename": "chart.png", "data_base64": "aGk=" }],
+            })),
+        );
+        let spec = view_spec_from_resp(resp, None).unwrap();
+        assert_eq!(spec.files[0].filename, "chart.png");
+        assert_eq!(spec.files[0].data_base64, "aGk=");
+    }
+
+    #[test]
+    fn malformed_runtime_files_are_rejected_before_rendering() {
+        let resp = Msg::resp_ok(
+            0,
+            Some(json!({
+                "data": {"components": []},
+                "files": [{ "filename": "chart.png" }],
+            })),
+        );
+        let error = view_spec_from_resp(resp, None).unwrap_err();
+        assert!(matches!(error, InteractionError::UnexpectedReply { .. }));
     }
 
     #[test]

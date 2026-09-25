@@ -1,32 +1,45 @@
-use diesel::QueryableByName;
-use diesel_async::RunQueryDsl;
-use pwr_bot::repo::PgRepos;
+#[test]
+fn voice_plugin_migration_claims_only_voice_storage() {
+    let initial = include_str!(
+        "../crates/plugin/voice/migrations/20260924-140100-0000_voice_owned_schema/up.sql"
+    );
+    let sentinel = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("crates/plugin/voice/migrations/20260924-140000-0000_voice_storage");
 
-#[path = "support/db.rs"]
-mod db;
-
-#[derive(QueryableByName)]
-struct TableExists {
-    #[diesel(sql_type = diesel::sql_types::Bool)]
-    exists: bool,
+    assert!(initial.contains("voice_sessions"));
+    assert!(initial.contains("voice_settings"));
+    assert!(!initial.contains("server_settings"));
+    assert!(!sentinel.exists());
 }
 
-#[tokio::test]
-async fn core_migrations_create_the_voice_sessions_table() {
-    let db_url = db::db_url().await;
-    let repos = PgRepos::new(db_url)
-        .await
-        .expect("connect to test database");
-    repos.run_migrations().await.expect("run core migrations");
+#[test]
+fn feed_plugin_migration_claims_only_feed_storage() {
+    let initial = include_str!(
+        "../crates/plugin/feed/migrations/20260924-130100-0000_feed_owned_schema/up.sql"
+    );
+    let sentinel = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("crates/plugin/feed/migrations/20260924-130000-0000_feed_settings");
 
-    let mut connection = repos.pool().get().await.expect("get database connection");
-    let result: TableExists = diesel::sql_query(
-        "SELECT EXISTS (SELECT FROM information_schema.tables \
-         WHERE table_schema = 'public' AND table_name = 'voice_sessions')",
-    )
-    .get_result(&mut connection)
-    .await
-    .expect("query core schema");
+    assert!(initial.contains("feeds"));
+    assert!(initial.contains("feed_settings"));
+    assert!(!initial.contains("server_settings"));
+    assert!(!sentinel.exists());
+}
 
-    assert!(result.exists, "core migrations must create voice_sessions");
+#[test]
+fn core_migrations_claim_only_core_storage() {
+    let core = include_str!("../migrations/20260925-000000-0000_core_storage/up.sql");
+    let historical_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("migrations/2026-04-29-122252-0000_initial_schema");
+
+    assert!(!historical_path.exists());
+    assert!(core.contains("server_settings"));
+    assert!(core.contains("bot_meta"));
+    assert!(core.contains("plugin_kv"));
+    assert!(core.contains("guild_plugins"));
+    assert!(!core.contains("voice_sessions"));
+    assert!(!core.contains("feeds"));
+    assert!(core.starts_with(
+        "-- Each migration source owns only the tables in its up.sql and uses CREATE TABLE IF NOT EXISTS."
+    ));
 }

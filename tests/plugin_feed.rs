@@ -126,7 +126,7 @@ fn services(
         kv: None,
         engine: None,
         stats: Arc::new(StatsHandle::default()),
-        voice: None,
+        users: Default::default(),
         welcome: None,
         previews: None,
         settings_returns,
@@ -205,7 +205,6 @@ async fn core_and_plugin_migrations_create_owned_tables_once() {
     });
     for table in [
         "server_settings",
-        "voice_sessions",
         "bot_meta",
         "plugin_kv",
         "guild_plugins",
@@ -536,7 +535,7 @@ async fn list_sessions_are_author_bound_end_to_end() {
                 message_id,
                 custom_id,
                 json!({"user": {"id": 999}}),
-                |data| pwr_bot::plugin::validate_view_data(data).map_err(Into::into),
+                pwr_bot::plugin::validate_view_spec,
             )
             .await
             .expect_err("a different user cannot mutate the list");
@@ -558,7 +557,7 @@ async fn list_sessions_are_author_bound_end_to_end() {
             message_id,
             "feed-list:unsub:0",
             json!({"user": {"id": user_id}}),
-            |data| pwr_bot::plugin::validate_view_data(data).map_err(Into::into),
+            pwr_bot::plugin::validate_view_spec,
         )
         .await
         .expect("the author can mutate the list");

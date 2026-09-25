@@ -1,4 +1,4 @@
-//! Integration tests for plugin→host `host.*` capability ops: the fixture
+//! Integration tests for plugin→host `host.*` ops: the fixture
 //! issues a `host.send_message` call through the real stdio wire, the host
 //! serves it via the mocked [`HostIo`] seam (no live Discord), and the
 //! fixture's resp echoes the mock's data back to the test. Pure stdio — no
@@ -25,10 +25,18 @@ use pwr_bot::plugin::StatsHandle;
 use pwr_bot::plugin::host::MockHostIo;
 use pwr_bot::plugin::host::MockKvStore;
 use pwr_plugin_protocol::Msg;
+use pwr_plugin_protocol::ViewSpec;
 use serde_json::json;
 
 mod probe;
 use probe::probe_binary;
+
+fn fixture_script(name: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join(name)
+}
 
 /// The V2 text-display envelope the prose send path builds for `content`.
 fn payload_for(content: &str) -> serde_json::Value {
@@ -46,7 +54,7 @@ fn host_services(io: Arc<dyn HostIo>, kv: Option<Arc<dyn KvStore>>) -> Arc<HostS
         kv,
         engine: None,
         stats: Arc::new(StatsHandle::default()),
-        voice: None,
+        users: Default::default(),
         welcome: None,
         previews: None,
         settings_returns: None,
@@ -69,7 +77,7 @@ fn view_host_services(
         kv: None,
         engine: Some(Arc::new(engine)),
         stats: Arc::new(StatsHandle::default()),
-        voice: None,
+        users: Default::default(),
         welcome: None,
         previews: None,
         settings_returns: None,
@@ -800,6 +808,52 @@ async fn host_kvdel_invoke_serves_kv_delete_through_the_seam() {
         } => assert_eq!(id, 0),
         other => panic!("expected ok resp with no data, got {other:?}"),
     }
+}
+
+#[tokio::test]
+async fn malformed_modal_response_does_not_change_existing_view() {
+    let manager = Arc::new(PluginManager::new(None, RespawnPolicy::default()));
+    let plugin = manager
+        .spawn(
+            "malformed-modal",
+            fixture_script("malformed_modal_plugin.sh"),
+            None,
+            &[],
+            &[],
+        )
+        .await
+        .expect("spawn malformed modal fixture");
+    let engine = InteractionEngine::new();
+    let message_id = serenity::MessageId::new(10_001);
+    let user_id = serenity::UserId::new(7);
+    let prior = ViewSpec {
+        data: json!({"content": "prior"}),
+        ephemeral: false,
+        view: json!({"page": 1}),
+        files: vec![],
+    };
+    engine
+        .register(message_id, user_id, plugin.clone(), "modal", prior.clone())
+        .await;
+    manager
+        .bind_modal(user_id.get(), "malformed-modal", "modal:submit")
+        .await;
+
+    let error = manager
+        .deliver_modal_submission(user_id.get(), json!({"user": {"id": user_id.get()}}))
+        .await
+        .expect_err("malformed modal file is rejected");
+
+    assert!(
+        matches!(
+            error,
+            pwr_bot::plugin::ModalDeliveryError::InvalidResponse { ref kind, .. }
+                if kind == "InvalidView"
+        ),
+        "{error:?}"
+    );
+    assert_eq!(engine.view_state(message_id).await, Some(prior.view));
+    plugin.stop().await.expect("stop malformed modal fixture");
 }
 
 /// The fixture's `host.openmodal` invoke issues a plugin→host

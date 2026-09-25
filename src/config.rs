@@ -43,7 +43,6 @@ pub struct CorePluginSpec {
 /// Feature flags for optional bot components.
 #[derive(Clone, Default, Debug)]
 pub struct Features {
-    pub voice_tracking: bool,
     pub autoregister_cmds: bool,
 }
 
@@ -104,7 +103,6 @@ impl Config {
             .collect();
 
         self.features = Features {
-            voice_tracking: parse_bool_env("ENABLE_VOICE_TRACKING", true),
             autoregister_cmds: parse_bool_env("ENABLE_AUTOREGISTER_CMD", true),
         };
 

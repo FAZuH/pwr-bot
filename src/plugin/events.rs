@@ -16,8 +16,11 @@ use tokio::sync::Mutex;
 
 use crate::plugin::PluginManager;
 
-/// The Discord event name for `VoiceStateUpdate`, the v1 subscription.
+/// The Discord event name for `VoiceStateUpdate`.
 pub const VOICE_STATE_EVENT: &str = "voice_state";
+
+/// The Discord event name for `GuildCreate` and cached guild snapshots.
+pub const GUILD_CREATE_EVENT: &str = "guild_create";
 
 /// Routes Discord gateway events to the plugins that declared them in their
 /// manifest `event_handlers`. Subscriptions are keyed by plugin name;
@@ -101,11 +104,24 @@ mod tests {
     async fn subscribe_then_subscribers_returns_the_plugin_per_event() {
         let router = PluginEventRouter::new();
         router
-            .subscribe("feed", &["voice_state".into(), "message".into()])
+            .subscribe(
+                "feed",
+                &[
+                    "voice_state".into(),
+                    GUILD_CREATE_EVENT.into(),
+                    "message".into(),
+                ],
+            )
             .await;
-        router.subscribe("hello", &["voice_state".into()]).await;
+        router
+            .subscribe("hello", &["voice_state".into(), GUILD_CREATE_EVENT.into()])
+            .await;
 
         assert_eq!(router.subscribers("voice_state").await, ["feed", "hello"]);
+        assert_eq!(
+            router.subscribers(GUILD_CREATE_EVENT).await,
+            ["feed", "hello"]
+        );
         assert_eq!(router.subscribers("message").await, ["feed"]);
         assert_eq!(
             router.subscribers("guild_ready").await,

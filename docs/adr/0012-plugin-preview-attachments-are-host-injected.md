@@ -79,3 +79,13 @@ wholly host-side.
 - Snapshot tests normalize the declared attachment list alongside the
   custom-id timestamps, since the declaration is stable JSON while the
   bytes themselves never reach the plugin.
+
+**Update — 2026-09-24 (phase 5):** Voice runtime leaderboard images are a
+separate approved transport. `ViewSpec` now carries `files` entries using
+the same `{filename, data_base64}` runtime-file shape as `host.send_message`.
+After validating the complete `ViewSpec`, the host decodes and attaches them on
+the initial `open_plugin_view` render,
+the Settings-section handoff, and every interaction edit, alongside any
+host-injected preview attachments. The host validates file shape, base64, an 8 MiB per-file limit,
+and a 25 MiB per-message limit before Discord I/O. The historical
+host-injected welcome-preview decision above remains in force.

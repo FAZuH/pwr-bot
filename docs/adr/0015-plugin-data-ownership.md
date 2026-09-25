@@ -5,15 +5,11 @@ capabilities, not the schemas. The core Postgres connection capability
 (`db_url`, already returned by `host.get_config`) is formalized as stable
 protocol surface, and `data_path` is the sanctioned home for plugin files
 (the voice session heartbeat is a file there, not a table). A plugin owns its
-tables and can run its own embedded Diesel migrations at startup. Only the
-feed plugin currently owns embedded migrations.
-The shared `server_settings` table — an artifact of one process owning
-three domains — splits into per-plugin settings storage, with each plugin
-reading its legacy row on first startup; the core retains the shared table
-only for the still-live Voice and Welcome settings and the feed legacy
-import. Core also keeps `plugin_kv`, `guild_plugins`, and `bot_meta`, and
-drops the remaining feed service and table ownership by the end of the
-migration. Rejected: a generic SQL passthrough cap (violates ADR-0010's "ops
+tables and can run its own embedded Diesel migrations at startup. Feed and
+voice own their embedded migrations; core owns shared host tables.
+The shared `server_settings` table remains for Welcome settings and one-time
+legacy imports. Core also keeps `plugin_kv`, `guild_plugins`, and `bot_meta`;
+the feed repository is read-only for the transitional dump. Rejected: a generic SQL passthrough cap (violates ADR-0010's "ops
 are shaped by services") and typed-RPC growth (keeps the core domain-aware,
 contra ADR-0014). No data migration guards the rename of the settings
 panels — nothing pre-plugin runs in production, so `guild_plugins` rows are

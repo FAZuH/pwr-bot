@@ -13,7 +13,6 @@ pub mod register_owner;
 pub mod session_exit;
 pub mod settings;
 pub mod unregister;
-pub mod voice;
 pub mod welcome;
 
 /// How long the session parks on a handed-off section panel before giving
@@ -41,8 +40,6 @@ use poise::ReplyHandle;
 use crate::bot::Data;
 use crate::bot::command::about::AboutHandler;
 use crate::bot::command::settings::SettingsHandler;
-use crate::bot::command::voice::leaderboard::VoiceLeaderboardHandler;
-use crate::bot::command::voice::stats::VoiceStatsHandler;
 use crate::bot::navigation::Navigation;
 use crate::bot::translate::SettingsReturnPage;
 
@@ -70,7 +67,6 @@ impl Cog for Cogs {
             register_owner::register_owner(),
             settings::settings(),
             unregister::unregister(),
-            voice::voice(),
             welcome::welcome(),
         ]
     }
@@ -144,18 +140,6 @@ impl<'a> Router<'a> {
         match target {
             SettingsMain => Some(Box::new(SettingsHandler::new())),
             SettingsAbout => Some(Box::new(AboutHandler::new())),
-            VoiceLeaderboard { time_range } => {
-                Some(Box::new(VoiceLeaderboardHandler::new(time_range)))
-            }
-            VoiceStats {
-                time_range,
-                target_user,
-                stat_type,
-            } => Some(Box::new(VoiceStatsHandler::new(
-                time_range,
-                *target_user,
-                stat_type,
-            ))),
             SettingsSection { .. } | Back | Exit => {
                 unreachable!("pop_step resolves the terminal targets itself")
             }
@@ -392,13 +376,11 @@ mod tests {
         assert!(matches!(walk.back(), Popped::RootBack));
     }
 
-    /// Voice leaderboard → About → Back: the marker closes the About frame
-    /// and the parent beneath it runs again, morphing the same message back.
+    /// A child frame → About → Back: the marker closes the About frame and
+    /// the parent beneath it runs again.
     #[test]
     fn back_pops_one_level_to_the_parent() {
-        let parent = Navigation::VoiceLeaderboard {
-            time_range: crate::bot::command::voice::VoiceLeaderboardTimeRange::Today,
-        };
+        let parent = Navigation::SettingsAbout;
         let mut walk = Walk::new(parent.clone());
         assert!(matches!(walk.opened(), Popped::Run(ref target) if target == &parent));
         assert!(matches!(
@@ -409,13 +391,10 @@ mod tests {
     }
 
     /// The parent a Back reveals stays the current frame rather than being
-    /// re-pushed, so the next Back closes it too: two Backs from About leave
-    /// the session instead of looping on the parent.
+    /// re-pushed, so the next Back closes it too.
     #[test]
     fn a_revealed_parent_stays_the_current_frame() {
-        let parent = Navigation::VoiceLeaderboard {
-            time_range: crate::bot::command::voice::VoiceLeaderboardTimeRange::Today,
-        };
+        let parent = Navigation::SettingsAbout;
         let mut walk = Walk::new(parent.clone());
         walk.opened();
         walk.pushed(Navigation::SettingsAbout);
@@ -428,23 +407,17 @@ mod tests {
         assert!(matches!(walk.back(), Popped::RootBack));
     }
 
-    /// Three frames deep, each Back closes exactly one: the walk uncovers the
-    /// frames in order rather than collapsing to the root.
+    /// Three nested frames each Back closes exactly one: the walk uncovers
+    /// the frames in order rather than collapsing to the root.
     #[test]
     fn consecutive_backs_each_close_one_frame() {
         let mut walk = Walk::new(Navigation::SettingsAbout);
         walk.opened();
-        walk.pushed(Navigation::VoiceLeaderboard {
-            time_range: crate::bot::command::voice::VoiceLeaderboardTimeRange::Today,
-        });
-        walk.pushed(Navigation::VoiceLeaderboard {
-            time_range: crate::bot::command::voice::VoiceLeaderboardTimeRange::Past7Days,
-        });
+        walk.pushed(Navigation::SettingsAbout);
+        walk.pushed(Navigation::SettingsAbout);
         assert!(matches!(
             walk.back(),
-            Popped::Run(Navigation::VoiceLeaderboard {
-                time_range: crate::bot::command::voice::VoiceLeaderboardTimeRange::Today,
-            })
+            Popped::Run(Navigation::SettingsAbout)
         ));
         assert!(matches!(
             walk.back(),
@@ -452,7 +425,6 @@ mod tests {
         ));
     }
 
-    /// Exiting to a settings section is the handoff, wherever in the walk it
     /// happens: the message morphs into the section's plugin view and the
     /// host run ends.
     #[test]
@@ -495,37 +467,20 @@ mod tests {
         let mut walk = Walk::new(Navigation::SettingsAbout);
         walk.opened();
         assert!(matches!(walk.pushed(Navigation::Exit), Popped::End));
-
-        let mut idle = Walk::new(Navigation::VoiceLeaderboard {
-            time_range: crate::bot::command::voice::VoiceLeaderboardTimeRange::Today,
-        });
-        idle.opened();
-        assert!(matches!(
-            pop_step(&mut idle.queue, &mut idle.history),
-            Popped::End
-        ));
-        assert_eq!(idle.history.len(), 1, "the open frame is left alone");
+        assert_eq!(walk.history.len(), 1, "the open frame is left alone");
     }
 
     /// History is capped: the oldest frame falls off, so a session that keeps
     /// navigating deeper cannot grow the walk without bound.
     #[test]
     fn history_is_capped_at_max_nav_history() {
-        let mut walk = Walk::new(Navigation::SettingsAbout);
+        let mut walk = Walk::new(Navigation::SettingsMain);
         walk.opened();
         for _step in 0..MAX_NAV_HISTORY {
-            walk.pushed(Navigation::VoiceLeaderboard {
-                time_range: crate::bot::command::voice::VoiceLeaderboardTimeRange::Today,
-            });
+            walk.pushed(Navigation::SettingsAbout);
         }
         assert_eq!(walk.history.len(), MAX_NAV_HISTORY);
-        assert_eq!(
-            walk.history.front(),
-            Some(&Navigation::VoiceLeaderboard {
-                time_range: crate::bot::command::voice::VoiceLeaderboardTimeRange::Today,
-            }),
-            "the initial frame is the oldest and the first to fall off"
-        );
+        assert_eq!(walk.history.front(), Some(&Navigation::SettingsAbout));
     }
 
     /// The Back marker never reaches the handler map: `pop_step` resolves it

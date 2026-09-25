@@ -211,7 +211,7 @@ mod tests {
     fn manifest_serializes_to_declared_shape() {
         assert_eq!(
             serde_json::to_string(&sample_manifest()).unwrap(),
-            r#"{"name":"feed","description":"Feed subscriptions","version":"0.1.0","commands":[{"create_command":{"description":"List feeds","name":"feed.list","options":[]}}],"event_handlers":["voice_state"],"tasks":[{"name":"prune","interval_secs":3600,"command":"feed.prune"}],"settings":[],"api_version":1}"#
+            r#"{"name":"feed","description":"Feed subscriptions","version":"0.1.0","commands":[{"create_command":{"description":"List feeds","name":"feed.list","options":[]}}],"event_handlers":["voice_state"],"tasks":[{"name":"prune","interval_secs":3600,"command":"feed.prune"}],"settings":[],"api_version":2}"#
         );
     }
 
@@ -224,7 +224,7 @@ mod tests {
 
     #[test]
     fn missing_required_field_fails_to_deserialize() {
-        let json = r#"{"name":"feed","description":"d","version":"0.1.0","commands":[],"event_handlers":[],"api_version":1}"#;
+        let json = r#"{"name":"feed","description":"d","version":"0.1.0","commands":[],"event_handlers":[],"api_version":3}"#;
         assert!(serde_json::from_str::<Manifest>(json).is_err());
     }
 
@@ -247,11 +247,11 @@ mod tests {
     #[test]
     fn unknown_api_version_is_rejected() {
         let mut manifest = sample_manifest();
-        manifest.api_version = 2;
+        manifest.api_version = 3;
         assert_eq!(
             manifest.validate(),
             Err(ManifestError::UnsupportedApiVersion {
-                got: 2,
+                got: 3,
                 expected: API_VERSION,
             })
         );
@@ -365,7 +365,7 @@ mod tests {
 
     #[test]
     fn manifest_without_settings_deserializes_with_an_empty_list() {
-        let json = r#"{"name":"feed","description":"d","version":"0.1.0","commands":[],"event_handlers":[],"tasks":[],"api_version":1}"#;
+        let json = r#"{"name":"feed","description":"d","version":"0.1.0","commands":[],"event_handlers":[],"tasks":[],"api_version":2}"#;
         let manifest: Manifest = serde_json::from_str(json).unwrap();
         assert_eq!(manifest.settings, vec![]);
         assert_eq!(manifest.validate(), Ok(()));

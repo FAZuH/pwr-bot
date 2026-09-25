@@ -58,7 +58,7 @@ fn services(io: Arc<MockHostIo>, db_url: String) -> Arc<HostServices> {
         kv: None,
         engine: None,
         stats: Arc::new(StatsHandle::default()),
-        voice: None,
+        users: Default::default(),
         welcome: None,
         previews: None,
         settings_returns: None,
@@ -149,7 +149,7 @@ async fn the_adopted_message_answers_toggles_like_any_panel() {
             message_id,
             "feeds:toggle",
             json!({ "_context": admin_context() }),
-            |data| pwr_bot::plugin::validate_view_data(data).map_err(Into::into),
+            pwr_bot::plugin::validate_view_spec,
         )
         .await
         .expect("the toggle click routes to the adopted session");

@@ -38,7 +38,7 @@
 //!   framework is built; `/plugins` uses the same routing commands for
 //!   per-guild registration.
 //! - `plugin_slash_dispatch` also wires autocomplete responses; per-option
-//!   min/max/length constraints remain outside the v1 command parser.
+//!   min/max/length constraints remain outside the command parser.
 
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -58,19 +58,34 @@ use serde_json::json;
 use crate::bot::Data;
 use crate::bot::checks::is_author_guild_admin;
 use crate::bot::command::Error;
+use crate::plugin::decode_runtime_files_with_existing;
 use crate::plugin::edit_body_for_transport;
-use crate::plugin::validate_view_data;
+use crate::plugin::validate_view_spec;
 
 pub(crate) const ACTOR_CONTEXT_KEY: &str = "_context";
 
+#[cfg(test)]
 pub(crate) fn actor_context(interaction: &serenity::CommandInteraction) -> Value {
-    actor_context_from_parts(interaction.user.id, interaction.member.as_deref())
+    actor_context_with_guild_name(interaction, None)
 }
 
-/// Builds the actor payload sent to a plugin for one Discord interaction.
-pub(crate) fn actor_context_from_parts(
+pub(crate) fn actor_context_with_guild_name(
+    interaction: &serenity::CommandInteraction,
+    guild_name: Option<&str>,
+) -> Value {
+    actor_context_from_parts_with_guild(
+        interaction.user.id,
+        interaction.member.as_deref(),
+        interaction.guild_id,
+        guild_name,
+    )
+}
+
+pub(crate) fn actor_context_from_parts_with_guild(
     user_id: serenity::UserId,
     member: Option<&serenity::Member>,
+    guild_id: Option<serenity::GuildId>,
+    guild_name: Option<&str>,
 ) -> Value {
     let mut member_roles = member
         .map(|member| {
@@ -87,6 +102,8 @@ pub(crate) fn actor_context_from_parts(
         .map(|permissions| permissions.bits());
     json!({
         "user_id": user_id.get(),
+        "guild_id": guild_id.map(|id| id.get()),
+        "guild_name": guild_name,
         "member_roles": member_roles,
         "member_permissions": member_permissions,
     })
@@ -702,7 +719,7 @@ async fn edit_invoked_view(
     token: &str,
     spec: &ViewSpec,
 ) -> Result<serenity::Message, Error> {
-    let (body, files) = ctx
+    let (body, mut files) = ctx
         .data()
         .previews
         .resolve(
@@ -710,6 +727,10 @@ async fn edit_invoked_view(
             ctx.guild_id().map(serenity::GuildId::get),
         )
         .await;
+    files.extend(
+        decode_runtime_files_with_existing(&spec.files, files.len())
+            .map_err(|error| anyhow::anyhow!(error.msg))?,
+    );
     Ok(ctx
         .http()
         .edit_original_interaction_response(
@@ -727,7 +748,7 @@ async fn present_invoked_view(
     deferred_ephemeral: Option<bool>,
 ) -> Result<(serenity::Message, bool), Error> {
     let presentation = view_presentation(spec);
-    validate_view_data(&presentation.edit_body)?;
+    validate_view_spec(spec).map_err(|error| Error::from(error.msg))?;
     if deferred_ephemeral.is_some_and(|ephemeral| ephemeral != spec.ephemeral) {
         return Err(
             anyhow::anyhow!("plugin changed response visibility after progress started").into(),
@@ -741,13 +762,14 @@ async fn present_invoked_view(
         }
     }
     let message = edit_invoked_view(ctx, token, spec).await?;
-    Ok((message, spec.ephemeral))
+    Ok((message, presentation.ephemeral))
 }
 
 /// Opens a plugin view from a slash interaction end to end: invoke the
 /// plugin for its spec, defer with the view's ephemerality, edit the
 /// deferred response with the spec payload (transport-stripped, with any
-/// declared attachment slots filled, ADR-0012), and register the engine
+/// declared attachment slots filled, ADR-0012, plus runtime files from
+/// `ViewSpec.files`), and register the engine
 /// session on the edited message's id. No placeholder message is ever sent.
 ///
 /// Shared by `plugin_slash_dispatch` and the commands that deep-link a
@@ -769,7 +791,8 @@ pub async fn open_plugin_view(
     let Some(plugin) = data.plugin_manager.get(plugin_name).await else {
         return Err(anyhow::anyhow!("plugin `{plugin_name}` is not running").into());
     };
-    args[ACTOR_CONTEXT_KEY] = actor_context(app.interaction);
+    let guild_name = ctx.guild().map(|guild| guild.name.to_string());
+    args[ACTOR_CONTEXT_KEY] = actor_context_with_guild_name(app.interaction, guild_name.as_deref());
     if args.get("guild_id").is_none()
         && let Some(guild_id) = ctx.guild_id()
     {
@@ -836,6 +859,7 @@ fn is_feed_settings_command(command_name: &str) -> bool {
 }
 
 fn autocomplete_args(ctx: &poise::ApplicationContext<'_, Data, Error>, query: &str) -> Value {
+    let guild_name = ctx.guild().map(|guild| guild.name.to_string());
     let mut args = json!({
         "query": query,
         "option": ctx
@@ -844,7 +868,10 @@ fn autocomplete_args(ctx: &poise::ApplicationContext<'_, Data, Error>, query: &s
             .autocomplete()
             .map(|option| option.name)
             .unwrap_or_default(),
-        ACTOR_CONTEXT_KEY: actor_context(ctx.interaction),
+        ACTOR_CONTEXT_KEY: actor_context_with_guild_name(
+            ctx.interaction,
+            guild_name.as_deref(),
+        ),
     });
     if let Some(guild_id) = ctx.guild_id() {
         args["guild_id"] = json!(guild_id.get());
@@ -2316,6 +2343,10 @@ mod tests {
             context["member_permissions"],
             json!(serenity::Permissions::MANAGE_GUILD.bits())
         );
+        interaction.guild_id = Some(serenity::GuildId::new(9));
+        let guild_context = actor_context_with_guild_name(&interaction, Some("Test Guild"));
+        assert_eq!(guild_context["guild_id"], json!(9));
+        assert_eq!(guild_context["guild_name"], json!("Test Guild"));
     }
 
     // ── commands_from_manifest / select_commands ────────────────────────────
@@ -2496,11 +2527,13 @@ mod tests {
             data: json!({"components": []}),
             ephemeral: true,
             view: json!({}),
+            files: vec![],
         };
         let public_spec = ViewSpec {
             data: json!({"components": []}),
             ephemeral: false,
             view: json!({}),
+            files: vec![],
         };
 
         assert!(view_presentation(&ephemeral_spec).ephemeral);
@@ -2516,6 +2549,7 @@ mod tests {
             data: data.clone(),
             ephemeral: true,
             view: json!({"page": 1}),
+            files: vec![],
         };
 
         let presentation = view_presentation(&spec);

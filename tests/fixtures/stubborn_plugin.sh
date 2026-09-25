@@ -4,7 +4,7 @@
 # read fails and the loop retries after a sleep. stop() must fall back to
 # signaling its process group: SIGTERM first, then SIGKILL on a second grace
 # timeout, and the host must observe a signal death.
-echo '{"t":"hello","v":1,"name":"stubborn","caps":[]}'
+echo '{"t":"hello","v":2,"name":"stubborn","ops":[]}'
 while true; do
     IFS= read -r line || sleep 1
 done

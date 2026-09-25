@@ -31,7 +31,6 @@ const MIGRATIONS: EmbeddedMigrations = embed_migrations!("migrations");
 pub struct PgRepos {
     feed_dump: PgFeedDumpRepo,
     pub server_settings: PgServerSettingsRepo,
-    pub voice_sessions: PgVoiceSessionsRepo,
     pub bot_meta: PgBotMetaRepo,
     pub plugin_kv: PgPluginKvRepo,
     pub guild_plugins: PgGuildPluginRepo,
@@ -51,7 +50,6 @@ impl PgRepos {
         Ok(Self {
             feed_dump: PgFeedDumpRepo::new(pool.clone()),
             server_settings: PgServerSettingsRepo::new(pool.clone()),
-            voice_sessions: PgVoiceSessionsRepo::new(pool.clone()),
             bot_meta: PgBotMetaRepo::new(pool.clone()),
             plugin_kv: PgPluginKvRepo::new(pool.clone()),
             guild_plugins: PgGuildPluginRepo::new(pool.clone()),
@@ -79,7 +77,6 @@ impl PgRepos {
 
     pub async fn delete_all_tables(&self) -> anyhow::Result<()> {
         self.server_settings.delete_all().await?;
-        self.voice_sessions.delete_all().await?;
         self.bot_meta.delete_all().await?;
         self.plugin_kv.delete_all().await?;
         self.guild_plugins.delete_all().await?;
@@ -94,10 +91,6 @@ impl Repos for PgRepos {
 
     fn server_settings(&self) -> Box<dyn ServerSettingsRepository + Send + Sync> {
         Box::new(self.server_settings.clone())
-    }
-
-    fn voice_sessions(&self) -> Box<dyn VoiceSessionsRepository + Send + Sync> {
-        Box::new(self.voice_sessions.clone())
     }
 
     fn bot_meta(&self) -> Box<dyn BotMetaRepository + Send + Sync> {

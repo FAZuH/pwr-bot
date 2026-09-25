@@ -7,10 +7,10 @@ settings, and welcome — into plugin crates. Their host shells and update
 modules were removed. The host still owns the `/settings` GUI and the
 remaining host views, so the runtime has users after the migration.
 
-This ticket retires the host copies. The remaining host runtime has six
-`GuiFeature` implementations: `about`, `settings`, `voice_stats`,
-`voice_leaderboard`, `register`, and `unregister`. The last two are
-one-shot features; the other four use the host event loop.
+This ticket retires the host copies. The remaining host runtime has four
+`GuiFeature` implementations: `about`, `settings`, `register`, and
+`unregister`. The last two are one-shot features; the other two use the host
+event loop.
 
 The retired panels still leave one piece of live machinery behind: the
 welcome preview resolver (`PreviewResolver`, ADR-0012). It fills the
@@ -22,25 +22,25 @@ transport paths call it. It cannot die with the panel.
 Keep the gui runtime. The host panel copies, their update cores, and
 their `Navigation` targets are deleted; the runtime is not.
 
-1. **The runtime earns its keep.** Six host features still use
+1. **The runtime earns its keep.** Four host features still use
    `GuiFeature`; the `/settings` GUI is one of them. Retiring the runtime
    means migrating those host features first.
 2. **The commands deep-link the plugins.** `/feed settings`,
-   `/voice settings`, and `/welcome` no longer start a host session.
+   `/vc settings`, and `/welcome` no longer start a host session.
    They call `open_plugin_view` (`src/plugin/command.rs`), the shared
    invoke → validate → defer → edit → register core extracted from
    `plugin_slash_dispatch`, and open their panel plugin's view directly.
    The helper resolves declared attachment slots through
    `PreviewResolver`, so the welcome preview works on this path too.
 3. **The preview resolver moves, not dies.** `PreviewResolver`,
-   `generate_preview_from`, `declares_preview`, and `WELCOME_FILE` move
-   to `src/plugin/preview.rs` — consumer-side, next to the transport
+   `AttachmentRenderer`, `WelcomeAttachmentRenderer`, and `WELCOME_FILE`
+   live in `src/plugin/preview.rs` — consumer-side, next to the transport
    paths that call them.
 4. **The hub stubs are gone for good.** With all three panels migrated,
    the `settings:config:*` fallback in `crates/plugin/settings/` is
    dead: the prefix constant, the `config_target` lookup, the
-   `page_swap` stub arm, and their tests are deleted. `FEATURES` now
-   carries each feature's plugin target directly.
+   `page_swap` stub arm, and their tests are deleted. Plugin targets now
+   come from the manifests through the host command routes.
 5. **The host-owned guards stay.** `TranslateLayer` and the
    `host_owned` message checks keep routing interactions for the host
    features that still create `Host` sessions.
@@ -72,3 +72,10 @@ runs the `SettingsFeature` (`src/bot/gui/settings.rs`, core
 `Navigation::SettingsSection`. `SettingsMain` is a runnable host frame,
 not a terminal handoff, and the About feature's Back lands on the
 Settings GUI.
+
+## Update (2026-09-25)
+
+The host GUI runtime now contains only the `about`, `settings`, `register`,
+and `unregister` features. Voice and feed views render and persist through
+their plugin crates; the host forwards generic gateway events to subscribed
+plugins.

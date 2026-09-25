@@ -1,201 +1,140 @@
-//! End-to-end tests for the voice settings panel plugin (#149, the
-//! panel-migration's second panel): the panel plugin is spawned over the
-//! real stdio wire — no database, no Discord — through the plugin manager,
-//! like the core plugins the host spawns at startup. The voice settings seam
-//! is served by a mockall mock of the host's [`VoiceSettingsSource`] and the
-//! Discord I/O seam by a mock [`HostIo`].
-//!
-//! Assertions mirror the documented contract:
-//! - the panel's invoke loads the guild's snapshot through
-//!   `host.voice.get_settings` and renders the monolith `/vc settings`
-//!   layout as Components V2;
-//! - a plain edit (toggle) re-renders without a host call;
-//! - Back persists the whole snapshot exactly once through
-//!   `host.voice.update_settings`, then hands the message back to the host
-//!   Settings GUI (the panel re-renders only when no live Settings session
-//!   takes the message back);
-//! - About persists the edited snapshot exactly once, then opens the host
-//!   About view on the panel's message — the `about` open_view target
-//!   completes the parked waiter with the About page;
-//! - the engine's `view.timeout` event persists the last snapshot once,
-//!   answering nothing;
-//! - a failed settings load fails the open with the host's typed error
-//!   forwarded;
-//! - `bye` exits cleanly with status 0.
-
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use mockall::predicate::eq;
+use pwr_bot::bot::translate::SettingsReturns;
 use pwr_bot::plugin::HostConfig;
 use pwr_bot::plugin::HostServices;
+use pwr_bot::plugin::InteractionEngine;
 use pwr_bot::plugin::PluginManager;
 use pwr_bot::plugin::RespawnPolicy;
 use pwr_bot::plugin::RunningPlugin;
 use pwr_bot::plugin::StatsHandle;
-use pwr_bot::plugin::VoiceSettingsError;
 use pwr_bot::plugin::host::MockHostIo;
-use pwr_bot::plugin::host::MockVoiceSettingsSource;
 use pwr_plugin_protocol::Msg;
-use pwr_plugin_protocol::ServerSettings;
 use pwr_poise_components::IS_COMPONENTS_V2;
 use serde_json::Value;
 use serde_json::json;
 
+mod common;
 mod probe;
 use probe::probe_binary;
 
-/// The guild the panels key their settings by.
-const GUILD_ID: u64 = 42;
-
-/// A settings snapshot with the voice field set, so wire round trips are
-/// observable end to end.
-fn sample_settings() -> ServerSettings {
-    ServerSettings {
-        voice: pwr_plugin_protocol::VoiceSettings {
-            enabled: Some(true),
-        },
-        ..ServerSettings::default()
-    }
+async fn database() -> String {
+    let db_url = common::db::db_url().await;
+    let core = common::setup_db().await;
+    common::teardown_db(&core).await;
+    db_url
 }
 
-/// The services the panel shares with its host calls, like the host's one
-/// [`HostServices`] arc: the io seam posts placeholders and edits payloads,
-/// and the voice seam serves the panel's settings RPCs.
 fn services(
-    io: Arc<MockHostIo>,
-    voice: Arc<MockVoiceSettingsSource>,
-    settings_returns: Option<Arc<pwr_bot::bot::translate::SettingsReturns>>,
+    db_url: String,
+    engine: InteractionEngine<RunningPlugin>,
+    returns: Arc<SettingsReturns>,
 ) -> Arc<HostServices> {
     Arc::new(HostServices {
-        io: Some(io),
+        io: Some(Arc::new(MockHostIo::new())),
         config: Some(HostConfig {
-            db_url: "postgres://test".into(),
-            data_path: PathBuf::from("/tmp/pwr-bot-test"),
+            db_url,
+            data_path: PathBuf::from("/tmp/pwr-bot-voice-test"),
             poll_interval: std::time::Duration::from_secs(30),
         }),
         kv: None,
-        engine: None,
+        engine: Some(Arc::new(engine)),
         stats: Arc::new(StatsHandle::default()),
-        voice: Some(voice),
+        users: Default::default(),
         welcome: None,
         previews: None,
-        settings_returns,
+        settings_returns: Some(returns),
     })
 }
 
-/// Spawns the panel plugin under a manager wired with the shared services,
-/// like the host's startup loop spawns its core plugins.
-async fn spawn_panel(services: Arc<HostServices>) -> Arc<RunningPlugin> {
-    let manager =
-        Arc::new(PluginManager::new(None, RespawnPolicy::default()).with_host_services(services));
+async fn spawn_panel(db_url: String, returns: Arc<SettingsReturns>) -> Arc<RunningPlugin> {
+    let engine = InteractionEngine::<RunningPlugin>::new();
+    let host_services = services(db_url, engine, returns);
+    let manager = Arc::new(
+        PluginManager::new(None, RespawnPolicy::default()).with_host_services(host_services),
+    );
     manager
         .spawn("voice", probe_binary("voice"), None, &[], &[])
         .await
-        .expect("spawn voice panel")
+        .expect("spawn voice plugin")
 }
 
-/// Asserts a resp is an ok view envelope answering its own invoke id, and
-/// returns its `view` value.
-fn assert_envelope(resp: &Msg, expected_id: u64) -> Value {
-    match resp {
+fn admin_args(guild_id: u64) -> Value {
+    json!({
+        "_context": {
+            "user_id": 42,
+            "guild_id": guild_id,
+            "member_permissions": 8
+        }
+    })
+}
+
+fn assert_envelope(response: &Msg, expected_id: u64) -> Value {
+    match response {
         Msg::Resp {
             id,
             ok: true,
             data: Some(data),
             error: None,
         } => {
-            assert_eq!(*id, expected_id, "resp answers its own invoke id");
+            assert_eq!(*id, expected_id);
             assert_eq!(data["ephemeral"], json!(false));
             assert_eq!(data["data"]["flags"], json!(IS_COMPONENTS_V2));
             data["view"].clone()
         }
-        _ => panic!("expected ok envelope, got {resp:?}"),
+        other => panic!("expected an ok envelope, got {other:?}"),
     }
 }
 
-/// The panel's status text display.
-fn panel_status(resp: &Msg) -> &str {
-    match resp {
+fn panel_status(response: &Msg) -> &str {
+    match response {
         Msg::Resp {
             data: Some(data), ..
         } => data["data"]["components"][0]["components"][0]["content"]
             .as_str()
-            .expect("status text display"),
-        other => panic!("expected a resp, got {other:?}"),
+            .expect("status text"),
+        other => panic!("expected a response, got {other:?}"),
     }
 }
 
-/// The full edit loop, then Back: the toggle re-renders without a host
-/// call, Back persists the edited whole snapshot exactly once through
-/// `host.voice.update_settings`, then hands the message back to the host
-/// Settings GUI — the host-reserved `settings` open_view target completes
-/// the waiter the parked session parked, and the panel answers its
-/// interaction with the `ViewMoved` marker instead of a render.
 #[tokio::test]
+#[serial_test::serial]
 async fn open_edit_and_back_persist_the_snapshot_once_and_return() {
-    let mut voice = MockVoiceSettingsSource::new();
-    voice
-        .expect_get_settings()
-        .with(eq(GUILD_ID))
-        .times(1)
-        .returning(|_| Ok(sample_settings()));
-    let mut toggled = sample_settings();
-    toggled.voice.enabled = Some(false);
-    voice
-        .expect_update_settings()
-        .with(eq(GUILD_ID), eq(toggled))
-        .times(1)
-        .returning(|_, _| Ok(()));
+    let db_url = database().await;
+    let returns = Arc::new(SettingsReturns::default());
+    let panel = spawn_panel(db_url, returns.clone()).await;
+    let guild_id = 42;
 
-    let returns = Arc::new(pwr_bot::bot::translate::SettingsReturns::default());
-    let panel = spawn_panel(services(
-        Arc::new(MockHostIo::new()),
-        Arc::new(voice),
-        Some(returns.clone()),
-    ))
-    .await;
-
-    // The invoke the Settings section handoff would issue — with the
-    // forwarded guild id. The panel renders the active snapshot.
-    let resp = panel
-        .call(
-            "invoke",
-            Some("voice-settings"),
-            Some(json!({ "guild_id": GUILD_ID })),
-        )
+    let response = panel
+        .call("invoke", Some("voice-settings"), Some(admin_args(guild_id)))
         .await
-        .expect("panel invoke answered");
-    let view = assert_envelope(&resp, 0);
-    assert_eq!(view["guild_id"], json!(GUILD_ID));
-    assert!(panel_status(&resp).contains("**active**"));
+        .expect("invoke answered");
+    let view = assert_envelope(&response, 0);
+    assert!(panel_status(&response).contains("**active**"));
 
-    // A plain edit: the toggle flips the model with no host call — the
-    // re-rendered panel shows the paused copy.
-    let resp = panel
+    let response = panel
         .call(
             "view.interact",
             Some("voice-settings"),
             Some(json!({
+                "_context": admin_args(guild_id)["_context"],
                 "custom_id": "voice:toggle",
                 "view": view,
             })),
         )
         .await
         .expect("toggle answered");
-    let view = assert_envelope(&resp, 1);
-    assert!(panel_status(&resp).contains("**paused**"));
+    let view = assert_envelope(&response, 1);
+    assert!(panel_status(&response).contains("**paused**"));
 
-    // Back: persist once (the mock pins the toggled snapshot), then the
-    // in-place open_view against the host-reserved `settings` target wakes
-    // the parked session — the panel answers with the ViewMoved marker and
-    // the host re-runs the Settings GUI on the message.
-    let rx = returns.wait(poise::serenity_prelude::MessageId::new(777));
-    let resp = panel
+    let waiter = returns.wait(poise::serenity_prelude::MessageId::new(777));
+    let response = panel
         .call(
             "view.interact",
             Some("voice-settings"),
             Some(json!({
+                "_context": admin_args(guild_id)["_context"],
                 "custom_id": "voice:back",
                 "view": view,
                 "channel_id": 999,
@@ -204,74 +143,52 @@ async fn open_edit_and_back_persist_the_snapshot_once_and_return() {
         )
         .await
         .expect("back answered");
-    match &resp {
+    assert!(matches!(
+        response,
         Msg::Resp {
             ok: false,
-            error: Some(err),
+            error: Some(error),
             ..
-        } => assert_eq!(err.kind, "ViewMoved"),
-        other => panic!("expected the ViewMoved marker, got {other:?}"),
-    }
-    rx.await.expect("the parked session was woken");
+        } if error.kind == "ViewMoved"
+    ));
+    waiter.await.expect("settings waiter was woken");
+    panel.stop().await.expect("stop voice plugin");
 }
 
-/// About persists the edited snapshot exactly once (like Back), then opens
-/// the host About view in place: the host-reserved `about` open_view target
-/// completes the parked waiter with the About page, and the panel answers
-/// its interaction with the `ViewMoved` marker.
 #[tokio::test]
+#[serial_test::serial]
 async fn about_persists_the_snapshot_once_and_opens_the_host_about_view() {
-    let mut voice = MockVoiceSettingsSource::new();
-    voice
-        .expect_get_settings()
-        .with(eq(GUILD_ID))
-        .times(1)
-        .returning(|_| Ok(sample_settings()));
-    let mut toggled = sample_settings();
-    toggled.voice.enabled = Some(false);
-    voice
-        .expect_update_settings()
-        .with(eq(GUILD_ID), eq(toggled))
-        .times(1)
-        .returning(|_, _| Ok(()));
+    let db_url = database().await;
+    let returns = Arc::new(SettingsReturns::default());
+    let panel = spawn_panel(db_url, returns.clone()).await;
+    let guild_id = 43;
 
-    let returns = Arc::new(pwr_bot::bot::translate::SettingsReturns::default());
-    let panel = spawn_panel(services(
-        Arc::new(MockHostIo::new()),
-        Arc::new(voice),
-        Some(returns.clone()),
-    ))
-    .await;
-
-    let resp = panel
-        .call(
-            "invoke",
-            Some("voice-settings"),
-            Some(json!({ "guild_id": GUILD_ID })),
-        )
+    let response = panel
+        .call("invoke", Some("voice-settings"), Some(admin_args(guild_id)))
         .await
-        .expect("panel invoke answered");
-    let view = assert_envelope(&resp, 0);
-
-    let resp = panel
+        .expect("invoke answered");
+    let view = assert_envelope(&response, 0);
+    let response = panel
         .call(
             "view.interact",
             Some("voice-settings"),
             Some(json!({
+                "_context": admin_args(guild_id)["_context"],
                 "custom_id": "voice:toggle",
                 "view": view,
             })),
         )
         .await
         .expect("toggle answered");
-    let view = assert_envelope(&resp, 1);
+    let view = assert_envelope(&response, 1);
 
-    let rx = returns.wait(poise::serenity_prelude::MessageId::new(778));
-    let resp = panel
+    let waiter = returns.wait(poise::serenity_prelude::MessageId::new(778));
+    let response = panel
         .call(
             "view.interact",
             Some("voice-settings"),
             Some(json!({
+                "_context": admin_args(guild_id)["_context"],
                 "custom_id": "voice:about",
                 "view": view,
                 "channel_id": 999,
@@ -280,84 +197,153 @@ async fn about_persists_the_snapshot_once_and_opens_the_host_about_view() {
         )
         .await
         .expect("about answered");
-    match &resp {
+    assert!(matches!(
+        response,
         Msg::Resp {
             ok: false,
-            error: Some(err),
+            error: Some(error),
             ..
-        } => assert_eq!(err.kind, "ViewMoved"),
-        other => panic!("expected the ViewMoved marker, got {other:?}"),
-    }
-    let page = rx.await.expect("the parked session was woken");
-    assert_eq!(page, pwr_bot::bot::translate::SettingsReturnPage::About);
+        } if error.kind == "ViewMoved"
+    ));
+    assert_eq!(
+        waiter.await.expect("settings waiter was woken"),
+        pwr_bot::bot::translate::SettingsReturnPage::About
+    );
+    panel.stop().await.expect("stop voice plugin");
 }
 
-/// The expiry event persists the last snapshot exactly once, answering
-/// nothing: the engine pushes `view.timeout` with the session's state.
 #[tokio::test]
+#[serial_test::serial]
 async fn expiry_persists_the_last_snapshot_once() {
-    let mut voice = MockVoiceSettingsSource::new();
-    voice
-        .expect_update_settings()
-        .with(eq(GUILD_ID), eq(sample_settings()))
-        .times(1)
-        .returning(|_, _| Ok(()));
-
-    let panel = spawn_panel(services(Arc::new(MockHostIo::new()), Arc::new(voice), None)).await;
-
+    let db_url = database().await;
+    let returns = Arc::new(SettingsReturns::default());
+    let panel = spawn_panel(db_url.clone(), returns).await;
     panel
         .send_event(
             "view.timeout",
             Some(json!({
-                "guild_id": GUILD_ID,
-                "settings": sample_settings(),
+                "guild_id": 44,
+                "settings": { "enabled": false }
             })),
         )
         .await
-        .expect("event delivered");
-
-    // The persist is fire-and-forget: give the plugin's loop a beat to
-    // resolve it before the bye, so the mock's times(1) expectation is
-    // observed at drop.
+        .expect("timeout event delivered");
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
-    let status = panel.stop().await.expect("graceful stop");
-    assert_eq!(status.code(), Some(0), "clean exit after bye: {status}");
+    let (client, connection) = tokio_postgres::connect(&db_url, tokio_postgres::NoTls)
+        .await
+        .expect("connect to verify settings");
+    tokio::spawn(async move {
+        connection.await.expect("verification connection");
+    });
+    let row = client
+        .query_one(
+            "SELECT enabled FROM voice_settings WHERE guild_id = $1",
+            &[&44_i64],
+        )
+        .await
+        .expect("read persisted settings");
+    assert!(!row.get::<_, bool>(0));
+    panel.stop().await.expect("stop voice plugin");
 }
 
-/// A failed settings load fails the open with the host's typed error
-/// forwarded: the Settings section handoff surfaces what the service said.
 #[tokio::test]
+#[serial_test::serial]
 async fn a_failed_load_fails_the_open_with_the_forwarded_error() {
-    let mut voice = MockVoiceSettingsSource::new();
-    voice
-        .expect_get_settings()
-        .with(eq(GUILD_ID))
-        .times(1)
-        .returning(|_| Err(VoiceSettingsError::Service(anyhow::anyhow!("guild gone"))));
+    let db_url = database().await;
+    let returns = Arc::new(SettingsReturns::default());
+    let panel = spawn_panel(db_url.clone(), returns).await;
+    let (client, connection) = tokio_postgres::connect(&db_url, tokio_postgres::NoTls)
+        .await
+        .expect("connect to break settings storage");
+    tokio::spawn(async move {
+        connection.await.expect("settings failure connection");
+    });
+    let mut ready = false;
+    for _ in 0..100 {
+        let exists: bool = client
+            .query_one(
+                "SELECT EXISTS (SELECT 1 FROM information_schema.tables \
+                 WHERE table_schema = 'public' AND table_name = 'voice_settings')",
+                &[],
+            )
+            .await
+            .expect("poll voice migration")
+            .get(0);
+        if exists {
+            ready = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert!(ready, "voice plugin did not finish its migrations");
+    let initial = panel
+        .call("invoke", Some("voice-settings"), Some(admin_args(46)))
+        .await
+        .expect("settings invocation before failure");
+    assert_envelope(&initial, 0);
+    client
+        .execute("DROP TABLE voice_settings", &[])
+        .await
+        .expect("break settings storage after plugin startup");
 
-    let panel = spawn_panel(services(Arc::new(MockHostIo::new()), Arc::new(voice), None)).await;
+    let response = panel
+        .call("invoke", Some("voice-settings"), Some(admin_args(46)))
+        .await;
+    client
+        .execute(
+            concat!(
+                "CREATE TABLE voice_settings (guild_id BIGINT PRIMARY KEY, ",
+                "enabled BOOLEAN NOT NULL DEFAULT TRUE)"
+            ),
+            &[],
+        )
+        .await
+        .expect("restore settings storage");
+    let response = response.expect("failed settings invocation answered");
+    assert!(
+        matches!(
+            &response,
+            Msg::Resp {
+                ok: false,
+                error: Some(error),
+                ..
+            } if error.kind == "CommandError"
+                && error.msg.contains("voice service failed: database error")
+                && error.msg.contains("relation \"voice_settings\" does not exist")
+        ),
+        "unexpected response: {response:?}"
+    );
+    panel.stop().await.expect("stop voice plugin");
+}
 
-    let resp = panel
+#[tokio::test]
+#[serial_test::serial]
+async fn invalid_settings_actor_is_rejected() {
+    let db_url = database().await;
+    let returns = Arc::new(SettingsReturns::default());
+    let panel = spawn_panel(db_url, returns).await;
+    let response = panel
         .call(
             "invoke",
             Some("voice-settings"),
-            Some(json!({ "guild_id": GUILD_ID })),
+            Some(json!({
+                "_context": {
+                    "user_id": 42,
+                    "guild_id": 45,
+                    "member_permissions": 0
+                }
+            })),
         )
         .await
-        .expect("invoke answered");
-    match resp {
+        .expect("invalid invocation answered");
+    assert!(matches!(
+        response,
         Msg::Resp {
             ok: false,
-            error: Some(err),
+            error: Some(error),
             ..
-        } => {
-            assert_eq!(err.kind, "VoiceSettingsError");
-            assert!(err.msg.contains("guild gone"), "msg: {}", err.msg);
-        }
-        _ => panic!("expected err resp, got {resp:?}"),
-    }
-
-    let status = panel.stop().await.expect("graceful stop");
-    assert_eq!(status.code(), Some(0), "clean exit after bye: {status}");
+        } if error.kind == "CommandError" && error.msg.contains("Manage Server")
+    ));
+    panel.stop().await.expect("stop voice plugin");
 }

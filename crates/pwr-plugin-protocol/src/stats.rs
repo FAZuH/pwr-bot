@@ -1,5 +1,5 @@
 //! The `host.stats` payload: the live bot statistics a plugin receives from
-//! the [`crate::HostCap::Stats`] op. Mirrors what the host's `/about` command
+//! the [`crate::HostOp::Stats`] op. Mirrors what the host's `/about` command
 //! shows, minus render-only fields (the About view's `current_year`): the
 //! plugin formats the values itself.
 

@@ -12,10 +12,10 @@
 //!
 //! # Flow
 //!
-//! locate the plugin binary → spawn → hello handshake (version, caps, and
+//! locate the plugin binary → spawn → hello handshake (version, ops, and
 //! manifest validated via `pwr_plugin_protocol`) → ack with the preview's
 //! own hello → `invoke` the command → interpret the resp payload as the
-//! view message (envelope or raw v1 shape, see
+//! view message (envelope or legacy raw shape, see
 //! [`proto::message_from_resp_data`]) → write it as a fixture JSON file →
 //! `pwr_viewgen` parses, validates, and renders it to HTML (and optionally
 //! PNG).
@@ -117,7 +117,8 @@ fn run_preview(args: &PreviewArgs) -> Result<()> {
     let payload = session
         .invoke(&command, serde_json::json!({}))
         .with_context(|| format!("invoking the `{command}` command"))?;
-    let message = message_from_resp_data(&payload);
+    let message = message_from_resp_data(&payload)
+        .with_context(|| format!("parsing the `{command}` response"))?;
     let plugin_name = session.name.clone();
     session.shutdown().context("stopping the plugin")?;
 

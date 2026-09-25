@@ -46,7 +46,7 @@ fn main() -> ExitCode {
     let hello = Msg::Hello {
         v: API_VERSION,
         name: PLUGIN_NAME.into(),
-        caps: vec![format!("command:{PLUGIN_NAME}")],
+        ops: vec![format!("command:{PLUGIN_NAME}")],
         manifest: Some(Manifest {
             name: PLUGIN_NAME.into(),
             description: "Echo plugin args".into(),

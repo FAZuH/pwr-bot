@@ -7,7 +7,7 @@
 //! host waiting for a reply (the bug that killed the prototype).
 //!
 //! Protocol behavior:
-//! - announces `hello` (`v`, `name`, `caps`) as its first line after spawn;
+//! - announces `hello` (`v`, `name`, `ops`) as its first line after spawn;
 //! - answers `call` (`invoke`, `view.interact`, `view.modal_submit`) with a
 //!   correlation-id-matched `resp`, keeping a per-process click counter for
 //!   [`BUTTON_CUSTOM_ID`];
@@ -136,7 +136,7 @@ fn main() -> ExitCode {
         let hello = Msg::Hello {
             v: API_VERSION,
             name: PLUGIN_NAME.into(),
-            caps: vec![
+            ops: vec![
                 "command:hello".into(),
                 "host.defer".into(),
                 "host.send_message".into(),

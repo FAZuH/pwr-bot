@@ -9,7 +9,7 @@
 //! free logging channel.
 //!
 //! Behavior:
-//! - announces `hello` (`v`, `name`, `caps`, `manifest`) as its first line
+//! - announces `hello` (`v`, `name`, `ops`, `manifest`) as its first line
 //!   after spawn; the manifest declares the `welcome-settings` command and
 //!   the settings section the host Settings GUI opens the panel through,
 //!   which forwards the source interaction's `guild_id` in the invoke args;
@@ -824,7 +824,7 @@ fn main() -> ExitCode {
     let hello = Msg::Hello {
         v: API_VERSION,
         name: PLUGIN_NAME.into(),
-        caps: vec![
+        ops: vec![
             GET_SETTINGS_OP.into(),
             UPDATE_SETTINGS_OP.into(),
             "host.open_view".into(),

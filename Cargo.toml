@@ -76,12 +76,9 @@ wreq-util = "0.2"
 url = "2"
 image = "0.25"
 sysinfo = "0.33"
-derive_builder = "0.20.2"
-contribution-grid = "2.0.1"
 minijinja = "2.15.1"
 base64 = "0.22.1"
 resvg = "0.47.0"
-plotters = "0.3.7"
 diesel = { version = "2.3", features = ["chrono", "postgres", "serde_json", "uuid"] }
 diesel-async = { version = "0.8", features = ["deadpool", "postgres"] }
 diesel_migrations = { version = "2.3", features = ["postgres"] }
@@ -99,10 +96,8 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 httpmock = "0.7.0"
 serial_test = "3.3.1"
 pwr-viewgen.workspace = true
-# The core panels' manifests, read by the registered-command snapshot test.
+# Integration tests exercise the feed service and repository types.
 feed = { path = "crates/plugin/feed" }
-voice = { path = "crates/plugin/voice" }
-welcome = { path = "crates/plugin/welcome" }
 postgresql_embedded = { version = "=0.20.1", default-features = false, features = ["zonky", "tokio", "rustls"] }
 tokio-postgres = "0.7"
 # TLS for tokio-postgres in the test DB seam: `sslmode=require` URLs must

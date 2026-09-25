@@ -39,8 +39,6 @@ pub mod register;
 pub mod rt;
 pub mod settings;
 pub mod unregister;
-pub mod voice_leaderboard;
-pub mod voice_stats;
 
 pub use effects::EffectHandler;
 pub use effects::NoopEffectHandler;
@@ -95,11 +93,6 @@ pub(crate) mod cycle {
             "duplicate action labels in the rendered view: label lookup would be \
              HashMap-order dependent"
         );
-    }
-
-    /// True when an action with this visible label is registered.
-    pub fn has_label<T: Action>(registry: &ActionRegistry<T>, label: &str) -> bool {
-        registry.actions.values().any(|a| a.label() == label)
     }
 
     /// Finds the action behind the rendered button the user actually sees:

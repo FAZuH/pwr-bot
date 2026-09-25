@@ -50,3 +50,9 @@ The consequences:
 
 ADR-0009 records the migration that creates the need. ADR-0011 records
 the modal capability the same seam needs.
+
+**Update — 2026-09-25 (phase 5):** The live protocol calls this surface `ops`
+(`HostOp` in `crates/pwr-plugin-protocol/src/ops.rs`) and uses API version
+`2`. Voice owns its settings repository, legacy import, migrations, heartbeat
+file, and event subscriber. The `host.resolve_users` operation provides a
+cache-first projection with display names and avatar URLs to voice views.

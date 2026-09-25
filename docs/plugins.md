@@ -38,10 +38,28 @@ bot stays up.
 The `feed` core plugin owns feed subscriptions, delivery, and its settings
 storage. It applies the migrations under
 `crates/plugin/feed/migrations/` at startup and exposes the `/feed` command
-group plus the `/feed-settings` panel command. Its own service and repository
-write feed tables; the host bridges Discord and plugin operations. The
-owner-only `/dump_db` command is the exception: the host directly reads
-feed tables for its transitional database dump.
+group plus the `/feed-settings` panel command. Its single migration has a
+unique version and creates only feed-owned tables with `IF NOT EXISTS`. Its own
+service and repository write feed tables; the host bridges Discord and plugin
+operations. The owner-only `/dump_db` command is the exception: the host
+directly reads feed tables for its transitional database dump.
+
+## Voice
+
+The `voice` core plugin owns voice-session tracking, statistics, leaderboard
+views, and voice settings. It subscribes to the host's `voice_state` and
+`guild_create` events, stores sessions in its own PostgreSQL tables, keeps its
+crash-recovery marker at `$DATA_PATH/voice_heartbeat`, and imports legacy voice
+settings from `server_settings` once. It exposes the `/vc` command group and
+the `/voice-settings` panel. The host supplies `host.get_config` and the
+bounded `host.resolve_users` operation; voice does not use a host
+voice-settings RPC. Its single migration has a unique version and creates only
+voice-owned tables with `IF NOT EXISTS`. Runtime leaderboard images travel in
+`ViewSpec.files` and are attached by the host on initial and interaction renders.
+
+The protocol calls the declared host operation list `ops` and uses API
+version `2`. A plugin's manifest may declare `voice_state`, `guild_create`, and
+`view.timeout` event handlers.
 
 ## Missing or invalid catalog
 
