@@ -19,11 +19,14 @@ _Avoid_: server, daemon
 
 **ViewSpec**:
 The envelope a plugin returns to show a view,
-`{data: Value, ephemeral: bool, view: Value}` in
+`{data: Value, ephemeral: bool, view: Value, files: Vec<RuntimeFile>}` in
 `crates/pwr-plugin-protocol/src/view.rs`. `data` is the raw Discord
 message payload, and `view` is plugin-owned opaque state that the host
 stores and hands back on interactions. `ephemeral` is `true` when the
-reply is visible only to the invoking user.
+reply is visible only to the invoking user. `files` is an optional list of
+`{filename, data_base64}` attachments the host decodes and ships with the
+message, which is how a plugin carries image bytes such as
+`welcome_preview.png`.
 _Avoid_: view payload
 
 **Gate**:
@@ -124,19 +127,21 @@ _Avoid_: host command, host method
 
 **Service RPC**:
 A host op that mirrors one method of a host service, for example
-`host.welcome.get_settings`. The service stays the single source of truth,
+`host.resolve_users`. The service stays the single source of truth,
 and the plugin stays a thin client. Ops are shaped by services, never by
-plugins: the host API grows only when the host domain grows. Feed and voice
-settings are plugin-owned; identity lookups use the typed
-`host.resolve_users` op. See Host op, Panel plugin, and ADR-0010.
+plugins: the host API grows only when the host domain grows. All settings
+storage is plugin-owned — feed, voice, and welcome each own their tables,
+and the `host.welcome.*` settings pair was retired in phase 6. See Host op,
+Panel plugin, and ADR-0010.
 _Avoid_: bespoke op, plugin-shaped op
 
 **Panel plugin**:
 A plugin crate that owns one settings panel end to end, such as feed
 settings, voice settings, or welcome. It renders the view and answers its
 interactions. Voice owns its repository, embedded migrations, heartbeat
-file, and voice event subscriber; Welcome reaches shared host settings through
-service RPCs. Feed uses its own repository and embedded migrations. The panel
+file, and voice event subscriber; welcome owns its `welcome_settings` table
+and its copy-once legacy import, and ships preview bytes in the envelope
+`files`. Feed uses its own repository and embedded migrations. The panel
 migration turns the three host-side panels into panel plugins, one crate each.
 See Service RPC and ADR-0009.
 _Avoid_: host panel, feature panel

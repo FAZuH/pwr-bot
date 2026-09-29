@@ -42,8 +42,6 @@ fn services(
         engine: Some(Arc::new(engine)),
         stats: Arc::new(StatsHandle::default()),
         users: Default::default(),
-        welcome: None,
-        previews: None,
         settings_returns: Some(returns),
     })
 }

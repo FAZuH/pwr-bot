@@ -67,10 +67,11 @@ The `sealed::Sealed` supertrait closes `GuiFeature` to external implementors —
 Plugin views do not use the host's sealed `GuiFeature` or `Host` loop. The
 feed and voice plugins keep pure update modules in their own `src/update/`
 directories, render views in their own `src/view/` directories, and invoke
-their repositories and services directly. The host runtime remains only for
-host-owned views. After validating a complete `ViewSpec`, the host resolves
-declared previews and decodes runtime files for the initial render and every
-interaction edit.
+their repositories and services directly; the welcome plugin owns the same
+update and render duties inside `crates/plugin/welcome`. The host runtime
+remains only for host-owned views. After validating a complete `ViewSpec`,
+the host base64-decodes the envelope's `files` into attachments for the
+initial render and every interaction edit.
 
 #### Host Loop
 
@@ -139,16 +140,16 @@ The only layer that enforces business rules. Handlers call services; services or
 
 | Service (trait) | Responsibility |
 |---------|---------------|
-| `SettingsProvider` | Server configuration management |
 | `InternalOps` | Bot metadata and internal operations |
 
 ---
 
 ## Domain Contracts (`src/entity.rs`, plugin crates)
 
-The host keeps shared settings, bot metadata, plugin enablement, and the
-transitional feed-dump DTOs. Feed and voice entities, repositories, services,
-and migrations live in their plugin crates.
+The host keeps the legacy `server_settings` rows (until phase 7), bot
+metadata, plugin enablement, and the transitional feed-dump DTOs. Feed,
+voice, and welcome entities, repositories, services, and migrations live in
+their plugin crates.
 
 ### Host entities (`src/entity.rs`)
 
@@ -158,7 +159,7 @@ and migrations live in their plugin crates.
 | `FeedItemEntity` | Feed update used by the transitional database dump |
 | `SubscriberEntity` | Feed notification target used by the transitional database dump |
 | `FeedSubscriptionEntity` | Feed subscription link used by the transitional database dump |
-| `ServerSettingsEntity` | Shared per-guild configuration and legacy settings |
+| `ServerSettingsEntity` | Legacy per-guild settings, the import source for plugin-owned settings (until phase 7) |
 | `BotMetaEntity` | Key-value bot metadata |
 | `GuildPluginEntity` | Per-guild plugin enablement |
 
@@ -168,6 +169,7 @@ and migrations live in their plugin crates.
 |--------|-------------|
 | `feed` | `crates/plugin/feed/src/entity.rs` |
 | `voice` | `crates/plugin/voice/src/entity.rs` |
+| `welcome` | `crates/plugin/welcome/src/repo/mod.rs` |
 
 ### Feed Platforms (`crates/plugin/feed/src/feed/`)
 
@@ -194,7 +196,6 @@ A factory trait `Repos` defines the repo access interface. The concrete `PgRepos
 ```rust
 pub trait Repos: Send + Sync {
     fn feed_dump(&self) -> Box<dyn FeedDumpRepository + Send + Sync>;
-    fn server_settings(&self) -> Box<dyn ServerSettingsRepository + Send + Sync>;
     fn bot_meta(&self) -> Box<dyn BotMetaRepository + Send + Sync>;
     fn plugin_kv(&self) -> Box<dyn PluginKvRepository + Send + Sync>;
     fn guild_plugins(&self) -> Box<dyn GuildPluginRepository + Send + Sync>;
@@ -211,8 +212,10 @@ pub struct PgRepos {
 ```
 
 `PgFeedDumpRepo` is read-only and exists for the transitional `/dump_db`
-projection. The feed and voice plugins own their writes, migrations, and
-repositories under their respective crates.
+projection. The feed, voice, and welcome plugins own their writes,
+migrations, and repositories under their respective crates. The
+`PgRepos.server_settings` handle and the `server_settings` table survive
+only as the legacy settings import source until phase 7 (#170).
 
 ---
 
@@ -229,7 +232,7 @@ core, not a layer of it.
 |----------|------|
 | `crates/pwr-plugin-protocol` | Wire types: `Msg`, `Manifest`, `ViewSpec`, `HostOp`, `WireError` |
 | `src/plugin/` | Plugin host: `manager` (spawn, health, respawn, unload), `interaction` (session engine), `host` (`host.*` ops), `command` (slash dispatch), `events` (gateway fan-out), `install` (pinned catalog), `view` (gate) |
-| `crates/plugin/` | Plugins: `hello` (fixture), `feed` (subscriptions and delivery), `voice` (tracking, statistics, leaderboard, settings), `welcome` (settings panel) |
+| `crates/plugin/` | Plugins: `hello` (fixture), `feed` (subscriptions and delivery), `voice` (tracking, statistics, leaderboard, settings), `welcome` (settings panel, welcome-card renderer, `welcome_settings` storage) |
 | `crates/pwr-poise-components` | Reusable components library on pwr-ext (typed builders, pagination) |
 
 ### Plugin Data Flow
@@ -240,7 +243,6 @@ Slash command
   → subprocess invoke             correlated call over stdio
   → ViewSpec.data                 raw Discord message JSON
   → gate                          validate_view_spec (data + files)
-  → PreviewResolver               fill declared attachment slots
   → ViewSpec.files                decode after the gate and attach runtime files
   → Discord                       edit_original_interaction_response
 
@@ -250,7 +252,7 @@ Component / modal interaction
   → plugin (view.interact)         returns a new ViewSpec
   → validated whole ViewSpec        invalid data or files leave prior view + last_active
   → commit_interaction_view        transactional commit
-  → edit_message with attachments
+  → edit_message with the envelope files as attachments
 ```
 
 ### Validate-Only Gate
@@ -261,7 +263,7 @@ runtime-file list at every raw-send boundary: initial dispatch, component and
 modal re-render, and the Settings section handoff's message morph. It discards
 the parsed message value and sends the original JSON verbatim. A failure is a
 `WireError` with kind `InvalidView`. The host never partially sends, registers,
-or commits. The combined preview and runtime attachment count is limited to 10.
+or commits. The runtime attachment count is limited to 10.
 An invalid re-render keeps the prior session view and `last_active` unchanged.
 
 ### View Authoring Split
@@ -350,4 +352,4 @@ Discord gateway event
 | Strategy | Domain | Swappable platform implementations |
 | Repository (factory) | Infrastructure | `Repos` trait with `PgRepos` concrete impl |
 | PluginEventRouter | Application | Decoupled gateway-event fan-out to subscribed plugins |
-| Service | Application | Business logic via trait objects (`SettingsProvider`, `InternalOps`) |
+| Service | Application | Business logic via trait objects (`InternalOps`) |

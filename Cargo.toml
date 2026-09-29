@@ -76,9 +76,7 @@ wreq-util = "0.2"
 url = "2"
 image = "0.25"
 sysinfo = "0.33"
-minijinja = "2.15.1"
 base64 = "0.22.1"
-resvg = "0.47.0"
 diesel = { version = "2.3", features = ["chrono", "postgres", "serde_json", "uuid"] }
 diesel-async = { version = "0.8", features = ["deadpool", "postgres"] }
 diesel_migrations = { version = "2.3", features = ["postgres"] }

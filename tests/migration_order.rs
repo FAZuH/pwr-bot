@@ -16,6 +16,8 @@ mod db;
 const CORE_MIGRATIONS: EmbeddedMigrations = embed_migrations!("migrations");
 const FEED_MIGRATIONS: EmbeddedMigrations = embed_migrations!("crates/plugin/feed/migrations");
 const VOICE_MIGRATIONS: EmbeddedMigrations = embed_migrations!("crates/plugin/voice/migrations");
+const WELCOME_MIGRATIONS: EmbeddedMigrations =
+    embed_migrations!("crates/plugin/welcome/migrations");
 
 struct StaticMigrations(&'static EmbeddedMigrations);
 
@@ -41,12 +43,40 @@ const FEED_PREVIOUS_VERSION: &str = "202609241300000000";
 const FEED_OWNED_VERSION: &str = "202609241301000000";
 const VOICE_PREVIOUS_VERSION: &str = "202609241400000000";
 const VOICE_OWNED_VERSION: &str = "202609241401000000";
+const WELCOME_OWNED_VERSION: &str = "202609241501000000";
 
-#[derive(Clone, Copy)]
-enum Order {
-    CoreFeedVoice,
-    CoreVoiceFeed,
-    FeedVoiceCore,
+/// Every migration source a startup can run, and every ordering of them.
+fn startup_orders() -> Vec<Vec<&'static EmbeddedMigrations>> {
+    fn extend(
+        order: &mut Vec<&'static EmbeddedMigrations>,
+        remaining: &mut Vec<&'static EmbeddedMigrations>,
+        orders: &mut Vec<Vec<&'static EmbeddedMigrations>>,
+    ) {
+        if remaining.is_empty() {
+            orders.push(order.clone());
+            return;
+        }
+        for index in 0..remaining.len() {
+            let source = remaining.remove(index);
+            order.push(source);
+            extend(order, remaining, orders);
+            order.pop();
+            remaining.insert(index, source);
+        }
+    }
+
+    let mut orders = Vec::new();
+    extend(
+        &mut Vec::new(),
+        &mut vec![
+            &CORE_MIGRATIONS,
+            &FEED_MIGRATIONS,
+            &VOICE_MIGRATIONS,
+            &WELCOME_MIGRATIONS,
+        ],
+        &mut orders,
+    );
+    orders
 }
 
 async fn reset_database(db_url: &str) {
@@ -69,6 +99,7 @@ async fn reset_database(db_url: &str) {
         "voice_settings_import_state",
         "voice_settings",
         "voice_sessions",
+        "welcome_settings",
         "__diesel_schema_migrations",
     ] {
         client
@@ -92,15 +123,6 @@ fn run_sources(db_url: &str, sources: &[&'static EmbeddedMigrations]) {
 
 fn run_source(db_url: &str, source: &'static EmbeddedMigrations) {
     run_sources(db_url, &[source]);
-}
-
-fn run_order(db_url: &str, order: Order) {
-    let sources: [&'static EmbeddedMigrations; 3] = match order {
-        Order::CoreFeedVoice => [&CORE_MIGRATIONS, &FEED_MIGRATIONS, &VOICE_MIGRATIONS],
-        Order::CoreVoiceFeed => [&CORE_MIGRATIONS, &VOICE_MIGRATIONS, &FEED_MIGRATIONS],
-        Order::FeedVoiceCore => [&FEED_MIGRATIONS, &VOICE_MIGRATIONS, &CORE_MIGRATIONS],
-    };
-    run_sources(db_url, &sources);
 }
 
 fn seed_ledger(db_url: &str, versions: &[&str]) {
@@ -243,6 +265,7 @@ async fn assert_schema_and_versions_with_existing(db_url: &str, existing_version
             "voice_sessions",
             "voice_settings",
             "voice_settings_import_state",
+            "welcome_settings",
         ],
     )
     .await;
@@ -251,6 +274,7 @@ async fn assert_schema_and_versions_with_existing(db_url: &str, existing_version
         CORE_STORAGE_VERSION,
         FEED_OWNED_VERSION,
         VOICE_OWNED_VERSION,
+        WELCOME_OWNED_VERSION,
     ]);
     assert_ledger_shape_and_versions(db_url, &expected).await;
 }
@@ -264,18 +288,21 @@ fn embedded_owners_have_one_globally_unique_version_each() {
     let core = embedded_versions(&CORE_MIGRATIONS);
     let feed = embedded_versions(&FEED_MIGRATIONS);
     let voice = embedded_versions(&VOICE_MIGRATIONS);
+    let welcome = embedded_versions(&WELCOME_MIGRATIONS);
 
     assert_eq!(core, vec![CORE_STORAGE_VERSION.to_owned()]);
     assert_eq!(feed, vec![FEED_OWNED_VERSION.to_owned()]);
     assert_eq!(voice, vec![VOICE_OWNED_VERSION.to_owned()]);
+    assert_eq!(welcome, vec![WELCOME_OWNED_VERSION.to_owned()]);
 
     let all = core
         .iter()
         .chain(&feed)
         .chain(&voice)
+        .chain(&welcome)
         .cloned()
         .collect::<BTreeSet<_>>();
-    assert_eq!(all.len(), 3, "migration versions are globally unique");
+    assert_eq!(all.len(), 4, "migration versions are globally unique");
 }
 
 #[tokio::test]
@@ -327,7 +354,15 @@ async fn existing_mixed_component_ledger_is_preserved_when_all_migrations_run() 
                 ABSENT_VERSION,
             ],
         );
-        run_order(&url, Order::CoreFeedVoice);
+        run_sources(
+            &url,
+            &[
+                &CORE_MIGRATIONS,
+                &FEED_MIGRATIONS,
+                &VOICE_MIGRATIONS,
+                &WELCOME_MIGRATIONS,
+            ],
+        );
     })
     .await
     .expect("mixed ledger migration task");
@@ -347,14 +382,13 @@ async fn existing_mixed_component_ledger_is_preserved_when_all_migrations_run() 
 #[serial_test::serial]
 async fn core_and_plugin_migrations_converge_in_every_startup_order() {
     let db_url = db::db_url().await;
-    for order in [
-        Order::CoreFeedVoice,
-        Order::CoreVoiceFeed,
-        Order::FeedVoiceCore,
-    ] {
+    let orders = startup_orders();
+    assert_eq!(orders.len(), 24, "four sources have 24 startup orders");
+    for order in &orders {
         reset_database(&db_url).await;
         let url = db_url.clone();
-        tokio::task::spawn_blocking(move || run_order(&url, order))
+        let order = order.clone();
+        tokio::task::spawn_blocking(move || run_sources(&url, &order))
             .await
             .expect("migration order task");
         assert_schema_and_versions(&db_url).await;
@@ -366,7 +400,15 @@ async fn core_and_plugin_migrations_converge_in_every_startup_order() {
     let url = db_url.clone();
     tokio::task::spawn_blocking(move || {
         seed_legacy_core_schema(&url);
-        run_order(&url, Order::CoreFeedVoice);
+        run_sources(
+            &url,
+            &[
+                &CORE_MIGRATIONS,
+                &FEED_MIGRATIONS,
+                &VOICE_MIGRATIONS,
+                &WELCOME_MIGRATIONS,
+            ],
+        );
     })
     .await
     .expect("legacy schema migration task");

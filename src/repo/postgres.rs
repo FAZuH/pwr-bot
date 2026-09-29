@@ -150,9 +150,6 @@ impl CrudTable<ServerSettingsEntity, u64> for PgServerSettingsRepo {
     }
 }
 
-#[async_trait::async_trait]
-impl ServerSettingsRepository for PgServerSettingsRepo {}
-
 // ============================================================================
 // PgBotMetaRepo
 // ============================================================================

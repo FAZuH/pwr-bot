@@ -12,10 +12,10 @@ This ticket retires the host copies. The remaining host runtime has four
 `unregister`. The last two are one-shot features; the other two use the host
 event loop.
 
-The retired panels still leave one piece of live machinery behind: the
-welcome preview resolver (`PreviewResolver`, ADR-0012). It fills the
-attachment slot the welcome plugin declares, and the plugin
-transport paths call it. It cannot die with the panel.
+The retired panels left one piece of live machinery behind: the welcome
+preview resolver (`PreviewResolver`, ADR-0012). Phase 6 (#169) retired it
+too: the welcome plugin renders its preview and ships the bytes in the
+envelope's `files`.
 
 ## Decision
 
@@ -30,12 +30,14 @@ their `Navigation` targets are deleted; the runtime is not.
    They call `open_plugin_view` (`src/plugin/command.rs`), the shared
    invoke → validate → defer → edit → register core extracted from
    `plugin_slash_dispatch`, and open their panel plugin's view directly.
-   The helper resolves declared attachment slots through
-   `PreviewResolver`, so the welcome preview works on this path too.
-3. **The preview resolver moves, not dies.** `PreviewResolver`,
-   `AttachmentRenderer`, `WelcomeAttachmentRenderer`, and `WELCOME_FILE`
-   live in `src/plugin/preview.rs` — consumer-side, next to the transport
-   paths that call them.
+   The helper ships the runtime `files` bytes the envelope carries, so
+   the welcome preview works on this path too.
+3. **The preview resolver retired in phase 6 (#169).** `PreviewResolver`,
+   `AttachmentRenderer`, and `WelcomeAttachmentRenderer` were deleted with
+   `src/plugin/preview.rs`; `WELCOME_FILE`, the card renderer, and the
+   embedded font live in `crates/plugin/welcome`, which renders the card
+   and ships `welcome_preview.png` in the envelope's `files` (ADR-0012
+   update).
 4. **The hub stubs are gone for good.** With all three panels migrated,
    the `settings:config:*` fallback in `crates/plugin/settings/` is
    dead: the prefix constant, the `config_target` lookup, the

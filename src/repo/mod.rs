@@ -89,10 +89,6 @@ impl Repos for PgRepos {
         Box::new(self.feed_dump.clone())
     }
 
-    fn server_settings(&self) -> Box<dyn ServerSettingsRepository + Send + Sync> {
-        Box::new(self.server_settings.clone())
-    }
-
     fn bot_meta(&self) -> Box<dyn BotMetaRepository + Send + Sync> {
         Box::new(self.bot_meta.clone())
     }

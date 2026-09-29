@@ -4,11 +4,11 @@ A plugin runs in a subprocess. It shares no memory with the host, and it
 cannot call a host service object directly. The only channel to host-owned
 services is the host-op protocol: a plugin sends a `Call` message with an op
 string, and the host answers it in `handle_host_call` (`src/plugin/host.rs`).
-The v1 surface holds
-seventeen ops after `host.open_dm` landed: Discord I/O, the plugin kv store,
-host config, navigation, live stats, and the voice and welcome settings pairs
-(`crates/pwr-plugin-protocol/src/caps.rs`). The voice and welcome ops dispatch
-to context-free adapters over the host services; feed no longer uses a host
+The surface holds
+fourteen ops: Discord I/O, the plugin kv store, host config, navigation,
+live stats, and user resolution (`crates/pwr-plugin-protocol/src/ops.rs`).
+The voice and welcome settings pairs were retired as voice (phase 5) and
+welcome (phase 6, #169) took ownership of their storage; feed uses no host
 settings op and owns its repository directly.
 
 We decided that the host publishes typed RPC endpoints that mirror its own
@@ -34,19 +34,19 @@ The consequences:
 - **Adding a plugin needs zero host changes.** A plugin is a catalog
   entry. It calls ops the host already serves, and no op names a plugin.
 - **Adding a capability grows the op surface additively, in one place.**
-  The addition touches the enum variant, the `ALL_CAPS` list, and
-  `as_str` in the caps module (`crates/pwr-plugin-protocol/src/caps.rs`
+  The addition touches the enum variant, the `ALL_OPS` list, and
+  `as_str` in the ops module (`crates/pwr-plugin-protocol/src/ops.rs`
   documents the procedure), plus one dispatch arm in `handle_host_call`.
   Nothing else changes.
 - **The failure mode to avoid is the bespoke per-plugin op.** An op named
-  after a plugin — `host.welcome.set_color`, for example — inverts the
+  after a plugin — `host.welcome.set_color`, say — inverts the
   dependency. The host API grows because a plugin asked for it, and the
   op surface mirrors plugins instead of services.
 - **The rejected alternative is host panels owning their settings state in
   the plugin kv store** (`host.kv.get`, `host.kv.set`, `host.kv.delete`).
-  That inverts data ownership for Voice and Welcome and forces service
-  rewrites for code outside the panels that reads the same settings. Feed
-  now owns its settings table directly.
+  That inverts data ownership for plugins that own their storage and forces
+  service rewrites for code outside the panels that reads the same settings.
+  Feed, voice, and welcome now own their settings tables directly.
 
 ADR-0009 records the migration that creates the need. ADR-0011 records
 the modal capability the same seam needs.
@@ -56,3 +56,8 @@ the modal capability the same seam needs.
 `2`. Voice owns its settings repository, legacy import, migrations, heartbeat
 file, and event subscriber. The `host.resolve_users` operation provides a
 cache-first projection with display names and avatar URLs to voice views.
+
+**Update — 2026-09-28 (phase 6, #169):** The welcome settings pair is
+retired: `ALL_OPS` holds 14 ops and no settings pair remains on the surface.
+Welcome owns its `welcome_settings` table, its copy-once legacy import, and
+its preview rendering, and ships preview bytes in the envelope `files`.

@@ -20,7 +20,6 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     rm -rf src crates
 
 # Build app (and plugin binaries the image ships)
-COPY ./assets ./assets
 COPY ./src ./src
 COPY ./crates ./crates
 COPY ./migrations ./migrations

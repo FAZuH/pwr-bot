@@ -193,7 +193,15 @@ async fn first_feed_settings_load_imports_the_legacy_server_settings_row() {
         .await
         .expect("import legacy feed settings");
 
-    assert_eq!(imported, legacy);
+    // The legacy snapshot's toggle predates the column: the import ignores
+    // it and the column default (TRUE) applies.
+    assert_eq!(
+        imported,
+        FeedsSettings {
+            enabled: None,
+            ..legacy.clone()
+        }
+    );
     drop(connection);
 
     let changed_legacy = FeedsSettings {
@@ -218,7 +226,13 @@ async fn first_feed_settings_load_imports_the_legacy_server_settings_row() {
         .get_feed_settings(42)
         .await
         .expect("read imported feed settings");
-    assert_eq!(cached, legacy);
+    assert_eq!(
+        cached,
+        FeedsSettings {
+            enabled: Some(true),
+            ..legacy.clone()
+        }
+    );
     common::teardown_db(&db).await;
 }
 

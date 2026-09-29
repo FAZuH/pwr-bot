@@ -2,8 +2,8 @@ use std::path::Path;
 
 use anyhow::Result;
 use image::RgbaImage;
-use pwr_bot::bot::command::welcome::image_generator::WelcomeCardData;
-use pwr_bot::bot::command::welcome::image_generator::WelcomeImageGenerator;
+use welcome::image_generator::WelcomeCardData;
+use welcome::image_generator::WelcomeImageGenerator;
 
 #[tokio::main]
 async fn main() -> Result<()> {

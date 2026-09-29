@@ -27,6 +27,20 @@ fn feed_plugin_migration_claims_only_feed_storage() {
 }
 
 #[test]
+fn welcome_plugin_migration_claims_only_welcome_storage() {
+    let initial = include_str!(
+        "../crates/plugin/welcome/migrations/20260924-150100-0000_welcome_owned_schema/up.sql"
+    );
+
+    assert!(initial.contains("welcome_settings"));
+    assert!(!initial.contains("server_settings"));
+    assert!(initial.starts_with(concat!(
+        "-- Each migration source owns only the tables in its up.sql and uses ",
+        "CREATE TABLE IF NOT EXISTS."
+    )));
+}
+
+#[test]
 fn core_migrations_claim_only_core_storage() {
     let core = include_str!("../migrations/20260925-000000-0000_core_storage/up.sql");
     let historical_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
