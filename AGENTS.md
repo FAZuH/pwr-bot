@@ -22,7 +22,7 @@ cargo test --all-features
 ```
 
 - Do **not** run `./dev.sh format lint` after every edit — it mutates source files and may require re-reading
-- Tests need `DB_URL` in `.env` locally; CI copies `.env-example` → `.env` automatically
+- Tests need a running database: `docker compose up -d db` before `cargo test`. That service reads `DB_USER`/`DB_PASS`/`DB_NAME` from `.env` and binds `127.0.0.1:5432`. CI copies `.env-example` → `.env` automatically
 - CI order: `fmt --check` → `clippy -D warnings` → `test` (Docker/binary builds run as separate CI workflows)
 - Diagrams: always use `./dev.sh docs`, never invoke `mmdc` directly
 
@@ -56,37 +56,57 @@ impl Cog for Cogs {
 }
 ```
 
-## UI Views (TEA host runtime)
+## UI Views
 
-Interactive views follow the Elm Architecture (see `docs/adr/0005-tea-gui-architecture.md`):
+Interactive views follow the Elm Architecture (see `docs/adr/0005-tea-gui-architecture.md`).
+
+### Host-owned views
 
 - **Core** `src/update/<feature>.rs` — pure `fn update(msg, &mut model) -> Vec<Effect>`; imports no serenity/tokio/diesel/poise (image bytes OK, serenity types not)
 - **Shell** `src/bot/gui/` — sealed `GuiFeature` trait (pure `view`, `translate`, `attachments`, `open_modal` hook) + `Host` event loop in `rt.rs`
 - **Adapters** — per-feature `EffectHandler` impls executing effects against `ctx.data().service`
 - Interaction substrate (Action, ActionRegistry, SelectValues, ViewChannel, ViewEvent) lives in `src/bot/view/` — the collectors the Host runs on
-- Snapshot tests in each feature pin rendered component JSON (custom_id timestamps normalized) — run them when touching any view
+- Snapshot tests in each host feature pin rendered component JSON (custom_id timestamps normalized) — run them when touching any host view
+
+### Plugin views
+
+- Plugin-side pure updates live in `crates/plugin/<name>/src/update/`.
+- Plugin render functions live beside those updates in `src/view/`.
+- The plugin command loop executes effects directly against its service/repository; plugin views do not run through the host `GuiFeature` or `Host` runtime.
+- Plugin interaction sessions are author-bound; the interaction engine rejects clicks from a different user before the plugin sees them.
 
 ## Business Logic (Update Pattern)
 
-Pure, testable state mutations live in `src/update/<feature>.rs` as free
-`fn update(msg, &mut Model) -> Vec<Effect>` functions (plus `Model`, `Msg`,
-`Effect` vocabularies and unit tests). Handlers in `src/bot/command/` parse
-Discord interactions into `Msg`s, and side effects execute only through the
-feature's `EffectHandler` adapter. See `docs/adr/0005-tea-gui-architecture.md`
-for the layering rules. Existing modules: `about`, `feed_batch`,
-`register`, `unregister`, `feed_list`, `voice_stats`,
-`voice_leaderboard`, `plugins`, `pagination`.
+Pure, testable state mutations live in `src/update/<feature>.rs` for host
+features and in the plugin's `src/update/` for plugin features. Handlers parse
+Discord interactions into `Msg` values, run `update`, and execute returned
+effects through the feature's adapter or the plugin's direct service loop.
+Existing host modules include `about`, `register`, `unregister`, `settings`,
+`plugins`, and `pagination`; feed, voice, and welcome updates live in their
+respective plugin crates.
 
-- Place pure logic in `src/update/<feature>.rs` (Model, Msg, Effect, `update` fn, tests)
-- Handlers in `src/bot/command/` parse Discord interactions into `Msg`s, run `update`, and route returned `Effect`s to the feature's `EffectHandler` adapter (never execute effects inline)
+- Place host pure logic in `src/update/<feature>.rs` (Model, Msg, Effect, `update` fn, tests)
+- Place plugin pure logic in `crates/plugin/<name>/src/update/` with the plugin's direct service adapter
 
 ## Database
 
 - PostgreSQL with Diesel (diesel-async 0.8 + deadpool)
+- **Local database: always Docker, never a system install.** Run `docker compose up -d db` — the `db` service in `docker-compose.yml` is the same `postgres:17-alpine` image CI uses, and it takes its credentials from `.env`. Do not `apt-get install postgresql` and do not rely on the ADR-0002 embedded server as root, because `initdb` refuses to run as root and a hand-installed server drifts from CI in both version and credentials
+- **Keep `libpq-dev` installed.** Diesel links `-lpq`, so removing it breaks every build, not just the database. Only the server packages are ever removed
 - Migrations: `diesel migration generate <name>` (requires `diesel_cli` installed with PostgreSQL support)
-- Schema source: `src/repo/schema.rs` — regenerate with `diesel print-schema` after migration changes, then manually correct `Nullable<Integer>` PKs to `Integer`
+- Core schema source: `src/repo/schema.rs`; plugin schemas and migrations live
+  under each plugin crate. Regenerate core schema with `diesel print-schema`
+  after core migration changes, then manually correct `Nullable<Integer>` PKs
+  to `Integer`.
 - See `.agents/skills/db-schema/SKILL.md` for migration and model patterns
 - Migration script: `scripts/migrate.py` (SQLite → PostgreSQL data migration)
+
+## Branching & PRs
+
+Follow `docs/dev/branching.md`: PRs target the active integration branch
+(conventionally `development`, or a version branch like `v0.5` for a large
+effort) — never `main`, except hotfixes, which then merge back into the
+integration branch immediately. Merge-only PRs everywhere.
 
 ## Commit Conventions
 
@@ -107,6 +127,7 @@ Source lives in `docs/diagrams/*.mmd`. Re-export the PNGs with `./dev.sh docs` a
 |---------|----------|
 | Stripping doc comments during refactoring | Preserve all `///` and `//!` docs when moving code |
 | Wrong commit format | Follow `docs/dev/commit-changelog.md` strictly |
+| Installing a system PostgreSQL to get tests running | Use `docker compose up -d db`. It is the only supported local database; the embedded fallback cannot start as root, and a hand-installed server drifts from CI |
 
 ## Agent skills
 

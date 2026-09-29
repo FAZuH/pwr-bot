@@ -38,8 +38,7 @@ attachment slot by filename — the same declaration the monolith's
 - The host resolves the declaration where a plugin envelope reaches
   Discord: the click path's type-7 response and its webhook-edit
   fallbacks, the modal-submission response, and `host.open_view`'s final
-  edit. The resolver (`PreviewResolver`, `src/bot/gui/welcome.rs` — since
-  moved to `src/plugin/preview.rs` by the #152 retirement, ADR-0013) checks
+  edit. The resolver (`PreviewResolver`, `src/plugin/preview.rs`) checks
   the declaration, loads the guild's settings through the service, renders
   the card, and returns the `CreateAttachment` list to send. A slot the
   host cannot fill — no guild, no settings, a failed render — is declared
@@ -72,7 +71,7 @@ wholly host-side.
 ## Consequences
 
 - The protocol surface grows by the settings RPC pair only; no render op,
-  no bytes op. The cap count lands at 18.
+  no bytes op. The cap count is 17.
 - A plugin that declares a filename the host does not know gets nothing:
   the resolver only fills `welcome_preview.png` today. The mechanism is
   host-side and additive — a new preview source extends the resolver, not
@@ -80,3 +79,13 @@ wholly host-side.
 - Snapshot tests normalize the declared attachment list alongside the
   custom-id timestamps, since the declaration is stable JSON while the
   bytes themselves never reach the plugin.
+
+**Update — 2026-09-24 (phase 5):** Voice runtime leaderboard images are a
+separate approved transport. `ViewSpec` now carries `files` entries using
+the same `{filename, data_base64}` runtime-file shape as `host.send_message`.
+After validating the complete `ViewSpec`, the host decodes and attaches them on
+the initial `open_plugin_view` render,
+the Settings-section handoff, and every interaction edit, alongside any
+host-injected preview attachments. The host validates file shape, base64, an 8 MiB per-file limit,
+and a 25 MiB per-message limit before Discord I/O. The historical
+host-injected welcome-preview decision above remains in force.

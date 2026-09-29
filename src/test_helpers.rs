@@ -1,8 +1,5 @@
 //! Shared test fixtures: plugin manifests and catalog entries.
 
-#[path = "../tests/support/db.rs"]
-pub(crate) mod db;
-
 use pwr_plugin_protocol::API_VERSION;
 use pwr_plugin_protocol::CommandDef;
 use pwr_plugin_protocol::Manifest;
@@ -21,6 +18,8 @@ pub(crate) fn manifest_named(name: &str) -> Manifest {
         }],
         event_handlers: Vec::new(),
         tasks: Vec::new(),
+        settings: vec![],
+        requires: vec![],
         api_version: API_VERSION,
     }
 }
@@ -33,5 +32,6 @@ pub(crate) fn entry_named(name: &str) -> CatalogEntry {
         sha256: "a".repeat(64),
         manifest: manifest_named(name),
         auto_enable: false,
+        discord_token: false,
     }
 }

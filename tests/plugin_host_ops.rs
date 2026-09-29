@@ -1,4 +1,4 @@
-//! Integration tests for plugin→host `host.*` capability ops: the fixture
+//! Integration tests for plugin→host `host.*` ops: the fixture
 //! issues a `host.send_message` call through the real stdio wire, the host
 //! serves it via the mocked [`HostIo`] seam (no live Discord), and the
 //! fixture's resp echoes the mock's data back to the test. Pure stdio — no
@@ -13,6 +13,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use poise::serenity_prelude as serenity;
+use pwr_bot::plugin::Authority;
 use pwr_bot::plugin::HostConfig;
 use pwr_bot::plugin::HostIo;
 use pwr_bot::plugin::HostServices;
@@ -25,10 +26,23 @@ use pwr_bot::plugin::StatsHandle;
 use pwr_bot::plugin::host::MockHostIo;
 use pwr_bot::plugin::host::MockKvStore;
 use pwr_plugin_protocol::Msg;
+use pwr_plugin_protocol::ViewSpec;
 use serde_json::json;
 
 mod probe;
 use probe::probe_binary;
+
+fn fixture_script(name: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join(name)
+}
+
+/// The V2 text-display envelope the prose send path builds for `content`.
+fn payload_for(content: &str) -> serde_json::Value {
+    pwr_poise_components::view_data_v2([pwr_poise_components::text_display(content)])
+}
 
 fn host_services(io: Arc<dyn HostIo>, kv: Option<Arc<dyn KvStore>>) -> Arc<HostServices> {
     Arc::new(HostServices {
@@ -41,10 +55,10 @@ fn host_services(io: Arc<dyn HostIo>, kv: Option<Arc<dyn KvStore>>) -> Arc<HostS
         kv,
         engine: None,
         stats: Arc::new(StatsHandle::default()),
-        feeds: None,
-        voice: None,
+        users: Default::default(),
         welcome: None,
         previews: None,
+        settings_returns: None,
     })
 }
 
@@ -64,10 +78,10 @@ fn view_host_services(
         kv: None,
         engine: Some(Arc::new(engine)),
         stats: Arc::new(StatsHandle::default()),
-        feeds: None,
-        voice: None,
+        users: Default::default(),
         welcome: None,
         previews: None,
+        settings_returns: None,
     })
 }
 
@@ -81,16 +95,21 @@ async fn host_say_serves_send_message_through_the_seam() {
     mock.expect_send_message()
         .with(
             mockall::predicate::eq(987_654_321_u64),
-            mockall::predicate::eq("hello from the fixture"),
+            mockall::predicate::function(|data: &serde_json::Value| {
+                data["components"][0]["content"] == json!("hello from the fixture")
+            }),
+            mockall::predicate::always(),
         )
         .times(1)
-        .returning(|_, _| Ok(Some(json!({ "message_id": 123_456_789 }))));
+        .returning(|_, _, _| Ok(Some(json!({ "message_id": 123_456_789 }))));
 
     let plugin = RunningPlugin::spawn_with(
         probe_binary("hello"),
+        "hello",
         Some(host_services(Arc::new(mock), None)),
         None,
         None,
+        Authority::none(),
     )
     .await
     .expect("spawn fixture");
@@ -139,9 +158,11 @@ async fn host_defer_invoke_serves_defer_through_the_seam() {
 
     let plugin = RunningPlugin::spawn_with(
         probe_binary("hello"),
+        "hello",
         Some(host_services(Arc::new(mock), None)),
         None,
         None,
+        Authority::none(),
     )
     .await
     .expect("spawn fixture");
@@ -189,9 +210,11 @@ async fn host_edit_invoke_serves_edit_message_through_the_seam() {
 
     let plugin = RunningPlugin::spawn_with(
         probe_binary("hello"),
+        "hello",
         Some(host_services(Arc::new(mock), None)),
         None,
         None,
+        Authority::none(),
     )
     .await
     .expect("spawn fixture");
@@ -237,10 +260,11 @@ async fn host_openview_opens_the_target_plugin_view_end_to_end() {
     mock.expect_send_message()
         .with(
             mockall::predicate::eq(channel_id),
-            mockall::predicate::eq("Loading…"),
+            mockall::predicate::always(),
+            mockall::predicate::always(),
         )
         .times(1)
-        .returning(move |_, _| Ok(Some(json!({ "message_id": produced }))));
+        .returning(move |_, _, _| Ok(Some(json!({ "message_id": produced }))));
     mock.expect_edit_message()
         .with(
             mockall::predicate::eq(channel_id),
@@ -253,7 +277,7 @@ async fn host_openview_opens_the_target_plugin_view_end_to_end() {
                 // Discord rejects them on edit.
                 data == &json!({
                     "attachments": [],
-                    "components": [{"content": "{}", "type": 10}],
+                    "components": [{"content": "{\"user\":{\"id\":7}}", "type": 10}],
                     "embeds": [],
                     "flags": 32768,
                 })
@@ -273,9 +297,11 @@ async fn host_openview_opens_the_target_plugin_view_end_to_end() {
 
     let caller = RunningPlugin::spawn_with(
         probe_binary("hello"),
+        "hello",
         Some(services),
         Some(manager.clone()),
         None,
+        Authority::none(),
     )
     .await
     .expect("spawn caller plugin");
@@ -287,7 +313,7 @@ async fn host_openview_opens_the_target_plugin_view_end_to_end() {
                 "channel_id": channel_id,
                 "plugin": "arg-echo",
                 "command": "arg-echo",
-                "args": {},
+                "args": {"user": {"id": 7}},
             })),
         )
         .await
@@ -313,12 +339,12 @@ async fn host_openview_opens_the_target_plugin_view_end_to_end() {
         "the produced message has an open session"
     );
     let follow_up = engine
-        .interact(message_id, "arg-echo", json!({}))
+        .interact(message_id, "arg-echo", json!({"user": {"id": 7}}))
         .await
         .expect("follow-up interaction routes to the target plugin");
     assert_eq!(
         follow_up.data["components"][0]["content"],
-        "{\"custom_id\":\"arg-echo\",\"view\":{\"last_args\":{}}}"
+        "{\"custom_id\":\"arg-echo\",\"user\":{\"id\":7},\"view\":{\"last_args\":{\"user\":{\"id\":7}}}}"
     );
     assert_eq!(follow_up.data["tts"], false);
     assert_eq!(follow_up.data["enforce_nonce"], false);
@@ -345,7 +371,7 @@ async fn host_openview_edits_the_source_message_in_place() {
             mockall::predicate::function(|data: &serde_json::Value| {
                 data == &json!({
                     "attachments": [],
-                    "components": [{"content": "{}", "type": 10}],
+                    "components": [{"content": "{\"user\":{\"id\":7}}", "type": 10}],
                     "embeds": [],
                     "flags": 32768,
                 })
@@ -365,9 +391,11 @@ async fn host_openview_edits_the_source_message_in_place() {
 
     let caller = RunningPlugin::spawn_with(
         probe_binary("hello"),
+        "hello",
         Some(services),
         Some(manager.clone()),
         None,
+        Authority::none(),
     )
     .await
     .expect("spawn caller plugin");
@@ -379,7 +407,7 @@ async fn host_openview_edits_the_source_message_in_place() {
                 "channel_id": channel_id,
                 "plugin": "arg-echo",
                 "command": "arg-echo",
-                "args": {},
+                "args": {"user": {"id": 7}},
                 "message_id": source,
             })),
         )
@@ -435,9 +463,11 @@ async fn host_openview_accepts_a_string_message_id() {
 
     let caller = RunningPlugin::spawn_with(
         probe_binary("hello"),
+        "hello",
         Some(services),
         Some(manager.clone()),
         None,
+        Authority::none(),
     )
     .await
     .expect("spawn caller plugin");
@@ -449,7 +479,7 @@ async fn host_openview_accepts_a_string_message_id() {
                 "channel_id": channel_id,
                 "plugin": "arg-echo",
                 "command": "arg-echo",
-                "args": {},
+                "args": {"user": {"id": 7}},
                 "message_id": source.to_string(),
             })),
         )
@@ -487,9 +517,11 @@ async fn host_openview_rejects_malformed_view_before_sending_or_registering() {
         .expect("spawn target plugin");
     let caller = RunningPlugin::spawn_with(
         probe_binary("hello"),
+        "hello",
         Some(services),
         Some(manager.clone()),
         None,
+        Authority::none(),
     )
     .await
     .expect("spawn caller plugin");
@@ -502,7 +534,7 @@ async fn host_openview_rejects_malformed_view_before_sending_or_registering() {
                 "channel_id": 987_654_321_u64,
                 "plugin": "arg-echo",
                 "command": "malformed",
-                "args": {},
+                "args": {"user": {"id": 7}},
             })),
         )
         .await
@@ -534,9 +566,16 @@ async fn host_openview_rejects_malformed_view_before_sending_or_registering() {
 /// of panicking or hanging.
 #[tokio::test]
 async fn host_call_without_services_is_host_unavailable() {
-    let plugin = RunningPlugin::spawn_with(probe_binary("hello"), None, None, None)
-        .await
-        .expect("spawn fixture");
+    let plugin = RunningPlugin::spawn_with(
+        probe_binary("hello"),
+        "hello",
+        None,
+        None,
+        None,
+        Authority::none(),
+    )
+    .await
+    .expect("spawn fixture");
     let resp = plugin
         .call(
             "invoke",
@@ -566,20 +605,30 @@ async fn host_call_without_services_is_host_unavailable() {
 async fn concurrent_host_calls_correlate_by_id() {
     let mut mock = MockHostIo::new();
     mock.expect_send_message()
-        .with(mockall::predicate::eq(1_u64), mockall::predicate::eq("one"))
+        .with(
+            mockall::predicate::eq(1_u64),
+            mockall::predicate::eq(payload_for("one")),
+            mockall::predicate::always(),
+        )
         .times(1)
-        .returning(|_, _| Ok(Some(json!({ "message_id": 1 }))));
+        .returning(|_, _, _| Ok(Some(json!({ "message_id": 1 }))));
     mock.expect_send_message()
-        .with(mockall::predicate::eq(2_u64), mockall::predicate::eq("two"))
+        .with(
+            mockall::predicate::eq(2_u64),
+            mockall::predicate::eq(payload_for("two")),
+            mockall::predicate::always(),
+        )
         .times(1)
-        .returning(|_, _| Ok(Some(json!({ "message_id": 2 }))));
+        .returning(|_, _, _| Ok(Some(json!({ "message_id": 2 }))));
 
     let plugin = Arc::new(
         RunningPlugin::spawn_with(
             probe_binary("hello"),
+            "hello",
             Some(host_services(Arc::new(mock), None)),
             None,
             None,
+            Authority::none(),
         )
         .await
         .expect("spawn fixture"),
@@ -625,9 +674,11 @@ async fn call_after_stop_fails_fast() {
     let mock = MockHostIo::new();
     let plugin = RunningPlugin::spawn_with(
         probe_binary("hello"),
+        "hello",
         Some(host_services(Arc::new(mock), None)),
         None,
         None,
+        Authority::none(),
     )
     .await
     .expect("spawn fixture");
@@ -662,9 +713,11 @@ async fn host_kvget_invoke_serves_kv_get_through_the_seam() {
     let mock_io = MockHostIo::new();
     let plugin = RunningPlugin::spawn_with(
         probe_binary("hello"),
+        "hello",
         Some(host_services(Arc::new(mock_io), Some(Arc::new(mock_kv)))),
         None,
         None,
+        Authority::none(),
     )
     .await
     .expect("spawn fixture");
@@ -710,9 +763,11 @@ async fn host_kvset_invoke_serves_kv_set_through_the_seam() {
     let mock_io = MockHostIo::new();
     let plugin = RunningPlugin::spawn_with(
         probe_binary("hello"),
+        "hello",
         Some(host_services(Arc::new(mock_io), Some(Arc::new(mock_kv)))),
         None,
         None,
+        Authority::none(),
     )
     .await
     .expect("spawn fixture");
@@ -758,9 +813,11 @@ async fn host_kvdel_invoke_serves_kv_delete_through_the_seam() {
     let mock_io = MockHostIo::new();
     let plugin = RunningPlugin::spawn_with(
         probe_binary("hello"),
+        "hello",
         Some(host_services(Arc::new(mock_io), Some(Arc::new(mock_kv)))),
         None,
         None,
+        Authority::none(),
     )
     .await
     .expect("spawn fixture");
@@ -783,6 +840,52 @@ async fn host_kvdel_invoke_serves_kv_delete_through_the_seam() {
         } => assert_eq!(id, 0),
         other => panic!("expected ok resp with no data, got {other:?}"),
     }
+}
+
+#[tokio::test]
+async fn malformed_modal_response_does_not_change_existing_view() {
+    let manager = Arc::new(PluginManager::new(None, RespawnPolicy::default()));
+    let plugin = manager
+        .spawn(
+            "malformed-modal",
+            fixture_script("malformed_modal_plugin.sh"),
+            None,
+            &[],
+            &[],
+        )
+        .await
+        .expect("spawn malformed modal fixture");
+    let engine = InteractionEngine::new();
+    let message_id = serenity::MessageId::new(10_001);
+    let user_id = serenity::UserId::new(7);
+    let prior = ViewSpec {
+        data: json!({"content": "prior"}),
+        ephemeral: false,
+        view: json!({"page": 1}),
+        files: vec![],
+    };
+    engine
+        .register(message_id, user_id, plugin.clone(), "modal", prior.clone())
+        .await;
+    manager
+        .bind_modal(user_id.get(), "malformed-modal", "modal:submit")
+        .await;
+
+    let error = manager
+        .deliver_modal_submission(user_id.get(), json!({"user": {"id": user_id.get()}}))
+        .await
+        .expect_err("malformed modal file is rejected");
+
+    assert!(
+        matches!(
+            error,
+            pwr_bot::plugin::ModalDeliveryError::InvalidResponse { ref kind, .. }
+                if kind == "InvalidView"
+        ),
+        "{error:?}"
+    );
+    assert_eq!(engine.view_state(message_id).await, Some(prior.view));
+    plugin.stop().await.expect("stop malformed modal fixture");
 }
 
 /// The fixture's `host.openmodal` invoke issues a plugin→host

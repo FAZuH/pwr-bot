@@ -11,7 +11,19 @@ use crate::bot::Error;
 use crate::bot::error::BotError;
 use crate::bot::reply::text_reply;
 use crate::error::AppError;
+use crate::plugin::InteractionError;
 use crate::service::error::ServiceError;
+
+/// Returns the user-facing text for a plugin command rejection.
+fn plugin_rejection_message(error: &Error) -> Option<String> {
+    let interaction_error = error.downcast_ref::<InteractionError>()?;
+    match interaction_error {
+        InteractionError::PluginRejected { kind, msg } if kind == "CommandError" => {
+            Some(msg.clone())
+        }
+        _ => None,
+    }
+}
 
 /// Handles framework errors and sends appropriate responses to users.
 pub struct ErrorHandler;
@@ -56,6 +68,8 @@ impl ErrorHandler {
             ("❌ Action Failed", bot_error.to_string())
         } else if let Some(service_error) = error.downcast_ref::<ServiceError>() {
             ("❌ Service Error", service_error.to_string())
+        } else if let Some(message) = plugin_rejection_message(error) {
+            ("❌ Action Failed", message)
         } else {
             let ref_id = AppError::log_with_ref(error);
             error!(
@@ -96,5 +110,43 @@ impl ErrorHandler {
         } else {
             let _ = ctx.send(text_reply(message)).await;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plugin_command_rejection_keeps_its_user_facing_message() {
+        let error: Error = Box::new(InteractionError::PluginRejected {
+            kind: "CommandError".into(),
+            msg: "Configuration error: notification channel is missing".into(),
+        });
+
+        assert_eq!(
+            plugin_rejection_message(&error).as_deref(),
+            Some("Configuration error: notification channel is missing")
+        );
+    }
+
+    #[test]
+    fn host_unavailable_plugin_errors_are_redacted() {
+        let error: Error = Box::new(InteractionError::PluginRejected {
+            kind: "HostUnavailable".into(),
+            msg: "database host details must stay private".into(),
+        });
+
+        assert!(plugin_rejection_message(&error).is_none());
+    }
+
+    #[test]
+    fn unknown_plugin_errors_are_redacted() {
+        let error: Error = Box::new(InteractionError::PluginRejected {
+            kind: "UnknownAction".into(),
+            msg: "internal action details must stay private".into(),
+        });
+
+        assert!(plugin_rejection_message(&error).is_none());
     }
 }

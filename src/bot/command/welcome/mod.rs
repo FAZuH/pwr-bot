@@ -13,7 +13,7 @@ pub async fn welcome(ctx: Context<'_>) -> Result<(), Error> {
     let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?.get();
     open_plugin_view(
         ctx,
-        "welcome-settings",
+        "welcome",
         "welcome-settings",
         json!({ "guild_id": guild_id }),
     )

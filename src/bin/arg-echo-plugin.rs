@@ -46,7 +46,7 @@ fn main() -> ExitCode {
     let hello = Msg::Hello {
         v: API_VERSION,
         name: PLUGIN_NAME.into(),
-        caps: vec![format!("command:{PLUGIN_NAME}")],
+        ops: vec![format!("command:{PLUGIN_NAME}")],
         manifest: Some(Manifest {
             name: PLUGIN_NAME.into(),
             description: "Echo plugin args".into(),
@@ -56,6 +56,8 @@ fn main() -> ExitCode {
             }],
             event_handlers: vec![],
             tasks: vec![],
+            settings: vec![],
+            requires: vec![],
             api_version: API_VERSION,
         }),
     };
@@ -81,6 +83,19 @@ fn main() -> ExitCode {
                 } else {
                     view_data(&args)
                 };
+                if args.get("emit_progress").and_then(Value::as_bool) == Some(true) {
+                    let progress = Msg::Progress {
+                        id,
+                        data: json!({
+                            "data": view_data(&json!({ "phase": "working" })),
+                            "ephemeral": false,
+                            "view": {"phase": "working"},
+                        }),
+                    };
+                    if write_msg(&mut out, &progress).is_err() {
+                        return ExitCode::FAILURE;
+                    }
+                }
                 let resp = Msg::resp_ok(
                     id,
                     Some(json!({
@@ -111,7 +126,11 @@ fn main() -> ExitCode {
                 }
             }
             // The host's hello ack and everything else: tolerate silently.
-            Msg::Hello { .. } | Msg::Pong | Msg::Event { .. } | Msg::Resp { .. } => {}
+            Msg::Hello { .. }
+            | Msg::Pong
+            | Msg::Event { .. }
+            | Msg::Resp { .. }
+            | Msg::Progress { .. } => {}
         }
     }
     ExitCode::SUCCESS

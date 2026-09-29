@@ -10,19 +10,21 @@
 //! effects.
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
 use pwr_plugin_protocol::Manifest;
 
+use crate::bot::add_plugin_commands;
 use crate::bot::command::prelude::*;
+use crate::bot::host_command_names;
 use crate::bot::manifest_for;
 use crate::bot::reply::text_reply;
 use crate::plugin::CatalogEntry;
 use crate::plugin::InstallError;
 use crate::plugin::PluginError;
-use crate::plugin::command::commands_from_manifest;
 use crate::plugin::command::register_in_guild;
 use crate::plugin::install;
 use crate::update::PluginsCmd;
@@ -58,17 +60,32 @@ pub async fn list(ctx: Context<'_>) -> Result<(), Error> {
         ctx.send(text_reply(reply)).await?;
         return Ok(());
     }
-    let mut lines = Vec::with_capacity(model.catalog.len());
-    for name in &model.catalog {
-        let state = if model.enabled.contains(name) {
+    ctx.send(text_reply(
+        list_lines(&data.plugin_catalog, &model.enabled).join("\n"),
+    ))
+    .await?;
+    Ok(())
+}
+
+/// The `/plugins list` body: one line per catalog plugin with its guild
+/// state and the authority the operator granted it — the Discord token, or
+/// the shaped `host.*` op surface alone.
+fn list_lines(catalog: &HashMap<String, CatalogEntry>, enabled: &[String]) -> Vec<String> {
+    let mut lines = Vec::with_capacity(catalog.len());
+    for (name, entry) in catalog {
+        let state = if enabled.contains(name) {
             "enabled"
         } else {
             "disabled"
         };
-        lines.push(format!("`{name}` — {state}"));
+        let authority = if entry.discord_token {
+            "discord token"
+        } else {
+            "host ops only"
+        };
+        lines.push(format!("`{name}` — {state}, {authority}"));
     }
-    ctx.send(text_reply(lines.join("\n"))).await?;
-    Ok(())
+    lines
 }
 
 /// Enables a catalog plugin for this guild, registering the union of all
@@ -280,13 +297,20 @@ fn commands_for_enabled_plugins(
     enabled: &[String],
 ) -> Vec<poise::Command<crate::bot::Data, Error>> {
     let mut commands = Vec::new();
+    let mut registered_names = HashSet::new();
+    let reserved_names = host_command_names();
     let mut enabled_names: Vec<&String> = enabled.iter().collect();
     enabled_names.sort();
     for name in enabled_names {
         let Some(manifest) = manifest_for(core_manifests, catalog, name) else {
             continue;
         };
-        commands.extend(commands_from_manifest(manifest));
+        add_plugin_commands(
+            &mut commands,
+            &mut registered_names,
+            manifest,
+            &reserved_names,
+        );
     }
     commands
 }
@@ -315,9 +339,22 @@ where
 mod tests {
     use std::path::PathBuf;
 
+    use serde_json::json;
+
     use super::*;
     use crate::test_helpers::entry_named;
     use crate::test_helpers::manifest_named;
+
+    fn manifest_with_command(plugin: &str, command: &str, description: &str) -> Manifest {
+        let mut manifest = manifest_named(plugin);
+        manifest.commands = vec![pwr_plugin_protocol::CommandDef {
+            create_command: json!({
+                "name": command,
+                "description": description,
+            }),
+        }];
+        manifest
+    }
 
     /// The catalog load failure a fresh checkout produces: no `plugins.toml`.
     fn missing_catalog_error() -> InstallError {
@@ -380,59 +417,139 @@ mod tests {
     }
 
     #[test]
+    fn list_lines_shows_each_plugins_state_and_authority() {
+        let mut granted = entry_named("pro");
+        granted.discord_token = true;
+        let catalog = HashMap::from([
+            ("hello".to_string(), entry_named("hello")),
+            ("pro".to_string(), granted),
+        ]);
+
+        let lines = list_lines(&catalog, &["pro".to_string()]);
+
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert!(
+            lines.contains(&"`hello` — disabled, host ops only".to_string()),
+            "{lines:?}"
+        );
+        assert!(
+            lines.contains(&"`pro` — enabled, discord token".to_string()),
+            "{lines:?}"
+        );
+    }
+
+    #[test]
     fn enabling_one_plugin_registers_all_enabled_plugins_commands() {
-        let core = HashMap::from([("settings".to_string(), manifest_named("settings"))]);
+        let core = HashMap::from([("voice".to_string(), manifest_named("voice"))]);
         let catalog = HashMap::from([("feed".to_string(), entry_named("feed"))]);
 
         let commands = commands_for_enabled_plugins(
             &core,
             &catalog,
-            &["settings".to_string(), "feed".to_string()],
+            &["voice".to_string(), "feed".to_string()],
         );
         let names: Vec<&str> = commands
             .iter()
             .map(|command| command.name.as_ref())
             .collect();
 
-        assert_eq!(names, ["feed", "settings"]);
+        assert_eq!(names, ["feed", "voice"]);
     }
 
     #[test]
     fn disabling_one_plugin_registers_the_remaining_plugins_commands() {
-        let core = HashMap::from([("settings".to_string(), manifest_named("settings"))]);
+        let core = HashMap::from([("voice".to_string(), manifest_named("voice"))]);
         let catalog = HashMap::from([("feed".to_string(), entry_named("feed"))]);
 
         // After `feed` is disabled, the remaining enabled set is just
-        // `settings`; the re-registered union carries only its commands.
-        let commands = commands_for_enabled_plugins(&core, &catalog, &["settings".to_string()]);
+        // `voice`; the re-registered union carries only its commands.
+        let commands = commands_for_enabled_plugins(&core, &catalog, &["voice".to_string()]);
         let names: Vec<&str> = commands
             .iter()
             .map(|command| command.name.as_ref())
             .collect();
 
-        assert_eq!(names, ["settings"]);
+        assert_eq!(names, ["voice"]);
     }
 
     #[test]
     fn commands_for_enabled_plugins_skip_names_without_a_manifest() {
-        let core = HashMap::from([("settings".to_string(), manifest_named("settings"))]);
+        let core = HashMap::from([("voice".to_string(), manifest_named("voice"))]);
 
         let commands = commands_for_enabled_plugins(
             &core,
             &HashMap::new(),
-            &["ghost".to_string(), "settings".to_string()],
+            &["ghost".to_string(), "voice".to_string()],
         );
         let names: Vec<&str> = commands
             .iter()
             .map(|command| command.name.as_ref())
             .collect();
 
-        assert_eq!(names, ["settings"]);
+        assert_eq!(names, ["voice"]);
+    }
+
+    #[test]
+    fn manual_registration_reserves_host_roots_and_deduplicates_commands() {
+        let core = HashMap::from([
+            (
+                "alpha".to_string(),
+                manifest_with_command("alpha", "settings", "plugin settings"),
+            ),
+            (
+                "beta".to_string(),
+                manifest_with_command("beta", "shared", "first"),
+            ),
+        ]);
+        let catalog = HashMap::from([(
+            "gamma".to_string(),
+            CatalogEntry {
+                manifest: manifest_with_command("gamma", "shared", "second"),
+                ..entry_named("gamma")
+            },
+        )]);
+
+        let commands = commands_for_enabled_plugins(
+            &core,
+            &catalog,
+            &["gamma".into(), "beta".into(), "alpha".into()],
+        );
+        let names: Vec<&str> = commands
+            .iter()
+            .map(|command| command.name.as_ref())
+            .collect();
+
+        assert_eq!(names, ["shared"]);
+        assert_eq!(commands[0].description.as_deref(), Some("first"));
+    }
+
+    #[test]
+    fn manual_registration_has_the_same_first_owner_for_every_input_order() {
+        let core = HashMap::from([
+            (
+                "zeta".to_string(),
+                manifest_with_command("zeta", "shared", "zeta"),
+            ),
+            (
+                "alpha".to_string(),
+                manifest_with_command("alpha", "shared", "alpha"),
+            ),
+        ]);
+        let catalog = HashMap::new();
+
+        let first = commands_for_enabled_plugins(&core, &catalog, &["zeta".into(), "alpha".into()]);
+        let second =
+            commands_for_enabled_plugins(&core, &catalog, &["alpha".into(), "zeta".into()]);
+
+        assert_eq!(first.len(), 1);
+        assert_eq!(second.len(), 1);
+        assert_eq!(first[0].description, second[0].description);
+        assert_eq!(first[0].description.as_deref(), Some("alpha"));
     }
 
     #[tokio::test]
     async fn register_enabled_plugins_registers_the_union_of_all_enabled_plugins() {
-        let core = HashMap::from([("settings".to_string(), manifest_named("settings"))]);
+        let core = HashMap::from([("voice".to_string(), manifest_named("voice"))]);
         let catalog = HashMap::from([("feed".to_string(), entry_named("feed"))]);
 
         let mut calls = 0;
@@ -440,7 +557,7 @@ mod tests {
         let result = register_enabled_plugins(
             &core,
             &catalog,
-            &["settings".to_string(), "feed".to_string()],
+            &["voice".to_string(), "feed".to_string()],
             |commands| {
                 calls += 1;
                 registered.extend(commands.iter().map(|command| command.name.to_string()));
@@ -451,29 +568,29 @@ mod tests {
 
         assert!(result.is_ok());
         assert_eq!(calls, 1);
-        assert_eq!(registered, ["feed", "settings"]);
+        assert_eq!(registered, ["feed", "voice"]);
     }
 
     #[tokio::test]
     async fn register_enabled_plugins_keeps_the_remaining_plugins_commands_after_a_disable() {
-        let core = HashMap::from([("settings".to_string(), manifest_named("settings"))]);
+        let core = HashMap::from([("voice".to_string(), manifest_named("voice"))]);
         let catalog = HashMap::from([("feed".to_string(), entry_named("feed"))]);
 
         let mut registered: Vec<String> = Vec::new();
         let result =
-            register_enabled_plugins(&core, &catalog, &["settings".to_string()], |commands| {
+            register_enabled_plugins(&core, &catalog, &["voice".to_string()], |commands| {
                 registered.extend(commands.iter().map(|command| command.name.to_string()));
                 Box::pin(async { Ok(()) })
             })
             .await;
 
         assert!(result.is_ok());
-        assert_eq!(registered, ["settings"]);
+        assert_eq!(registered, ["voice"]);
     }
 
     #[tokio::test]
     async fn register_enabled_plugins_with_no_enabled_plugins_registers_an_empty_set() {
-        let core = HashMap::from([("settings".to_string(), manifest_named("settings"))]);
+        let core = HashMap::from([("voice".to_string(), manifest_named("voice"))]);
         let catalog = HashMap::from([("feed".to_string(), entry_named("feed"))]);
 
         let mut calls = 0;

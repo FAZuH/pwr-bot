@@ -1,14 +1,13 @@
-//! Shared plugin-side plumbing for pwr-bot panel plugins (ADR-0009).
+//! Shared plugin-side plumbing for pwr-bot panel plugins.
 //!
 //! A panel plugin owns its view, update logic, and model vocabulary; the
 //! mechanical plumbing every panel would otherwise copy — session state,
-//! pending host-call bookkeeping, wire writing, and hub navigation — lives
-//! here once. The crate is generic over the panel through [`Panel`]: a
-//! plugin implements it for its model and gets [`SessionState`],
-//! [`Pending`], and [`issue_host_call`] pre-wired to its service RPC pair
-//! (ADR-0010).
+//! pending host-call bookkeeping, and wire writing — lives here once. The
+//! crate is generic over the panel through [`Panel`]: a plugin implements it
+//! for its model and gets [`SessionState`], [`Pending`], and
+//! [`issue_host_call`] pre-wired to its service RPC pair (ADR-0010).
 //!
-//! Known fork: welcome-settings duplicates [`SessionState`], [`Pending`],
+//! Known fork: welcome duplicates [`SessionState`], [`Pending`],
 //! [`HostCall`], and [`issue_host_call`] locally. The shared session echo
 //! carries the panel's whole model, but a welcome modal submission must
 //! re-read settings rather than persist a stale snapshot, and the shared
@@ -19,10 +18,15 @@
 //! bot-crate dependencies, and the host keeps its own copy of the id
 //! parsing twin.
 
+pub mod lifecycle;
+pub mod pagination;
+
 use std::collections::HashMap;
 use std::io::Write;
 
+pub use pwr_plugin_protocol::ABOUT_TARGET;
 use pwr_plugin_protocol::Msg;
+pub use pwr_plugin_protocol::SETTINGS_TARGET;
 use pwr_plugin_protocol::ServerSettings;
 use pwr_plugin_protocol::WireError;
 use serde_json::Value;
@@ -90,25 +94,25 @@ pub enum Pending<P> {
     /// The settings-load RPC ([`Panel::GET_SETTINGS_OP`]) issued to load
     /// the model before the first render.
     LoadSettings { invoke_id: u64, guild_id: u64 },
-    /// The settings-persist RPC ([`Panel::UPDATE_SETTINGS_OP`]) a terminal
-    /// exit issued before returning to the hub. The channel the source
-    /// interaction came from and the hub page to open follow the persist.
+    /// The settings-persist RPC ([`Panel::UPDATE_SETTINGS_OP`]) a Back or
+    /// About press issued. On its resp the panel hands the message to the
+    /// host page it asked for through [`Pending::OpenSettings`]; without a
+    /// captured [`ReturnExit`] there is nothing to return to, so the panel
+    /// re-renders and stays.
     Persist {
         invoke_id: u64,
         session: SessionState<P>,
-        channel_id: Option<u64>,
-        /// The message the interaction fired on: `open_hub_args` edits it in
-        /// place instead of posting a fresh hub message.
-        message_id: Option<u64>,
-        hub_page: HubPage,
+        exit: Option<ReturnExit>,
     },
-    /// The `host.open_view` a completed persist issued for the hub.
-    OpenHub {
+    /// The `host.open_view` a [`ReturnExit`] issued against a
+    /// host-reserved target — Back and About exits both ride it. Its resp
+    /// answers with the wire's `ViewMoved` marker when the open replaced
+    /// the panel's own message (the host page took it over, so re-rendering
+    /// would overwrite it), or with the panel's own render when nothing
+    /// took over (no live Settings session, or no source message to morph).
+    OpenSettings {
         invoke_id: u64,
         session: SessionState<P>,
-        /// The in-place marker: a successful open replaced the source
-        /// message, so its resp answers `VIEW_MOVED_KIND` instead of the
-        /// panel's own render.
         message_id: Option<u64>,
     },
     /// The settings-persist RPC an expiry issued: nothing to answer, the
@@ -122,10 +126,80 @@ impl<P: Panel> Pending<P> {
         match self {
             Pending::LoadSettings { .. } => P::GET_SETTINGS_OP,
             Pending::Persist { .. } => P::UPDATE_SETTINGS_OP,
-            Pending::OpenHub { .. } => "host.open_view",
+            Pending::OpenSettings { .. } => "host.open_view",
             Pending::Expire => P::UPDATE_SETTINGS_OP,
         }
     }
+}
+
+/// The `host.open_view` args that hand `message_id` (when the panel knows
+/// the message its interaction fired on) back to the host Settings GUI,
+/// carrying the guild the panel edits.
+pub fn open_settings_args(channel_id: u64, guild_id: u64, message_id: Option<u64>) -> Value {
+    return_args(SETTINGS_TARGET, channel_id, guild_id, message_id)
+}
+
+/// The `host.open_view` args that hand `message_id` to the host page the
+/// host-reserved `target` names, carrying the guild the panel edits. The
+/// `message_id` key is absent when the panel knows no source message: the
+/// host then opens the page on a fresh message.
+pub fn return_args(target: &str, channel_id: u64, guild_id: u64, message_id: Option<u64>) -> Value {
+    let mut args = json!({
+        "channel_id": channel_id,
+        "plugin": target,
+        "args": { "guild_id": guild_id },
+    });
+    if let Some(message_id) = message_id {
+        args["message_id"] = json!(message_id);
+    }
+    args
+}
+
+/// The exit a panel press captured: the `host.open_view` args that hand the
+/// panel's message to a host page (the reserved `settings` or `about`
+/// target), and the source message id the open rides (it decides the
+/// in-place `ViewMoved` answer).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReturnExit {
+    /// The `host.open_view` args against a host-reserved target.
+    pub args: Value,
+    /// The message the panel's interaction fired on, when known.
+    pub message_id: Option<u64>,
+}
+
+/// Reads the Back exit off a `view.interact` args payload: the triggering
+/// interaction's channel id and source message id become the in-place
+/// `host.open_view` against the host-reserved `settings` target. `None`
+/// when the interaction carries no channel id — there is nothing to return
+/// in place, and the caller keeps the panel on screen.
+pub fn back_exit(args: Option<&Value>, guild_id: u64) -> Option<ReturnExit> {
+    return_exit(SETTINGS_TARGET, args, guild_id)
+}
+
+/// Reads the About exit off a `view.interact` args payload, mirroring
+/// [`back_exit`] against the host-reserved `about` target: the host About
+/// view opens on the panel's message. `None` when the interaction carries
+/// no channel id — there is nothing to open in place, and the caller keeps
+/// the panel on screen.
+pub fn about_exit(args: Option<&Value>, guild_id: u64) -> Option<ReturnExit> {
+    return_exit(ABOUT_TARGET, args, guild_id)
+}
+
+/// Builds the exit to a host-reserved target from a `view.interact` args
+/// payload.
+fn return_exit(target: &str, args: Option<&Value>, guild_id: u64) -> Option<ReturnExit> {
+    let channel_id = args.and_then(|a| a.get("channel_id")).and_then(id_as_u64)?;
+    let message_id = source_message_id(args);
+    let mut exit_args = return_args(target, channel_id, guild_id, message_id);
+    if let Some(context) = args.and_then(|args| args.get("_context")) {
+        exit_args["args"]["_context"] = context.clone();
+    } else if let Some(user) = args.and_then(|args| args.get("user")) {
+        exit_args["args"]["user"] = user.clone();
+    }
+    Some(ReturnExit {
+        args: exit_args,
+        message_id,
+    })
 }
 
 /// A plugin→host call: the pending kind its resp will resolve, and the
@@ -141,25 +215,6 @@ impl<P: Panel> HostCall<P> {
     }
 }
 
-/// Which hub page the panel's About exit opens.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HubPage {
-    Hub,
-    About,
-}
-
-impl HubPage {
-    pub fn name(self) -> &'static str {
-        match self {
-            HubPage::Hub => "hub",
-            HubPage::About => "about",
-        }
-    }
-}
-
-/// The settings hub's plugin name, the `host.open_view` target for Back.
-pub const HUB_PLUGIN: &str = "settings";
-
 /// Reads a Discord id from a wire value: a number, or the string form
 /// serenity's ids serialize to.
 pub fn id_as_u64(value: &Value) -> Option<u64> {
@@ -174,29 +229,6 @@ pub fn id_as_u64(value: &Value) -> Option<u64> {
 /// source message, so the caller opens the view on a fresh message.
 pub fn source_message_id(args: Option<&Value>) -> Option<u64> {
     args?.get("message")?.get("id").and_then(id_as_u64)
-}
-
-/// The `host.open_view` call args opening the settings hub on the given
-/// page: the panel's Back lands where the monolith's
-/// `Navigation::SettingsMain` did, and its About where
-/// `Navigation::SettingsAbout` did. When the interaction carried a source
-/// message id, the hub replaces that message instead of posting a fresh one.
-pub fn open_hub_args(
-    channel_id: u64,
-    guild_id: u64,
-    page: HubPage,
-    message_id: Option<u64>,
-) -> Value {
-    let mut args = json!({
-        "channel_id": channel_id,
-        "plugin": HUB_PLUGIN,
-        "command": HUB_PLUGIN,
-        "args": { "guild_id": guild_id, "page": page.name() },
-    });
-    if let Some(message_id) = message_id {
-        args["message_id"] = json!(message_id);
-    }
-    args
 }
 
 /// Serializes `msg` to one JSON line, writes it, then flushes.
@@ -229,14 +261,23 @@ pub fn issue_host_call<P: Panel>(
     call: HostCall<P>,
 ) -> bool {
     *next_call_id += 1;
+    issue_host_call_with_id(out, pending, *next_call_id, call)
+}
+
+pub fn issue_host_call_with_id<P: Panel>(
+    out: &mut impl Write,
+    pending: &mut HashMap<u64, Pending<P>>,
+    call_id: u64,
+    call: HostCall<P>,
+) -> bool {
     let HostCall {
         pending: pending_kind,
         args,
     } = call;
     let op = pending_kind.op();
-    pending.insert(*next_call_id, pending_kind);
+    pending.insert(call_id, pending_kind);
     let call_msg = Msg::Call {
-        id: *next_call_id,
+        id: call_id,
         op: op.into(),
         cmd: None,
         args: Some(args),
@@ -257,33 +298,6 @@ mod tests {
     }
 
     #[test]
-    fn open_hub_args_carry_channel_guild_and_page() {
-        assert_eq!(
-            open_hub_args(5, 42, HubPage::About, None),
-            json!({
-                "channel_id": 5,
-                "plugin": "settings",
-                "command": "settings",
-                "args": { "guild_id": 42, "page": "about" },
-            })
-        );
-    }
-
-    #[test]
-    fn open_hub_args_edit_the_source_message_when_present() {
-        assert_eq!(
-            open_hub_args(5, 42, HubPage::Hub, Some(777)),
-            json!({
-                "channel_id": 5,
-                "plugin": "settings",
-                "command": "settings",
-                "args": { "guild_id": 42, "page": "hub" },
-                "message_id": 777,
-            })
-        );
-    }
-
-    #[test]
     fn source_message_id_reads_the_serenity_interaction_shape() {
         assert_eq!(
             source_message_id(Some(&json!({ "message": { "id": "555" } }))),
@@ -301,5 +315,112 @@ mod tests {
             "a modal submit without a message falls back to a fresh message"
         );
         assert_eq!(source_message_id(None), None);
+    }
+
+    #[test]
+    fn open_settings_args_target_the_host_reserved_settings_and_edit_in_place() {
+        assert_eq!(
+            open_settings_args(5, 42, Some(777)),
+            json!({
+                "channel_id": 5,
+                "plugin": SETTINGS_TARGET,
+                "args": { "guild_id": 42 },
+                "message_id": 777,
+            })
+        );
+        assert!(
+            open_settings_args(5, 42, None).get("message_id").is_none(),
+            "no source message leaves the key absent, not null"
+        );
+    }
+
+    #[test]
+    fn back_exit_reads_the_channel_and_source_message_off_the_interaction() {
+        let args = json!({
+            "channel_id": "5",
+            "message": { "id": "555" },
+        });
+        let back = back_exit(Some(&args), 42).expect("channel id present");
+        assert_eq!(
+            back.args,
+            json!({
+                "channel_id": 5,
+                "plugin": SETTINGS_TARGET,
+                "args": { "guild_id": 42 },
+                "message_id": 555,
+            })
+        );
+        assert_eq!(back.message_id, Some(555));
+    }
+
+    #[test]
+    fn panel_exits_carry_the_actor_context_to_the_host_session() {
+        let args = json!({
+            "channel_id": "5",
+            "message": { "id": "555" },
+            "_context": { "user_id": 7 },
+        });
+
+        let back = back_exit(Some(&args), 42).expect("channel id present");
+
+        assert_eq!(back.args["args"]["_context"], json!({ "user_id": 7 }));
+    }
+
+    #[test]
+    fn back_exit_without_a_source_message_omits_the_message_id() {
+        let back = back_exit(Some(&json!({ "channel_id": "5" })), 42).expect("channel id present");
+
+        assert_eq!(back.message_id, None);
+        assert!(back.args.get("message_id").is_none());
+    }
+
+    #[test]
+    fn back_exit_without_a_channel_id_is_none() {
+        assert_eq!(back_exit(None, 42), None);
+        assert_eq!(back_exit(Some(&json!({})), 42), None);
+        assert_eq!(
+            back_exit(Some(&json!({ "message": { "id": "555" } })), 42),
+            None,
+            "a modal submit without a channel id has nothing to return in place"
+        );
+    }
+
+    #[test]
+    fn about_exit_reads_the_channel_and_source_message_off_the_interaction() {
+        let args = json!({
+            "channel_id": "5",
+            "message": { "id": "555" },
+        });
+        let about = about_exit(Some(&args), 42).expect("channel id present");
+        assert_eq!(
+            about.args,
+            json!({
+                "channel_id": 5,
+                "plugin": ABOUT_TARGET,
+                "args": { "guild_id": 42 },
+                "message_id": 555,
+            })
+        );
+        assert_eq!(about.message_id, Some(555));
+    }
+
+    #[test]
+    fn about_exit_without_a_source_message_omits_the_message_id() {
+        let about =
+            about_exit(Some(&json!({ "channel_id": "5" })), 42).expect("channel id present");
+
+        assert_eq!(about.message_id, None);
+        assert!(about.args.get("message_id").is_none());
+    }
+
+    #[test]
+    fn about_exit_without_a_channel_id_is_none() {
+        assert_eq!(about_exit(None, 42), None);
+        assert_eq!(about_exit(Some(&json!({})), 42), None);
+        assert_eq!(
+            about_exit(Some(&json!({ "message": { "id": "555" } })), 42),
+            None,
+            "a modal submit without a channel id has nothing to return in place"
+        );
     }
 }

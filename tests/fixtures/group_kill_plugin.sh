@@ -5,7 +5,7 @@
 # SIGTERM all fail to stop it — unload must escalate to the group SIGKILL.
 # The child pid is written to a marker file; because the child ignores
 # SIGTERM, its death after unload can only come from the group SIGKILL.
-echo '{"t":"hello","v":1,"name":"group-kill","caps":[]}'
+echo '{"t":"hello","v":2,"name":"group-kill","ops":[]}'
 BASE="/tmp/pwr_bot_plugin_group_${PPID}_kill"
 trap '' TERM
 sh -c 'trap "" TERM; while :; do sleep 1; done' &

@@ -13,10 +13,10 @@ Format: `type(scope): summary` or `type: summary`.
 | `bot` | `src/bot/**` |
 | `deps` | Dependency manifests and lockfiles (`Cargo.toml`, `Cargo.lock`) |
 | `db` | `src/repo/**`, `migrations/**`, and database test support |
-| `feed` | `src/feed/**` |
+| `feed` | `crates/plugin/feed/**` |
 | `minor` | `src/update/**` and small model/update logic |
 | `plugin` | `src/plugin/**`, `crates/plugin/**`, and plugin protocol/component crates |
-| `publisher` | `src/task/**` feed publisher tasks |
+| `publisher` | Scheduled publisher tasks in plugin crates |
 | `service` | `src/service/**` |
 | `source` | repo-wide Rust source under `src/**` when no narrower scope owns it |
 | `subscriber` | `src/subscriber/**` |

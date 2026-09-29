@@ -9,7 +9,7 @@ process runs the bot and its plugin subprocesses.
 A subprocess that the host spawns to add commands and views to the bot. It
 speaks JSON-lines over stdio through `pwr-plugin-protocol`, with a `"t"` tag
 on every message. The plugins live in `crates/plugin/`, for example `hello`
-and `settings`.
+and the settings panels `feed`, `voice`, and `welcome`.
 _Avoid_: extension, add-on
 
 **Host**:
@@ -29,7 +29,7 @@ _Avoid_: view payload
 **Gate**:
 The host's validate-only check of `ViewSpec.data` at every raw-send
 boundary: initial slash dispatch, component and modal re-render,
-`host.open_view`, and the hub handoff's message morph. The host parses a
+`host.open_view`, and the view handoff's message morph. The host parses a
 clone of the payload through
 `pwr_ext::prelude::CreateMessageDe`, discards the parsed value, and sends
 the original JSON unchanged. A failure is a `WireError` with kind
@@ -56,9 +56,9 @@ The reusable typed builders in `crates/pwr-poise-components`, rebuilt on
 `pwr-ext`, kept for shared pieces the `view!` grammar does not fit
 (pagination). Runtime assembly now composes `pwr-ext` `component!`/splices
 plus the typed `view_support` builders inside a single `view!` literal:
-plugins author the whole view with `view!` and splice runtime data (such
-as the settings hub nav row) at its pinned positions, `Option`-gated on
-discovery. No in-repo view is library-composed any more.
+plugins author the whole view with `view!` and splice runtime data
+(conditional rows, per-section buttons) at pinned positions,
+`Option`-gated on state. No in-repo view is library-composed any more.
 See ADR-0004.
 _Avoid_: pwr-ext
 
@@ -96,10 +96,11 @@ _Avoid_: owned message, session claim
 A Back press with an empty navigation history: the view on screen is
 the root view, so Back dismisses it instead of navigating to a parent
 frame. A public root view is deleted; an ephemeral one is left for the
-user, because it belongs to the interaction that produced it. No host
-feature returns the plain Back navigation today — every Back-capable
-view hands off to the settings hub — so Root Back stays the navigation
-walk's well-defined empty-history branch.
+user, because it belongs to the interaction that produced it. The
+Settings GUI is always the root frame of its session, so its plain
+Back over the empty history is the Root Back; the panels it hands off
+to return through the host-reserved `settings` target, which re-runs
+the Settings GUI instead of popping the walk.
 _Avoid_: exit Back, root dismissal
 
 **Content placeholder vs deferred think**:
@@ -117,23 +118,46 @@ _Avoid_: loading message, placeholder reply
 **Host op**:
 One operation a plugin can call on the host over the protocol, written
 `host.<name>` on the wire, such as `host.kv.get`. A plugin declares the
-ops it calls in its hello `caps` list, and the host rejects an unknown
+ops it calls in its hello `ops` list, and the host rejects an unknown
 `host.*` op at spawn. See Host and ADR-0010.
 _Avoid_: host command, host method
 
 **Service RPC**:
 A host op that mirrors one method of a host service, for example
-`host.feed.get_settings`. The service stays the single source of truth,
+`host.welcome.get_settings`. The service stays the single source of truth,
 and the plugin stays a thin client. Ops are shaped by services, never by
-plugins: the host API grows only when the host domain grows. See Host op,
-Panel plugin, and ADR-0010.
+plugins: the host API grows only when the host domain grows. Feed and voice
+settings are plugin-owned; identity lookups use the typed
+`host.resolve_users` op. See Host op, Panel plugin, and ADR-0010.
 _Avoid_: bespoke op, plugin-shaped op
 
 **Panel plugin**:
-A plugin crate that owns one settings panel end to end — the interactive
-settings view for one feature, such as feed settings, voice settings, or
-welcome. It renders the view, answers its interactions, and reaches
-service data through service RPCs. The panel migration turns the three
-host-side panels into panel plugins, one crate each. See Service RPC and
-ADR-0009.
+A plugin crate that owns one settings panel end to end, such as feed
+settings, voice settings, or welcome. It renders the view and answers its
+interactions. Voice owns its repository, embedded migrations, heartbeat
+file, and voice event subscriber; Welcome reaches shared host settings through
+service RPCs. Feed uses its own repository and embedded migrations. The panel
+migration turns the three host-side panels into panel plugins, one crate each.
+See Service RPC and ADR-0009.
 _Avoid_: host panel, feature panel
+
+**Settings**:
+The host's centralized settings GUI. One Discord message the host renders
+itself, listing every plugin's registered settings sections. The host owns
+the view; no plugin renders the list. Opening a section morphs the message
+into that section's panel through the plugin view engine. The name is
+`settings` everywhere: the `/settings` command, the manifest `settings`
+field. The capability lives in the host because it is generic — it never
+knows what a panel contains, only which command opens it.
+_Avoid_: settings hub, hub, settings panel (for the list)
+
+**Settings section**:
+A plugin's registered entry in the host Settings GUI. Declared in the
+plugin manifest as `{name, description, command}`, where `command` names
+one of that plugin's own registered commands. A section is navigation
+only: settings values live wherever the plugin stores them, and the host
+never reads or writes plugin settings data. A section's panel returns to
+the Settings GUI through `host.open_view` against the host-reserved
+`settings` target: the panel's Back persists plugin-side, then the parked
+Settings session re-renders on the same message.
+_Avoid_: settings entry, hub entry

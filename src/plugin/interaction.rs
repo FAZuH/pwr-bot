@@ -12,7 +12,8 @@
 //! Success payloads come in two shapes, both accepted here:
 //! - the full envelope `{"data": ..., "ephemeral": ..., "view": ...}`, used
 //!   verbatim (recognized by a top-level `data` key);
-//! - the v1 raw shape: the Discord message JSON itself, wrapped as
+//! - runtime `files` in the envelope are decoded by the host at transport;
+//! - the legacy raw shape: the Discord message JSON itself, wrapped as
 //!   `{data, ephemeral: false, view: <stored view>}`. The canonical fixture
 //!   serves this shape today.
 //!
@@ -31,9 +32,8 @@
 //! subprocesses. Message ids are [`serenity::MessageId`]s.
 //!
 //! Rendering seam: this module never touches Discord. `open`/`interact`
-//! return the [`ViewSpec`] and the caller renders `spec.data` verbatim
-//! (e.g. via `ctx.send`/`ctx.edit`); hooking component interactions into
-//! [`InteractionEngine::interact`] is the #113 registry seam.
+//! return the [`ViewSpec`] and the caller renders `spec.data` verbatim.
+//! [`InteractionEngine::interact_validated`] is the host's component seam.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -52,6 +52,7 @@ use pwr_plugin_protocol::view_payload;
 use serde_json::Map;
 use serde_json::Value;
 use tokio::sync::Mutex;
+use tokio::sync::mpsc;
 
 use crate::plugin::PluginError;
 use crate::plugin::RunningPlugin;
@@ -73,6 +74,18 @@ pub trait PluginHandle: Send + Sync {
         args: Option<Value>,
     ) -> Result<Msg, PluginError>;
 
+    /// Sends a `call`, forwards correlated progress values, then awaits the response.
+    async fn call_with_progress(
+        &self,
+        op: &str,
+        cmd: Option<&str>,
+        args: Option<Value>,
+        progress: mpsc::UnboundedSender<Value>,
+    ) -> Result<Msg, PluginError> {
+        drop(progress);
+        self.call(op, cmd, args).await
+    }
+
     /// Pushes a one-way event (e.g. `view.timeout`) without awaiting a reply.
     async fn send_event(&self, name: &str, data: Option<Value>) -> Result<(), PluginError>;
 }
@@ -86,6 +99,16 @@ impl PluginHandle for RunningPlugin {
         args: Option<Value>,
     ) -> Result<Msg, PluginError> {
         RunningPlugin::call(self, op, cmd, args).await
+    }
+
+    async fn call_with_progress(
+        &self,
+        op: &str,
+        cmd: Option<&str>,
+        args: Option<Value>,
+        progress: mpsc::UnboundedSender<Value>,
+    ) -> Result<Msg, PluginError> {
+        RunningPlugin::call_with_progress(self, op, cmd, args, progress).await
     }
 
     async fn send_event(&self, name: &str, data: Option<Value>) -> Result<(), PluginError> {
@@ -104,6 +127,18 @@ impl<P: PluginHandle + ?Sized> PluginHandle for Arc<P> {
         self.as_ref().call(op, cmd, args).await
     }
 
+    async fn call_with_progress(
+        &self,
+        op: &str,
+        cmd: Option<&str>,
+        args: Option<Value>,
+        progress: mpsc::UnboundedSender<Value>,
+    ) -> Result<Msg, PluginError> {
+        self.as_ref()
+            .call_with_progress(op, cmd, args, progress)
+            .await
+    }
+
     async fn send_event(&self, name: &str, data: Option<Value>) -> Result<(), PluginError> {
         self.as_ref().send_event(name, data).await
     }
@@ -120,6 +155,8 @@ impl<P: PluginHandle + ?Sized> PluginHandle for Arc<P> {
 struct Session<P> {
     /// The plugin owning the view.
     plugin: Arc<P>,
+    /// The user who invoked the view.
+    author_id: serenity::UserId,
     /// Command name the session was opened from.
     command: String,
     /// Opaque plugin view state, handed back verbatim on each interaction.
@@ -139,6 +176,7 @@ struct Session<P> {
 #[derive(Debug)]
 struct SessionSnapshot<P> {
     plugin: Arc<P>,
+    author_id: serenity::UserId,
     command: String,
     view: Value,
     generation: u64,
@@ -150,6 +188,20 @@ pub enum InteractionError {
     /// No session is open for the given message id.
     #[error("no plugin session for message {message_id}")]
     NoSession {
+        /// The message id the interaction targeted.
+        message_id: serenity::MessageId,
+    },
+
+    /// The interaction did not carry an author id.
+    #[error("plugin interaction is missing its author")]
+    MissingAuthor {
+        /// The message id the interaction targeted.
+        message_id: serenity::MessageId,
+    },
+
+    /// The interaction author does not own the view session.
+    #[error("plugin interaction is not owned by the view session")]
+    NotAuthor {
         /// The message id the interaction targeted.
         message_id: serenity::MessageId,
     },
@@ -281,12 +333,42 @@ impl<P: PluginHandle> InteractionEngine<P> {
         view_spec_from_resp(resp, None)
     }
 
+    pub async fn invoke_with_progress(
+        &self,
+        plugin: Arc<P>,
+        command: &str,
+        args: Value,
+        progress: mpsc::UnboundedSender<ViewSpec>,
+    ) -> Result<ViewSpec, InteractionError> {
+        let (raw_progress, mut receiver) = mpsc::unbounded_channel();
+        let call = plugin.call_with_progress("invoke", Some(command), Some(args), raw_progress);
+        tokio::pin!(call);
+        loop {
+            tokio::select! {
+                response = &mut call => {
+                    while let Ok(data) = receiver.try_recv() {
+                        let spec = view_spec_from_data(data, None)?;
+                        let _ = progress.send(spec);
+                    }
+                    return view_spec_from_resp(response?, None);
+                }
+                data = receiver.recv() => {
+                    if let Some(data) = data {
+                        let spec = view_spec_from_data(data, None)?;
+                        let _ = progress.send(spec);
+                    }
+                }
+            }
+        }
+    }
+
     /// Registers the session for an already-computed [`ViewSpec`] under
     /// `message_id`, storing the spec's opaque `view` as the session state.
     /// Any session already open for `message_id` is replaced.
     pub async fn register(
         &self,
         message_id: serenity::MessageId,
+        author_id: serenity::UserId,
         plugin: Arc<P>,
         command: &str,
         spec: ViewSpec,
@@ -296,6 +378,7 @@ impl<P: PluginHandle> InteractionEngine<P> {
             message_id,
             Session {
                 plugin,
+                author_id,
                 command: command.to_string(),
                 view: spec.view.clone(),
                 generation,
@@ -313,12 +396,13 @@ impl<P: PluginHandle> InteractionEngine<P> {
     pub async fn open(
         &self,
         message_id: serenity::MessageId,
+        author_id: serenity::UserId,
         plugin: Arc<P>,
         command: &str,
         args: Value,
     ) -> Result<ViewSpec, InteractionError> {
         let spec = self.invoke(plugin.clone(), command, args).await?;
-        self.register(message_id, plugin, command, spec.clone())
+        self.register(message_id, author_id, plugin, command, spec.clone())
             .await;
         Ok(spec)
     }
@@ -362,6 +446,10 @@ impl<P: PluginHandle> InteractionEngine<P> {
             // interact was queued; treat it as gone.
             return Err(InteractionError::NoSession { message_id });
         }
+        let author_id = interaction_author(message_id, &interaction)?;
+        if author_id != snapshot.author_id {
+            return Err(InteractionError::NotAuthor { message_id });
+        }
 
         // Plain interactions retain the historical activity semantics: a
         // successfully acquired session lock refreshes the inactivity timer.
@@ -384,15 +472,15 @@ impl<P: PluginHandle> InteractionEngine<P> {
         Ok(spec)
     }
 
-    /// Interacts with a session and validates the returned raw view before its
-    /// state is committed. The validator is supplied by the host boundary;
-    /// the engine remains independent of Discord and message schemas.
+    /// Interacts with a session and validates the complete returned view spec
+    /// before its state is committed. The validator is supplied by the host
+    /// boundary; the engine remains independent of Discord and message schemas.
     pub async fn interact_validated(
         &self,
         message_id: serenity::MessageId,
         custom_id: &str,
         interaction: Value,
-        validate: impl FnOnce(&Value) -> Result<(), WireError>,
+        validate: impl FnOnce(&ViewSpec) -> Result<(), WireError>,
     ) -> Result<ViewSpec, InteractionError> {
         let (lock, generation) = self.session_lock(message_id).await?;
         let _guard = lock.lock().await;
@@ -400,13 +488,17 @@ impl<P: PluginHandle> InteractionEngine<P> {
         if snapshot.generation != generation {
             return Err(InteractionError::NoSession { message_id });
         }
+        let author_id = interaction_author(message_id, &interaction)?;
+        if author_id != snapshot.author_id {
+            return Err(InteractionError::NotAuthor { message_id });
+        }
         let args = interact_args(&snapshot.view, custom_id, interaction);
         let resp = snapshot
             .plugin
             .call("view.interact", Some(snapshot.command.as_str()), Some(args))
             .await?;
         let spec = view_spec_from_resp(resp, Some(snapshot.view))?;
-        validate(&spec.data).map_err(|error| InteractionError::InvalidView {
+        validate(&spec).map_err(|error| InteractionError::InvalidView {
             kind: error.kind,
             msg: error.msg,
         })?;
@@ -461,6 +553,20 @@ impl<P: PluginHandle> InteractionEngine<P> {
         Ok(())
     }
 
+    /// Drops the session for `message_id` without notifying the plugin.
+    /// Unlike [`InteractionEngine::abandon`], no `view.timeout` is pushed:
+    /// the host took the message back (the Settings return) after the panel
+    /// already persisted on its Back, so a silent removal also keeps the
+    /// reaper from expiring the stale session into a second persist.
+    pub async fn deregister(&self, message_id: serenity::MessageId) -> bool {
+        self.inner
+            .sessions
+            .lock()
+            .await
+            .remove(&message_id)
+            .is_some()
+    }
+
     /// Snapshots the session for `message_id` under the sessions lock, for
     /// working with it outside the lock. Errors with
     /// [`InteractionError::NoSession`] when no session is open.
@@ -474,6 +580,7 @@ impl<P: PluginHandle> InteractionEngine<P> {
             .ok_or(InteractionError::NoSession { message_id })?;
         Ok(SessionSnapshot {
             plugin: session.plugin.clone(),
+            author_id: session.author_id,
             command: session.command.clone(),
             view: session.view.clone(),
             generation: session.generation,
@@ -504,6 +611,7 @@ impl<P: PluginHandle> InteractionEngine<P> {
                         id,
                         SessionSnapshot {
                             plugin: s.plugin,
+                            author_id: s.author_id,
                             command: s.command,
                             view: s.view,
                             generation: s.generation,
@@ -543,7 +651,7 @@ pub(crate) fn view_spec_from_resp(
             ok: true,
             data: Some(data),
             ..
-        } => Ok(view_spec_from_data(data, current_view)),
+        } => Ok(view_spec_from_data(data, current_view)?),
         Msg::Resp {
             ok: true,
             data: None,
@@ -570,29 +678,58 @@ pub(crate) fn view_spec_from_resp(
 }
 
 /// Interprets a success payload as a [`ViewSpec`]. A payload shaped like the
-/// full envelope (`{data, ephemeral, view}`) is used verbatim; anything else
-/// is the v1 raw shape (Discord message JSON) and is wrapped with defaults,
+/// full envelope (`{data, ephemeral, view, files}`) is used verbatim; anything
+/// else is the raw shape (Discord message JSON) and is wrapped with defaults,
 /// carrying the session's stored `view` through unchanged. `data` is not a
 /// top-level Discord message field, so the `data`-key check is unambiguous.
-/// The envelope/raw split is [`view_payload`]'s contract; this projection
-/// only adds the session's `current_view` fallback for the `view` field.
-fn view_spec_from_data(data: Value, current_view: Option<Value>) -> ViewSpec {
-    match view_payload(&data) {
+/// Runtime-file JSON is parsed at this trust boundary; malformed entries are
+/// rejected before a render can be attempted.
+fn view_spec_from_data(
+    data: Value,
+    current_view: Option<Value>,
+) -> Result<ViewSpec, InteractionError> {
+    match view_payload(&data).map_err(|error| InteractionError::UnexpectedReply {
+        detail: error.to_string(),
+    })? {
         ViewPayload::Envelope {
             data,
             ephemeral,
             view,
-        } => ViewSpec {
+            files,
+        } => Ok(ViewSpec {
             data,
             ephemeral,
             view: view.or(current_view).unwrap_or_default(),
-        },
-        ViewPayload::Raw { data } => ViewSpec {
+            files,
+        }),
+        ViewPayload::Raw { data } => Ok(ViewSpec {
             data,
             ephemeral: false,
             view: current_view.unwrap_or_default(),
-        },
+            files: vec![],
+        }),
     }
+}
+
+/// Reads the author id from a host interaction payload. The host's normalized
+/// `_context` value wins; the Discord-shaped `user.id` field is the fallback
+/// for callers that pass the raw interaction directly.
+pub(crate) fn author_id_from_payload(payload: &Value) -> Option<serenity::UserId> {
+    let id = payload
+        .get("_context")
+        .and_then(|context| context.get("user_id"))
+        .or_else(|| payload.get("user").and_then(|user| user.get("id")))?;
+    let id = id
+        .as_u64()
+        .or_else(|| id.as_str().and_then(|id| id.parse().ok()))?;
+    Some(serenity::UserId::new(id))
+}
+
+fn interaction_author(
+    message_id: serenity::MessageId,
+    interaction: &Value,
+) -> Result<serenity::UserId, InteractionError> {
+    author_id_from_payload(interaction).ok_or(InteractionError::MissingAuthor { message_id })
 }
 
 /// Builds the `view.interact` call args: the raw interaction merged with the
@@ -634,6 +771,7 @@ mod tests {
         last_args: StdMutex<Option<Value>>,
         wrong_reply: AtomicBool,
         malformed_view: AtomicBool,
+        malformed_file: AtomicBool,
         dead_events: AtomicBool,
         /// While `gate_active` is set, each `view.interact` call waits for one
         /// message on `gate` before answering — tests use this to hold a call
@@ -680,6 +818,17 @@ mod tests {
                         ));
                     }
                     let clicks = self.clicks.fetch_add(1, Ordering::SeqCst) + 1;
+                    if self.malformed_file.load(Ordering::SeqCst) {
+                        return Ok(Msg::resp_ok(
+                            0,
+                            Some(json!({
+                                "data": {"content": format!("count={clicks}")},
+                                "ephemeral": false,
+                                "view": {"clicks": clicks},
+                                "files": [{"filename": "broken.bin", "data_base64": "not base64"}],
+                            })),
+                        ));
+                    }
                     if self.malformed_view.load(Ordering::SeqCst) {
                         return Ok(Msg::resp_ok(
                             0,
@@ -714,6 +863,43 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct ProgressPlugin;
+
+    #[async_trait]
+    impl PluginHandle for ProgressPlugin {
+        async fn call(
+            &self,
+            op: &str,
+            _cmd: Option<&str>,
+            _args: Option<Value>,
+        ) -> Result<Msg, PluginError> {
+            assert_eq!(op, "invoke");
+            Ok(Msg::resp_ok(0, Some(json!({ "content": "done" }))))
+        }
+
+        async fn call_with_progress(
+            &self,
+            op: &str,
+            cmd: Option<&str>,
+            args: Option<Value>,
+            progress: mpsc::UnboundedSender<Value>,
+        ) -> Result<Msg, PluginError> {
+            progress
+                .send(json!({
+                    "data": { "content": "working" },
+                    "ephemeral": false,
+                    "view": { "page": 1 },
+                }))
+                .expect("progress receiver is live");
+            self.call(op, cmd, args).await
+        }
+
+        async fn send_event(&self, _name: &str, _data: Option<Value>) -> Result<(), PluginError> {
+            Ok(())
+        }
+    }
+
     /// Opens a session on `engine` and returns its message id.
     async fn opened(
         engine: &InteractionEngine<FakePlugin>,
@@ -721,7 +907,13 @@ mod tests {
     ) -> serenity::MessageId {
         let id = serenity::MessageId::new(7);
         engine
-            .open(id, plugin, "hello", json!({}))
+            .open(
+                id,
+                serenity::UserId::new(1),
+                plugin,
+                "hello",
+                json!({"user": {"id": 1}}),
+            )
             .await
             .expect("open a session");
         id
@@ -734,7 +926,7 @@ mod tests {
         let id = opened(&engine, plugin.clone()).await;
 
         let committed = engine
-            .interact_validated(id, BUTTON_CUSTOM_ID, json!({}), |_| Ok(()))
+            .interact_validated(id, BUTTON_CUSTOM_ID, json!({"user": {"id": 1}}), |_| Ok(()))
             .await
             .expect("valid interaction commits its view");
         assert_eq!(committed.data, json!({"content": "count=1"}));
@@ -744,8 +936,8 @@ mod tests {
         plugin.malformed_view.store(true, Ordering::SeqCst);
 
         let error = engine
-            .interact_validated(id, BUTTON_CUSTOM_ID, json!({}), |data| {
-                crate::plugin::validate_view_data(data).map_err(Into::into)
+            .interact_validated(id, BUTTON_CUSTOM_ID, json!({"user": {"id": 1}}), |spec| {
+                crate::plugin::validate_view_spec(spec)
             })
             .await
             .unwrap_err();
@@ -754,6 +946,33 @@ mod tests {
             matches!(error, InteractionError::InvalidView { ref kind, .. } if kind == "InvalidView")
         );
         assert_eq!(engine.view_state(id).await, Some(prior_view));
+    }
+
+    #[tokio::test]
+    async fn validated_interaction_rejects_malformed_file_without_committing_view() {
+        let plugin = Arc::new(FakePlugin::default());
+        let engine = InteractionEngine::new();
+        let id = opened(&engine, plugin.clone()).await;
+
+        engine
+            .interact_validated(id, BUTTON_CUSTOM_ID, json!({"user": {"id": 1}}), |_| Ok(()))
+            .await
+            .expect("valid interaction commits its prior view");
+        let prior_view = engine.view_state(id).await;
+
+        plugin.malformed_file.store(true, Ordering::SeqCst);
+        let error = engine
+            .interact_validated(id, BUTTON_CUSTOM_ID, json!({"user": {"id": 1}}), |spec| {
+                crate::plugin::validate_view_spec(spec)
+            })
+            .await
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            InteractionError::InvalidView { ref kind, .. } if kind == "InvalidView"
+        ));
+        assert_eq!(engine.view_state(id).await, prior_view);
     }
 
     /// Parses the click count out of a spec's content string.
@@ -783,6 +1002,18 @@ mod tests {
     // ── wire shapes ──────────────────────────────────────────────────────────
 
     #[test]
+    fn author_id_reads_normalized_and_discord_interaction_shapes() {
+        assert_eq!(
+            author_id_from_payload(&json!({"_context": {"user_id": 7}})),
+            Some(serenity::UserId::new(7))
+        );
+        assert_eq!(
+            author_id_from_payload(&json!({"user": {"id": "8"}})),
+            Some(serenity::UserId::new(8))
+        );
+    }
+
+    #[test]
     fn view_spec_envelope_resp_is_rendered_verbatim() {
         let resp = Msg::resp_ok(
             0,
@@ -796,6 +1027,34 @@ mod tests {
         assert_eq!(spec.data, json!({"content": "hello"}));
         assert!(spec.ephemeral);
         assert_eq!(spec.view, json!({"page": 2}));
+    }
+
+    #[test]
+    fn runtime_files_in_a_view_envelope_survive_response_projection() {
+        let resp = Msg::resp_ok(
+            0,
+            Some(json!({
+                "data": {"components": []},
+                "view": {"page": 1},
+                "files": [{ "filename": "chart.png", "data_base64": "aGk=" }],
+            })),
+        );
+        let spec = view_spec_from_resp(resp, None).unwrap();
+        assert_eq!(spec.files[0].filename, "chart.png");
+        assert_eq!(spec.files[0].data_base64, "aGk=");
+    }
+
+    #[test]
+    fn malformed_runtime_files_are_rejected_before_rendering() {
+        let resp = Msg::resp_ok(
+            0,
+            Some(json!({
+                "data": {"components": []},
+                "files": [{ "filename": "chart.png" }],
+            })),
+        );
+        let error = view_spec_from_resp(resp, None).unwrap_err();
+        assert!(matches!(error, InteractionError::UnexpectedReply { .. }));
     }
 
     #[test]
@@ -872,13 +1131,47 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_click_from_another_author_is_refused_without_reaching_plugin() {
+        let plugin = Arc::new(FakePlugin::default());
+        let engine = InteractionEngine::new();
+        let id = opened(&engine, plugin.clone()).await;
+        let prior_view = engine.view_state(id).await;
+
+        let result = engine
+            .interact(id, BUTTON_CUSTOM_ID, json!({"user": {"id": "2"}}))
+            .await;
+
+        assert!(
+            matches!(result, Err(InteractionError::NotAuthor { .. })),
+            "a different user cannot mutate the view"
+        );
+        assert_eq!(plugin.clicks.load(Ordering::SeqCst), 0);
+        assert_eq!(engine.view_state(id).await, prior_view);
+    }
+
+    #[tokio::test]
+    async fn an_interaction_without_an_author_is_refused() {
+        let plugin = Arc::new(FakePlugin::default());
+        let engine = InteractionEngine::new();
+        let id = opened(&engine, plugin.clone()).await;
+
+        let error = engine
+            .interact(id, BUTTON_CUSTOM_ID, json!({}))
+            .await
+            .expect_err("an actorless interaction cannot mutate the view");
+
+        assert!(matches!(error, InteractionError::MissingAuthor { .. }));
+        assert_eq!(plugin.clicks.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
     async fn interact_round_trips_and_updates_the_stored_view() {
         let plugin = Arc::new(FakePlugin::default());
         let engine = InteractionEngine::new();
         let id = opened(&engine, plugin).await;
 
         let spec = engine
-            .interact(id, BUTTON_CUSTOM_ID, json!({"user_id": 1}))
+            .interact(id, BUTTON_CUSTOM_ID, json!({"user": {"id": 1}}))
             .await
             .expect("first click");
         assert_eq!(spec.data["content"], "count=1");
@@ -889,7 +1182,7 @@ mod tests {
         );
 
         let spec = engine
-            .interact(id, BUTTON_CUSTOM_ID, json!({"user_id": 1}))
+            .interact(id, BUTTON_CUSTOM_ID, json!({"user": {"id": 1}}))
             .await
             .expect("second click");
         assert_eq!(spec.data["content"], "count=2");
@@ -903,7 +1196,7 @@ mod tests {
         let id = serenity::MessageId::new(7);
 
         let spec = engine
-            .invoke(plugin, "hello", json!({}))
+            .invoke(plugin, "hello", json!({"user": {"id": 1}}))
             .await
             .expect("invoke returns the view spec");
         assert_eq!(spec.data, json!({"content": "hello"}));
@@ -914,21 +1207,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn invoke_with_progress_forwards_intermediate_views() {
+        let plugin = Arc::new(ProgressPlugin);
+        let engine = InteractionEngine::new();
+        let (progress_tx, mut progress_rx) = mpsc::unbounded_channel();
+
+        let final_spec = engine
+            .invoke_with_progress(plugin, "hello", json!({"user": {"id": 1}}), progress_tx)
+            .await
+            .expect("invoke completes");
+        let progress_spec = progress_rx.recv().await.expect("progress view");
+
+        assert_eq!(progress_spec.data, json!({ "content": "working" }));
+        assert_eq!(progress_spec.view, json!({ "page": 1 }));
+        assert_eq!(final_spec.data, json!({ "content": "done" }));
+    }
+
+    #[tokio::test]
     async fn invoke_then_register_opens_a_session_that_interact_routes_to() {
         let plugin = Arc::new(FakePlugin::default());
         let engine = InteractionEngine::new();
         let id = serenity::MessageId::new(7);
 
         let spec = engine
-            .invoke(plugin.clone(), "hello", json!({}))
+            .invoke(plugin.clone(), "hello", json!({"user": {"id": 1}}))
             .await
             .expect("invoke returns the view spec");
         assert!(!engine.has_session(id).await);
-        engine.register(id, plugin, "hello", spec).await;
+        engine
+            .register(id, serenity::UserId::new(1), plugin, "hello", spec)
+            .await;
         assert!(engine.has_session(id).await);
 
         let spec = engine
-            .interact(id, BUTTON_CUSTOM_ID, json!({"user_id": 1}))
+            .interact(id, BUTTON_CUSTOM_ID, json!({"user": {"id": 1}}))
             .await
             .expect("click routes to the registered session");
         assert_eq!(spec.data["content"], "count=1");
@@ -943,7 +1255,11 @@ mod tests {
     async fn interact_with_unknown_message_id_errors() {
         let engine = InteractionEngine::<FakePlugin>::new();
         let err = engine
-            .interact(serenity::MessageId::new(1), BUTTON_CUSTOM_ID, json!({}))
+            .interact(
+                serenity::MessageId::new(1),
+                BUTTON_CUSTOM_ID,
+                json!({"user": {"id": 1}}),
+            )
             .await
             .unwrap_err();
         assert!(matches!(
@@ -960,7 +1276,7 @@ mod tests {
         let id = opened(&engine, plugin).await;
 
         let err = engine
-            .interact(id, "hello:nope", json!({}))
+            .interact(id, "hello:nope", json!({"user": {"id": 1}}))
             .await
             .unwrap_err();
         assert!(
@@ -984,11 +1300,11 @@ mod tests {
         let id = opened(&engine, plugin.clone()).await;
 
         engine
-            .interact(id, BUTTON_CUSTOM_ID, json!({}))
+            .interact(id, BUTTON_CUSTOM_ID, json!({"user": {"id": 1}}))
             .await
             .expect("first click stores the view");
         engine
-            .interact(id, BUTTON_CUSTOM_ID, json!({"user_id": 9}))
+            .interact(id, BUTTON_CUSTOM_ID, json!({"user": {"id": 1}}))
             .await
             .expect("second click");
         let args = plugin
@@ -1004,8 +1320,8 @@ mod tests {
             "stored view rides along"
         );
         assert_eq!(
-            args["user_id"].as_u64(),
-            Some(9),
+            args["user"]["id"].as_u64(),
+            Some(1),
             "the raw interaction is merged through"
         );
     }
@@ -1060,20 +1376,32 @@ mod tests {
         let a = serenity::MessageId::new(1);
         let b = serenity::MessageId::new(2);
         engine
-            .open(a, plugin.clone(), "hello", json!({}))
+            .open(
+                a,
+                serenity::UserId::new(1),
+                plugin.clone(),
+                "hello",
+                json!({"user": {"id": 1}}),
+            )
             .await
             .expect("open a");
         engine
-            .open(b, plugin.clone(), "hello", json!({}))
+            .open(
+                b,
+                serenity::UserId::new(1),
+                plugin.clone(),
+                "hello",
+                json!({"user": {"id": 1}}),
+            )
             .await
             .expect("open b");
 
         engine
-            .interact(a, BUTTON_CUSTOM_ID, json!({}))
+            .interact(a, BUTTON_CUSTOM_ID, json!({"user": {"id": 1}}))
             .await
             .expect("click a");
         engine
-            .interact(b, BUTTON_CUSTOM_ID, json!({}))
+            .interact(b, BUTTON_CUSTOM_ID, json!({"user": {"id": 1}}))
             .await
             .expect("click b");
 
@@ -1088,17 +1416,29 @@ mod tests {
         let a = serenity::MessageId::new(1);
         let b = serenity::MessageId::new(2);
         engine
-            .open(a, plugin.clone(), "hello", json!({}))
+            .open(
+                a,
+                serenity::UserId::new(1),
+                plugin.clone(),
+                "hello",
+                json!({"user": {"id": 1}}),
+            )
             .await
             .expect("open a");
         engine
-            .open(b, plugin.clone(), "hello", json!({}))
+            .open(
+                b,
+                serenity::UserId::new(1),
+                plugin.clone(),
+                "hello",
+                json!({"user": {"id": 1}}),
+            )
             .await
             .expect("open b");
 
         let (ra, rb) = tokio::join!(
-            engine.interact(a, BUTTON_CUSTOM_ID, json!({})),
-            engine.interact(b, BUTTON_CUSTOM_ID, json!({})),
+            engine.interact(a, BUTTON_CUSTOM_ID, json!({"user": {"id": 1}})),
+            engine.interact(b, BUTTON_CUSTOM_ID, json!({"user": {"id": 1}})),
         );
         let sa = ra.expect("click a resolves");
         let sb = rb.expect("click b resolves");
@@ -1130,7 +1470,11 @@ mod tests {
 
         let i1 = tokio::spawn({
             let engine = engine.clone();
-            async move { engine.interact(id, BUTTON_CUSTOM_ID, json!({})).await }
+            async move {
+                engine
+                    .interact(id, BUTTON_CUSTOM_ID, json!({"user": {"id": 1}}))
+                    .await
+            }
         });
         // Pin the first click inside the plugin call before the second is
         // spawned, so the second one can only ever see the first one's
@@ -1138,7 +1482,11 @@ mod tests {
         wait_for_gate_entry(&plugin).await;
         let i2 = tokio::spawn({
             let engine = engine.clone();
-            async move { engine.interact(id, BUTTON_CUSTOM_ID, json!({})).await }
+            async move {
+                engine
+                    .interact(id, BUTTON_CUSTOM_ID, json!({"user": {"id": 1}}))
+                    .await
+            }
         });
 
         // Release each plugin call as it arrives; whichever lands second must
@@ -1179,11 +1527,17 @@ mod tests {
         let engine = InteractionEngine::new();
         let id = serenity::MessageId::new(7);
         engine
-            .open(id, plugin.clone(), "hello", json!({}))
+            .open(
+                id,
+                serenity::UserId::new(1),
+                plugin.clone(),
+                "hello",
+                json!({"user": {"id": 1}}),
+            )
             .await
             .expect("open");
         engine
-            .interact(id, BUTTON_CUSTOM_ID, json!({}))
+            .interact(id, BUTTON_CUSTOM_ID, json!({"user": {"id": 1}}))
             .await
             .expect("seed the session view");
         assert_eq!(engine.view_state(id).await, Some(json!({"clicks": 1})));
@@ -1192,14 +1546,24 @@ mod tests {
         plugin.gate_active.store(true, Ordering::SeqCst);
         let stale = tokio::spawn({
             let engine = engine.clone();
-            async move { engine.interact(id, BUTTON_CUSTOM_ID, json!({})).await }
+            async move {
+                engine
+                    .interact(id, BUTTON_CUSTOM_ID, json!({"user": {"id": 1}}))
+                    .await
+            }
         });
         wait_for_gate_entry(&plugin).await;
 
         // Re-open the same message: the session is replaced while the stale
         // interact is still in flight.
         engine
-            .open(id, plugin.clone(), "hello", json!({}))
+            .open(
+                id,
+                serenity::UserId::new(1),
+                plugin.clone(),
+                "hello",
+                json!({"user": {"id": 1}}),
+            )
             .await
             .expect("reopen replaces the session");
         assert_eq!(engine.view_state(id).await, Some(Value::Null));
@@ -1230,28 +1594,48 @@ mod tests {
         let engine = InteractionEngine::new();
         let id = serenity::MessageId::new(7);
         engine
-            .open(id, plugin.clone(), "hello", json!({}))
+            .open(
+                id,
+                serenity::UserId::new(1),
+                plugin.clone(),
+                "hello",
+                json!({"user": {"id": 1}}),
+            )
             .await
             .expect("open");
 
         // First interact holds the session lock, blocked inside the plugin.
         let holder = tokio::spawn({
             let engine = engine.clone();
-            async move { engine.interact(id, BUTTON_CUSTOM_ID, json!({})).await }
+            async move {
+                engine
+                    .interact(id, BUTTON_CUSTOM_ID, json!({"user": {"id": 1}}))
+                    .await
+            }
         });
         wait_for_gate_entry(&plugin).await;
 
         // Second interact queues on the session lock with the old identity.
         let queued = tokio::spawn({
             let engine = engine.clone();
-            async move { engine.interact(id, BUTTON_CUSTOM_ID, json!({})).await }
+            async move {
+                engine
+                    .interact(id, BUTTON_CUSTOM_ID, json!({"user": {"id": 1}}))
+                    .await
+            }
         });
         // Let the queued interact reach its initial session lookup before
         // the session is replaced underneath it.
         tokio::task::yield_now().await;
 
         engine
-            .open(id, plugin.clone(), "hello", json!({}))
+            .open(
+                id,
+                serenity::UserId::new(1),
+                plugin.clone(),
+                "hello",
+                json!({"user": {"id": 1}}),
+            )
             .await
             .expect("reopen replaces the session");
 
@@ -1276,17 +1660,29 @@ mod tests {
         let engine = InteractionEngine::new();
         let id = serenity::MessageId::new(7);
         engine
-            .open(id, plugin.clone(), "hello", json!({}))
+            .open(
+                id,
+                serenity::UserId::new(1),
+                plugin.clone(),
+                "hello",
+                json!({"user": {"id": 1}}),
+            )
             .await
             .expect("first open");
         engine
-            .interact(id, BUTTON_CUSTOM_ID, json!({}))
+            .interact(id, BUTTON_CUSTOM_ID, json!({"user": {"id": 1}}))
             .await
             .expect("click");
         assert_eq!(engine.view_state(id).await, Some(json!({"clicks": 1})));
 
         engine
-            .open(id, plugin.clone(), "hello", json!({}))
+            .open(
+                id,
+                serenity::UserId::new(1),
+                plugin.clone(),
+                "hello",
+                json!({"user": {"id": 1}}),
+            )
             .await
             .expect("reopen replaces the session");
         assert_eq!(
@@ -1295,7 +1691,7 @@ mod tests {
             "the reopened session starts from the fresh spec's view"
         );
         let spec = engine
-            .interact(id, BUTTON_CUSTOM_ID, json!({}))
+            .interact(id, BUTTON_CUSTOM_ID, json!({"user": {"id": 1}}))
             .await
             .expect("click after reopen");
         assert_eq!(spec.data["content"], "count=2");
@@ -1314,7 +1710,7 @@ mod tests {
         plugin.wrong_reply.store(true, Ordering::SeqCst);
 
         let err = engine
-            .interact(id, BUTTON_CUSTOM_ID, json!({}))
+            .interact(id, BUTTON_CUSTOM_ID, json!({"user": {"id": 1}}))
             .await
             .unwrap_err();
         assert!(matches!(err, InteractionError::UnexpectedReply { .. }));
@@ -1346,7 +1742,7 @@ mod tests {
         let engine = InteractionEngine::with_timeout(Duration::from_secs(3600));
         let id = opened(&engine, plugin.clone()).await;
         engine
-            .interact(id, BUTTON_CUSTOM_ID, json!({}))
+            .interact(id, BUTTON_CUSTOM_ID, json!({"user": {"id": 1}}))
             .await
             .expect("click");
 
@@ -1364,7 +1760,7 @@ mod tests {
         let engine = InteractionEngine::with_timeout(Duration::from_millis(200));
         let id = opened(&engine, plugin.clone()).await;
         engine
-            .interact(id, BUTTON_CUSTOM_ID, json!({}))
+            .interact(id, BUTTON_CUSTOM_ID, json!({"user": {"id": 1}}))
             .await
             .expect("click");
 

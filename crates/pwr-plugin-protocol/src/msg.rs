@@ -6,7 +6,7 @@ use crate::manifest::Manifest;
 
 /// The wire protocol version announced in [`Msg::Hello`] as `v`. The host
 /// rejects a handshake that carries any other value.
-pub const API_VERSION: u32 = 1;
+pub const API_VERSION: u32 = 2;
 
 /// Name of the canonical test-plugin fixture: what it announces in
 /// [`Msg::Hello`] and what the host sends as `cmd` on `invoke`/`view.interact`.
@@ -38,7 +38,7 @@ pub const VIEW_MOVED_KIND: &str = "ViewMoved";
 
 /// A message on the plugin wire, serialized as one compact JSON object per
 /// line. The `t` discriminator names the variant: `hello`, `call`, `resp`,
-/// `event`, `ping`, `pong`, `bye`.
+/// `progress`, `event`, `ping`, `pong`, `bye`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "t", rename_all = "lowercase")]
 pub enum Msg {
@@ -48,8 +48,8 @@ pub enum Msg {
         v: u32,
         /// Plugin name.
         name: String,
-        /// Capabilities the plugin serves and host ops it requires.
-        caps: Vec<String>,
+        /// Operations the plugin serves and host ops it requires.
+        ops: Vec<String>,
         /// The plugin's manifest declaration, when the plugin carries one.
         /// Absent on old hellos, which the host accepts (validated only when
         /// present).
@@ -60,7 +60,7 @@ pub enum Msg {
     Call {
         /// Monotonic per-producer correlation id.
         id: u64,
-        /// Operation name, e.g. `invoke`, `view.interact`, `host.fetch_user`.
+        /// Operation name, e.g. `invoke`, `view.interact`, `host.resolve_users`.
         op: String,
         /// Command name for `invoke`; absent for host-service ops.
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -81,6 +81,13 @@ pub enum Msg {
         /// First-class wire error.
         #[serde(skip_serializing_if = "Option::is_none")]
         error: Option<WireError>,
+    },
+    /// An intermediate result for a call that is still running.
+    Progress {
+        /// Correlation id of the pending [`Msg::Call`].
+        id: u64,
+        /// Opaque progress payload. View invokes use the [`crate::ViewSpec`] envelope.
+        data: Value,
     },
     /// One-way push; never answered.
     Event {
@@ -174,12 +181,12 @@ mod tests {
         let msg = Msg::Hello {
             v: API_VERSION,
             name: "feed".into(),
-            caps: vec!["command:feed".into()],
+            ops: vec!["command:feed".into()],
             manifest: None,
         };
         assert_eq!(
             serde_json::to_string(&msg).unwrap(),
-            r#"{"t":"hello","v":1,"name":"feed","caps":["command:feed"]}"#
+            r#"{"t":"hello","v":2,"name":"feed","ops":["command:feed"]}"#
         );
     }
 
@@ -188,7 +195,7 @@ mod tests {
         let msg = Msg::Hello {
             v: API_VERSION,
             name: "feed".into(),
-            caps: vec!["command:feed".into()],
+            ops: vec!["command:feed".into()],
             manifest: Some(Manifest {
                 name: "feed".into(),
                 description: "Feed subscriptions".into(),
@@ -198,12 +205,14 @@ mod tests {
                 }],
                 event_handlers: vec![],
                 tasks: vec![],
+                settings: vec![],
+                requires: vec![],
                 api_version: API_VERSION,
             }),
         };
         assert_eq!(
             serde_json::to_string(&msg).unwrap(),
-            r#"{"t":"hello","v":1,"name":"feed","caps":["command:feed"],"manifest":{"name":"feed","description":"Feed subscriptions","version":"0.1.0","commands":[{"create_command":{"description":"List feeds","name":"feed.list"}}],"event_handlers":[],"tasks":[],"api_version":1}}"#
+            r#"{"t":"hello","v":2,"name":"feed","ops":["command:feed"],"manifest":{"name":"feed","description":"Feed subscriptions","version":"0.1.0","commands":[{"create_command":{"description":"List feeds","name":"feed.list"}}],"event_handlers":[],"tasks":[],"settings":[],"requires":[],"api_version":2}}"#
         );
     }
 
@@ -218,6 +227,18 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&msg).unwrap(),
             r#"{"t":"call","id":7,"op":"invoke","cmd":"feed.list","args":{"guild_id":"123"}}"#
+        );
+    }
+
+    #[test]
+    fn progress_matches_wire_format() {
+        let msg = Msg::Progress {
+            id: 7,
+            data: json!({ "data": { "content": "working" } }),
+        };
+        assert_eq!(
+            serde_json::to_string(&msg).unwrap(),
+            r#"{"t":"progress","id":7,"data":{"data":{"content":"working"}}}"#
         );
     }
 
@@ -322,7 +343,7 @@ mod tests {
             Msg::Hello {
                 v: API_VERSION,
                 name: "feed".into(),
-                caps: vec!["command:feed".into()],
+                ops: vec!["command:feed".into()],
                 manifest: None,
             },
             Msg::Call {
@@ -353,6 +374,10 @@ mod tests {
                     msg: "no such op".into(),
                 }),
             },
+            Msg::Progress {
+                id: 1,
+                data: json!({"phase": "working"}),
+            },
             Msg::Event {
                 name: "view.timeout".into(),
                 data: None,
@@ -368,7 +393,7 @@ mod tests {
 
     #[test]
     fn wire_decodes_unknown_fields_gracefully() {
-        let json = r#"{"t":"hello","v":1,"name":"feed","caps":[],"ver":"0.1.0"}"#;
+        let json = r#"{"t":"hello","v":2,"name":"feed","ops":[],"ver":"0.1.0"}"#;
         let msg: Msg = serde_json::from_str(json).unwrap();
         assert!(matches!(msg, Msg::Hello { .. }));
     }

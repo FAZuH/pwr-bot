@@ -84,8 +84,8 @@ mod tests {
     #[test]
     fn fixture_paths_distinguish_plugin_and_command() {
         let hello = paths_for("hello", "hello");
-        let settings = paths_for("settings", "settings");
-        assert_ne!(hello.json, settings.json);
+        let welcome = paths_for("welcome", "welcome");
+        assert_ne!(hello.json, welcome.json);
         let other_command = paths_for("hello", "hello.tick");
         assert_eq!(
             other_command.json,

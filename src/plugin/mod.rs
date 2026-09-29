@@ -7,7 +7,7 @@
 //! is forwarded into the host's `log` output.
 //!
 //! Spawn flow: the plugin announces `hello` first, the host validates it
-//! (version plus `host.*` caps, rejecting before any work) and answers with
+//! (version plus `host.*` ops, rejecting before any work) and answers with
 //! its own `hello` as the ack. Calls then flow host→plugin, correlated by
 //! monotonic ids; each `resp` is matched to its waiting call through a
 //! oneshot channel. Events flow host→plugin as one-way pushes; the
@@ -44,13 +44,13 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
+use std::time::Instant;
 
 pub use error::InstallError;
 pub use error::PluginError;
+pub use events::GUILD_CREATE_EVENT;
 pub use events::PluginEventRouter;
 pub use events::VOICE_STATE_EVENT;
-pub use host::FeedSettingsError;
-pub use host::FeedSettingsSource;
 pub use host::HostConfig;
 pub use host::HostError;
 pub use host::HostIo;
@@ -60,16 +60,18 @@ pub use host::KvStore;
 pub use host::PgKvStore;
 pub use host::SerenityHostIo;
 pub use host::SerenityStatsSource;
-pub use host::ServiceFeedSettingsSource;
-pub use host::ServiceVoiceSettingsSource;
+pub use host::SerenityUserResolver;
 pub use host::ServiceWelcomeSettingsSource;
 pub use host::StatsError;
 pub use host::StatsHandle;
 pub use host::StatsSource;
-pub use host::VoiceSettingsError;
-pub use host::VoiceSettingsSource;
+pub use host::UserResolveError;
+pub use host::UserResolver;
+pub use host::UserResolverHandle;
 pub use host::WelcomeSettingsError;
 pub use host::WelcomeSettingsSource;
+pub(crate) use host::decode_runtime_files_with_existing;
+pub use host::validate_view_spec;
 pub use install::CatalogEntry;
 pub use install::PluginCatalog;
 pub use interaction::InteractionEngine;
@@ -85,13 +87,13 @@ pub use modal::ModalBinding;
 pub use modal::ModalDeliveryError;
 pub use modal::ModalRouteError;
 pub use modal::ModalRouter;
-use pwr_plugin_protocol::ALL_CAPS;
+use pwr_plugin_protocol::ALL_OPS;
 use pwr_plugin_protocol::API_VERSION;
 use pwr_plugin_protocol::CallIdSeq;
 use pwr_plugin_protocol::Manifest;
 use pwr_plugin_protocol::Msg;
 use pwr_plugin_protocol::WireError;
-use pwr_plugin_protocol::validate_caps;
+use pwr_plugin_protocol::validate_ops;
 use serde_json::Value;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::AsyncWriteExt;
@@ -102,6 +104,7 @@ use tokio::process::ChildStdin;
 use tokio::process::ChildStdout;
 use tokio::process::Command;
 use tokio::sync::Mutex;
+use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::sync::watch;
 pub use view::ViewValidationError;
@@ -124,6 +127,125 @@ const CALL_TIMEOUT: Duration = Duration::from_secs(10);
 /// grace, then SIGKILL to the group.
 const STOP_TIMEOUT: Duration = Duration::from_secs(10);
 
+struct PendingCall {
+    response: oneshot::Sender<Msg>,
+    progress: Option<mpsc::UnboundedSender<Value>>,
+    last_progress: Arc<Mutex<Instant>>,
+}
+
+/// The authority one plugin spawn carries, resolved from the startup
+/// [`AuthoritySnapshot`] before the child environment is built.
+/// [`Authority::none`] is the default: no digest pin, no token.
+#[derive(Clone, Default)]
+pub struct Authority {
+    /// The catalog's pinned sha256, normalised (trimmed, lowercased) the
+    /// way [`install::sha256_hex`] emits it, so the spawn seam compares
+    /// without re-normalising. `None` for a plugin the catalog does not
+    /// pin — a `CORE_PLUGINS` plugin, which is never grantable.
+    pinned: Option<String>,
+    /// The Discord token to inject. Never `Some` without a digest pin:
+    /// authority attaches to bytes, so a grant only ever rides along with
+    /// the digest it was reviewed against.
+    token: Option<String>,
+}
+
+impl Authority {
+    /// A spawn with no elevated authority: no digest pin and no token.
+    pub fn none() -> Self {
+        Self::default()
+    }
+
+    /// Whether this spawn injects `DISCORD_TOKEN` into the child.
+    pub fn has_token(&self) -> bool {
+        self.token.is_some()
+    }
+
+    /// The digest the binary's bytes must match, when the plugin is a
+    /// catalog plugin.
+    pub fn pinned(&self) -> Option<&str> {
+        self.pinned.as_deref()
+    }
+}
+
+/// The catalog's authority facts, snapshotted at startup so a spawn decision
+/// never depends on live state: every spawn — including a respawn after a
+/// crash — resolves against this, and authority never changes mid-flight
+/// (ADR-0016).
+pub struct AuthoritySnapshot {
+    entries: HashMap<String, GrantFact>,
+    token: String,
+}
+
+/// One catalog entry's grant facts. Both halves of the grant are held, so
+/// the AND is decided from what the host knows before the child exists.
+struct GrantFact {
+    /// The pinned sha256, normalised as [`Authority::pinned`] documents.
+    pinned: String,
+    /// The operator's grant (`discord_token = true`).
+    granted: bool,
+    /// Whether the entry's embedded manifest declares the need.
+    declares: bool,
+}
+
+impl AuthoritySnapshot {
+    /// The snapshot a host with no catalog runs on: nothing is pinned and
+    /// nothing is granted.
+    pub fn none() -> Self {
+        Self {
+            entries: HashMap::new(),
+            token: String::new(),
+        }
+    }
+
+    /// Snapshots `catalog` against the bot's `token`. The token is held
+    /// here and only ever leaves the seam through a spawn that both halves
+    /// of the AND agree on.
+    pub fn from_catalog(catalog: &HashMap<String, CatalogEntry>, token: String) -> Self {
+        Self {
+            entries: catalog
+                .iter()
+                .map(|(name, entry)| {
+                    (
+                        name.clone(),
+                        GrantFact {
+                            pinned: entry.sha256.trim().to_ascii_lowercase(),
+                            granted: entry.discord_token,
+                            declares: entry.manifest.requires_discord_token(),
+                        },
+                    )
+                })
+                .collect(),
+            token,
+        }
+    }
+
+    /// Resolves one spawn. The declaration and the grant must agree in both
+    /// directions, and a plugin the catalog does not pin is never grantable:
+    /// there the host holds no manifest before spawn, so the declaration
+    /// half is unknowable. Either disagreement is a refusal.
+    pub fn resolve(&self, name: &str) -> Result<Authority, PluginError> {
+        let Some(fact) = self.entries.get(name) else {
+            return Ok(Authority::none());
+        };
+        match (fact.granted, fact.declares) {
+            (false, false) => Ok(Authority {
+                pinned: Some(fact.pinned.clone()),
+                token: None,
+            }),
+            (true, true) => Ok(Authority {
+                pinned: Some(fact.pinned.clone()),
+                token: Some(self.token.clone()),
+            }),
+            (true, false) => Err(PluginError::UndeclaredGrant {
+                name: name.to_string(),
+            }),
+            (false, true) => Err(PluginError::UngrantedDeclaration {
+                name: name.to_string(),
+            }),
+        }
+    }
+}
+
 /// A running plugin subprocess: owns the stdio pipes, the reader/waiter
 /// tasks, and call correlation.
 pub struct RunningPlugin {
@@ -136,7 +258,7 @@ pub struct RunningPlugin {
     /// closes the pipe, and the plugin treats stdin EOF as exit.
     stdin: Arc<Mutex<Option<ChildStdin>>>,
     /// In-flight calls: correlation id -> the oneshot awaiting its resp.
-    inflight: Arc<Mutex<HashMap<u64, oneshot::Sender<Msg>>>>,
+    inflight: Arc<Mutex<HashMap<u64, PendingCall>>>,
     /// Host-side monotonic call-id source.
     ids: Mutex<CallIdSeq>,
     /// The child handle; taken by the waiter task once the plugin dies.
@@ -156,12 +278,15 @@ pub struct RunningPlugin {
 
 impl RunningPlugin {
     /// Spawns the plugin binary at `path`, runs the hello handshake
-    /// (validate version + caps, then ack with the host's hello), and returns
+    /// (validate version + ops, then ack with the host's hello), and returns
     /// a handle ready for calls. A rejected handshake kills the child before
     /// any work happens. Host services are absent, so `host.*` calls answer
     /// `HostUnavailable` / `ConfigUnavailable`.
+    ///
+    /// The binary's file stem names it in the logs; use
+    /// [`RunningPlugin::spawn_with`] to name it by its configured name.
     pub async fn spawn(path: impl AsRef<Path>) -> Result<RunningPlugin, PluginError> {
-        Self::spawn_with(path, None, None, None).await
+        Self::spawn_with(path, "", None, None, None, Authority::none()).await
     }
 
     /// Spawns the plugin binary like [`RunningPlugin::spawn`], but wires the
@@ -170,25 +295,70 @@ impl RunningPlugin {
     /// plugin→host `host.*` calls can be served, and the given event bus
     /// (if any) so plugin→host `Msg::Event`s are broadcast on it instead of
     /// being dropped.
+    ///
+    /// `name` is the plugin's configured name — the one a catalog entry, a
+    /// `CORE_PLUGINS` spec, and `/plugins list` use — so the spawn audit line
+    /// names the plugin rather than the binary's file stem. An empty `name`
+    /// falls back to the stem, for a caller holding no configured name.
+    ///
+    /// `authority` is the resolved grant ([`Authority::none`] for no
+    /// authority). It is enforced before the child exists: a binary that no
+    /// longer matches its pinned digest is refused, and the child
+    /// environment is an allowlist — `PATH` plus whatever the grant adds.
     pub async fn spawn_with(
         path: impl AsRef<Path>,
+        name: &str,
         host: Option<Arc<HostServices>>,
         manager: Option<Arc<PluginManager>>,
         event_bus: Option<Arc<EventBus>>,
+        authority: Authority,
     ) -> Result<RunningPlugin, PluginError> {
         let path = path.as_ref();
-        let label = path
-            .file_stem()
-            .and_then(|stem| stem.to_str())
-            .unwrap_or("plugin")
-            .to_string();
+        let label = if name.is_empty() {
+            path.file_stem()
+                .and_then(|stem| stem.to_str())
+                .unwrap_or("plugin")
+                .to_string()
+        } else {
+            name.to_string()
+        };
+
+        // Authority attaches to bytes: a binary swapped since the operator
+        // reviewed it is refused here rather than inheriting the grant.
+        let digest_verdict = match authority.pinned() {
+            Some(expected) => {
+                let read = install::sha256_hex(path).map_err(|source| PluginError::Digest {
+                    name: label.clone(),
+                    path: path.to_path_buf(),
+                    source,
+                })?;
+                if read != expected {
+                    return Err(PluginError::Digest {
+                        name: label.clone(),
+                        path: path.to_path_buf(),
+                        source: InstallError::Verify {
+                            name: label,
+                            expected: expected.to_string(),
+                            got: read,
+                        },
+                    });
+                }
+                "verified"
+            }
+            None => "unpinned",
+        };
 
         let mut command = Command::new(path);
         command
+            .env_clear()
+            .env("PATH", std::env::var("PATH").unwrap_or_default())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
+        if let Some(token) = &authority.token {
+            command.env("DISCORD_TOKEN", token);
+        }
         #[cfg(unix)]
         command.process_group(0);
 
@@ -196,6 +366,15 @@ impl RunningPlugin {
             path: path.to_path_buf(),
             source,
         })?;
+        info!(
+            "spawned plugin {label} from {}: grant {}, digest {digest_verdict}",
+            path.display(),
+            if authority.has_token() {
+                "discord token"
+            } else {
+                "none"
+            }
+        );
         #[cfg(unix)]
         let pgid = child.id().expect("spawned child has a pid");
 
@@ -225,7 +404,7 @@ impl RunningPlugin {
         let Msg::Hello {
             v,
             name,
-            caps,
+            ops,
             manifest,
         } = hello
         else {
@@ -238,7 +417,7 @@ impl RunningPlugin {
             )
             .await);
         };
-        if let Err(reason) = validate_hello(&name, v, &caps) {
+        if let Err(reason) = validate_hello(&name, v, &ops) {
             return Err(reject(child, reason).await);
         }
         let manifest = match manifest {
@@ -270,6 +449,18 @@ impl RunningPlugin {
             }
             None => None,
         };
+        // A declaration the operator never granted is refused, not warned
+        // about: the plugin would run without the authority it declared, and
+        // a refusal is what the ADR promises (ADR-0016). A catalog plugin is
+        // refused before spawn by the snapshot's AND, so this cannot
+        // double-fire; it chiefly catches a core plugin, which is never
+        // grantable and is unknowable before the handshake.
+        if let Some(manifest) = &manifest
+            && manifest.requires_discord_token()
+            && !authority.has_token()
+        {
+            return Err(reject(child, PluginError::UngrantedDeclaration { name }).await);
+        }
 
         // Acknowledge with the host's own hello (nushell-style both-sides
         // hello). Config values are not part of the ack — the `host.get_config`
@@ -329,9 +520,37 @@ impl RunningPlugin {
         cmd: Option<&str>,
         args: Option<Value>,
     ) -> Result<Msg, PluginError> {
+        self.call_inner(op, cmd, args, None).await
+    }
+
+    pub async fn call_with_progress(
+        &self,
+        op: &str,
+        cmd: Option<&str>,
+        args: Option<Value>,
+        progress: mpsc::UnboundedSender<Value>,
+    ) -> Result<Msg, PluginError> {
+        self.call_inner(op, cmd, args, Some(progress)).await
+    }
+
+    async fn call_inner(
+        &self,
+        op: &str,
+        cmd: Option<&str>,
+        args: Option<Value>,
+        progress: Option<mpsc::UnboundedSender<Value>>,
+    ) -> Result<Msg, PluginError> {
         let id = self.ids.lock().await.next_id();
-        let (tx, rx) = oneshot::channel();
-        self.inflight.lock().await.insert(id, tx);
+        let (response, mut receiver) = oneshot::channel();
+        let last_progress = Arc::new(Mutex::new(Instant::now()));
+        self.inflight.lock().await.insert(
+            id,
+            PendingCall {
+                response,
+                progress,
+                last_progress: last_progress.clone(),
+            },
+        );
 
         let msg = Msg::Call {
             id,
@@ -360,20 +579,27 @@ impl RunningPlugin {
             }
         }
 
-        match tokio::time::timeout(CALL_TIMEOUT, rx).await {
-            Ok(Ok(msg)) => Ok(msg),
-            // The sender was dropped without a response — the plugin died
-            // while the call was in flight.
-            Ok(Err(_)) => Err(PluginError::PluginDied {
-                name: self.name.clone(),
-            }),
-            Err(_) => {
-                self.inflight.lock().await.remove(&id);
-                Err(PluginError::CallTimeout {
-                    name: self.name.clone(),
-                    op: op.to_string(),
-                    timeout: CALL_TIMEOUT,
-                })
+        loop {
+            let idle = last_progress.lock().await.elapsed();
+            let remaining = CALL_TIMEOUT.saturating_sub(idle);
+            match tokio::time::timeout(remaining, &mut receiver).await {
+                Ok(Ok(message)) => return Ok(message),
+                Ok(Err(_)) => {
+                    return Err(PluginError::PluginDied {
+                        name: self.name.clone(),
+                    });
+                }
+                Err(_) => {
+                    if last_progress.lock().await.elapsed() < CALL_TIMEOUT {
+                        continue;
+                    }
+                    self.inflight.lock().await.remove(&id);
+                    return Err(PluginError::CallTimeout {
+                        name: self.name.clone(),
+                        op: op.to_string(),
+                        timeout: CALL_TIMEOUT,
+                    });
+                }
             }
         }
     }
@@ -556,18 +782,15 @@ fn host_hello() -> Msg {
     Msg::Hello {
         v: API_VERSION,
         name: "host".into(),
-        caps: ALL_CAPS
-            .iter()
-            .map(|cap| cap.as_str().to_string())
-            .collect(),
+        ops: ALL_OPS.iter().map(|op| op.as_str().to_string()).collect(),
         manifest: None,
     }
 }
 
 /// Validates a plugin's hello before any work happens: the version must match
-/// and every declared `host.*` cap must be in the v1 surface. Rejection is
+/// and every declared `host.*` op must be in the v2 surface. Rejection is
 /// decided here, before any other message is exchanged.
-fn validate_hello(name: &str, v: u32, caps: &[String]) -> Result<(), PluginError> {
+fn validate_hello(name: &str, v: u32, ops: &[String]) -> Result<(), PluginError> {
     if v != API_VERSION {
         return Err(PluginError::VersionMismatch {
             name: name.to_string(),
@@ -575,7 +798,7 @@ fn validate_hello(name: &str, v: u32, caps: &[String]) -> Result<(), PluginError
             expected: API_VERSION,
         });
     }
-    validate_caps(caps).map_err(PluginError::Caps)?;
+    validate_ops(ops).map_err(PluginError::Ops)?;
     Ok(())
 }
 
@@ -663,7 +886,7 @@ async fn run_stderr(stderr: ChildStderr, name: String) {
 #[allow(clippy::too_many_arguments)] // private reader loop; parameters mirror the protocol roles
 async fn run_reader(
     mut reader: BufReader<ChildStdout>,
-    inflight: Arc<Mutex<HashMap<u64, oneshot::Sender<Msg>>>>,
+    inflight: Arc<Mutex<HashMap<u64, PendingCall>>>,
     pongs: Arc<AtomicU64>,
     name: String,
     died: oneshot::Sender<()>,
@@ -703,9 +926,9 @@ async fn run_reader(
         }
     }
 
-    let pending: Vec<(u64, oneshot::Sender<Msg>)> = inflight.lock().await.drain().collect();
-    for (id, tx) in pending {
-        let _ = tx.send(Msg::resp_err(
+    let pending: Vec<(u64, PendingCall)> = inflight.lock().await.drain().collect();
+    for (id, pending) in pending {
+        let _ = pending.response.send(Msg::resp_err(
             id,
             WireError {
                 kind: "PluginDied".into(),
@@ -725,7 +948,7 @@ async fn run_reader(
 #[allow(clippy::too_many_arguments)] // private dispatch; parameters mirror the protocol roles
 async fn dispatch(
     msg: &Msg,
-    inflight: &Arc<Mutex<HashMap<u64, oneshot::Sender<Msg>>>>,
+    inflight: &Arc<Mutex<HashMap<u64, PendingCall>>>,
     pongs: &Arc<AtomicU64>,
     name: &str,
     stdin: &Arc<Mutex<Option<ChildStdin>>>,
@@ -735,10 +958,21 @@ async fn dispatch(
 ) {
     match msg {
         Msg::Resp { id, .. } => {
-            if let Some(tx) = inflight.lock().await.remove(id) {
-                let _ = tx.send(msg.clone());
+            if let Some(pending) = inflight.lock().await.remove(id) {
+                let _ = pending.response.send(msg.clone());
             } else {
                 debug!("plugin {name} answered id {id} which has no waiting call");
+            }
+        }
+        Msg::Progress { id, data } => {
+            let pending = inflight.lock().await;
+            let Some(pending) = pending.get(id) else {
+                debug!("plugin {name} progressed id {id} which has no waiting call");
+                return;
+            };
+            *pending.last_progress.lock().await = Instant::now();
+            if let Some(progress) = &pending.progress {
+                let _ = progress.send(data.clone());
             }
         }
         Msg::Call { id, op, args, .. } => {
@@ -807,25 +1041,92 @@ async fn run_reaper(
 
 #[cfg(test)]
 mod tests {
-    use pwr_plugin_protocol::CapsError;
+    use pwr_plugin_protocol::OpsError;
 
     use super::*;
+    use crate::test_helpers::entry_named;
+
+    // ── the grant AND (ADR-0016) ─────────────────────────────────────────────
+
+    /// A one-entry catalog: `discord_token` grants the token, `declares`
+    /// puts the matching entry in the embedded manifest, and the pin is
+    /// upper-case hex so the snapshot's normalisation is exercised.
+    fn snapshot(grants: bool, declares: bool) -> AuthoritySnapshot {
+        let mut entry = entry_named("pro");
+        entry.discord_token = grants;
+        entry.sha256 = "AB".repeat(32);
+        if declares {
+            entry.manifest.requires = vec![pwr_plugin_protocol::DISCORD_TOKEN.into()];
+        }
+        AuthoritySnapshot::from_catalog(
+            &HashMap::from([("pro".to_string(), entry)]),
+            "the-bot-token".to_string(),
+        )
+    }
+
+    #[test]
+    fn a_declared_and_granted_plugin_gets_the_token_and_the_pin() {
+        let authority = snapshot(true, true)
+            .resolve("pro")
+            .expect("the halves agree");
+        assert!(authority.has_token());
+        assert_eq!(authority.pinned(), Some("ab".repeat(32).as_str()));
+    }
+
+    #[test]
+    fn a_declared_but_ungranted_plugin_is_refused() {
+        assert!(matches!(
+            snapshot(false, true).resolve("pro"),
+            Err(PluginError::UngrantedDeclaration { ref name }) if name == "pro"
+        ));
+    }
+
+    #[test]
+    fn a_granted_but_undeclared_plugin_is_refused() {
+        assert!(matches!(
+            snapshot(true, false).resolve("pro"),
+            Err(PluginError::UndeclaredGrant { ref name }) if name == "pro"
+        ));
+    }
+
+    #[test]
+    fn a_core_plugin_is_never_grantable() {
+        // The snapshot holds only catalog entries: a name the catalog does
+        // not pin is a `CORE_PLUGINS` plugin, and there the host knows no
+        // manifest before spawn, so it gets no pin and no token.
+        let authority = snapshot(true, true)
+            .resolve("feed")
+            .expect("no halves to disagree");
+        assert!(!authority.has_token());
+        assert_eq!(authority.pinned(), None);
+        assert_eq!(
+            AuthoritySnapshot::none().resolve("pro").unwrap().pinned(),
+            None
+        );
+    }
+
+    #[test]
+    fn a_pinned_plugin_with_no_authority_still_gets_its_digest_check() {
+        let authority = snapshot(false, false).resolve("pro").expect("neither half");
+        assert!(!authority.has_token());
+        assert_eq!(authority.pinned(), Some("ab".repeat(32).as_str()));
+    }
 
     // ── hello validation (the reject-before-work decision) ─────────────────
 
     #[test]
     fn valid_hello_is_accepted() {
-        let caps = vec!["command:hello".into(), "host.kv.get".into()];
-        assert!(validate_hello("hello", API_VERSION, &caps).is_ok());
+        let ops = vec!["command:hello".into(), "host.kv.get".into()];
+        assert!(validate_hello("hello", API_VERSION, &ops).is_ok());
     }
 
     #[test]
     fn version_mismatch_is_rejected_before_any_work() {
-        let err = validate_hello("hello", 2, &[]).unwrap_err();
+        let err = validate_hello("hello", 3, &[]).unwrap_err();
         assert!(matches!(
             err,
             PluginError::VersionMismatch {
-                got: 2,
+                got: 3,
                 expected: API_VERSION,
                 ..
             }
@@ -833,35 +1134,34 @@ mod tests {
     }
 
     #[test]
-    fn unknown_host_cap_is_rejected() {
+    fn unknown_host_op_is_rejected() {
         let err = validate_hello("hello", API_VERSION, &["host.frobnicate".into()]).unwrap_err();
         assert!(matches!(
             err,
-            PluginError::Caps(CapsError { ref op }) if op == "host.frobnicate"
+            PluginError::Ops(OpsError { ref op }) if op == "host.frobnicate"
         ));
     }
 
     // ── the host ack hello ──────────────────────────────────────────────────
 
     #[test]
-    fn host_hello_announces_the_full_cap_surface() {
-        let Msg::Hello { v, name, caps, .. } = host_hello() else {
+    fn host_hello_announces_the_full_op_surface() {
+        let Msg::Hello { v, name, ops, .. } = host_hello() else {
             panic!("host ack must be a hello")
         };
         assert_eq!(v, API_VERSION);
         assert_eq!(name, "host");
-        assert_eq!(caps.len(), 18, "every v1 host cap must be announced");
-        assert!(caps.iter().any(|c| c == "host.defer"));
-        assert!(caps.iter().any(|c| c == "host.kv.get"));
-        assert!(caps.iter().any(|c| c == "host.get_config"));
-        assert!(caps.iter().any(|c| c == "host.list_plugins"));
-        assert!(caps.iter().any(|c| c == "host.stats"));
-        assert!(caps.iter().any(|c| c == "host.feed.get_settings"));
-        assert!(caps.iter().any(|c| c == "host.voice.get_settings"));
-        assert!(caps.iter().any(|c| c == "host.voice.update_settings"));
-        assert!(caps.iter().any(|c| c == "host.welcome.get_settings"));
-        assert!(caps.iter().any(|c| c == "host.welcome.update_settings"));
-        assert!(caps.iter().any(|c| c == "host.open_modal"));
+        assert_eq!(ops.len(), 16, "every v2 host op must be announced");
+        assert!(ops.iter().any(|c| c == "host.defer"));
+        assert!(ops.iter().any(|c| c == "host.open_dm"));
+        assert!(ops.iter().any(|c| c == "host.kv.get"));
+        assert!(ops.iter().any(|c| c == "host.get_config"));
+        assert!(ops.iter().any(|c| c == "host.list_plugins"));
+        assert!(ops.iter().any(|c| c == "host.stats"));
+        assert!(ops.iter().any(|c| c == "host.resolve_users"));
+        assert!(ops.iter().any(|c| c == "host.welcome.get_settings"));
+        assert!(ops.iter().any(|c| c == "host.welcome.update_settings"));
+        assert!(ops.iter().any(|c| c == "host.open_modal"));
     }
 
     // ── pong accounting (the health checker's liveness signal) ──────────────
@@ -883,6 +1183,43 @@ mod tests {
         )
         .await;
         assert_eq!(pongs.load(Ordering::Relaxed), 1);
+    }
+
+    #[tokio::test]
+    async fn progress_routes_to_the_waiting_call() {
+        let inflight = Arc::new(Mutex::new(HashMap::new()));
+        let (response, _receiver) = oneshot::channel();
+        let (progress_tx, mut progress_rx) = mpsc::unbounded_channel();
+        inflight.lock().await.insert(
+            7,
+            PendingCall {
+                response,
+                progress: Some(progress_tx),
+                last_progress: Arc::new(Mutex::new(Instant::now())),
+            },
+        );
+        let pongs = Arc::new(AtomicU64::new(0));
+        let stdin = Arc::new(Mutex::new(None::<ChildStdin>));
+
+        dispatch(
+            &Msg::Progress {
+                id: 7,
+                data: serde_json::json!({ "phase": "working" }),
+            },
+            &inflight,
+            &pongs,
+            "feed",
+            &stdin,
+            None,
+            None,
+            None,
+        )
+        .await;
+
+        assert_eq!(
+            progress_rx.recv().await,
+            Some(serde_json::json!({ "phase": "working" }))
+        );
     }
 
     // ── plugin→host event broadcast ────────────────────────────────────────

@@ -31,6 +31,10 @@
 //! - **Swap**: unload the old binary, spawn the new one. External install
 //!   (resolving a pin to a binary path) is #110; the manager takes the new
 //!   path as input.
+//! - **Authority**: every spawn resolves its grant and digest from the
+//!   startup [`AuthoritySnapshot`], so a respawn after a crash reuses
+//!   exactly what the first spawn used. A binary that no longer matches its
+//!   pinned digest is refused at the spawn seam (ADR-0016).
 //! - **Tasks**: manifest `tasks[]` drive a per-task loop that invokes the
 //!   plugin's command on its interval; loops end on unload (the stop flag)
 //!   or when the plugin is reaped (the respawn restarts them).
@@ -55,6 +59,8 @@ use pwr_plugin_protocol::TaskDef;
 use tokio::sync::Mutex;
 
 use crate::event::event_bus::EventBus;
+use crate::plugin::Authority;
+use crate::plugin::AuthoritySnapshot;
 use crate::plugin::HostServices;
 use crate::plugin::PluginError;
 use crate::plugin::PluginEventRouter;
@@ -194,9 +200,10 @@ impl CrashLoopGuard {
     }
 }
 
-/// One registered plugin: the running handle, its spawn spec (binary path),
-/// health config, the stop flag for its health task, and the Discord events
-/// it subscribed to at spawn.
+/// One registered plugin: the running handle, its spawn spec (binary path,
+/// health config, the stop flag for its health task, the Discord events it
+/// subscribed to at spawn, and the authority it was granted). The spawn spec
+/// is what a respawn reuses verbatim.
 struct Entry {
     /// The running subprocess handle.
     plugin: Arc<RunningPlugin>,
@@ -215,6 +222,9 @@ struct Entry {
     /// Manifest `tasks[]`: per-task loops invoke the declared command on its
     /// interval; re-applied on respawn and swap.
     tasks: Vec<TaskDef>,
+    /// The authority this instance was spawned with, reused verbatim by
+    /// `respawn` so a crash cannot change what the plugin holds.
+    authority: Authority,
 }
 
 /// Owns running plugins by name and drives the lifecycle: health checks,
@@ -247,6 +257,10 @@ pub struct PluginManager {
     /// binds the author to the calling session, and the author's later
     /// submission rides the route back to that session.
     pub(crate) modals: ModalRouter,
+    /// The catalog's authority, snapshotted at startup. Every spawn resolves
+    /// its grant and digest against it, so authority never changes
+    /// mid-flight.
+    grants: AuthoritySnapshot,
 }
 
 impl PluginManager {
@@ -262,7 +276,16 @@ impl PluginManager {
             event_router: None,
             respawn_policy,
             modals: ModalRouter::new(DEFAULT_VIEW_TIMEOUT),
+            grants: AuthoritySnapshot::none(),
         }
+    }
+
+    /// Wires the startup authority snapshot into the manager so every spawn
+    /// — and every respawn — resolves its grant and digest against the
+    /// catalog as it stood at boot. Builder-style: consumes `self`.
+    pub fn with_grants(mut self, grants: AuthoritySnapshot) -> Self {
+        self.grants = grants;
+        self
     }
 
     /// Wires host services into the manager so every spawned plugin can be
@@ -294,8 +317,11 @@ impl PluginManager {
     /// (the manifest's Discord events) when an event router is wired, and
     /// starts one task loop per manifest `tasks[]` entry (each invokes the
     /// declared command on its interval). Fails with
-    /// [`PluginError::AlreadyRunning`] if the name is already
-    /// registered.
+    /// [`PluginError::AlreadyRunning`] if the name is already registered.
+    ///
+    /// The name's authority is resolved from the startup snapshot first, so
+    /// a plugin whose grant and declared needs disagree is refused before
+    /// any child exists.
     pub async fn spawn(
         self: &Arc<Self>,
         name: &str,
@@ -303,6 +329,22 @@ impl PluginManager {
         health: Option<HealthConfig>,
         event_handlers: &[String],
         tasks: &[TaskDef],
+    ) -> Result<Arc<RunningPlugin>, PluginError> {
+        let authority = self.grants.resolve(name)?;
+        self.spawn_granted(name, path, health, event_handlers, tasks, authority)
+            .await
+    }
+
+    /// [`PluginManager::spawn`] with the authority already resolved, so
+    /// `respawn` reuses exactly what the first spawn used.
+    async fn spawn_granted(
+        self: &Arc<Self>,
+        name: &str,
+        path: impl AsRef<Path>,
+        health: Option<HealthConfig>,
+        event_handlers: &[String],
+        tasks: &[TaskDef],
+        authority: Authority,
     ) -> Result<Arc<RunningPlugin>, PluginError> {
         let path = path.as_ref().to_path_buf();
         {
@@ -318,9 +360,11 @@ impl PluginManager {
         let plugin = Arc::new(
             RunningPlugin::spawn_with(
                 &path,
+                name,
                 self.services.clone(),
                 Some(Arc::clone(self)),
                 self.event_bus.clone(),
+                authority.clone(),
             )
             .await?,
         );
@@ -332,6 +376,7 @@ impl PluginManager {
             stop: stop.clone(),
             event_handlers: event_handlers.to_vec(),
             tasks: tasks.to_vec(),
+            authority,
         };
         // Register under the name. A concurrent spawn that won the race
         // reports itself here: the guard drops before the stop, so the
@@ -495,7 +540,7 @@ impl PluginManager {
         // replaces the instance, and the identity-gated unload below then
         // leaves the fresh one alone. `NotRunning` is reserved for a name
         // that was never registered.
-        let (path, health, event_handlers, tasks) = {
+        let (path, health, event_handlers, tasks, authority) = {
             let plugins = self.plugins.lock().await;
             match plugins.get(name) {
                 None => {
@@ -508,6 +553,7 @@ impl PluginManager {
                     entry.health.clone(),
                     entry.event_handlers.clone(),
                     entry.tasks.clone(),
+                    entry.authority.clone(),
                 ),
             }
         };
@@ -528,7 +574,7 @@ impl PluginManager {
         };
         self.with_crash_loop_guard(name, |guard| guard.record(Instant::now()))
             .await;
-        self.spawn(name, &path, health, &event_handlers, &tasks)
+        self.spawn_granted(name, &path, health, &event_handlers, &tasks, authority)
             .await?;
         Ok(RespawnOutcome::Respawned)
     }

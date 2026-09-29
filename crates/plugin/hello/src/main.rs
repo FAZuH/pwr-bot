@@ -7,7 +7,7 @@
 //! host waiting for a reply (the bug that killed the prototype).
 //!
 //! Protocol behavior:
-//! - announces `hello` (`v`, `name`, `caps`) as its first line after spawn;
+//! - announces `hello` (`v`, `name`, `ops`) as its first line after spawn;
 //! - answers `call` (`invoke`, `view.interact`, `view.modal_submit`) with a
 //!   correlation-id-matched `resp`, keeping a per-process click counter for
 //!   [`BUTTON_CUSTOM_ID`];
@@ -96,6 +96,8 @@ fn manifest() -> Manifest {
             interval_secs: 1,
             command: "hello.tick".into(),
         }],
+        settings: vec![],
+        requires: vec![],
         api_version: API_VERSION,
     }
 }
@@ -135,7 +137,7 @@ fn main() -> ExitCode {
         let hello = Msg::Hello {
             v: API_VERSION,
             name: PLUGIN_NAME.into(),
-            caps: vec![
+            ops: vec![
                 "command:hello".into(),
                 "host.defer".into(),
                 "host.send_message".into(),
@@ -307,6 +309,7 @@ fn main() -> ExitCode {
                     }
                 }
                 Msg::Pong => {}
+                Msg::Progress { .. } => {}
                 // The host answers our hello with its own; tolerate it silently.
                 // Logging it would be noise, and the stderr test asserts on a
                 // dedicated fixture line instead.
