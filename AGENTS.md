@@ -24,7 +24,8 @@ cargo test --all-features
 - Do **not** run `./dev.sh format lint` after every edit — it mutates source files and may require re-reading
 - Tests need a running database: `docker compose up -d db` before `cargo test`. That service reads `DB_USER`/`DB_PASS`/`DB_NAME` from `.env` and binds `127.0.0.1:5432`. CI copies `.env-example` → `.env` automatically
 - CI order: `fmt --check` → `clippy -D warnings` → `test` (Docker/binary builds run as separate CI workflows)
-- Diagrams: always use `./dev.sh docs`, never invoke `mmdc` directly
+- Diagrams: always use `./dev.sh docs`, never invoke `mmdc` directly. That step passes `--width/--height`, which mermaid-cli v12 dropped — keep any locally installed `mmdc` on 11.x
+- `dev.sh` is synced in from an upstream external config: do not hand-edit it here, report its defects upstream instead. On NixOS its `#!/bin/bash` shebang does not resolve, so invoke it as `bash dev.sh <command>`
 
 ## Code Style
 
