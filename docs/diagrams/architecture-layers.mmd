@@ -75,11 +75,9 @@ graph TB
             UpdateTrait -.->|implemented by| VoiceLBUpd & VoiceStatsUpd & WelcomeUpd & FeedListUpd & FeedSetUpd & MainSetUpd
         end
         
-        SettingsService["SettingsService<br/>get · update"]
         FeedService["FeedSubscriptionService"]
         VoiceService["VoiceTrackingService"]
         InternalService["InternalService"]
-        SettingsService --> FeedService & VoiceService
     end
 
     subgraph Domain["Domain Layer  ·  src/entity.rs  src/feed/"]

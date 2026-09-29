@@ -99,6 +99,22 @@ The protocol calls the declared host operation list `ops` and uses API
 version `2`. A plugin's manifest may declare `voice_state`, `guild_create`, and
 `view.timeout` event handlers.
 
+## Welcome
+
+The `welcome` core plugin owns the welcome panel, the welcome-card renderer,
+and welcome settings storage. It applies the migrations under
+`crates/plugin/welcome/migrations/` into its own `welcome_settings` table and
+copies the legacy `server_settings.welcome` value into that table on a guild's
+first read, then reads only its own table. The renderer, the twelve SVG cards
+in `assets/welcome/`, and the font embedded with `include_bytes!` live in the
+crate, so a preview renders with no host involvement. The core `/welcome`
+command opens the panel; the plugin itself registers `welcome-settings`. The
+host supplies `host.get_config`,
+`host.open_view`, and `host.open_modal`; there is no welcome-settings RPC. The
+rendered `welcome_preview.png` travels in `ViewSpec.files` while cards are
+enabled and is absent while they are off. Its single migration has a unique
+version and creates only welcome-owned tables with `IF NOT EXISTS`.
+
 ## Missing or invalid catalog
 
 The bot still starts when the catalog is missing or invalid. Plugin commands

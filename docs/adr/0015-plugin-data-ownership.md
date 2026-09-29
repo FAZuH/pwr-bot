@@ -5,10 +5,11 @@ capabilities, not the schemas. The core Postgres connection capability
 (`db_url`, already returned by `host.get_config`) is formalized as stable
 protocol surface, and `data_path` is the sanctioned home for plugin files
 (the voice session heartbeat is a file there, not a table). A plugin owns its
-tables and can run its own embedded Diesel migrations at startup. Feed and
-voice own their embedded migrations; core owns shared host tables.
-The shared `server_settings` table remains for Welcome settings and one-time
-legacy imports. Core also keeps `plugin_kv`, `guild_plugins`, and `bot_meta`;
+tables and can run its own embedded Diesel migrations at startup. Feed,
+voice, and welcome own their embedded migrations; core owns shared host
+tables. The shared `server_settings` table remains only as the legacy import
+source until phase 7 (#170). Core also keeps `plugin_kv`, `guild_plugins`,
+and `bot_meta`;
 the feed repository is read-only for the transitional dump. Rejected: a generic SQL passthrough cap (violates ADR-0010's "ops
 are shaped by services") and typed-RPC growth (keeps the core domain-aware,
 contra ADR-0014). No data migration guards the rename of the settings
@@ -26,8 +27,11 @@ pre-existing tables and data are never touched.
 Core uses `20260925-000000-0000_core_storage` for `server_settings`, `bot_meta`,
 `plugin_kv`, and `guild_plugins`. Feed uses
 `20260924-130100-0000_feed_owned_schema`; voice uses
-`20260924-140100-0000_voice_owned_schema`. Feed copies a legacy
+`20260924-140100-0000_voice_owned_schema`; welcome uses
+`20260924-150100-0000_welcome_owned_schema`. Feed copies a legacy
 `server_settings.feeds` value once into its own storage, then reads only that
-storage. Voice imports the legacy `server_settings.voice` value once. The
+storage. Voice imports the legacy `server_settings.voice` value once. Welcome
+copies the legacy `server_settings.welcome` value into `welcome_settings` on
+its first read, then reads only its own table. The
 heartbeat marker is `$DATA_PATH/voice_heartbeat`; it is not a host table or a
 plugin-kv row.

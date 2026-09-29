@@ -1,5 +1,13 @@
 # The plugin preview attachment is host-injected at transport
 
+**Superseded — 2026-09-28 (phase 6, #169):** The host no longer injects
+preview bytes. `PreviewResolver`, `WelcomeAttachmentRenderer`,
+`declared_attachment_count`, and the `data.attachments` slot are deleted; the
+welcome plugin renders `welcome_preview.png` itself and ships the bytes in
+the envelope's `ViewSpec.files` — the alternative this ADR rejected, in
+envelope form. The decision below is kept as the record of the phase-5
+design.
+
 ## Context
 
 ADR-0011 left one open question: after the welcome panel migrates, its
@@ -87,5 +95,14 @@ After validating the complete `ViewSpec`, the host decodes and attaches them on
 the initial `open_plugin_view` render,
 the Settings-section handoff, and every interaction edit, alongside any
 host-injected preview attachments. The host validates file shape, base64, an 8 MiB per-file limit,
-and a 25 MiB per-message limit before Discord I/O. The historical
-host-injected welcome-preview decision above remains in force.
+and a 25 MiB per-message limit before Discord I/O.
+
+**Update — 2026-09-28 (phase 6, #169):** The host-injected design is
+retired. `PreviewResolver` (`src/plugin/preview.rs`),
+`WelcomeAttachmentRenderer`, `declared_attachment_count`, and the
+`data.attachments` slot are deleted; the renderer, `WELCOME_FILE`, the SVG
+cards, and the embedded font moved into `crates/plugin/welcome`, which
+renders the card and ships `welcome_preview.png` as a `ViewSpec.files`
+entry. The host only validates and base64-decodes `files` into Discord
+attachments for every render — the "Bytes in the RPC response" alternative
+above, carried in the envelope instead of an op response.
