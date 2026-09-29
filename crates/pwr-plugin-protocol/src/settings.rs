@@ -1,8 +1,8 @@
 //! Legacy shared settings wire types.
 //!
 //! The voice and feed plugins own their settings repositories. These types
-//! remain for the welcome host operation and for one-time legacy imports from
-//! `server_settings`; they are not a voice host-settings RPC.
+//! remain for one-time legacy imports from `server_settings`; they are not a
+//! voice host-settings RPC.
 //!
 //! `current_year`-style render-only values never appear here. A payload field
 //! must be data the service itself stores.
@@ -11,7 +11,8 @@ use serde::Deserialize;
 use serde::Serialize;
 
 /// The whole per-guild settings snapshot: every feature section together.
-/// Welcome host operations use this aggregate. Feed and voice settings are
+/// Plugins deserialize it from `server_settings` during their one-time
+/// legacy import; no host operation consumes it. Feed and voice settings are
 /// owned by their plugins; their fields remain for transitional legacy
 /// imports only.
 #[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]

@@ -71,7 +71,12 @@ impl FeedSettingsService {
             .next();
         Ok(row
             .and_then(|row| serde_json::from_value::<ServerSettings>(row.settings).ok())
-            .map(|settings| settings.feeds)
+            .map(|settings| FeedsSettings {
+                // The snapshot's toggle is dropped here: readers treat
+                // `None` as `unwrap_or(true)`.
+                enabled: None,
+                ..settings.feeds
+            })
             .unwrap_or_default())
     }
 }

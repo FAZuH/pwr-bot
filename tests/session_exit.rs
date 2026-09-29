@@ -59,8 +59,6 @@ fn services(io: Arc<MockHostIo>, db_url: String) -> Arc<HostServices> {
         engine: None,
         stats: Arc::new(StatsHandle::default()),
         users: Default::default(),
-        welcome: None,
-        previews: None,
         settings_returns: None,
     })
 }
@@ -132,7 +130,6 @@ async fn the_adopted_message_answers_toggles_like_any_panel() {
         "feed-settings",
         json!({ "guild_id": GUILD_ID, "_context": admin_context() }),
         io.as_ref(),
-        Some(&pwr_bot::plugin::preview::PreviewResolver::new(Vec::new())),
         &message,
     )
     .await

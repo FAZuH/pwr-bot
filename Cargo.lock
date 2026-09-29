@@ -4219,7 +4219,6 @@ dependencies = [
  "image 0.25.9",
  "libc",
  "log",
- "minijinja",
  "mockall",
  "poise",
  "postgresql_embedded",
@@ -4228,7 +4227,6 @@ dependencies = [
  "pwr-plugin-support",
  "pwr-poise-components",
  "pwr-viewgen",
- "resvg",
  "rustls",
  "rustls-native-certs",
  "serde",
@@ -6988,11 +6986,24 @@ checksum = "a28ac98ddc8b9274cb41bb4d9d4d5c425b6020c50c46f25559911905610b4a88"
 name = "welcome"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "diesel",
+ "diesel-async",
+ "diesel_migrations",
+ "image 0.25.9",
+ "minijinja",
  "pwr-ext",
  "pwr-plugin-protocol",
  "pwr-plugin-support",
  "pwr-poise-components",
+ "resvg",
+ "serde",
  "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "wreq",
+ "wreq-util",
 ]
 
 [[package]]

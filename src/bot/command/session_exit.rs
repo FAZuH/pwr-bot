@@ -54,7 +54,7 @@ use crate::plugin::RunningPlugin;
 use crate::plugin::SerenityHostIo;
 use crate::plugin::command::ACTOR_CONTEXT_KEY;
 use crate::plugin::command::actor_context_with_guild_name;
-use crate::plugin::decode_runtime_files_with_existing;
+use crate::plugin::decode_runtime_files;
 use crate::plugin::edit_body_for_transport;
 use crate::plugin::validate_view_spec;
 
@@ -137,24 +137,13 @@ pub async fn handoff_to_section(
             actor_context_with_guild_name(app.interaction, guild_name.as_deref());
     }
     let io = SerenityHostIo::new(ctx.serenity_context().http.clone());
-    adopt_message_into_section(
-        &data.plugin_engine,
-        running,
-        command,
-        args,
-        &io,
-        Some(data.previews.as_ref()),
-        message,
-    )
-    .await
+    adopt_message_into_section(&data.plugin_engine, running, command, args, &io, message).await
 }
 
 /// The adoption half of the handoff, at the seam tests can drive offline:
 /// invokes the plugin command for its [`ViewSpec`], sends the raw payload
-/// through the Gate, resolves the body's declared attachment slots like
-/// every other transport (ADR-0012 — never a dangling slot), morphs the
-/// message into it through the Discord-edit seam, and only then registers
-/// the engine session on the message id.
+/// through the Gate, morphs the message into it through the Discord-edit
+/// seam, and only then registers the engine session on the message id.
 ///
 /// The order is the failure story: a payload the Gate rejects, or an edit
 /// that fails, leaves the message untouched and the engine sessionless, so
@@ -168,28 +157,16 @@ pub async fn adopt_message_into_section(
     command: &str,
     args: serde_json::Value,
     io: &dyn HostIo,
-    previews: Option<&crate::plugin::preview::PreviewResolver>,
     message: &serenity::Message,
 ) -> Result<(), Error> {
     let channel_id = serenity::ChannelId::new(message.channel_id.get());
     let message_id = message.id;
-    let guild_id = args.get("guild_id").and_then(serde_json::Value::as_u64);
     let author_id = crate::plugin::interaction::author_id_from_payload(&args)
         .ok_or_else(|| Error::from("settings handoff is missing its interaction author"))?;
     let spec = engine.invoke(plugin.clone(), command, args).await?;
     validate_view_spec(&spec).map_err(|error| Error::from(error.msg))?;
-    let (body, mut attachments) = match previews {
-        Some(previews) => {
-            previews
-                .resolve(edit_body_for_transport(&spec.data), guild_id)
-                .await
-        }
-        None => (edit_body_for_transport(&spec.data), Vec::new()),
-    };
-    attachments.extend(
-        decode_runtime_files_with_existing(&spec.files, attachments.len())
-            .map_err(|error| Error::from(error.msg))?,
-    );
+    let body = edit_body_for_transport(&spec.data);
+    let attachments = decode_runtime_files(&spec.files).map_err(|error| Error::from(error.msg))?;
     io.edit_message(channel_id.get(), message_id.get(), body, attachments)
         .await?;
     engine

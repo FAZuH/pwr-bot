@@ -58,7 +58,7 @@ use serde_json::json;
 use crate::bot::Data;
 use crate::bot::checks::is_author_guild_admin;
 use crate::bot::command::Error;
-use crate::plugin::decode_runtime_files_with_existing;
+use crate::plugin::decode_runtime_files;
 use crate::plugin::edit_body_for_transport;
 use crate::plugin::validate_view_spec;
 
@@ -719,18 +719,8 @@ async fn edit_invoked_view(
     token: &str,
     spec: &ViewSpec,
 ) -> Result<serenity::Message, Error> {
-    let (body, mut files) = ctx
-        .data()
-        .previews
-        .resolve(
-            edit_body_for_transport(&spec.data),
-            ctx.guild_id().map(serenity::GuildId::get),
-        )
-        .await;
-    files.extend(
-        decode_runtime_files_with_existing(&spec.files, files.len())
-            .map_err(|error| anyhow::anyhow!(error.msg))?,
-    );
+    let body = edit_body_for_transport(&spec.data);
+    let files = decode_runtime_files(&spec.files).map_err(|error| anyhow::anyhow!(error.msg))?;
     Ok(ctx
         .http()
         .edit_original_interaction_response(

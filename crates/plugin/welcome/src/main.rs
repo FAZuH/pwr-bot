@@ -13,17 +13,20 @@
 //!   after spawn; the manifest declares the `welcome-settings` command and
 //!   the settings section the host Settings GUI opens the panel through,
 //!   which forwards the source interaction's `guild_id` in the invoke args;
-//! - answers `invoke` of `welcome-settings` by loading the guild's whole
-//!   [`ServerSettings`] snapshot through `host.welcome.get_settings` and
-//!   rendering the monolith `/welcome` panel as Components V2;
+//! - reads the host config once at startup (`host.get_config`) and connects
+//!   its own [`Repository`], whose migrations create the `welcome_settings`
+//!   table the plugin owns;
+//! - answers `invoke` of `welcome-settings` by loading the guild's settings
+//!   through [`Repository::get_settings`] and rendering the monolith
+//!   `/welcome` panel as Components V2;
 //! - unlike the feed and voice panels, the session state it echoes carries
 //!   only the guild id and the pending message-removal selection — never the
-//!   settings. Every interaction re-reads the guild's snapshot through
-//!   `host.welcome.get_settings` before it applies its message, so a modal
+//!   settings. Every interaction re-reads the guild's settings through
+//!   [`Repository::get_settings`] before it applies its message, so a modal
 //!   submission (whose answer the host does not commit to the session) can
 //!   never render or persist a stale snapshot;
 //! - every mutating message persists immediately through
-//!   `host.welcome.update_settings` (no-op edits included); `Back` returns
+//!   [`Repository::update_settings`] (no-op edits included); `Back` returns
 //!   to the host Settings GUI and `About` opens the host About view on the
 //!   panel's message —
 //!   neither persists, the session simply expires through the engine's
@@ -36,10 +39,10 @@
 //!   custom id (unique per open, so an author-keyed route collision cannot
 //!   mis-apply an answer); the removal selection rides a small in-process
 //!   stash across the modal round trip;
-//! - declares the preview attachment slot in every envelope (ADR-0012): the
-//!   `attachments` field names [`WELCOME_FILE`] while welcome cards are
-//!   enabled and is empty while they are off. The host renders the card and
-//!   attaches the bytes at transport; the plugin never sees image bytes;
+//! - ships the rendered preview PNG as a runtime file in every envelope
+//!   while welcome cards are enabled, and ships no file while they are off
+//!   (which removes the attachment on edit) — the phase-5 `files` mechanism
+//!   the voice leaderboard uses;
 //! - answers `ping` with `pong`, tolerates the host's hello ack silently,
 //!   and exits 0 on `bye` and on EOF. There is no `view.timeout` handler:
 //!   the monolith's expiry persists nothing, so an expired panel has
@@ -51,7 +54,10 @@ use std::collections::HashSet;
 use std::io::BufRead;
 use std::io::Write;
 use std::process::ExitCode;
+use std::sync::LazyLock;
 
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD;
 use pwr_ext::component;
 use pwr_ext::view;
 use pwr_ext::view_support::ButtonStyle;
@@ -65,8 +71,8 @@ use pwr_plugin_protocol::API_VERSION;
 use pwr_plugin_protocol::MODAL_OPENED_KIND;
 use pwr_plugin_protocol::MODAL_SUBMIT_OP;
 use pwr_plugin_protocol::Msg;
-use pwr_plugin_protocol::ServerSettings;
 use pwr_plugin_protocol::VIEW_MOVED_KIND;
+use pwr_plugin_protocol::WelcomeSettings;
 use pwr_plugin_protocol::WireError;
 use pwr_plugin_support::about_exit;
 use pwr_plugin_support::back_exit;
@@ -77,10 +83,14 @@ use serde_json::Value;
 use serde_json::json;
 use welcome::COMMAND_NAME;
 use welcome::PLUGIN_NAME;
+use welcome::image_generator::WelcomeCardData;
+use welcome::image_generator::WelcomeImageGenerator;
 use welcome::manifest;
+use welcome::repo::Repository;
 
 /// Filename of the welcome preview attachment, matching the monolith's
-/// `WELCOME_FILE`. The envelope declares this slot; the host fills it.
+/// `WELCOME_FILE`. The envelope ships this file's bytes while cards are
+/// enabled.
 const WELCOME_FILE: &str = "welcome_preview.png";
 
 /// Custom ids for the panel's interactive components.
@@ -111,24 +121,23 @@ const MAX_MESSAGES: usize = 25;
 
 // ── the plugin's own update logic ─────────────────────────────────────────────
 
-/// The welcome settings model: the guild's whole [`ServerSettings`] snapshot
-/// plus the pending removal selection, as the monolith's
-/// `WelcomeSettingsModel` held them. The preview image bytes are absent by
-/// design — the host renders and attaches them (ADR-0012).
+/// The welcome settings model: the guild's [`WelcomeSettings`] plus the
+/// pending removal selection, as the monolith's `WelcomeSettingsModel`
+/// held them.
 #[derive(Debug, Clone, PartialEq)]
 struct Model {
-    settings: ServerSettings,
+    settings: WelcomeSettings,
     marked_removal: HashSet<usize>,
 }
 
 impl Model {
     /// Whether welcome cards are enabled (defaults to disabled).
     fn is_enabled(&self) -> bool {
-        self.settings.welcome.enabled.unwrap_or(false)
+        self.settings.enabled.unwrap_or(false)
     }
 
     fn message_count(&self) -> usize {
-        self.settings.welcome.messages.as_ref().map_or(0, Vec::len)
+        self.settings.messages.as_ref().map_or(0, Vec::len)
     }
 }
 
@@ -149,12 +158,11 @@ enum PanelMsg {
 }
 
 /// Effects the model can request: a persist of the whole snapshot. The
-/// monolith's paired `RenderImage` effect is host-side here — the envelope
-/// declares the attachment slot and the host re-renders it on every
-/// transport (ADR-0012).
+/// monolith's paired `RenderImage` effect is the envelope's own `files`
+/// field — every render ships the freshly rendered card bytes.
 #[derive(Debug, Clone, PartialEq)]
 enum Effect {
-    Persist(ServerSettings),
+    Persist(WelcomeSettings),
 }
 
 /// The pure update function — the only writer of the model. Every mutating
@@ -164,16 +172,16 @@ enum Effect {
 fn update(msg: PanelMsg, model: &mut Model) -> Vec<Effect> {
     match msg {
         PanelMsg::ToggleEnabled => {
-            let current = model.settings.welcome.enabled.unwrap_or(false);
-            model.settings.welcome.enabled = Some(!current);
+            let current = model.settings.enabled.unwrap_or(false);
+            model.settings.enabled = Some(!current);
             persist(model)
         }
         PanelMsg::SetChannel(channel_id) => {
-            model.settings.welcome.channel_id = channel_id;
+            model.settings.channel_id = channel_id;
             persist(model)
         }
         PanelMsg::SetTemplate(template_id) => {
-            model.settings.welcome.template_id = template_id;
+            model.settings.template_id = template_id;
             persist(model)
         }
         PanelMsg::MarkRemoval(indices) => {
@@ -185,7 +193,6 @@ fn update(msg: PanelMsg, model: &mut Model) -> Vec<Effect> {
             if !trimmed.is_empty() && model.message_count() < MAX_MESSAGES {
                 model
                     .settings
-                    .welcome
                     .messages
                     .get_or_insert_with(Vec::new)
                     .push(trimmed);
@@ -195,13 +202,13 @@ fn update(msg: PanelMsg, model: &mut Model) -> Vec<Effect> {
         PanelMsg::SetColor(color) => {
             let trimmed = color.trim().to_string();
             if trimmed.starts_with('#') {
-                model.settings.welcome.primary_color = Some(trimmed);
+                model.settings.primary_color = Some(trimmed);
             }
             persist(model)
         }
         PanelMsg::SaveRemoval => {
-            let msgs = model.settings.welcome.messages.clone().unwrap_or_default();
-            model.settings.welcome.messages = Some(
+            let msgs = model.settings.messages.clone().unwrap_or_default();
+            model.settings.messages = Some(
                 msgs.into_iter()
                     .enumerate()
                     .filter(|(i, _)| !model.marked_removal.contains(i))
@@ -281,26 +288,11 @@ impl SessionState {
 // ── plugin→host call bookkeeping ──────────────────────────────────────────────
 
 /// A plugin→host call in flight: the invoke id the reply must answer, the
-/// session state to echo, and what to do once the host's resp arrives. The
-/// settings snapshot rides the variants that render (the load's resp is the
-/// only copy the plugin holds); the ones that only chain carry the session.
+/// session state to echo, and what to do once the host's resp arrives.
+/// Settings loads and persists are local repository work now, so only the
+/// two host-rendered opens chain through a resp.
 #[derive(Debug, Clone, PartialEq)]
 enum Pending {
-    /// The load issued before the first render.
-    LoadSettings { invoke_id: u64, guild_id: u64 },
-    /// The load issued before applying a click.
-    Interact {
-        invoke_id: u64,
-        session: SessionState,
-        msg: PanelMsg,
-    },
-    /// The persist a mutating click or modal submission issued; its resp
-    /// answers with the re-rendered panel.
-    Persist {
-        invoke_id: u64,
-        session: SessionState,
-        settings: ServerSettings,
-    },
     /// The `host.open_modal` a modal trigger issued; its resp answers the
     /// click with [`MODAL_OPENED_KIND`] so the host skips its own response.
     OpenModal { invoke_id: u64 },
@@ -314,22 +306,12 @@ enum Pending {
         session: SessionState,
         message_id: Option<u64>,
     },
-    /// The load issued before applying a modal submission.
-    ModalSubmit {
-        invoke_id: u64,
-        session: SessionState,
-        msg: PanelMsg,
-    },
 }
 
 impl Pending {
     /// The host op this pending kind belongs to.
     fn op(&self) -> &'static str {
         match self {
-            Pending::LoadSettings { .. }
-            | Pending::Interact { .. }
-            | Pending::ModalSubmit { .. } => GET_SETTINGS_OP,
-            Pending::Persist { .. } => UPDATE_SETTINGS_OP,
             Pending::OpenModal { .. } => "host.open_modal",
             Pending::OpenSettings { .. } => "host.open_view",
         }
@@ -429,7 +411,6 @@ fn view_data(model: &Model) -> Value {
         channel_types: Some(Cow::Owned(vec![ChannelType::Text])),
         default_channels: model
             .settings
-            .welcome
             .channel_id
             .as_deref()
             .and_then(|id| id.parse::<u64>().ok())
@@ -446,7 +427,6 @@ fn view_data(model: &Model) -> Value {
         "Select Template (Current: {})",
         model
             .settings
-            .welcome
             .template_id
             .clone()
             .unwrap_or_else(|| "1".to_string())
@@ -461,7 +441,6 @@ fn view_data(model: &Model) -> Value {
     let removal_select: Option<CreateContainerComponent<'static>> = (msgs > 0).then(|| {
         let options: Vec<CreateSelectMenuOption<'static>> = model
             .settings
-            .welcome
             .messages
             .as_ref()
             .map(|messages| {
@@ -574,27 +553,65 @@ fn view_data(model: &Model) -> Value {
     serde_json::to_value(message).expect("welcome settings view is serializable")
 }
 
-/// The envelope's `attachments` declaration (ADR-0012): the preview slot by
-/// filename while welcome cards are enabled, an explicit empty list while
-/// they are off (which removes the attachment on edit). The host resolves
-/// the slot into bytes at transport; the plugin never holds them.
-fn attachment_declaration(model: &Model) -> Value {
-    if model.is_enabled() {
-        json!([{ "id": 0, "filename": WELCOME_FILE }])
-    } else {
-        json!([])
+/// The preview card generator: one HTTP client for the process, shared by
+/// every render.
+static PREVIEW_GENERATOR: LazyLock<WelcomeImageGenerator> =
+    LazyLock::new(WelcomeImageGenerator::new);
+
+/// The envelope's `files` entries: the freshly rendered preview PNG while
+/// welcome cards are enabled, an empty list while they are off (which
+/// removes the attachment on edit). A render failure ships no file, the
+/// same as the disabled state.
+async fn preview_files(model: &Model) -> Vec<Value> {
+    if !model.is_enabled() {
+        return Vec::new();
+    }
+    let data = WelcomeCardData {
+        template_id: model
+            .settings
+            .template_id
+            .clone()
+            .unwrap_or_else(|| "1".to_string()),
+        username: "PreviewUser".to_string(),
+        user_tag: "@previewuser".to_string(),
+        avatar_url: String::new(),
+        avatar_b64: None,
+        server_name: "Your Server".to_string(),
+        member_count: "100".to_string(),
+        member_number: "#100".to_string(),
+        primary_color: model
+            .settings
+            .primary_color
+            .clone()
+            .unwrap_or_else(|| "#5865F2".to_string()),
+        welcome_message: model
+            .settings
+            .messages
+            .as_ref()
+            .and_then(|messages| messages.first())
+            .cloned()
+            .unwrap_or_else(|| "Welcome to the server!".to_string()),
+    };
+    match PREVIEW_GENERATOR.generate_card(data).await {
+        Ok(bytes) => vec![json!({
+            "filename": WELCOME_FILE,
+            "data_base64": STANDARD.encode(bytes),
+        })],
+        Err(error) => {
+            eprintln!("failed to render the welcome preview: {error}");
+            Vec::new()
+        }
     }
 }
 
-/// The full envelope a view reply carries: raw message data with the
-/// attachment declaration, visibility, and the session state the host
-/// stores per message.
-fn envelope(session: &SessionState, model: &Model) -> Value {
-    let mut data = view_data(model);
-    data["attachments"] = attachment_declaration(model);
+/// The full envelope a view reply carries: raw message data, the preview
+/// files, visibility, and the session state the host stores per message.
+async fn envelope(session: &SessionState, model: &Model) -> Value {
+    let data = view_data(model);
     json!({
         "data": data,
         "ephemeral": false,
+        "files": preview_files(model).await,
         "view": session.to_value(),
     })
 }
@@ -602,17 +619,17 @@ fn envelope(session: &SessionState, model: &Model) -> Value {
 /// Writes an ok resp answering `invoke_id` with the panel envelope built
 /// from the loaded snapshot and the session's selection. Returns whether
 /// the write succeeded.
-fn reply_panel(
+async fn reply_panel(
     out: &mut impl Write,
     invoke_id: u64,
     session: &SessionState,
-    settings: &ServerSettings,
+    settings: &WelcomeSettings,
 ) -> bool {
     let model = Model {
         settings: settings.clone(),
         marked_removal: session.marked_removal.clone(),
     };
-    let resp = Msg::resp_ok(invoke_id, Some(envelope(session, &model)));
+    let resp = Msg::resp_ok(invoke_id, Some(envelope(session, &model).await));
     write_msg(out, &resp).is_ok()
 }
 
@@ -741,25 +758,6 @@ fn modal_input_value(args: Option<&Value>, input: &str) -> Option<String> {
 
 // ── protocol helpers ───────────────────────────────────────────────────────────
 
-/// The settings RPC pair this panel's host ops belong to.
-const GET_SETTINGS_OP: &str = "host.welcome.get_settings";
-const UPDATE_SETTINGS_OP: &str = "host.welcome.update_settings";
-
-/// The `host.welcome.get_settings` call args.
-fn get_settings_args(guild_id: u64) -> Value {
-    json!({ "guild_id": guild_id })
-}
-
-/// The `host.welcome.update_settings` call args persisting a snapshot.
-fn update_settings_args(guild_id: u64, settings: &ServerSettings) -> Value {
-    json!({ "guild_id": guild_id, "settings": settings })
-}
-
-/// Parses a `host.welcome.get_settings` resp payload into a snapshot.
-fn parse_settings(data: &Value) -> Option<ServerSettings> {
-    serde_json::from_value(data.clone()).ok()
-}
-
 /// The selected value of a single-value select interaction.
 fn selected_id(args: Option<&Value>) -> Option<String> {
     args.and_then(|a| a.get("data"))
@@ -805,9 +803,59 @@ fn click_msg(custom_id: &str, args: Option<&Value>) -> Option<PanelMsg> {
 
 // ── the event loop ────────────────────────────────────────────────────────────
 
-fn main() -> ExitCode {
+/// Asks the host for its config (`host.get_config`) and reads lines until
+/// the resp arrives, queueing anything the host sent first (its hello ack
+/// and any interaction that beat the config). Returns the database url and
+/// the queued messages.
+fn load_host_config(
+    out: &mut impl Write,
+    next_call_id: &mut u64,
+    input: &mut impl BufRead,
+) -> Result<(String, Vec<Msg>), String> {
+    *next_call_id += 1;
+    let call_id = *next_call_id;
+    write_msg(
+        out,
+        &Msg::Call {
+            id: call_id,
+            op: "host.get_config".into(),
+            cmd: None,
+            args: None,
+        },
+    )
+    .map_err(|error| error.to_string())?;
+    let mut queued = Vec::new();
+    for line in input.lines() {
+        let line = line.map_err(|error| error.to_string())?;
+        let message: Msg = serde_json::from_str(&line).map_err(|error| error.to_string())?;
+        if matches!(&message, Msg::Hello { .. }) {
+            continue;
+        }
+        if let Msg::Resp {
+            id,
+            ok: true,
+            data: Some(data),
+            ..
+        } = &message
+            && *id == call_id
+        {
+            let db_url = data
+                .get("db_url")
+                .and_then(Value::as_str)
+                .ok_or("host.get_config response has no db_url")?
+                .to_string();
+            return Ok((db_url, queued));
+        }
+        queued.push(message);
+    }
+    Err("host closed before returning config".into())
+}
+
+#[tokio::main]
+async fn main() -> ExitCode {
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
+    let mut input = stdin.lock();
     let mut out = stdout.lock();
     let mut next_call_id: u64 = 0;
     // plugin->host calls in flight: our call id -> the pending kind whose
@@ -825,8 +873,7 @@ fn main() -> ExitCode {
         v: API_VERSION,
         name: PLUGIN_NAME.into(),
         ops: vec![
-            GET_SETTINGS_OP.into(),
-            UPDATE_SETTINGS_OP.into(),
+            "host.get_config".into(),
             "host.open_view".into(),
             "host.open_modal".into(),
         ],
@@ -836,22 +883,50 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
 
-    for line in stdin.lock().lines() {
-        let Ok(line) = line else { break }; // EOF => clean exit
-        let msg: Msg = match serde_json::from_str(&line) {
-            Ok(msg) => msg,
-            Err(e) => {
-                eprintln!("bad json: {e}");
-                continue;
+    let (db_url, queued_messages) = match load_host_config(&mut out, &mut next_call_id, &mut input)
+    {
+        Ok(config) => config,
+        Err(error) => {
+            eprintln!("failed to load host config: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let repository = match Repository::connect(&db_url).await {
+        Ok(repository) => repository,
+        Err(error) => {
+            eprintln!("failed to connect welcome storage: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    if let Err(error) = repository.migrate().await {
+        eprintln!("failed to migrate welcome storage: {error}");
+        return ExitCode::FAILURE;
+    }
+
+    let mut queued_messages = queued_messages.into_iter();
+    let mut lines = input.lines();
+    loop {
+        let msg: Msg = if let Some(message) = queued_messages.next() {
+            message
+        } else {
+            let Some(Ok(line)) = lines.next() else {
+                break; // EOF => clean exit
+            };
+            match serde_json::from_str(&line) {
+                Ok(msg) => msg,
+                Err(e) => {
+                    eprintln!("bad json: {e}");
+                    continue;
+                }
             }
         };
         match msg {
             Msg::Bye => break,
             Msg::Call { id, op, cmd, args } => {
-                // Every interaction loads the guild's snapshot first: the
-                // plugin holds no settings between calls. A modal trigger
-                // instead opens its modal and answers the click with the
-                // modal-opened marker.
+                // Every interaction reads the guild's settings from the
+                // plugin's own storage first: the plugin holds no settings
+                // between calls. A modal trigger instead opens its modal
+                // and answers the click with the modal-opened marker.
                 let host_call = match (op.as_str(), cmd.as_deref()) {
                     ("invoke", Some(COMMAND_NAME)) => {
                         // The host forwards the source interaction's guild
@@ -866,13 +941,27 @@ fn main() -> ExitCode {
                             }
                             continue;
                         };
-                        Some(HostCall::new(
-                            Pending::LoadSettings {
-                                invoke_id: id,
-                                guild_id,
-                            },
-                            get_settings_args(guild_id),
-                        ))
+                        // A failed load fails the open: the panel has no
+                        // settings to edit.
+                        let settings = match repository.get_settings(guild_id).await {
+                            Ok(settings) => settings,
+                            Err(error) => {
+                                if !reply_err(
+                                    &mut out,
+                                    id,
+                                    "WelcomeSettingsError",
+                                    error.to_string(),
+                                ) {
+                                    return ExitCode::FAILURE;
+                                }
+                                continue;
+                            }
+                        };
+                        if !reply_panel(&mut out, id, &SessionState::new(guild_id), &settings).await
+                        {
+                            return ExitCode::FAILURE;
+                        }
+                        continue;
                     }
                     ("view.interact", Some(COMMAND_NAME)) => {
                         // The session state the host echoed back.
@@ -956,14 +1045,47 @@ fn main() -> ExitCode {
                             ))
                         } else if let Some(msg) = click_msg(custom_id, args.as_ref()) {
                             let guild_id = session.guild_id;
-                            Some(HostCall::new(
-                                Pending::Interact {
-                                    invoke_id: id,
-                                    session,
-                                    msg,
-                                },
-                                get_settings_args(guild_id),
-                            ))
+                            let settings = match repository.get_settings(guild_id).await {
+                                Ok(settings) => settings,
+                                Err(error) => {
+                                    if !reply_err(
+                                        &mut out,
+                                        id,
+                                        "WelcomeSettingsError",
+                                        error.to_string(),
+                                    ) {
+                                        return ExitCode::FAILURE;
+                                    }
+                                    continue;
+                                }
+                            };
+                            let mut model = Model {
+                                settings,
+                                marked_removal: session.marked_removal.clone(),
+                            };
+                            let effects = update(msg, &mut model);
+                            let session = session.with_marked(model.marked_removal.clone());
+                            match effects.as_slice() {
+                                [] => {
+                                    // A selection-only edit re-renders in
+                                    // place.
+                                    if !reply_panel(&mut out, id, &session, &model.settings).await {
+                                        return ExitCode::FAILURE;
+                                    }
+                                }
+                                [Effect::Persist(snapshot)] => {
+                                    if let Err(error) =
+                                        repository.update_settings(guild_id, snapshot).await
+                                    {
+                                        eprintln!("failed to persist welcome settings: {error}");
+                                    }
+                                    if !reply_panel(&mut out, id, &session, snapshot).await {
+                                        return ExitCode::FAILURE;
+                                    }
+                                }
+                                _ => eprintln!("update returned an unexpected effect set"),
+                            }
+                            continue;
                         } else {
                             if !reply_err(
                                 &mut out,
@@ -1029,14 +1151,39 @@ fn main() -> ExitCode {
                         };
                         let marked = stash.remove(submitted).unwrap_or_default();
                         let session = SessionState::new(guild_id).with_marked(marked);
-                        Some(HostCall::new(
-                            Pending::ModalSubmit {
-                                invoke_id: id,
-                                session,
-                                msg,
-                            },
-                            get_settings_args(guild_id),
-                        ))
+                        let settings = match repository.get_settings(guild_id).await {
+                            Ok(settings) => settings,
+                            Err(error) => {
+                                if !reply_err(
+                                    &mut out,
+                                    id,
+                                    "WelcomeSettingsError",
+                                    error.to_string(),
+                                ) {
+                                    return ExitCode::FAILURE;
+                                }
+                                continue;
+                            }
+                        };
+                        let mut model = Model {
+                            settings,
+                            marked_removal: session.marked_removal.clone(),
+                        };
+                        // A modal answer always mutates and persists: the
+                        // monolith persisted even a no-op submission.
+                        let effects = update(msg, &mut model);
+                        let session = session.with_marked(model.marked_removal.clone());
+                        let snapshot = match effects.as_slice() {
+                            [Effect::Persist(snapshot)] => snapshot.clone(),
+                            _ => model.settings.clone(),
+                        };
+                        if let Err(error) = repository.update_settings(guild_id, &snapshot).await {
+                            eprintln!("failed to persist welcome settings: {error}");
+                        }
+                        if !reply_panel(&mut out, id, &session, &snapshot).await {
+                            return ExitCode::FAILURE;
+                        }
+                        continue;
                     }
                     _ => None,
                 };
@@ -1069,185 +1216,12 @@ fn main() -> ExitCode {
             Msg::Progress { .. } => {}
             // The host answers our hello with its own; tolerate it silently.
             Msg::Hello { .. } => {}
-            Msg::Resp {
-                id,
-                ok,
-                data,
-                error,
-            } => {
+            Msg::Resp { id, ok, error, .. } => {
                 let Some(pending_kind) = pending.remove(&id) else {
-                    eprintln!("unexpected message: {line}");
+                    eprintln!("unexpected resp: {id}");
                     continue;
                 };
                 match pending_kind {
-                    Pending::LoadSettings {
-                        invoke_id,
-                        guild_id,
-                    } => {
-                        if !ok {
-                            eprintln!("{GET_SETTINGS_OP} failed: {error:?}");
-                            let error = error.unwrap_or_else(|| WireError {
-                                kind: "HostError".into(),
-                                msg: "host call failed".into(),
-                            });
-                            if !reply_err(&mut out, invoke_id, &error.kind, error.msg) {
-                                return ExitCode::FAILURE;
-                            }
-                            continue;
-                        }
-                        // A failed load fails the open: the panel has no
-                        // settings to edit.
-                        let Some(settings) = data.as_ref().and_then(parse_settings) else {
-                            eprintln!("{GET_SETTINGS_OP} resp carried no snapshot");
-                            if !reply_err(
-                                &mut out,
-                                invoke_id,
-                                "HostError",
-                                "host.welcome.get_settings resp carried no snapshot",
-                            ) {
-                                return ExitCode::FAILURE;
-                            }
-                            continue;
-                        };
-                        if !reply_panel(
-                            &mut out,
-                            invoke_id,
-                            &SessionState::new(guild_id),
-                            &settings,
-                        ) {
-                            return ExitCode::FAILURE;
-                        }
-                    }
-                    Pending::Interact {
-                        invoke_id,
-                        session,
-                        msg,
-                    } => {
-                        if !ok {
-                            eprintln!("{GET_SETTINGS_OP} failed: {error:?}");
-                            let error = error.unwrap_or_else(|| WireError {
-                                kind: "HostError".into(),
-                                msg: "host call failed".into(),
-                            });
-                            if !reply_err(&mut out, invoke_id, &error.kind, error.msg) {
-                                return ExitCode::FAILURE;
-                            }
-                            continue;
-                        }
-                        let Some(settings) = data.as_ref().and_then(parse_settings) else {
-                            eprintln!("{GET_SETTINGS_OP} resp carried no snapshot");
-                            if !reply_err(
-                                &mut out,
-                                invoke_id,
-                                "HostError",
-                                "host.welcome.get_settings resp carried no snapshot",
-                            ) {
-                                return ExitCode::FAILURE;
-                            }
-                            continue;
-                        };
-                        let mut model = Model {
-                            settings,
-                            marked_removal: session.marked_removal.clone(),
-                        };
-                        let effects = update(msg.clone(), &mut model);
-                        let session = session.with_marked(model.marked_removal.clone());
-                        let guild_id = session.guild_id;
-                        let call = match effects.as_slice() {
-                            [] => {
-                                // A selection-only edit re-renders in place.
-                                if !reply_panel(&mut out, invoke_id, &session, &model.settings) {
-                                    return ExitCode::FAILURE;
-                                }
-                                None
-                            }
-                            [Effect::Persist(snapshot)] => Some(HostCall::new(
-                                Pending::Persist {
-                                    invoke_id,
-                                    session,
-                                    settings: snapshot.clone(),
-                                },
-                                update_settings_args(guild_id, snapshot),
-                            )),
-                            _ => {
-                                eprintln!("update returned an unexpected effect set");
-                                None
-                            }
-                        };
-                        if let Some(call) = call
-                            && !issue_host_call(&mut out, &mut pending, &mut next_call_id, call)
-                        {
-                            return ExitCode::FAILURE;
-                        }
-                    }
-                    Pending::ModalSubmit {
-                        invoke_id,
-                        session,
-                        msg,
-                    } => {
-                        if !ok {
-                            eprintln!("{GET_SETTINGS_OP} failed: {error:?}");
-                            let error = error.unwrap_or_else(|| WireError {
-                                kind: "HostError".into(),
-                                msg: "host call failed".into(),
-                            });
-                            if !reply_err(&mut out, invoke_id, &error.kind, error.msg) {
-                                return ExitCode::FAILURE;
-                            }
-                            continue;
-                        }
-                        let Some(settings) = data.as_ref().and_then(parse_settings) else {
-                            eprintln!("{GET_SETTINGS_OP} resp carried no snapshot");
-                            if !reply_err(
-                                &mut out,
-                                invoke_id,
-                                "HostError",
-                                "host.welcome.get_settings resp carried no snapshot",
-                            ) {
-                                return ExitCode::FAILURE;
-                            }
-                            continue;
-                        };
-                        let mut model = Model {
-                            settings,
-                            marked_removal: session.marked_removal.clone(),
-                        };
-                        // A modal answer always mutates and persists: the
-                        // monolith persisted even a no-op submission.
-                        let effects = update(msg, &mut model);
-                        let session = session.with_marked(model.marked_removal.clone());
-                        let guild_id = session.guild_id;
-                        let snapshot = match effects.as_slice() {
-                            [Effect::Persist(snapshot)] => snapshot.clone(),
-                            _ => model.settings.clone(),
-                        };
-                        let call = HostCall::new(
-                            Pending::Persist {
-                                invoke_id,
-                                session,
-                                settings: snapshot.clone(),
-                            },
-                            update_settings_args(guild_id, &snapshot),
-                        );
-                        if !issue_host_call(&mut out, &mut pending, &mut next_call_id, call) {
-                            return ExitCode::FAILURE;
-                        }
-                    }
-                    Pending::Persist {
-                        invoke_id,
-                        session,
-                        settings,
-                    } => {
-                        // The persist answered the click that caused it: a
-                        // failure logs but still re-renders, so the panel
-                        // shows what the user chose.
-                        if !ok {
-                            eprintln!("{UPDATE_SETTINGS_OP} failed: {error:?}");
-                        }
-                        if !reply_panel(&mut out, invoke_id, &session, &settings) {
-                            return ExitCode::FAILURE;
-                        }
-                    }
                     Pending::OpenSettings {
                         invoke_id,
                         session: _,
@@ -1299,32 +1273,24 @@ fn main() -> ExitCode {
 
 #[cfg(test)]
 mod tests {
-    use pwr_plugin_protocol::WelcomeSettings;
     use pwr_poise_components::IS_COMPONENTS_V2;
 
     use super::*;
 
-    fn settings(welcome: WelcomeSettings) -> ServerSettings {
-        ServerSettings {
-            welcome,
-            ..ServerSettings::default()
-        }
-    }
-
     fn model(messages: &[&str]) -> Model {
         Model {
-            settings: settings(WelcomeSettings {
+            settings: WelcomeSettings {
                 enabled: Some(true),
                 channel_id: Some("10".into()),
                 primary_color: Some("#5865F2".into()),
                 template_id: Some("2".into()),
                 messages: Some(messages.iter().map(|m| m.to_string()).collect()),
-            }),
+            },
             marked_removal: HashSet::new(),
         }
     }
 
-    fn persisted(effects: &[Effect]) -> Option<ServerSettings> {
+    fn persisted(effects: &[Effect]) -> Option<WelcomeSettings> {
         effects
             .iter()
             .map(|e| match e {
@@ -1343,13 +1309,13 @@ mod tests {
         let mut m = model(&["one"]);
         let effects = update(PanelMsg::ToggleEnabled, &mut m);
         assert!(!m.is_enabled());
-        assert_eq!(persisted(&effects).unwrap().welcome.enabled, Some(false));
+        assert_eq!(persisted(&effects).unwrap().enabled, Some(false));
     }
 
     #[test]
     fn a_missing_enabled_flag_reads_as_disabled() {
         let mut m = Model {
-            settings: ServerSettings::default(),
+            settings: WelcomeSettings::default(),
             marked_removal: HashSet::new(),
         };
         assert!(!m.is_enabled());
@@ -1362,14 +1328,14 @@ mod tests {
         let mut m = model(&[]);
         let effects = update(PanelMsg::SetChannel(Some("99".into())), &mut m);
         assert_eq!(
-            persisted(&effects).unwrap().welcome.channel_id.as_deref(),
+            persisted(&effects).unwrap().channel_id.as_deref(),
             Some("99")
         );
 
         let mut m = model(&[]);
         let effects = update(PanelMsg::SetTemplate(Some("7".into())), &mut m);
         assert_eq!(
-            persisted(&effects).unwrap().welcome.template_id.as_deref(),
+            persisted(&effects).unwrap().template_id.as_deref(),
             Some("7")
         );
     }
@@ -1379,18 +1345,14 @@ mod tests {
         let mut m = model(&[]);
         let effects = update(PanelMsg::SetColor("ff0000".into()), &mut m);
         assert_eq!(
-            persisted(&effects)
-                .unwrap()
-                .welcome
-                .primary_color
-                .as_deref(),
+            persisted(&effects).unwrap().primary_color.as_deref(),
             Some("#5865F2"),
             "the no-op edit still persists, as the monolith did"
         );
 
         let mut m = model(&[]);
         update(PanelMsg::SetColor("#00ff00".into()), &mut m);
-        assert_eq!(m.settings.welcome.primary_color.as_deref(), Some("#00ff00"));
+        assert_eq!(m.settings.primary_color.as_deref(), Some("#00ff00"));
     }
 
     #[test]
@@ -1398,7 +1360,7 @@ mod tests {
         let mut m = model(&["one"]);
         let effects = update(PanelMsg::AddMessage(" two ".into()), &mut m);
         assert_eq!(
-            persisted(&effects).unwrap().welcome.messages,
+            persisted(&effects).unwrap().messages,
             Some(vec!["one".to_string(), "two".to_string()])
         );
     }
@@ -1408,7 +1370,7 @@ mod tests {
         let mut m = model(&["one"]);
         let effects = update(PanelMsg::AddMessage("   ".into()), &mut m);
         assert_eq!(
-            persisted(&effects).unwrap().welcome.messages.as_deref(),
+            persisted(&effects).unwrap().messages.as_deref(),
             Some(&["one".to_string()][..])
         );
         assert_eq!(m.message_count(), 1);
@@ -1422,7 +1384,7 @@ mod tests {
         let effects = update(PanelMsg::AddMessage("one too many".into()), &mut m);
         assert_eq!(m.message_count(), MAX_MESSAGES);
         assert_eq!(
-            persisted(&effects).unwrap().welcome.messages.unwrap().len(),
+            persisted(&effects).unwrap().messages.unwrap().len(),
             MAX_MESSAGES
         );
     }
@@ -1442,7 +1404,7 @@ mod tests {
         m.marked_removal = marked(&[0, 2]);
         let effects = update(PanelMsg::SaveRemoval, &mut m);
         assert_eq!(
-            persisted(&effects).unwrap().welcome.messages,
+            persisted(&effects).unwrap().messages,
             Some(vec!["two".to_string()])
         );
         assert!(m.marked_removal.is_empty());
@@ -1601,7 +1563,7 @@ mod tests {
     #[test]
     fn a_disabled_panel_renders_the_off_copy_and_enable_button() {
         let mut m = model(&[]);
-        m.settings.welcome.enabled = Some(false);
+        m.settings.enabled = Some(false);
         let data = view_data(&m);
         let children = data["components"][0]["components"].as_array().unwrap();
         assert!(
@@ -1682,39 +1644,48 @@ mod tests {
         assert_eq!(menu["default_values"][0]["type"], json!("channel"));
     }
 
-    // ── attachment declaration (ADR-0012) ───────────────────────────────────
+    // ── preview files (ADR-0012) ────────────────────────────────────────────
 
-    #[test]
-    fn the_preview_slot_is_declared_while_enabled() {
-        assert_eq!(
-            attachment_declaration(&model(&["one"])),
-            json!([{ "id": 0, "filename": WELCOME_FILE }])
+    #[tokio::test]
+    async fn the_preview_file_is_shipped_while_enabled() {
+        let files = preview_files(&model(&["one"])).await;
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0]["filename"], json!(WELCOME_FILE));
+        assert!(
+            files[0]["data_base64"]
+                .as_str()
+                .is_some_and(|b| !b.is_empty()),
+            "the file carries renderable bytes"
         );
     }
 
-    #[test]
-    fn a_disabled_panel_declares_an_empty_slot_list() {
+    #[tokio::test]
+    async fn a_disabled_panel_ships_no_file() {
         let mut m = model(&["one"]);
-        m.settings.welcome.enabled = Some(false);
-        assert_eq!(
-            attachment_declaration(&m),
-            json!([]),
-            "an explicit empty list removes the attachment on edit"
+        m.settings.enabled = Some(false);
+        let files = preview_files(&m).await;
+        assert!(
+            files.is_empty(),
+            "the preview is absent while disabled: {files:?}"
         );
     }
 
-    #[test]
-    fn the_envelope_carries_the_declaration_and_session_state() {
+    #[tokio::test]
+    async fn the_envelope_carries_the_files_and_session_state() {
         let m = model(&["one"]);
         let session = SessionState::new(7);
-        let data = envelope(&session, &m);
-        assert_eq!(
-            data["data"]["attachments"],
-            json!([{ "id": 0, "filename": WELCOME_FILE }])
-        );
+        let data = envelope(&session, &m).await;
         assert_eq!(data["ephemeral"], json!(false));
         assert_eq!(data["view"], session.to_value());
         assert_eq!(data["data"]["flags"], json!(IS_COMPONENTS_V2));
+        let files = data["files"].as_array().unwrap();
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0]["filename"], json!(WELCOME_FILE));
+        let attachments = data["data"].get("attachments");
+        assert!(
+            attachments.is_none_or(|a| a.as_array().is_some_and(Vec::is_empty)),
+            "no data.attachments declaration reaches Discord, got {attachments:?}"
+        );
     }
 
     // ── modals ──────────────────────────────────────────────────────────────
@@ -1870,74 +1841,17 @@ mod tests {
     }
 
     #[test]
-    fn get_and_update_args_carry_the_guild_and_snapshot() {
-        assert_eq!(get_settings_args(7), json!({ "guild_id": 7 }));
-        let settings = model(&["one"]).settings;
-        let args = update_settings_args(7, &settings);
-        assert_eq!(args["guild_id"], json!(7));
-        assert_eq!(
-            serde_json::from_value::<ServerSettings>(args["settings"].clone()).unwrap(),
-            settings
-        );
-    }
-
-    #[test]
-    fn parse_settings_accepts_a_snapshot_and_rejects_garbage() {
-        let settings = model(&[]).settings;
-        assert_eq!(
-            parse_settings(&serde_json::to_value(&settings).unwrap()),
-            Some(settings)
-        );
-        assert_eq!(parse_settings(&json!("nope")), None);
-    }
-
-    #[test]
     fn pending_ops_name_their_host_ops() {
         let session = SessionState::new(1);
-        assert_eq!(
-            Pending::LoadSettings {
-                invoke_id: 0,
-                guild_id: 1
-            }
-            .op(),
-            GET_SETTINGS_OP
-        );
-        assert_eq!(
-            Pending::Interact {
-                invoke_id: 0,
-                session: session.clone(),
-                msg: PanelMsg::ToggleEnabled,
-            }
-            .op(),
-            GET_SETTINGS_OP
-        );
-        assert_eq!(
-            Pending::Persist {
-                invoke_id: 0,
-                session: session.clone(),
-                settings: ServerSettings::default(),
-            }
-            .op(),
-            UPDATE_SETTINGS_OP
-        );
         assert_eq!(Pending::OpenModal { invoke_id: 0 }.op(), "host.open_modal");
         assert_eq!(
             Pending::OpenSettings {
                 invoke_id: 0,
-                session: session.clone(),
+                session,
                 message_id: None,
             }
             .op(),
             "host.open_view"
-        );
-        assert_eq!(
-            Pending::ModalSubmit {
-                invoke_id: 0,
-                session,
-                msg: PanelMsg::AddMessage("x".into()),
-            }
-            .op(),
-            GET_SETTINGS_OP
         );
     }
 
@@ -1951,11 +1865,8 @@ mod tests {
             &mut pending,
             &mut next_call_id,
             HostCall::new(
-                Pending::LoadSettings {
-                    invoke_id: 9,
-                    guild_id: 1,
-                },
-                get_settings_args(1),
+                Pending::OpenModal { invoke_id: 9 },
+                open_modal_args(1, 2, "token", json!({})),
             ),
         );
         assert!(ok);
@@ -1968,8 +1879,8 @@ mod tests {
         match msg {
             Msg::Call { id, op, args, .. } => {
                 assert_eq!(id, 1);
-                assert_eq!(op, GET_SETTINGS_OP);
-                assert_eq!(args, Some(json!({ "guild_id": 1 })));
+                assert_eq!(op, "host.open_modal");
+                assert!(args.is_some());
             }
             other => panic!("expected a call, got {other:?}"),
         }

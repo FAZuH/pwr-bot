@@ -7,6 +7,10 @@ use pwr_plugin_protocol::Manifest;
 use pwr_plugin_protocol::SettingsSection;
 use serde_json::json;
 
+pub mod image_generator;
+pub mod repo;
+pub mod storage;
+
 /// The plugin's name: the hello `name` and the handle the host keeps it
 /// under.
 pub const PLUGIN_NAME: &str = "welcome";

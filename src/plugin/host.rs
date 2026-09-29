@@ -30,7 +30,6 @@ use pwr_plugin_protocol::HostStats;
 use pwr_plugin_protocol::Msg;
 use pwr_plugin_protocol::ResolvedUser;
 use pwr_plugin_protocol::RuntimeFile;
-use pwr_plugin_protocol::ServerSettings;
 use pwr_plugin_protocol::ViewSpec;
 use pwr_plugin_protocol::WireError;
 use serde_json::Value;
@@ -45,8 +44,6 @@ use crate::plugin::edit_body_for_transport;
 use crate::plugin::interaction::author_id_from_payload;
 use crate::plugin::reject_content_on_edit;
 use crate::plugin::validate_view_data;
-use crate::service::error::ServiceError;
-use crate::service::traits::SettingsProvider;
 /// The seam between plugin `host.*` ops and Discord. The real implementation
 /// wraps [`serenity::Http`]; tests use the mockall mock generated from this
 /// trait, so no plugin test ever touches a live gateway.
@@ -567,64 +564,6 @@ impl StatsHandle {
     }
 }
 
-/// An error from a [`WelcomeSettingsSource`] operation.
-#[derive(Debug, thiserror::Error)]
-pub enum WelcomeSettingsError {
-    /// The shared settings service failed.
-    #[error(transparent)]
-    Service(#[from] ServiceError),
-}
-
-/// The seam between the `host.welcome.*` ops and the shared settings service.
-/// The real implementation wraps the service the host holds; tests use the
-/// mockall mock generated from this trait.
-#[automock]
-#[async_trait]
-pub trait WelcomeSettingsSource: Send + Sync {
-    /// Reads a guild's whole settings snapshot, as
-    /// `SettingsProvider::get_server_settings` does.
-    async fn get_settings(&self, guild_id: u64) -> Result<ServerSettings, WelcomeSettingsError>;
-
-    /// Writes a guild's whole settings snapshot, as
-    /// `SettingsProvider::update_server_settings` does.
-    async fn update_settings(
-        &self,
-        guild_id: u64,
-        settings: ServerSettings,
-    ) -> Result<(), WelcomeSettingsError>;
-}
-
-/// The real [`WelcomeSettingsSource`]: a thin adapter over the shared settings
-/// service the host holds at construction.
-pub struct ServiceWelcomeSettingsSource {
-    service: Arc<dyn SettingsProvider>,
-}
-
-impl ServiceWelcomeSettingsSource {
-    /// Wraps the host's shared settings service.
-    pub fn new(service: Arc<dyn SettingsProvider>) -> Self {
-        Self { service }
-    }
-}
-
-#[async_trait]
-impl WelcomeSettingsSource for ServiceWelcomeSettingsSource {
-    async fn get_settings(&self, guild_id: u64) -> Result<ServerSettings, WelcomeSettingsError> {
-        Ok(self.service.get_server_settings(guild_id).await?)
-    }
-
-    async fn update_settings(
-        &self,
-        guild_id: u64,
-        settings: ServerSettings,
-    ) -> Result<(), WelcomeSettingsError> {
-        Ok(self
-            .service
-            .update_server_settings(guild_id, settings)
-            .await?)
-    }
-}
-
 /// What the host can serve a plugin: the Discord I/O seam, the config subset,
 /// the key-value store, the interaction engine used to open `host.open_view`
 /// sessions, and the live-stats handle. All are optional so a plugin can be
@@ -647,12 +586,6 @@ pub struct HostServices {
     pub stats: Arc<StatsHandle>,
     /// Cache-backed user projection for `host.resolve_users`.
     pub users: UserResolverHandle,
-    /// Welcome settings for the `host.welcome.*` ops, backed by the shared
-    /// settings service; absent when the host holds no welcome service.
-    pub welcome: Option<Arc<dyn WelcomeSettingsSource>>,
-    /// Fills the attachment slots a plugin envelope declares at transport
-    /// (ADR-0012); absent when the host holds no preview renderer.
-    pub previews: Option<Arc<crate::plugin::preview::PreviewResolver>>,
     /// The Settings return-waiter registry: the host-reserved `settings`
     /// open_view target completes a waiter to wake the Router session that
     /// handed its message to a panel section. Absent when no Settings GUI
@@ -735,14 +668,7 @@ pub async fn handle_host_call(
             let Some(io) = host.and_then(|host| host.io.clone()) else {
                 return resp_err(id, "HostUnavailable", "host io is not configured");
             };
-            match io_call(
-                op,
-                args,
-                &*io,
-                host.and_then(|host| host.previews.as_deref()),
-            )
-            .await
-            {
+            match io_call(op, args, &*io).await {
                 Ok(data) => Msg::resp_ok(id, data),
                 Err(wire) => Msg::resp_err(id, wire),
             }
@@ -785,15 +711,7 @@ pub async fn handle_host_call(
                     "host plugin manager is not configured",
                 );
             };
-            match open_view_call(
-                args,
-                &*io,
-                &engine,
-                manager,
-                host.and_then(|host| host.previews.as_deref()),
-            )
-            .await
-            {
+            match open_view_call(args, &*io, &engine, manager).await {
                 Ok(data) => Msg::resp_ok(id, data),
                 Err(wire) => Msg::resp_err(id, wire),
             }
@@ -843,24 +761,6 @@ pub async fn handle_host_call(
                 Err(e) => Msg::resp_err(id, stats_err(e)),
             }
         }
-        HostOp::WelcomeGetSettings => {
-            let Some(welcome) = host.and_then(|host| host.welcome.clone()) else {
-                return resp_err(id, "HostUnavailable", "welcome settings are not configured");
-            };
-            match welcome_call(op, args, &*welcome).await {
-                Ok(data) => Msg::resp_ok(id, data),
-                Err(wire) => Msg::resp_err(id, wire),
-            }
-        }
-        HostOp::WelcomeUpdateSettings => {
-            let Some(welcome) = host.and_then(|host| host.welcome.clone()) else {
-                return resp_err(id, "HostUnavailable", "welcome settings are not configured");
-            };
-            match welcome_call(op, args, &*welcome).await {
-                Ok(data) => Msg::resp_ok(id, data),
-                Err(wire) => Msg::resp_err(id, wire),
-            }
-        }
     }
 }
 
@@ -873,7 +773,6 @@ async fn io_call(
     op: HostOp,
     args: Option<&Value>,
     io: &dyn HostIo,
-    previews: Option<&crate::plugin::preview::PreviewResolver>,
 ) -> Result<Option<Value>, WireError> {
     match op {
         HostOp::Defer => {
@@ -907,20 +806,14 @@ async fn io_call(
         HostOp::EditMessage => {
             let (channel_id, message_id, data) = parse_edit_message(args)?;
             reject_content_on_edit(&data).map_err(WireError::from)?;
-            let guild_id = args
-                .and_then(|args| args.get("guild_id"))
-                .and_then(id_as_u64);
-            let (body, attachments) = match previews {
-                Some(previews) => {
-                    previews
-                        .resolve(edit_body_for_transport(&data), guild_id)
-                        .await
-                }
-                None => (edit_body_for_transport(&data), Vec::new()),
-            };
-            io.edit_message(channel_id, message_id, body, attachments)
-                .await
-                .map_err(host_io_err)
+            io.edit_message(
+                channel_id,
+                message_id,
+                edit_body_for_transport(&data),
+                Vec::new(),
+            )
+            .await
+            .map_err(host_io_err)
         }
         other => Err(WireError {
             kind: "UnknownOp".into(),
@@ -980,10 +873,8 @@ async fn open_view_call(
     io: &dyn HostIo,
     engine: &InteractionEngine<RunningPlugin>,
     manager: &PluginManager,
-    previews: Option<&crate::plugin::preview::PreviewResolver>,
 ) -> Result<Option<Value>, WireError> {
     let (channel_id, plugin_name, command, call_args, message_id) = parse_open_view(args)?;
-    let guild_id = call_args.get("guild_id").and_then(id_as_u64);
     let Some(target) = manager.get(&plugin_name).await else {
         return Err(WireError {
             kind: "PluginNotFound".into(),
@@ -997,15 +888,8 @@ async fn open_view_call(
         Err(e) => return Err(open_view_err(e)),
     };
     validate_view_spec(&spec)?;
-    let (body, mut attachments) = match previews {
-        Some(previews) => {
-            previews
-                .resolve(edit_body_for_transport(&spec.data), guild_id)
-                .await
-        }
-        None => (edit_body_for_transport(&spec.data), Vec::new()),
-    };
-    let runtime_attachments = decode_runtime_files_with_existing(&spec.files, attachments.len())?;
+    let body = edit_body_for_transport(&spec.data);
+    let attachments = decode_runtime_files(&spec.files)?;
     let message_id = match message_id {
         Some(message_id) => message_id,
         None => {
@@ -1032,7 +916,6 @@ async fn open_view_call(
             spec.clone(),
         )
         .await;
-    attachments.splice(0..0, runtime_attachments);
     if let Err(e) = io
         .edit_message(channel_id, message_id, body, attachments)
         .await
@@ -1276,7 +1159,7 @@ fn parse_send_message(
     ))
 }
 
-/// Maximum number of host-filled preview and runtime files in one message.
+/// Maximum number of runtime files in one message.
 pub(crate) const MAX_RUNTIME_FILES: usize = 10;
 const MAX_RUNTIME_FILE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_RUNTIME_FILES_BYTES: usize = 25 * 1024 * 1024;
@@ -1284,27 +1167,14 @@ const MAX_RUNTIME_FILES_BYTES: usize = 25 * 1024 * 1024;
 /// Validates the complete plugin view before a host commits its opaque state.
 pub fn validate_view_spec(spec: &ViewSpec) -> Result<(), WireError> {
     validate_view_data(&spec.data).map_err(WireError::from)?;
-    validate_runtime_files(&spec.files, declared_attachment_count(&spec.data)).map_err(|error| {
-        WireError {
-            kind: "InvalidView".into(),
-            msg: error.msg,
-        }
+    validate_runtime_files(&spec.files).map_err(|error| WireError {
+        kind: "InvalidView".into(),
+        msg: error.msg,
     })
 }
 
-fn declared_attachment_count(data: &Value) -> usize {
-    data.get("attachments")
-        .and_then(Value::as_array)
-        .map_or(0, Vec::len)
-}
-
-fn validate_attachment_count(preview_count: usize, runtime_count: usize) -> Result<(), WireError> {
-    let total = preview_count.checked_add(runtime_count).ok_or_else(|| {
-        invalid_args(format!(
-            "message exceeds the {MAX_RUNTIME_FILES}-file limit"
-        ))
-    })?;
-    if total > MAX_RUNTIME_FILES {
+fn validate_attachment_count(runtime_count: usize) -> Result<(), WireError> {
+    if runtime_count > MAX_RUNTIME_FILES {
         return Err(invalid_args(format!(
             "message exceeds the {MAX_RUNTIME_FILES}-file limit"
         )));
@@ -1327,15 +1197,7 @@ fn parse_send_message_files(files: Option<&Value>) -> Result<Vec<RuntimeFile>, W
 pub(crate) fn decode_runtime_files(
     files: &[RuntimeFile],
 ) -> Result<Vec<serenity::CreateAttachment<'static>>, WireError> {
-    decode_runtime_files_with_existing(files, 0)
-}
-
-/// Decodes runtime files after accounting for files already filled by previews.
-pub(crate) fn decode_runtime_files_with_existing(
-    files: &[RuntimeFile],
-    preview_count: usize,
-) -> Result<Vec<serenity::CreateAttachment<'static>>, WireError> {
-    let decoded = decode_runtime_file_bytes(files, preview_count)?;
+    let decoded = decode_runtime_file_bytes(files)?;
     Ok(decoded
         .into_iter()
         .zip(files)
@@ -1344,19 +1206,13 @@ pub(crate) fn decode_runtime_files_with_existing(
 }
 
 /// Validates runtime files without constructing Discord attachments.
-pub(crate) fn validate_runtime_files(
-    files: &[RuntimeFile],
-    preview_count: usize,
-) -> Result<(), WireError> {
-    let _ = decode_runtime_file_bytes(files, preview_count)?;
+pub(crate) fn validate_runtime_files(files: &[RuntimeFile]) -> Result<(), WireError> {
+    let _ = decode_runtime_file_bytes(files)?;
     Ok(())
 }
 
-fn decode_runtime_file_bytes(
-    files: &[RuntimeFile],
-    preview_count: usize,
-) -> Result<Vec<Vec<u8>>, WireError> {
-    validate_attachment_count(preview_count, files.len())?;
+fn decode_runtime_file_bytes(files: &[RuntimeFile]) -> Result<Vec<Vec<u8>>, WireError> {
+    validate_attachment_count(files.len())?;
     let mut decoded = Vec::with_capacity(files.len());
     let mut total_bytes = 0usize;
     for (index, file) in files.iter().enumerate() {
@@ -1518,79 +1374,6 @@ fn parse_resolve_users(args: Option<&Value>) -> Result<(Option<u64>, Vec<u64>), 
     Ok((guild_id, user_ids))
 }
 
-/// Parses the `guild_id` (u64) shared by the `host.welcome.*` op. Accepts a
-/// numeric id or serenity's string form. A present id that is neither is a
-/// wrong type, not a missing one.
-fn parse_guild_id(args: Option<&Value>) -> Result<u64, WireError> {
-    let Some(value) = args
-        .and_then(Value::as_object)
-        .and_then(|obj| obj.get("guild_id"))
-    else {
-        return Err(invalid_args("missing `guild_id` (u64)"));
-    };
-    id_as_u64(value).ok_or_else(|| invalid_args("`guild_id` must be a u64 or its string form"))
-}
-
-/// Parses the `host.welcome.update_settings` args: `guild_id` (u64) plus the
-/// whole [`ServerSettings`] snapshot under `settings`.
-fn parse_update_settings(args: Option<&Value>) -> Result<(u64, ServerSettings), WireError> {
-    let guild_id = parse_guild_id(args)?;
-    let settings = args
-        .and_then(Value::as_object)
-        .and_then(|obj| obj.get("settings"))
-        .ok_or_else(|| invalid_args("missing `settings` (ServerSettings object)"))?;
-    serde_json::from_value(settings.clone())
-        .map_err(|e| invalid_args(format!("`settings` is not a ServerSettings: {e}")))
-        .map(|settings| (guild_id, settings))
-}
-
-/// Runs one welcome settings op against the seam and turns the outcome into a
-/// wire value: `Ok(data)` for a successful `resp_ok` (the settings snapshot
-/// for a read, `None` for a write), `Err(wire)` for a failed `resp_err`
-/// (`InvalidArgs` or `WelcomeSettingsError`). An op outside the welcome pair
-/// is a dispatch bug, so it answers `UnknownOp` rather than panicking the
-/// dispatch task.
-async fn welcome_call(
-    op: HostOp,
-    args: Option<&Value>,
-    welcome: &dyn WelcomeSettingsSource,
-) -> Result<Option<Value>, WireError> {
-    match op {
-        HostOp::WelcomeGetSettings => {
-            let guild_id = parse_guild_id(args)?;
-            let settings = welcome
-                .get_settings(guild_id)
-                .await
-                .map_err(welcome_settings_err)?;
-            let value = serde_json::to_value(&settings).map_err(|e| WireError {
-                kind: "WelcomeSettingsError".into(),
-                msg: e.to_string(),
-            })?;
-            Ok(Some(value))
-        }
-        HostOp::WelcomeUpdateSettings => {
-            let (guild_id, settings) = parse_update_settings(args)?;
-            welcome
-                .update_settings(guild_id, settings)
-                .await
-                .map_err(welcome_settings_err)?;
-            Ok(None)
-        }
-        other => Err(WireError {
-            kind: "UnknownOp".into(),
-            msg: format!("op `{}` is not a welcome settings op", other.as_str()),
-        }),
-    }
-}
-
-/// Maps a [`WelcomeSettingsError`] to its wire error.
-fn welcome_settings_err(err: WelcomeSettingsError) -> WireError {
-    WireError {
-        kind: "WelcomeSettingsError".into(),
-        msg: err.to_string(),
-    }
-}
-
 fn resp_err(id: u64, kind: &str, msg: impl Into<String>) -> Msg {
     Msg::resp_err(
         id,
@@ -1622,8 +1405,6 @@ mod tests {
             engine: None,
             stats: Arc::new(StatsHandle::default()),
             users: UserResolverHandle::default(),
-            welcome: None,
-            previews: None,
             settings_returns: None,
         }
     }
@@ -1640,8 +1421,6 @@ mod tests {
             engine: None,
             stats: Arc::new(StatsHandle::default()),
             users: UserResolverHandle::default(),
-            welcome: None,
-            previews: None,
             settings_returns: None,
         }
     }
@@ -1656,8 +1435,6 @@ mod tests {
             engine: Some(Arc::new(InteractionEngine::new())),
             stats: Arc::new(StatsHandle::default()),
             users: UserResolverHandle::default(),
-            welcome: None,
-            previews: None,
             settings_returns: None,
         }
     }
@@ -2334,16 +2111,15 @@ mod tests {
     }
 
     #[test]
-    fn runtime_files_and_previews_accept_exactly_the_file_limit() {
-        let files = (0..MAX_RUNTIME_FILES - 1)
+    fn runtime_files_accept_exactly_the_file_limit() {
+        let files = (0..MAX_RUNTIME_FILES)
             .map(|index| RuntimeFile {
                 filename: format!("{index}.bin"),
                 data_base64: String::new(),
             })
             .collect::<Vec<_>>();
-        let decoded = decode_runtime_files_with_existing(&files, 1)
-            .expect("one preview plus nine runtime files fits the limit");
-        assert_eq!(decoded.len(), MAX_RUNTIME_FILES - 1);
+        let decoded = decode_runtime_files(&files).expect("ten runtime files fit the limit");
+        assert_eq!(decoded.len(), MAX_RUNTIME_FILES);
     }
 
     #[test]
@@ -2355,17 +2131,6 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let error = decode_runtime_files(&files).expect_err("the file count must reject");
-        assert!(error.msg.contains("10-file limit"));
-    }
-
-    #[test]
-    fn runtime_files_and_previews_share_the_file_limit() {
-        let file = RuntimeFile {
-            filename: "runtime.bin".into(),
-            data_base64: String::new(),
-        };
-        let error = decode_runtime_files_with_existing(&[file], MAX_RUNTIME_FILES)
-            .expect_err("preview and runtime files share the limit");
         assert!(error.msg.contains("10-file limit"));
     }
 
@@ -3027,8 +2792,6 @@ mod tests {
             engine: None,
             stats: Arc::new(handle),
             users: UserResolverHandle::default(),
-            welcome: None,
-            previews: None,
             settings_returns: None,
         };
 
@@ -3078,28 +2841,12 @@ mod tests {
             engine: None,
             stats: Arc::new(handle),
             users: UserResolverHandle::default(),
-            welcome: None,
-            previews: None,
             settings_returns: None,
         };
 
         let resp = handle_host_call(7, "hello", "host.stats", None, Some(&host), None).await;
         let msg = assert_err(resp, 7, "StatsError");
         assert!(msg.contains("webhook"), "msg: {msg}");
-    }
-
-    fn welcome_services(welcome: Arc<dyn WelcomeSettingsSource>) -> HostServices {
-        HostServices {
-            io: None,
-            config: Some(sample_config()),
-            kv: None,
-            engine: None,
-            stats: Arc::new(StatsHandle::default()),
-            users: UserResolverHandle::default(),
-            welcome: Some(welcome),
-            previews: None,
-            settings_returns: None,
-        }
     }
 
     // ── host op validation ────────────────────────────────────────────────────
@@ -3111,6 +2858,8 @@ mod tests {
             "host.feed.update_settings",
             "host.voice.get_settings",
             "host.voice.update_settings",
+            "host.welcome.get_settings",
+            "host.welcome.update_settings",
         ] {
             let response = handle_host_call(7, "hello", op, None, None, None).await;
             assert_err(response, 7, "UnknownOp");
@@ -3213,189 +2962,6 @@ mod tests {
         )
         .await;
         assert_err(response, 7, "UnknownOp");
-    }
-
-    // ── welcome settings ────────────────────────────────────────────────────
-
-    fn welcome_sample_settings() -> ServerSettings {
-        ServerSettings {
-            welcome: pwr_plugin_protocol::WelcomeSettings {
-                enabled: Some(true),
-                channel_id: Some("123456789".into()),
-                primary_color: Some("#5865F2".into()),
-                template_id: Some("1".into()),
-                messages: Some(vec!["hello {user}".into()]),
-            },
-            ..ServerSettings::default()
-        }
-    }
-
-    #[tokio::test]
-    async fn welcome_get_settings_routes_through_the_seam() {
-        let mut mock = MockWelcomeSettingsSource::new();
-        mock.expect_get_settings()
-            .with(eq(42u64))
-            .times(1)
-            .returning(|_| Ok(welcome_sample_settings()));
-        let host = welcome_services(Arc::new(mock));
-
-        let resp = handle_host_call(
-            7,
-            "hello",
-            "host.welcome.get_settings",
-            Some(&json!({ "guild_id": 42 })),
-            Some(&host),
-            None,
-        )
-        .await;
-        assert_eq!(
-            assert_ok(resp, 7),
-            Some(json!({
-                "feeds": {
-                    "enabled": null,
-                    "channel_id": null,
-                    "subscribe_role_id": null,
-                    "unsubscribe_role_id": null,
-                },
-                "voice": { "enabled": null },
-                "welcome": {
-                    "enabled": true,
-                    "channel_id": "123456789",
-                    "primary_color": "#5865F2",
-                    "template_id": "1",
-                    "messages": ["hello {user}"],
-                },
-            }))
-        );
-    }
-
-    #[tokio::test]
-    async fn welcome_update_settings_routes_through_the_seam() {
-        let settings = welcome_sample_settings();
-        let mut mock = MockWelcomeSettingsSource::new();
-        mock.expect_update_settings()
-            .with(eq(42u64), eq(settings.clone()))
-            .times(1)
-            .returning(|_, _| Ok(()));
-        let host = welcome_services(Arc::new(mock));
-
-        let resp = handle_host_call(
-            7,
-            "hello",
-            "host.welcome.update_settings",
-            Some(&json!({ "guild_id": 42, "settings": settings })),
-            Some(&host),
-            None,
-        )
-        .await;
-        assert_eq!(assert_ok(resp, 7), None);
-    }
-
-    #[tokio::test]
-    async fn welcome_settings_without_services_is_host_unavailable() {
-        let resp = handle_host_call(
-            7,
-            "hello",
-            "host.welcome.get_settings",
-            Some(&json!({ "guild_id": 42 })),
-            None,
-            None,
-        )
-        .await;
-        assert_err(resp, 7, "HostUnavailable");
-
-        let resp = handle_host_call(
-            7,
-            "hello",
-            "host.welcome.update_settings",
-            Some(&json!({ "guild_id": 42, "settings": ServerSettings::default() })),
-            None,
-            None,
-        )
-        .await;
-        assert_err(resp, 7, "HostUnavailable");
-    }
-
-    #[tokio::test]
-    async fn welcome_settings_without_source_is_host_unavailable() {
-        let host = services(None, Some(sample_config()));
-
-        let resp = handle_host_call(
-            7,
-            "hello",
-            "host.welcome.get_settings",
-            Some(&json!({ "guild_id": 42 })),
-            Some(&host),
-            None,
-        )
-        .await;
-        assert_err(resp, 7, "HostUnavailable");
-    }
-
-    #[tokio::test]
-    async fn welcome_settings_service_failure_is_welcome_settings_error() {
-        let mut mock = MockWelcomeSettingsSource::new();
-        mock.expect_get_settings()
-            .with(eq(42u64))
-            .times(1)
-            .returning(|_| {
-                Err(WelcomeSettingsError::Service(
-                    ServiceError::UnexpectedResult {
-                        message: "no such guild".into(),
-                    },
-                ))
-            });
-        let host = welcome_services(Arc::new(mock));
-
-        let resp = handle_host_call(
-            7,
-            "hello",
-            "host.welcome.get_settings",
-            Some(&json!({ "guild_id": 42 })),
-            Some(&host),
-            None,
-        )
-        .await;
-        let msg = assert_err(resp, 7, "WelcomeSettingsError");
-        assert!(msg.contains("no such guild"), "msg: {msg}");
-    }
-
-    #[tokio::test]
-    async fn welcome_settings_string_guild_id_parses() {
-        let mut mock = MockWelcomeSettingsSource::new();
-        mock.expect_get_settings()
-            .with(eq(42u64))
-            .times(1)
-            .returning(|_| Ok(welcome_sample_settings()));
-        let host = welcome_services(Arc::new(mock));
-
-        let resp = handle_host_call(
-            7,
-            "hello",
-            "host.welcome.get_settings",
-            Some(&json!({ "guild_id": "42" })),
-            Some(&host),
-            None,
-        )
-        .await;
-        assert_ok(resp, 7);
-    }
-
-    #[tokio::test]
-    async fn welcome_settings_wrong_guild_id_type_is_invalid_args() {
-        let mock = MockWelcomeSettingsSource::new();
-        let host = welcome_services(Arc::new(mock));
-
-        let resp = handle_host_call(
-            7,
-            "hello",
-            "host.welcome.get_settings",
-            Some(&json!({ "guild_id": {"id": 42} })),
-            Some(&host),
-            None,
-        )
-        .await;
-        assert_err(resp, 7, "InvalidArgs");
     }
 
     // ── kv ────────────────────────────────────────────────────────────────────
@@ -3622,22 +3188,6 @@ mod tests {
         assert!(msg.contains("webhook"), "msg: {msg}");
     }
 
-    use crate::plugin::preview::AttachmentRenderer;
-    use crate::plugin::preview::PreviewResolver;
-
-    struct FixedPreview;
-
-    #[async_trait::async_trait]
-    impl AttachmentRenderer for FixedPreview {
-        fn filename(&self) -> &'static str {
-            "preview.png"
-        }
-
-        async fn render(&self, _guild_id: u64) -> Option<Vec<u8>> {
-            Some(b"preview".to_vec())
-        }
-    }
-
     fn open_view_test_host(
         io: Arc<dyn HostIo>,
         engine: Arc<InteractionEngine<RunningPlugin>>,
@@ -3649,8 +3199,6 @@ mod tests {
             engine: Some(engine),
             stats: Arc::new(StatsHandle::default()),
             users: UserResolverHandle::default(),
-            welcome: None,
-            previews: Some(Arc::new(PreviewResolver::new(vec![Arc::new(FixedPreview)]))),
             settings_returns: None,
         });
         let manager = Arc::new(
@@ -3698,7 +3246,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn open_view_attaches_runtime_files_alongside_previews() {
+    async fn open_view_ships_runtime_files_with_the_body() {
         let mut mock = MockHostIo::new();
         mock.expect_send_message()
             .with(
@@ -3714,13 +3262,9 @@ mod tests {
             .with(
                 eq(9_u64),
                 eq(1234_u64),
-                mockall::predicate::function(|body: &Value| {
-                    body["attachments"]
-                        .as_array()
-                        .is_some_and(|attachments| attachments.len() == 1)
-                }),
+                mockall::predicate::function(|body: &Value| body["attachments"].is_null()),
                 mockall::predicate::function(|attachments: &Vec<serenity::CreateAttachment>| {
-                    attachments.len() == 2
+                    attachments.len() == 1
                 }),
             )
             .times(1)

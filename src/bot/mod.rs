@@ -68,7 +68,6 @@ use crate::plugin::RunningPlugin;
 use crate::plugin::SerenityHostIo;
 use crate::plugin::SerenityStatsSource;
 use crate::plugin::SerenityUserResolver;
-use crate::plugin::ServiceWelcomeSettingsSource;
 use crate::plugin::StatsHandle;
 use crate::plugin::UserResolverHandle;
 use crate::plugin::VOICE_STATE_EVENT;
@@ -78,7 +77,7 @@ use crate::plugin::command::actor_context_from_parts_with_guild;
 use crate::plugin::command::commands_from_manifest;
 use crate::plugin::command::register_in_guild;
 use crate::plugin::command::routes_from_manifests_with_reserved;
-use crate::plugin::decode_runtime_files_with_existing;
+use crate::plugin::decode_runtime_files;
 use crate::plugin::edit_body_for_transport;
 use crate::plugin::interaction::DEFAULT_VIEW_TIMEOUT;
 use crate::plugin::validate_view_spec;
@@ -111,9 +110,6 @@ pub struct Data {
     /// handed-off message, and the host-reserved `settings` open_view target
     /// completes it.
     pub settings_returns: Arc<translate::SettingsReturns>,
-    /// Fills the attachment slots a plugin envelope declares at transport
-    /// (ADR-0012).
-    pub previews: Arc<crate::plugin::preview::PreviewResolver>,
     pub start_time: Instant,
 }
 
@@ -197,16 +193,6 @@ impl Bot {
         // gateway cache attaches in `start()` after the client is built.
         let stats_handle = Arc::new(StatsHandle::default());
         let user_resolver = UserResolverHandle::default();
-        // The welcome card renderer both the host ops and the view transports
-        // share: one generator for the process (ADR-0012).
-        let previews = Arc::new(crate::plugin::preview::PreviewResolver::new(vec![
-            Arc::new(crate::plugin::preview::WelcomeAttachmentRenderer::new(
-                service.settings.clone(),
-                Arc::new(
-                    crate::bot::command::welcome::image_generator::WelcomeImageGenerator::new(),
-                ),
-            )),
-        ]));
         let settings_returns = Arc::new(translate::SettingsReturns::default());
         let host_services = Arc::new(HostServices {
             io: Some(Arc::new(SerenityHostIo::new(http.clone()))),
@@ -215,10 +201,6 @@ impl Bot {
             engine: Some(plugin_engine.clone()),
             stats: stats_handle.clone(),
             users: user_resolver.clone(),
-            welcome: Some(Arc::new(ServiceWelcomeSettingsSource::new(
-                service.settings.clone(),
-            ))),
-            previews: Some(previews.clone()),
             settings_returns: Some(settings_returns.clone()),
         });
         let plugin_manager = Arc::new(
@@ -292,7 +274,6 @@ impl Bot {
             core_manifests,
             translate_layer: Arc::new(TranslateLayer::new()),
             settings_returns,
-            previews: previews.clone(),
             start_time,
         });
 
@@ -516,8 +497,8 @@ pub(crate) fn add_plugin_commands(
 /// What a plugin's answer to a view interaction means for the message it
 /// edits. See [`BotEventHandler::view_answer`].
 enum ViewAnswer {
-    /// The fresh render to send: the edit body, with its declared attachment
-    /// slots resolved, plus the files that declaration names (ADR-0012).
+    /// The fresh render to send: the edit body plus the runtime files the
+    /// spec ships.
     Render(Value, Vec<CreateAttachment<'static>>),
     /// The plugin answered the interaction itself — it opened a modal as the
     /// click's response (ADR-0011). The host sends nothing.
@@ -724,7 +705,6 @@ impl BotEventHandler {
         custom_id: &str,
         interaction: Value,
         interaction_token: &str,
-        guild_id: Option<u64>,
         kind: &str,
     ) {
         let result = self
@@ -733,8 +713,7 @@ impl BotEventHandler {
             .interact_validated(message_id, custom_id, interaction, validate_view_spec)
             .await;
 
-        if let ViewAnswer::Render(body, files) =
-            self.view_answer(result, message_id, guild_id, kind).await
+        if let ViewAnswer::Render(body, files) = self.view_answer(result, message_id, kind).await
             && let Err(e) = self
                 .http
                 .edit_original_interaction_response(
@@ -749,15 +728,13 @@ impl BotEventHandler {
     }
 
     /// Decides what a plugin's answer to a view interaction means for the
-    /// message: the fresh render to send (its declared attachment slots
-    /// filled, ADR-0012), nothing because the plugin answered the
-    /// interaction itself, or nothing because the view is stale or the
-    /// session failed.
+    /// message: the fresh render to send, nothing because the plugin
+    /// answered the interaction itself, or nothing because the view is
+    /// stale or the session failed.
     async fn view_answer(
         &self,
         result: Result<ViewSpec, InteractionError>,
         message_id: MessageId,
-        guild_id: Option<u64>,
         kind: &str,
     ) -> ViewAnswer {
         match result {
@@ -765,18 +742,14 @@ impl BotEventHandler {
             // strips the create-only fields Discord rejects on edit (error
             // 50080 for `sticker_ids`) before the body is sent.
             Ok(spec) => {
-                let (body, mut files) = self
-                    .data
-                    .previews
-                    .resolve(edit_body_for_transport(&spec.data), guild_id)
-                    .await;
-                match decode_runtime_files_with_existing(&spec.files, files.len()) {
-                    Ok(runtime_files) => files.extend(runtime_files),
+                let body = edit_body_for_transport(&spec.data);
+                let files = match decode_runtime_files(&spec.files) {
+                    Ok(files) => files,
                     Err(error) => {
                         warn!("plugin returned invalid runtime files: {}", error.msg);
                         return ViewAnswer::Nothing;
                     }
-                }
+                };
                 ViewAnswer::Render(body, files)
             }
             // A modal trigger the plugin answered by opening the modal: the
@@ -825,7 +798,6 @@ impl BotEventHandler {
             return;
         }
 
-        let guild_id = interaction.guild_id.map(GuildId::get);
         let mut raw = serde_json::to_value(interaction).unwrap_or_default();
         if let Some(raw_object) = raw.as_object_mut() {
             raw_object.insert(
@@ -856,7 +828,7 @@ impl BotEventHandler {
 
         match fast {
             Some(result) => match self
-                .view_answer(result, message_id, guild_id, "component interaction")
+                .view_answer(result, message_id, "component interaction")
                 .await
             {
                 ViewAnswer::Render(body, files) => {
@@ -886,7 +858,7 @@ impl BotEventHandler {
                 self.ack_component(interaction, message_id).await;
                 let result = (&mut round_trip).await;
                 if let ViewAnswer::Render(body, files) = self
-                    .view_answer(result, message_id, guild_id, "component interaction")
+                    .view_answer(result, message_id, "component interaction")
                     .await
                 {
                     self.edit_after_ack(message_id, interaction.token.as_str(), body, files)
@@ -1000,7 +972,6 @@ impl BotEventHandler {
             &interaction.data.custom_id,
             serde_json::to_value(interaction).unwrap_or_default(),
             interaction.token.as_str(),
-            interaction.guild_id.map(GuildId::get),
             "modal submit",
         )
         .await;
@@ -1009,31 +980,23 @@ impl BotEventHandler {
     /// Renders a plugin's answer to its own modal submission as the
     /// submission's response: an update-message carrying the answer's
     /// create envelope through the edit-transport strip (the same
-    /// projection every edit sends) with its declared attachment slots
-    /// filled (ADR-0012). A submission opened from a component click replaces
-    /// that message; one opened from a command answers as a fresh message,
-    /// honoring the spec's ephemerality.
+    /// projection every edit sends). A submission opened from a component
+    /// click replaces that message; one opened from a command answers as a
+    /// fresh message, honoring the spec's ephemerality.
     async fn render_modal_submission_response(
         &self,
         interaction: &ModalInteraction,
         spec: &ViewSpec,
     ) {
         let kind = if interaction.message.is_some() { 7 } else { 4 };
-        let (mut data, mut files) = self
-            .data
-            .previews
-            .resolve(
-                edit_body_for_transport(&spec.data),
-                interaction.guild_id.map(GuildId::get),
-            )
-            .await;
-        match decode_runtime_files_with_existing(&spec.files, files.len()) {
-            Ok(runtime_files) => files.extend(runtime_files),
+        let mut data = edit_body_for_transport(&spec.data);
+        let files = match decode_runtime_files(&spec.files) {
+            Ok(files) => files,
             Err(error) => {
                 warn!("plugin returned invalid runtime files: {}", error.msg);
                 return;
             }
-        }
+        };
         if kind == 4 && spec.ephemeral {
             let flags = data
                 .get("flags")
@@ -1178,7 +1141,6 @@ mod tests {
             core_manifests: Arc::new(HashMap::new()),
             translate_layer: Arc::new(TranslateLayer::new()),
             settings_returns: Arc::new(crate::bot::translate::SettingsReturns::default()),
-            previews: Arc::new(crate::plugin::preview::PreviewResolver::new(vec![])),
             start_time: Instant::now(),
         });
         let mut http = Http::without_token();

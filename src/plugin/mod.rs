@@ -33,7 +33,6 @@ pub mod install;
 pub mod interaction;
 pub mod manager;
 pub mod modal;
-pub mod preview;
 pub mod view;
 
 use std::collections::HashMap;
@@ -61,16 +60,13 @@ pub use host::PgKvStore;
 pub use host::SerenityHostIo;
 pub use host::SerenityStatsSource;
 pub use host::SerenityUserResolver;
-pub use host::ServiceWelcomeSettingsSource;
 pub use host::StatsError;
 pub use host::StatsHandle;
 pub use host::StatsSource;
 pub use host::UserResolveError;
 pub use host::UserResolver;
 pub use host::UserResolverHandle;
-pub use host::WelcomeSettingsError;
-pub use host::WelcomeSettingsSource;
-pub(crate) use host::decode_runtime_files_with_existing;
+pub(crate) use host::decode_runtime_files;
 pub use host::validate_view_spec;
 pub use install::CatalogEntry;
 pub use install::PluginCatalog;
@@ -1151,7 +1147,7 @@ mod tests {
         };
         assert_eq!(v, API_VERSION);
         assert_eq!(name, "host");
-        assert_eq!(ops.len(), 16, "every v2 host op must be announced");
+        assert_eq!(ops.len(), 14, "every v2 host op must be announced");
         assert!(ops.iter().any(|c| c == "host.defer"));
         assert!(ops.iter().any(|c| c == "host.open_dm"));
         assert!(ops.iter().any(|c| c == "host.kv.get"));
@@ -1159,8 +1155,6 @@ mod tests {
         assert!(ops.iter().any(|c| c == "host.list_plugins"));
         assert!(ops.iter().any(|c| c == "host.stats"));
         assert!(ops.iter().any(|c| c == "host.resolve_users"));
-        assert!(ops.iter().any(|c| c == "host.welcome.get_settings"));
-        assert!(ops.iter().any(|c| c == "host.welcome.update_settings"));
         assert!(ops.iter().any(|c| c == "host.open_modal"));
     }
 

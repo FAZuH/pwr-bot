@@ -55,12 +55,6 @@ pub enum HostOp {
     /// Resolve user display data through the host's cache and bounded REST
     /// fallback.
     ResolveUsers,
-    /// Read a guild's welcome settings (the whole [`crate::ServerSettings`]
-    /// snapshot), mirroring the welcome service's `get_server_settings`.
-    WelcomeGetSettings,
-    /// Write a guild's welcome settings snapshot, mirroring the welcome
-    /// service's `update_server_settings`.
-    WelcomeUpdateSettings,
 }
 
 /// Every op in the v2 host op surface, in declaration order. The
@@ -82,8 +76,6 @@ pub const ALL_OPS: &[HostOp] = &[
     HostOp::ListPlugins,
     HostOp::Stats,
     HostOp::ResolveUsers,
-    HostOp::WelcomeGetSettings,
-    HostOp::WelcomeUpdateSettings,
 ];
 
 impl HostOp {
@@ -106,8 +98,6 @@ impl HostOp {
             HostOp::ListPlugins => "host.list_plugins",
             HostOp::Stats => "host.stats",
             HostOp::ResolveUsers => "host.resolve_users",
-            HostOp::WelcomeGetSettings => "host.welcome.get_settings",
-            HostOp::WelcomeUpdateSettings => "host.welcome.update_settings",
         }
     }
 
@@ -192,7 +182,7 @@ mod tests {
 
     #[test]
     fn all_ops_is_exactly_the_v2_surface() {
-        assert_eq!(ALL_OPS.len(), 16);
+        assert_eq!(ALL_OPS.len(), 14);
         let mut seen = std::collections::HashSet::new();
         for op in ALL_OPS {
             assert!(seen.insert(*op), "duplicate op in ALL_OPS");
@@ -210,6 +200,8 @@ mod tests {
         assert_eq!(HostOp::parse("host.feed.update_settings"), None);
         assert_eq!(HostOp::parse("host.voice.get_settings"), None);
         assert_eq!(HostOp::parse("host.voice.update_settings"), None);
+        assert_eq!(HostOp::parse("host.welcome.get_settings"), None);
+        assert_eq!(HostOp::parse("host.welcome.update_settings"), None);
     }
 
     #[test]

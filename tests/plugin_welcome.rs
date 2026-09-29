@@ -1,31 +1,30 @@
 //! End-to-end tests for the welcome settings panel plugin (#151, the
-//! panel-migration's third panel): the panel plugin is spawned over the real
-//! stdio wire — no database, no Discord — through the plugin manager, like
-//! the core plugins the host spawns at startup. The welcome settings seam is
-//! served by a mockall mock of the host's [`WelcomeSettingsSource`] and the
-//! Discord I/O seam by a mock [`HostIo`].
+//! panel-migration's third panel; #169, the plugin's own storage): the panel
+//! is spawned over the real stdio and database seams — no Discord — through
+//! the plugin manager, like the core plugins the host spawns at startup. The
+//! plugin reads and writes its own `welcome_settings` table and copies the
+//! legacy `server_settings.settings.welcome` section into it once, on the
+//! guild's first read.
 //!
 //! Assertions mirror the documented contract:
-//! - the panel's invoke loads the guild's snapshot through
-//!   `host.welcome.get_settings` and renders the monolith `/welcome` panel as
-//!   Components V2, declaring the preview attachment slot by filename
-//!   (ADR-0012) while cards are enabled;
-//! - every mutating click persists immediately through
-//!   `host.welcome.update_settings` (the monolith's persist-on-every-change
-//!   semantics) after re-reading the snapshot — the session echo carries only
+//! - the panel's invoke loads the guild's snapshot from plugin storage and
+//!   renders the monolith `/welcome` panel as Components V2, shipping the
+//!   preview image as a `files` entry while cards are enabled (ADR-0012) and
+//!   never a `data.attachments` key;
+//! - every mutating click persists immediately (the monolith's
+//!   persist-on-every-change semantics), and the session echo carries only
 //!   the guild id and the removal selection, never the settings;
 //! - a modal trigger click opens its modal through `host.open_modal` and
 //!   answers the click with the `ModalOpened` marker, so the host sends
 //!   nothing (ADR-0011); the later `view.modal_submit` re-reads, persists the
 //!   answer, and carries the stashed removal selection across the round trip;
-//! - a failed load fails the open with the host's typed error forwarded;
+//! - a failed load fails the open with `WelcomeSettingsError`;
 //! - `bye` exits cleanly with status 0.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use mockall::predicate::eq;
 use pwr_bot::plugin::HostConfig;
 use pwr_bot::plugin::HostIo;
 use pwr_bot::plugin::HostServices;
@@ -34,10 +33,7 @@ use pwr_bot::plugin::PluginManager;
 use pwr_bot::plugin::RespawnPolicy;
 use pwr_bot::plugin::RunningPlugin;
 use pwr_bot::plugin::StatsHandle;
-use pwr_bot::plugin::WelcomeSettingsError;
-use pwr_bot::plugin::WelcomeSettingsSource;
 use pwr_bot::plugin::host::MockHostIo;
-use pwr_bot::plugin::host::MockWelcomeSettingsSource;
 use pwr_plugin_protocol::MODAL_OPENED_KIND;
 use pwr_plugin_protocol::MODAL_SUBMIT_OP;
 use pwr_plugin_protocol::Msg;
@@ -47,65 +43,97 @@ use pwr_poise_components::IS_COMPONENTS_V2;
 use serde_json::Value;
 use serde_json::json;
 
+mod common;
 mod probe;
 use probe::probe_binary;
 
-/// The guild the panel keys its settings by.
-const GUILD_ID: u64 = 42;
-
-/// The preview filename the envelope declares, matching the host's
-/// `WELCOME_FILE` (ADR-0012).
+/// The preview filename the envelope ships (ADR-0012), matching the plugin's
+/// `WELCOME_FILE`.
 const WELCOME_FILE: &str = "welcome_preview.png";
 
-/// A settings snapshot with the welcome section enabled and two messages, so
-/// the toggle, the removal flow, and the attachment declaration are all
-/// observable on the wire.
-fn sample_settings() -> ServerSettings {
-    ServerSettings {
-        welcome: WelcomeSettings {
-            enabled: Some(true),
-            channel_id: Some("123456789".into()),
-            primary_color: Some("#5865F2".into()),
-            template_id: Some("1".into()),
-            messages: Some(vec!["one".into(), "two".into()]),
-        },
-        ..ServerSettings::default()
+/// The panel's command name, the `cmd` every invoke and click carries.
+const COMMAND: &str = "welcome-settings";
+
+/// A welcome snapshot with cards enabled and two messages, so the toggle,
+/// the removal flow, and the preview file are all observable on the wire.
+fn sample_welcome() -> WelcomeSettings {
+    WelcomeSettings {
+        enabled: Some(true),
+        channel_id: Some("123456789".into()),
+        primary_color: Some("#5865F2".into()),
+        template_id: Some("1".into()),
+        messages: Some(vec!["one".into(), "two".into()]),
     }
 }
 
+/// A per-process test database with the core schema migrated and emptied.
+async fn database() -> String {
+    let db_url = common::db::db_url().await;
+    let core = common::setup_db().await;
+    common::teardown_db(&core).await;
+    db_url
+}
+
+/// A live test client, with its connection polled on the current runtime.
+async fn connect(db_url: &str) -> tokio_postgres::Client {
+    let (client, connection) = tokio_postgres::connect(db_url, tokio_postgres::NoTls)
+        .await
+        .expect("connect test client");
+    tokio::spawn(async move {
+        connection.await.expect("test client connection");
+    });
+    client
+}
+
+/// Seeds the legacy `server_settings` snapshot the plugin's first read
+/// copies from.
+async fn seed_legacy(client: &tokio_postgres::Client, guild_id: u64, welcome: WelcomeSettings) {
+    let settings = ServerSettings {
+        welcome,
+        ..ServerSettings::default()
+    };
+    let payload = serde_json::to_string(&settings).expect("serialize legacy snapshot");
+    client
+        .execute(
+            "INSERT INTO server_settings (guild_id, settings) VALUES ($1, $2::text::jsonb) \
+             ON CONFLICT (guild_id) DO UPDATE SET settings = EXCLUDED.settings",
+            &[&(guild_id as i64), &payload],
+        )
+        .await
+        .expect("seed legacy welcome settings");
+}
+
 /// The services the panel shares with its host calls, like the host's one
-/// [`HostServices`] arc: the io seam posts placeholders and edits payloads,
-/// the engine backs the modal open, and the welcome seam serves the panel's
-/// settings RPCs. No preview resolver: the
-/// declaration passes through the transport untouched, which is what the
-/// envelope assertions pin.
-fn shared_services(
+/// [`HostServices`] arc: the io seam answers modal opens, the engine backs
+/// `host.open_view`, and the config hands the plugin its database url.
+fn services_with_io(
     io: Arc<dyn HostIo>,
-    welcome: Arc<dyn WelcomeSettingsSource>,
+    db_url: String,
     engine: InteractionEngine<RunningPlugin>,
 ) -> Arc<HostServices> {
     Arc::new(HostServices {
         io: Some(io),
         config: Some(HostConfig {
-            db_url: "postgres://test".into(),
-            data_path: PathBuf::from("/tmp/pwr-bot-test"),
+            db_url,
+            data_path: PathBuf::from("/tmp/pwr-bot-welcome-test"),
             poll_interval: std::time::Duration::from_secs(30),
         }),
         kv: None,
         engine: Some(Arc::new(engine)),
         stats: Arc::new(StatsHandle::default()),
         users: Default::default(),
-        welcome: Some(welcome),
-        previews: None,
         settings_returns: None,
     })
 }
 
 /// Spawns the panel plugin under a manager wired with the shared services,
 /// like the host's startup loop spawns its core plugins.
-async fn spawn_panel(services: Arc<HostServices>) -> Arc<RunningPlugin> {
+async fn spawn_panel(io: Arc<dyn HostIo>, db_url: String) -> Arc<RunningPlugin> {
     let manager =
-        Arc::new(PluginManager::new(None, RespawnPolicy::default()).with_host_services(services));
+        Arc::new(
+            PluginManager::new(None, RespawnPolicy::default())
+                .with_host_services(services_with_io(io, db_url, InteractionEngine::new())),
+        );
     manager
         .spawn("welcome", probe_binary("welcome"), None, &[], &[])
         .await
@@ -137,7 +165,7 @@ fn resp_data(resp: &Msg) -> Value {
         Msg::Resp {
             data: Some(data), ..
         } => data.clone(),
-        _ => panic!("expected ok envelope, got {resp:?}"),
+        _ => panic!("expected ok resp, got {resp:?}"),
     }
 }
 
@@ -148,94 +176,143 @@ fn panel_status(data: &Value) -> &str {
         .expect("status text display")
 }
 
-/// The panel's attachment declaration (ADR-0012), as the envelope carries it.
-fn declared_attachments(data: &Value) -> &Value {
-    &data["data"]["attachments"]
+/// The preview files the envelope ships (ADR-0012).
+fn preview_files(data: &Value) -> &Vec<Value> {
+    data["files"].as_array().expect("envelope ships `files`")
 }
 
-/// The panel's first render, pinned on the wire: the invoke loads the
-/// snapshot, the envelope carries the monolith's status copy, declares the
-/// preview slot by filename while cards are enabled (ADR-0012), and echoes a
-/// session state of guild id plus empty selection — never the settings.
+/// The invoke loads the guild's snapshot — seeded from the legacy section on
+/// this first read — and renders the monolith's panel: the status copy, the
+/// session echo of guild id plus empty selection (never the settings), and
+/// the preview image as one `files` entry while cards are enabled, with no
+/// `data.attachments` declaration (the key itself rides empty, as serenity
+/// serializes it).
 #[tokio::test]
-async fn invoke_renders_the_panel_and_declares_the_preview_slot() {
-    let mut welcome = MockWelcomeSettingsSource::new();
-    welcome
-        .expect_get_settings()
-        .with(eq(GUILD_ID))
-        .times(1)
-        .returning(|_| Ok(sample_settings()));
+#[serial_test::serial]
+async fn invoke_renders_the_panel_and_ships_the_preview_file() {
+    let db_url = database().await;
+    let client = connect(&db_url).await;
+    seed_legacy(&client, 42, sample_welcome()).await;
 
-    let panel = spawn_panel(shared_services(
-        Arc::new(MockHostIo::new()),
-        Arc::new(welcome),
-        InteractionEngine::new(),
-    ))
-    .await;
-
+    let panel = spawn_panel(Arc::new(MockHostIo::new()), db_url.clone()).await;
     let resp = panel
-        .call(
-            "invoke",
-            Some("welcome-settings"),
-            Some(json!({ "guild_id": GUILD_ID })),
-        )
+        .call("invoke", Some(COMMAND), Some(json!({ "guild_id": 42 })))
         .await
         .expect("panel invoke answered");
     let view = assert_envelope(&resp, 0);
-    assert_eq!(view, json!({ "guild_id": GUILD_ID, "marked_removal": [] }));
+    assert_eq!(view, json!({ "guild_id": 42, "marked_removal": [] }));
     let data = resp_data(&resp);
     assert!(panel_status(&data).contains("**active**"));
-    assert_eq!(
-        declared_attachments(&data),
-        &json!([{ "id": 0, "filename": WELCOME_FILE }])
+    let files = preview_files(&data);
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0]["filename"], json!(WELCOME_FILE));
+    assert!(
+        !files[0]["data_base64"]
+            .as_str()
+            .expect("preview bytes as base64")
+            .is_empty(),
+        "the shipped file carries renderable bytes"
     );
+    let attachments = data["data"].get("attachments");
+    assert!(
+        attachments.is_none_or(|a| a.as_array().is_some_and(Vec::is_empty)),
+        "no data.attachments declaration reaches Discord, got {attachments:?}"
+    );
+
+    // The first read copied the legacy section into the plugin's own table.
+    let row = client
+        .query_one(
+            "SELECT enabled, messages::text FROM welcome_settings WHERE guild_id = $1",
+            &[&42_i64],
+        )
+        .await
+        .expect("read the copied snapshot");
+    assert!(row.get::<_, bool>(0), "cards are enabled");
+    let messages: Vec<String> = serde_json::from_str(row.get(1)).expect("message list");
+    assert_eq!(messages, ["one", "two"]);
 
     let status = panel.stop().await.expect("graceful stop");
     assert_eq!(status.code(), Some(0), "clean exit after bye: {status}");
 }
 
-/// A toggle click re-reads the snapshot, persists the flip immediately (the
-/// monolith's persist-on-every-change semantics, unlike the voice panel's
-/// persist-on-exit), and re-renders: the off copy shows and the attachment
-/// declaration goes empty, which removes the preview on edit.
+/// The copy is once-only: after the first read, editing the legacy section
+/// must not change what the panel renders — later reads answer from
+/// `welcome_settings` alone.
 #[tokio::test]
-async fn a_toggle_persists_immediately_and_renders_the_off_copy() {
-    let mut off = sample_settings();
-    off.welcome.enabled = Some(false);
+#[serial_test::serial]
+async fn the_legacy_section_is_copied_once_and_never_re_read() {
+    let db_url = database().await;
+    let client = connect(&db_url).await;
+    seed_legacy(&client, 43, sample_welcome()).await;
 
-    let mut welcome = MockWelcomeSettingsSource::new();
-    welcome
-        .expect_get_settings()
-        .with(eq(GUILD_ID))
-        .times(2)
-        .returning(|_| Ok(sample_settings()));
-    welcome
-        .expect_update_settings()
-        .with(eq(GUILD_ID), eq(off))
-        .times(1)
-        .returning(|_, _| Ok(()));
+    let panel = spawn_panel(Arc::new(MockHostIo::new()), db_url).await;
+    let resp = panel
+        .call("invoke", Some(COMMAND), Some(json!({ "guild_id": 43 })))
+        .await
+        .expect("first invoke answered");
+    assert_envelope(&resp, 0);
 
-    let panel = spawn_panel(shared_services(
-        Arc::new(MockHostIo::new()),
-        Arc::new(welcome),
-        InteractionEngine::new(),
-    ))
-    .await;
+    let edited = ServerSettings {
+        welcome: WelcomeSettings {
+            enabled: Some(false),
+            channel_id: None,
+            primary_color: None,
+            template_id: None,
+            messages: Some(vec!["stale".into()]),
+        },
+        ..ServerSettings::default()
+    };
+    let payload = serde_json::to_string(&edited).expect("serialize edited snapshot");
+    client
+        .execute(
+            "UPDATE server_settings SET settings = $1::text::jsonb WHERE guild_id = $2",
+            &[&payload, &43_i64],
+        )
+        .await
+        .expect("edit the legacy section after the copy");
 
     let resp = panel
-        .call(
-            "invoke",
-            Some("welcome-settings"),
-            Some(json!({ "guild_id": GUILD_ID })),
-        )
+        .call("invoke", Some(COMMAND), Some(json!({ "guild_id": 43 })))
+        .await
+        .expect("second invoke answered");
+    assert_envelope(&resp, 1);
+    let data = resp_data(&resp);
+    assert!(
+        panel_status(&data).contains("**active**"),
+        "the copied snapshot wins over the edited legacy section"
+    );
+    assert_eq!(
+        preview_files(&data).len(),
+        1,
+        "cards still ship the preview"
+    );
+
+    panel.stop().await.expect("graceful stop");
+}
+
+/// A toggle click re-reads the snapshot, persists the flip immediately (the
+/// monolith's persist-on-every-change semantics, unlike the voice panel's
+/// persist-on-exit), and re-renders: the off copy shows and the envelope
+/// ships no file, which removes the preview on edit.
+#[tokio::test]
+#[serial_test::serial]
+async fn a_toggle_persists_immediately_and_renders_the_off_copy() {
+    let db_url = database().await;
+    let client = connect(&db_url).await;
+    seed_legacy(&client, 44, sample_welcome()).await;
+
+    let panel = spawn_panel(Arc::new(MockHostIo::new()), db_url).await;
+    let resp = panel
+        .call("invoke", Some(COMMAND), Some(json!({ "guild_id": 44 })))
         .await
         .expect("panel invoke answered");
     let view = assert_envelope(&resp, 0);
+    assert_eq!(preview_files(&resp_data(&resp)).len(), 1);
 
     let resp = panel
         .call(
             "view.interact",
-            Some("welcome-settings"),
+            Some(COMMAND),
             Some(json!({
                 "custom_id": "welcome:toggle",
                 "view": view,
@@ -244,10 +321,29 @@ async fn a_toggle_persists_immediately_and_renders_the_off_copy() {
         .await
         .expect("toggle answered");
     let view = assert_envelope(&resp, 1);
-    assert_eq!(view, json!({ "guild_id": GUILD_ID, "marked_removal": [] }));
+    assert_eq!(view, json!({ "guild_id": 44, "marked_removal": [] }));
     let data = resp_data(&resp);
     assert!(panel_status(&data).contains("**disabled**"));
-    assert_eq!(declared_attachments(&data), &json!([]));
+    assert!(
+        preview_files(&data).is_empty(),
+        "the preview is absent while disabled"
+    );
+    let attachments = data["data"].get("attachments");
+    assert!(
+        attachments.is_none_or(|a| a.as_array().is_some_and(Vec::is_empty)),
+        "no data.attachments declaration reaches Discord, got {attachments:?}"
+    );
+
+    let row = client
+        .query_one(
+            "SELECT enabled FROM welcome_settings WHERE guild_id = $1",
+            &[&44_i64],
+        )
+        .await
+        .expect("read the persisted flip");
+    assert!(!row.get::<_, bool>(0), "the flip persisted immediately");
+
+    panel.stop().await.expect("graceful stop");
 }
 
 /// A modal trigger click opens its modal through `host.open_modal` — the io
@@ -255,10 +351,14 @@ async fn a_toggle_persists_immediately_and_renders_the_off_copy() {
 /// click is answered with the `ModalOpened` marker, so the host sends nothing
 /// (ADR-0011). No settings load or persist rides a trigger click.
 #[tokio::test]
+#[serial_test::serial]
 async fn a_modal_trigger_opens_the_modal_and_answers_with_the_marker() {
+    let db_url = database().await;
+    let client = connect(&db_url).await;
+    seed_legacy(&client, 45, sample_welcome()).await;
+
     let opened = Arc::new(Mutex::new(None::<String>));
     let sink = opened.clone();
-
     let mut io = MockHostIo::new();
     io.expect_open_modal()
         .withf(move |interaction_id, token, modal| {
@@ -273,26 +373,9 @@ async fn a_modal_trigger_opens_the_modal_and_answers_with_the_marker() {
             Ok(())
         });
 
-    let mut welcome = MockWelcomeSettingsSource::new();
-    welcome
-        .expect_get_settings()
-        .with(eq(GUILD_ID))
-        .times(1)
-        .returning(|_| Ok(sample_settings()));
-
-    let panel = spawn_panel(shared_services(
-        Arc::new(io),
-        Arc::new(welcome),
-        InteractionEngine::new(),
-    ))
-    .await;
-
+    let panel = spawn_panel(Arc::new(io), db_url).await;
     let resp = panel
-        .call(
-            "invoke",
-            Some("welcome-settings"),
-            Some(json!({ "guild_id": GUILD_ID })),
-        )
+        .call("invoke", Some(COMMAND), Some(json!({ "guild_id": 45 })))
         .await
         .expect("panel invoke answered");
     let view = assert_envelope(&resp, 0);
@@ -300,7 +383,7 @@ async fn a_modal_trigger_opens_the_modal_and_answers_with_the_marker() {
     let resp = panel
         .call(
             "view.interact",
-            Some("welcome-settings"),
+            Some(COMMAND),
             Some(json!({
                 "custom_id": "welcome:add",
                 "id": 9001,
@@ -333,18 +416,24 @@ async fn a_modal_trigger_opens_the_modal_and_answers_with_the_marker() {
         modal_id.starts_with("welcome:add:"),
         "the modal id is the trigger id, nonce-suffixed: {modal_id}"
     );
+
+    panel.stop().await.expect("graceful stop");
 }
 
 /// The full modal round trip: a marked removal survives the trigger (the
 /// plugin stashes the selection under the modal id), the submission re-reads
-/// the snapshot, persists the appended message through
-/// `host.welcome.update_settings`, and answers with the re-rendered panel —
-/// the selection still marked, the survivor list grown.
+/// the snapshot, persists the appended message in the plugin's own storage,
+/// and answers with the re-rendered panel — the selection still marked, the
+/// survivor list grown.
 #[tokio::test]
+#[serial_test::serial]
 async fn a_modal_submission_persists_the_answer_and_carries_the_stash() {
+    let db_url = database().await;
+    let client = connect(&db_url).await;
+    seed_legacy(&client, 46, sample_welcome()).await;
+
     let opened = Arc::new(Mutex::new(None::<String>));
     let sink = opened.clone();
-
     let mut io = MockHostIo::new();
     io.expect_open_modal()
         .times(1)
@@ -356,39 +445,9 @@ async fn a_modal_submission_persists_the_answer_and_carries_the_stash() {
             Ok(())
         });
 
-    let mut added = sample_settings();
-    added
-        .welcome
-        .messages
-        .as_mut()
-        .expect("sample has messages")
-        .push("three".into());
-
-    let mut welcome = MockWelcomeSettingsSource::new();
-    welcome
-        .expect_get_settings()
-        .with(eq(GUILD_ID))
-        .times(3)
-        .returning(|_| Ok(sample_settings()));
-    welcome
-        .expect_update_settings()
-        .with(eq(GUILD_ID), eq(added))
-        .times(1)
-        .returning(|_, _| Ok(()));
-
-    let panel = spawn_panel(shared_services(
-        Arc::new(io),
-        Arc::new(welcome),
-        InteractionEngine::new(),
-    ))
-    .await;
-
+    let panel = spawn_panel(Arc::new(io), db_url).await;
     let resp = panel
-        .call(
-            "invoke",
-            Some("welcome-settings"),
-            Some(json!({ "guild_id": GUILD_ID })),
-        )
+        .call("invoke", Some(COMMAND), Some(json!({ "guild_id": 46 })))
         .await
         .expect("panel invoke answered");
     let view = assert_envelope(&resp, 0);
@@ -397,7 +456,7 @@ async fn a_modal_submission_persists_the_answer_and_carries_the_stash() {
     let resp = panel
         .call(
             "view.interact",
-            Some("welcome-settings"),
+            Some(COMMAND),
             Some(json!({
                 "custom_id": "welcome:remove",
                 "data": { "values": ["1"] },
@@ -407,13 +466,13 @@ async fn a_modal_submission_persists_the_answer_and_carries_the_stash() {
         .await
         .expect("mark answered");
     let view = assert_envelope(&resp, 1);
-    assert_eq!(view, json!({ "guild_id": GUILD_ID, "marked_removal": [1] }));
+    assert_eq!(view, json!({ "guild_id": 46, "marked_removal": [1] }));
 
     // Open the add-message modal; the selection is stashed under its id.
     let resp = panel
         .call(
             "view.interact",
-            Some("welcome-settings"),
+            Some(COMMAND),
             Some(json!({
                 "custom_id": "welcome:add",
                 "id": 9002,
@@ -442,7 +501,7 @@ async fn a_modal_submission_persists_the_answer_and_carries_the_stash() {
             None,
             Some(json!({
                 "custom_id": modal_id,
-                "guild_id": GUILD_ID,
+                "guild_id": 46,
                 "data": {
                     "custom_id": modal_id,
                     "components": [{
@@ -457,7 +516,7 @@ async fn a_modal_submission_persists_the_answer_and_carries_the_stash() {
     let view = assert_envelope(&resp, 3);
     assert_eq!(
         view,
-        json!({ "guild_id": GUILD_ID, "marked_removal": [1] }),
+        json!({ "guild_id": 46, "marked_removal": [1] }),
         "the stashed selection carried across the modal round trip"
     );
     let data = resp_data(&resp);
@@ -466,40 +525,32 @@ async fn a_modal_submission_persists_the_answer_and_carries_the_stash() {
         .expect("removal select");
     assert_eq!(options.len(), 3, "the submitted message is listed");
     assert_eq!(options[1]["label"], json!("❌ two"), "still marked");
+
+    let row = client
+        .query_one(
+            "SELECT messages::text FROM welcome_settings WHERE guild_id = $1",
+            &[&46_i64],
+        )
+        .await
+        .expect("read the persisted message list");
+    let messages: Vec<String> = serde_json::from_str(row.get(0)).expect("message list");
+    assert_eq!(messages, ["one", "two", "three"]);
+
+    panel.stop().await.expect("graceful stop");
 }
 
 /// Marking persists nothing; saving drops the marked messages exactly once
 /// and clears the marks from the session echo.
 #[tokio::test]
-async fn saving_removals_persists_the_survivors_once_and_clears_the_marks() {
-    let mut survivors = sample_settings();
-    survivors.welcome.messages = Some(vec!["two".into()]);
+#[serial_test::serial]
+async fn saving_removals_persists_the_survivors_and_clears_the_marks() {
+    let db_url = database().await;
+    let client = connect(&db_url).await;
+    seed_legacy(&client, 47, sample_welcome()).await;
 
-    let mut welcome = MockWelcomeSettingsSource::new();
-    welcome
-        .expect_get_settings()
-        .with(eq(GUILD_ID))
-        .times(3)
-        .returning(|_| Ok(sample_settings()));
-    welcome
-        .expect_update_settings()
-        .with(eq(GUILD_ID), eq(survivors))
-        .times(1)
-        .returning(|_, _| Ok(()));
-
-    let panel = spawn_panel(shared_services(
-        Arc::new(MockHostIo::new()),
-        Arc::new(welcome),
-        InteractionEngine::new(),
-    ))
-    .await;
-
+    let panel = spawn_panel(Arc::new(MockHostIo::new()), db_url).await;
     let resp = panel
-        .call(
-            "invoke",
-            Some("welcome-settings"),
-            Some(json!({ "guild_id": GUILD_ID })),
-        )
+        .call("invoke", Some(COMMAND), Some(json!({ "guild_id": 47 })))
         .await
         .expect("panel invoke answered");
     let view = assert_envelope(&resp, 0);
@@ -507,7 +558,7 @@ async fn saving_removals_persists_the_survivors_once_and_clears_the_marks() {
     let resp = panel
         .call(
             "view.interact",
-            Some("welcome-settings"),
+            Some(COMMAND),
             Some(json!({
                 "custom_id": "welcome:remove",
                 "data": { "values": ["0"] },
@@ -517,12 +568,12 @@ async fn saving_removals_persists_the_survivors_once_and_clears_the_marks() {
         .await
         .expect("mark answered");
     let view = assert_envelope(&resp, 1);
-    assert_eq!(view, json!({ "guild_id": GUILD_ID, "marked_removal": [0] }));
+    assert_eq!(view, json!({ "guild_id": 47, "marked_removal": [0] }));
 
     let resp = panel
         .call(
             "view.interact",
-            Some("welcome-settings"),
+            Some(COMMAND),
             Some(json!({
                 "custom_id": "welcome:save",
                 "view": view,
@@ -531,41 +582,75 @@ async fn saving_removals_persists_the_survivors_once_and_clears_the_marks() {
         .await
         .expect("save answered");
     let view = assert_envelope(&resp, 2);
-    assert_eq!(view, json!({ "guild_id": GUILD_ID, "marked_removal": [] }));
-}
+    assert_eq!(view, json!({ "guild_id": 47, "marked_removal": [] }));
 
-/// A failed settings load fails the open with the host's typed error
-/// forwarded: the Settings section handoff surfaces what the service said.
-#[tokio::test]
-async fn a_failed_load_fails_the_open_with_the_forwarded_error() {
-    let mut welcome = MockWelcomeSettingsSource::new();
-    welcome
-        .expect_get_settings()
-        .with(eq(GUILD_ID))
-        .times(1)
-        .returning(|_| {
-            Err(WelcomeSettingsError::Service(
-                pwr_bot::service::error::ServiceError::UnexpectedResult {
-                    message: "guild gone".into(),
-                },
-            ))
-        });
-
-    let panel = spawn_panel(shared_services(
-        Arc::new(MockHostIo::new()),
-        Arc::new(welcome),
-        InteractionEngine::new(),
-    ))
-    .await;
-
-    let resp = panel
-        .call(
-            "invoke",
-            Some("welcome-settings"),
-            Some(json!({ "guild_id": GUILD_ID })),
+    let row = client
+        .query_one(
+            "SELECT messages::text FROM welcome_settings WHERE guild_id = $1",
+            &[&47_i64],
         )
         .await
-        .expect("invoke answered");
+        .expect("read the persisted survivors");
+    let messages: Vec<String> = serde_json::from_str(row.get(0)).expect("message list");
+    assert_eq!(messages, ["two"], "the marked message was dropped");
+
+    panel.stop().await.expect("graceful stop");
+}
+
+/// A failed settings load fails the open with the plugin's own typed error:
+/// dropping `welcome_settings` out from under a running plugin surfaces
+/// `WelcomeSettingsError` instead of a panel with no settings to edit.
+#[tokio::test]
+#[serial_test::serial]
+async fn a_failed_load_fails_the_open_with_the_forwarded_error() {
+    let db_url = database().await;
+    let client = connect(&db_url).await;
+    let panel = spawn_panel(Arc::new(MockHostIo::new()), db_url).await;
+
+    // Wait for the plugin's own migration to land before breaking it.
+    let mut ready = false;
+    for _ in 0..100 {
+        let exists: bool = client
+            .query_one(
+                "SELECT EXISTS (SELECT 1 FROM information_schema.tables \
+                 WHERE table_schema = 'public' AND table_name = 'welcome_settings')",
+                &[],
+            )
+            .await
+            .expect("poll welcome migration")
+            .get(0);
+        if exists {
+            ready = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert!(ready, "welcome plugin did not finish its migrations");
+
+    let initial = panel
+        .call("invoke", Some(COMMAND), Some(json!({ "guild_id": 48 })))
+        .await
+        .expect("invoke answered before the failure");
+    assert_envelope(&initial, 0);
+
+    client
+        .execute("DROP TABLE welcome_settings", &[])
+        .await
+        .expect("break settings storage after plugin startup");
+
+    let resp = panel
+        .call("invoke", Some(COMMAND), Some(json!({ "guild_id": 48 })))
+        .await;
+    client
+        .execute(
+            "CREATE TABLE welcome_settings (guild_id BIGINT PRIMARY KEY, \
+             enabled BOOLEAN NOT NULL DEFAULT FALSE, channel_id TEXT, \
+             primary_color TEXT, template_id TEXT, messages JSONB)",
+            &[],
+        )
+        .await
+        .expect("restore settings storage");
+    let resp = resp.expect("failed invoke answered");
     match resp {
         Msg::Resp {
             ok: false,
@@ -573,9 +658,9 @@ async fn a_failed_load_fails_the_open_with_the_forwarded_error() {
             ..
         } => {
             assert_eq!(err.kind, "WelcomeSettingsError");
-            assert!(err.msg.contains("guild gone"), "msg: {}", err.msg);
+            assert!(err.msg.contains("welcome_settings"), "msg: {}", err.msg);
         }
-        _ => panic!("expected err resp, got {resp:?}"),
+        other => panic!("expected err resp, got {other:?}"),
     }
 
     let status = panel.stop().await.expect("graceful stop");
