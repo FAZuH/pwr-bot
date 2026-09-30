@@ -35,13 +35,12 @@ Commands are organized by domain. Each top-level module is a command group; subc
 |--------|----------|
 | `crates/plugin/voice` manifest | `/vc` group and `/voice-settings` panel |
 | `crates/plugin/feed` manifest | `/feed` group and `/feed-settings` |
+| `crates/plugin/welcome` manifest | `/welcome` and `/welcome-settings` |
 | `settings.rs` | `/settings` — the host Settings GUI |
-| `welcome/mod.rs` | `/welcome` |
 | `about.rs` | `/about` |
 | `register.rs` | `/register` |
 | `register_owner.rs` | `/register_owner` |
 | `unregister.rs` | `/unregister` |
-| `dump_db.rs` | `/dump_db` |
 
 ### Router → CommandHandler → Host Flow
 
@@ -146,22 +145,18 @@ The only layer that enforces business rules. Handlers call services; services or
 
 ## Domain Contracts (`src/entity.rs`, plugin crates)
 
-The host keeps the legacy `server_settings` rows (until phase 7), bot
-metadata, plugin enablement, and the transitional feed-dump DTOs. Feed,
-voice, and welcome entities, repositories, services, and migrations live in
-their plugin crates.
+The host owns bot metadata, plugin enablement, the plugin kv store, and the
+legacy `server_settings` table the plugins import from once. Feed, voice,
+and welcome entities, repositories, services, and migrations live in their
+plugin crates; the host types none of them.
 
 ### Host entities (`src/entity.rs`)
 
 | Entity | Description |
 |--------|-------------|
-| `FeedEntity` | Feed content source used by the transitional database dump |
-| `FeedItemEntity` | Feed update used by the transitional database dump |
-| `SubscriberEntity` | Feed notification target used by the transitional database dump |
-| `FeedSubscriptionEntity` | Feed subscription link used by the transitional database dump |
-| `ServerSettingsEntity` | Legacy per-guild settings, the import source for plugin-owned settings (until phase 7) |
 | `BotMetaEntity` | Key-value bot metadata |
 | `GuildPluginEntity` | Per-guild plugin enablement |
+| `DbU64` | Newtype for `u64` values stored as `BIGINT` |
 
 ### Plugin entities
 
@@ -195,14 +190,12 @@ A factory trait `Repos` defines the repo access interface. The concrete `PgRepos
 
 ```rust
 pub trait Repos: Send + Sync {
-    fn feed_dump(&self) -> Box<dyn FeedDumpRepository + Send + Sync>;
     fn bot_meta(&self) -> Box<dyn BotMetaRepository + Send + Sync>;
     fn plugin_kv(&self) -> Box<dyn PluginKvRepository + Send + Sync>;
     fn guild_plugins(&self) -> Box<dyn GuildPluginRepository + Send + Sync>;
 }
 
 pub struct PgRepos {
-    feed_dump: PgFeedDumpRepo,
     pub server_settings: PgServerSettingsRepo,
     pub bot_meta: PgBotMetaRepo,
     pub plugin_kv: PgPluginKvRepo,
@@ -211,11 +204,12 @@ pub struct PgRepos {
 }
 ```
 
-`PgFeedDumpRepo` is read-only and exists for the transitional `/dump_db`
-projection. The feed, voice, and welcome plugins own their writes,
-migrations, and repositories under their respective crates. The
-`PgRepos.server_settings` handle and the `server_settings` table survive
-only as the legacy settings import source until phase 7 (#170).
+`PgServerSettingsRepo` is table maintenance only: the host owns the
+`server_settings` table (its core migration creates it) but types no
+payload for it, because each plugin copies the value it cares about into
+its own storage on first read (ADR-0015). The feed, voice, and welcome
+plugins own their writes, migrations, and repositories under their
+respective crates.
 
 ---
 

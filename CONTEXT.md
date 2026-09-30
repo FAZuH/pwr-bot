@@ -13,9 +13,12 @@ and the settings panels `feed`, `voice`, and `welcome`.
 _Avoid_: extension, add-on
 
 **Host**:
-The pwr-bot monolith process. It spawns plugins, routes their Discord
-interactions, and answers the `host.*` operations they call.
-_Avoid_: server, daemon
+The pwr-bot process. It spawns plugins, routes their Discord
+interactions, and answers the `host.*` operations they call. It is a thin
+plugin runner: no host struct, table, or command carries a plugin's name or
+its domain types, and every settings section and slash command a plugin
+contributes comes from the manifests the plugins themselves announce.
+_Avoid_: server, daemon, monolith
 
 **ViewSpec**:
 The envelope a plugin returns to show a view,

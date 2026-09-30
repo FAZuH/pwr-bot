@@ -24,7 +24,11 @@ split into three layers with one-way dependencies:
   the Host.
 - **Adapters**: one `EffectHandler` per feature executing effects against
   services via `ctx.data().service`; effects return results as `Msg`s
-  (`ImageRendered`, `SettingsPersisted`).
+  (`ImageRendered`, `SettingsPersisted`). Of the four host features that
+  survive, only `about` and `settings` run on the `Host` loop, and neither
+  has a side-effecting effect, so both use the single `NoopEffectHandler`.
+  `register` and `unregister` build no handler at all: they drive
+  `view` + `update` directly and never open a session.
 
 Initial data loads are shell-legal `Config` data-in at Host construction
 (Elm's init arguments) — a `Start -> Query -> Loaded` first frame would
@@ -36,10 +40,12 @@ Two seams carry behavior the pure core cannot express. Modal interactions
 need the component interaction itself, so `GuiFeature::open_modal` is a
 defaulted host-level hook returning the `ViewCmd::AlreadyResponded`
 equivalent (skip ack and re-render; deliver the submission as a `Msg`).
-Persist timing follows each feature's old handler: welcome persists on
-every mutation, voice and feed settings persist on terminal exits. Pattern
-uniformity lost to behavior preservation; the choice is documented in the
-respective core modules.
+Persist timing followed each feature's old handler: welcome persisted on
+every mutation, voice and feed settings persisted on terminal exits.
+Pattern uniformity lost to behavior preservation; the choice is documented
+in the respective core modules. Those persist hooks went with the panels
+themselves (ADR-0009); no surviving host feature persists anything, which
+is why the only `EffectHandler` left in the tree is the no-op one.
 
 The migration was executed per feature behind characterization snapshots
 that pin the rendered component JSON (custom_id timestamps normalized), so
@@ -53,3 +59,9 @@ The old `ViewEngine`, `ViewRender`, `ViewHandler`, `ViewCmd`, and
 remain the collector machinery the `Host` runs on.
 The plugin runtime (`src/plugin/**`, message-id keyed) is a separate
 engine and is not affected by this decision.
+
+**Update — 2026-09-30 (phase 7):** the host core modules are `about`,
+`pagination`, `lifecycle`, `plugins`, `register`, `settings`, and
+`unregister`. The feature-specific cores moved into their plugin crates
+with the panels, so the host TEA runtime is now the host's own four
+features and nothing else.

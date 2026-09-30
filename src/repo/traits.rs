@@ -36,15 +36,6 @@ pub trait CrudTable<T, ID>: TableBase {
     async fn replace(&self, model: &T) -> Result<ID, DatabaseError>;
 }
 
-/// Read-only projections for the host database dump.
-#[async_trait]
-pub trait FeedDumpRepository: Send + Sync {
-    async fn select_feeds(&self) -> Result<Vec<FeedEntity>, DatabaseError>;
-    async fn select_feed_items(&self) -> Result<Vec<FeedItemEntity>, DatabaseError>;
-    async fn select_subscribers(&self) -> Result<Vec<SubscriberEntity>, DatabaseError>;
-    async fn select_subscriptions(&self) -> Result<Vec<FeedSubscriptionEntity>, DatabaseError>;
-}
-
 /// Operations for internal bot metadata.
 #[async_trait]
 pub trait BotMetaRepository: CrudTable<BotMetaEntity, String> + Send + Sync {
@@ -88,7 +79,6 @@ pub trait GuildPluginRepository: TableBase + Send + Sync {
 /// Each method clones the underlying pool-backed handle and returns
 /// a boxed trait object. Call at service construction time, not per-operation.
 pub trait Repos: Send + Sync {
-    fn feed_dump(&self) -> Box<dyn FeedDumpRepository + Send + Sync>;
     fn bot_meta(&self) -> Box<dyn BotMetaRepository + Send + Sync>;
     fn plugin_kv(&self) -> Box<dyn PluginKvRepository + Send + Sync>;
     fn guild_plugins(&self) -> Box<dyn GuildPluginRepository + Send + Sync>;

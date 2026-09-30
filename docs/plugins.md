@@ -79,8 +79,9 @@ storage. It applies the migrations under
 group plus the `/feed-settings` panel command. Its single migration has a
 unique version and creates only feed-owned tables with `IF NOT EXISTS`. Its own
 service and repository write feed tables; the host bridges Discord and plugin
-operations. The owner-only `/dump_db` command is the exception: the host
-directly reads feed tables for its transitional database dump.
+operations, and reads no feed table. The owner-only `/dump_db` command and the
+host's read-only feed dump repository are gone: they selected tables the core
+migration no longer creates, so the command could not run.
 
 ## Voice
 

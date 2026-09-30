@@ -106,3 +106,9 @@ renders the card and ships `welcome_preview.png` as a `ViewSpec.files`
 entry. The host only validates and base64-decodes `files` into Discord
 attachments for every render — the "Bytes in the RPC response" alternative
 above, carried in the envelope instead of an op response.
+
+**Superseded, final — 2026-09-30 (phase 7, #170):** Nothing on this ADR's
+design remains. The last host-side welcome module,
+`src/bot/command/welcome/`, is deleted; the welcome plugin declares
+`/welcome` itself, so the host no longer names the plugin or its preview at
+all. The record below is kept as the phase-5 design it superseded.

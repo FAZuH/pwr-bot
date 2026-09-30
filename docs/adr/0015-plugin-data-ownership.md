@@ -8,9 +8,9 @@ protocol surface, and `data_path` is the sanctioned home for plugin files
 tables and can run its own embedded Diesel migrations at startup. Feed,
 voice, and welcome own their embedded migrations; core owns shared host
 tables. The shared `server_settings` table remains only as the legacy import
-source until phase 7 (#170). Core also keeps `plugin_kv`, `guild_plugins`,
-and `bot_meta`;
-the feed repository is read-only for the transitional dump. Rejected: a generic SQL passthrough cap (violates ADR-0010's "ops
+source; the host types no payload for it and reads no plugin data through it.
+Core also keeps `plugin_kv`, `guild_plugins`,
+and `bot_meta`. Rejected: a generic SQL passthrough cap (violates ADR-0010's "ops
 are shaped by services") and typed-RPC growth (keeps the core domain-aware,
 contra ADR-0014). No data migration guards the rename of the settings
 panels — nothing pre-plugin runs in production, so `guild_plugins` rows are

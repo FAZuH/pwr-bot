@@ -30,10 +30,10 @@ version = "0.4.0"
 
 edition = "2024"
 authors = ["FAZuH <mail@fazuh.com>"]
-description = "Discord bot with feed subscriptions and voice channel tracking"
+description = "Discord plugin host: spawns plugin subprocesses and routes their views"
 license = "MIT"
 repository = "https://github.com/FAZuH/pwr-bot"
-keywords = ["discord", "bot", "serenity", "feed-reader", "voice"]
+keywords = ["discord", "bot", "serenity", "plugin", "framework"]
 
 [lints.clippy]
 uninlined_format_args = "warn"
@@ -94,8 +94,6 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 httpmock = "0.7.0"
 serial_test = "3.3.1"
 pwr-viewgen.workspace = true
-# Integration tests exercise the feed service and repository types.
-feed = { path = "crates/plugin/feed" }
 postgresql_embedded = { version = "=0.20.1", default-features = false, features = ["zonky", "tokio", "rustls"] }
 tokio-postgres = "0.7"
 # TLS for tokio-postgres in the test DB seam: `sslmode=require` URLs must

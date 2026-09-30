@@ -5,7 +5,6 @@
 //! different files and domains.
 
 pub mod about;
-pub mod dump_db;
 pub mod plugins;
 pub mod prelude;
 pub mod register;
@@ -13,7 +12,6 @@ pub mod register_owner;
 pub mod session_exit;
 pub mod settings;
 pub mod unregister;
-pub mod welcome;
 
 /// How long the session parks on a handed-off section panel before giving
 /// up. The wake re-renders through the original interaction's token, which
@@ -61,13 +59,11 @@ impl Cog for Cogs {
     fn commands(&self) -> Vec<Command<Data, Error>> {
         vec![
             about::about(),
-            dump_db::dump_db(),
             plugins::plugins(),
             register::register(),
             register_owner::register_owner(),
             settings::settings(),
             unregister::unregister(),
-            welcome::welcome(),
         ]
     }
 }

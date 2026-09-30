@@ -29,7 +29,6 @@ const MIGRATIONS: EmbeddedMigrations = embed_migrations!("migrations");
 /// factory trait methods clone the inner handle and return a `Box<dyn Repo>`.
 /// Call factory methods at service construction time, not per-operation.
 pub struct PgRepos {
-    feed_dump: PgFeedDumpRepo,
     pub server_settings: PgServerSettingsRepo,
     pub bot_meta: PgBotMetaRepo,
     pub plugin_kv: PgPluginKvRepo,
@@ -48,7 +47,6 @@ impl PgRepos {
         info!("connected to db");
 
         Ok(Self {
-            feed_dump: PgFeedDumpRepo::new(pool.clone()),
             server_settings: PgServerSettingsRepo::new(pool.clone()),
             bot_meta: PgBotMetaRepo::new(pool.clone()),
             plugin_kv: PgPluginKvRepo::new(pool.clone()),
@@ -85,10 +83,6 @@ impl PgRepos {
 }
 
 impl Repos for PgRepos {
-    fn feed_dump(&self) -> Box<dyn FeedDumpRepository + Send + Sync> {
-        Box::new(self.feed_dump.clone())
-    }
-
     fn bot_meta(&self) -> Box<dyn BotMetaRepository + Send + Sync> {
         Box::new(self.bot_meta.clone())
     }
