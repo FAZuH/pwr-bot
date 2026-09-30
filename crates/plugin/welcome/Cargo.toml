@@ -27,5 +27,19 @@ wreq = { version = "0.16", features = ["stream", "query"] }
 wreq-util = "0.2"
 
 [dev-dependencies]
+dotenv = "0.15.0"
+libc = "0.2.182"
+mockall = "0.13.1"
+# The host-seam suite (`plugin_welcome.rs`) drives this panel over the real
+# stdio wire through the host's plugin runtime, so it needs the host's own
+# types, plus the test-database seam's own set. One-way: the host does not
+# depend on this crate.
+pwr-bot = { path = "../../.." }
+poise = { git = "https://github.com/serenity-rs/poise", branch = "serenity-next" }
+postgresql_embedded = { version = "=0.20.1", default-features = false, features = ["zonky", "tokio", "rustls"] }
+rustls-native-certs = "0.8"
+serial_test = "3.3.1"
+tokio-postgres = "0.7"
+tokio-postgres-rustls = { version = "0.14", default-features = false, features = ["ring", "native-certs"] }
 # Only the tests read `IS_COMPONENTS_V2`; production is `view!`-authored.
 pwr-poise-components = { path = "../../pwr-poise-components" }

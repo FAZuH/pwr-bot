@@ -168,6 +168,25 @@ fn panel_status(resp: &Msg) -> &str {
     }
 }
 
+/// The persisted snapshot's enabled flag, read straight from the plugin's
+/// own table — the ground truth for "did this interaction write anything".
+async fn persisted_enabled(db_url: &str) -> bool {
+    let (client, connection) = tokio_postgres::connect(db_url, tokio_postgres::NoTls)
+        .await
+        .expect("connect to read the persisted snapshot");
+    tokio::spawn(async move {
+        connection.await.expect("snapshot read connection");
+    });
+    client
+        .query_one(
+            "SELECT enabled FROM feed_settings WHERE guild_id = $1",
+            &[&42_i64],
+        )
+        .await
+        .expect("read the persisted feed settings")
+        .get(0)
+}
+
 #[tokio::test]
 #[serial_test::serial]
 async fn core_and_plugin_migrations_create_owned_tables_once() {
@@ -602,6 +621,121 @@ async fn feed_settings_rejects_an_invocation_without_actor_context() {
         }
         other => panic!("expected a permission error, got {other:?}"),
     }
+
+    let status = panel.stop().await.expect("graceful stop");
+    assert_eq!(status.code(), Some(0), "clean exit after bye: {status}");
+}
+
+/// A NON-admin is refused the settings command, through the real wire.
+///
+/// This is the seam the host's own guild-admin pre-check used to cover. That
+/// pre-check is gone — the host must not name a plugin to make an exception
+/// for it — so the plugin's `verify_settings_invocation` is now the only gate,
+/// and it is fed by whatever actor context the host builds. Both command names
+/// are covered because both reach the same panel.
+#[tokio::test]
+#[serial_test::serial]
+async fn a_non_admin_is_refused_the_settings_command() {
+    let db_url = prepare_database().await;
+    let panel = spawn_panel(services(Arc::new(MockHostIo::new()), db_url, None)).await;
+
+    for command in ["feed settings", "feed-settings"] {
+        let resp = panel
+            .call(
+                "invoke",
+                Some(command),
+                Some(json!({
+                    "guild_id": GUILD_ID,
+                    "_context": {
+                        "user_id": 7,
+                        "member_roles": [],
+                        // Neither Administrator nor Manage Server.
+                        "member_permissions": 0,
+                    },
+                })),
+            )
+            .await
+            .expect("invoke answered");
+
+        match resp {
+            Msg::Resp {
+                ok: false,
+                error: Some(err),
+                ..
+            } => {
+                assert_eq!(err.kind, "CommandError", "for `{command}`");
+                assert!(
+                    err.msg.contains("Manage Server") || err.msg.contains("Administrator"),
+                    "the refusal names the permission it wanted, got: {}",
+                    err.msg
+                );
+            }
+            other => {
+                panic!("a non-admin must not reach the panel for `{command}`, got {other:?}")
+            }
+        }
+    }
+
+    let status = panel.stop().await.expect("graceful stop");
+    assert_eq!(status.code(), Some(0), "clean exit after bye: {status}");
+}
+
+/// The same gate on the interaction path, and it writes nothing: a non-admin
+/// click is refused AND the seeded snapshot is still active afterwards.
+#[tokio::test]
+#[serial_test::serial]
+async fn a_non_admin_cannot_interact_with_the_settings_panel() {
+    let db_url = prepare_database().await;
+    install_settings_write_counter(&db_url).await;
+    let panel = spawn_panel(services(Arc::new(MockHostIo::new()), db_url.clone(), None)).await;
+
+    let resp = panel
+        .call(
+            "invoke",
+            Some("feed-settings"),
+            Some(json!({ "guild_id": GUILD_ID, "_context": admin_context() })),
+        )
+        .await
+        .expect("an admin opens the panel");
+    let view = assert_envelope(&resp, 0);
+
+    let resp = panel
+        .call(
+            "view.interact",
+            Some("feed-settings"),
+            Some(json!({
+                "custom_id": "feeds:toggle",
+                "view": view,
+                "_context": {
+                    "user_id": 999,
+                    "member_roles": [],
+                    "member_permissions": 0,
+                },
+            })),
+        )
+        .await
+        .expect("the click was answered");
+
+    match resp {
+        Msg::Resp {
+            ok: false,
+            error: Some(err),
+            ..
+        } => {
+            assert_eq!(err.kind, "CommandError");
+            assert!(
+                err.msg.contains("Manage Server") || err.msg.contains("Administrator"),
+                "msg: {}",
+                err.msg
+            );
+        }
+        other => panic!("a non-admin click must be refused, got {other:?}"),
+    }
+
+    assert!(
+        persisted_enabled(&db_url).await,
+        "the refused click wrote nothing: the snapshot is still active"
+    );
 
     let status = panel.stop().await.expect("graceful stop");
     assert_eq!(status.code(), Some(0), "clean exit after bye: {status}");

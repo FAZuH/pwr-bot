@@ -10,19 +10,25 @@ use pwr_bot::plugin::RespawnPolicy;
 use pwr_bot::plugin::RunningPlugin;
 use pwr_bot::plugin::StatsHandle;
 use pwr_bot::plugin::host::MockHostIo;
+use pwr_bot::repo::PgRepos;
 use pwr_plugin_protocol::Msg;
 use pwr_poise_components::IS_COMPONENTS_V2;
 use serde_json::Value;
 use serde_json::json;
 
-mod common;
+#[path = "support/db.rs"]
+mod db;
 mod probe;
 use probe::probe_binary;
 
+/// A per-process database with the core schema migrated and emptied. The core
+/// migration creates the `server_settings` table the panel imports its legacy
+/// settings from; the panel applies its own migration at startup.
 async fn database() -> String {
-    let db_url = common::db::db_url().await;
-    let core = common::setup_db().await;
-    common::teardown_db(&core).await;
+    let db_url = db::db_url().await;
+    let core = PgRepos::new(&db_url).await.expect("connect core storage");
+    core.run_migrations().await.expect("run core migrations");
+    core.delete_all_tables().await.expect("clean core storage");
     db_url
 }
 

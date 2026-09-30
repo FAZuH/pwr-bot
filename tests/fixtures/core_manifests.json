@@ -1,14 +1,14 @@
 [
   {
-    "name": "feed",
+    "name": "alpha",
     "description": "",
     "version": "0.1.0",
     "commands": [
       {
         "create_command": {
-          "description": "Manage feed subscriptions and settings",
+          "description": "Manage example subscriptions and settings",
           "description_localizations": {},
-          "name": "feed",
+          "name": "alpha",
           "name_localizations": {},
           "nsfw": false,
           "options": [
@@ -16,7 +16,7 @@
               "autocomplete": false,
               "channel_types": [],
               "choices": [],
-              "description": "Configure feed settings for this server",
+              "description": "Configure example settings for this server",
               "max_length": null,
               "max_value": null,
               "min_length": null,
@@ -30,7 +30,7 @@
               "autocomplete": false,
               "channel_types": [],
               "choices": [],
-              "description": "Subscribe to one or more feeds",
+              "description": "Subscribe to one or more examples",
               "max_length": null,
               "max_value": null,
               "min_length": null,
@@ -41,7 +41,7 @@
                   "autocomplete": true,
                   "channel_types": [],
                   "choices": [],
-                  "description": "Link(s) of the feeds. Separate links with commas (,)",
+                  "description": "Link(s) of the examples. Separate links with commas (,)",
                   "max_length": null,
                   "max_value": null,
                   "min_length": null,
@@ -84,7 +84,7 @@
               "autocomplete": false,
               "channel_types": [],
               "choices": [],
-              "description": "Unsubscribe from one or more feeds",
+              "description": "Unsubscribe from one or more examples",
               "max_length": null,
               "max_value": null,
               "min_length": null,
@@ -95,7 +95,7 @@
                   "autocomplete": true,
                   "channel_types": [],
                   "choices": [],
-                  "description": "Link(s) of the feeds. Separate links with commas (,)",
+                  "description": "Link(s) of the examples. Separate links with commas (,)",
                   "max_length": null,
                   "max_value": null,
                   "min_length": null,
@@ -138,7 +138,7 @@
               "autocomplete": false,
               "channel_types": [],
               "choices": [],
-              "description": "List your current feed subscriptions",
+              "description": "List your current example subscriptions",
               "max_length": null,
               "max_value": null,
               "min_length": null,
@@ -183,9 +183,9 @@
             0
           ],
           "default_member_permissions": "40",
-          "description": "Manage feed subscription settings",
+          "description": "Manage example subscription settings",
           "description_localizations": {},
-          "name": "feed-settings",
+          "name": "alpha-settings",
           "name_localizations": {},
           "nsfw": false,
           "options": []
@@ -198,15 +198,15 @@
     "api_version": 2
   },
   {
-    "name": "voice",
+    "name": "beta",
     "description": "",
     "version": "0.1.0",
     "commands": [
       {
         "create_command": {
-          "description": "Voice channel tracking and leaderboard commands",
+          "description": "Example tracking and leaderboard commands",
           "description_localizations": {},
-          "name": "vc",
+          "name": "beta",
           "name_localizations": {},
           "nsfw": false,
           "options": [
@@ -214,7 +214,7 @@
               "autocomplete": false,
               "channel_types": [],
               "choices": [],
-              "description": "Configure voice tracking settings for this server",
+              "description": "Configure example tracking settings for this server",
               "max_length": null,
               "max_value": null,
               "min_length": null,
@@ -228,7 +228,7 @@
               "autocomplete": false,
               "channel_types": [],
               "choices": [],
-              "description": "Display the voice activity leaderboard",
+              "description": "Display the example activity leaderboard",
               "max_length": null,
               "max_value": null,
               "min_length": null,
@@ -280,7 +280,7 @@
                       "value": 7
                     }
                   ],
-                  "description": "Time period to filter voice activity. Defaults to \"This month\"",
+                  "description": "Time period to filter example activity. Defaults to \"This month\"",
                   "max_length": null,
                   "max_value": null,
                   "min_length": null,
@@ -298,7 +298,7 @@
               "autocomplete": false,
               "channel_types": [],
               "choices": [],
-              "description": "Show voice activity statistics",
+              "description": "Show example activity statistics",
               "max_length": null,
               "max_value": null,
               "min_length": null,
@@ -397,9 +397,9 @@
             0
           ],
           "default_member_permissions": "40",
-          "description": "Manage voice tracking settings",
+          "description": "Manage example tracking settings",
           "description_localizations": {},
-          "name": "voice-settings",
+          "name": "beta-settings",
           "name_localizations": {},
           "nsfw": false,
           "options": []
@@ -412,7 +412,7 @@
     "api_version": 2
   },
   {
-    "name": "welcome",
+    "name": "gamma",
     "description": "",
     "version": "0.1.0",
     "commands": [
@@ -421,9 +421,22 @@
           "contexts": [
             0
           ],
-          "description": "Manage welcome card settings",
+          "description": "Manage example card settings",
           "description_localizations": {},
-          "name": "welcome-settings",
+          "name": "gamma-settings",
+          "name_localizations": {},
+          "nsfw": false,
+          "options": []
+        }
+      },
+      {
+        "create_command": {
+          "contexts": [
+            0
+          ],
+          "description": "Configure example cards for new members",
+          "description_localizations": {},
+          "name": "gamma",
           "name_localizations": {},
           "nsfw": false,
           "options": []

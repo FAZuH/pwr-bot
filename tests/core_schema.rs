@@ -1,43 +1,21 @@
-#[test]
-fn voice_plugin_migration_claims_only_voice_storage() {
-    let initial = include_str!(
-        "../crates/plugin/voice/migrations/20260924-140100-0000_voice_owned_schema/up.sql"
-    );
-    let sentinel = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("crates/plugin/voice/migrations/20260924-140000-0000_voice_storage");
+//! The core migration source owns exactly the host's own tables.
+//!
+//! This assertion is deliberately generic: it names the four core tables and
+//! nothing else, so it does not enumerate what any plugin owns. A plugin's
+//! migration source is asserted in that plugin's own crate.
 
-    assert!(initial.contains("voice_sessions"));
-    assert!(initial.contains("voice_settings"));
-    assert!(!initial.contains("server_settings"));
-    assert!(!sentinel.exists());
-}
+/// The tables the host's core storage owns (ADR-0015).
+const CORE_TABLES: &[&str] = &["server_settings", "bot_meta", "plugin_kv", "guild_plugins"];
 
-#[test]
-fn feed_plugin_migration_claims_only_feed_storage() {
-    let initial = include_str!(
-        "../crates/plugin/feed/migrations/20260924-130100-0000_feed_owned_schema/up.sql"
-    );
-    let sentinel = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("crates/plugin/feed/migrations/20260924-130000-0000_feed_settings");
-
-    assert!(initial.contains("feeds"));
-    assert!(initial.contains("feed_settings"));
-    assert!(!initial.contains("server_settings"));
-    assert!(!sentinel.exists());
-}
-
-#[test]
-fn welcome_plugin_migration_claims_only_welcome_storage() {
-    let initial = include_str!(
-        "../crates/plugin/welcome/migrations/20260924-150100-0000_welcome_owned_schema/up.sql"
-    );
-
-    assert!(initial.contains("welcome_settings"));
-    assert!(!initial.contains("server_settings"));
-    assert!(initial.starts_with(concat!(
-        "-- Each migration source owns only the tables in its up.sql and uses ",
-        "CREATE TABLE IF NOT EXISTS."
-    )));
+/// Every `CREATE TABLE IF NOT EXISTS <name>` in `sql`, in source order.
+fn declared_tables(sql: &str) -> Vec<String> {
+    sql.lines()
+        .filter_map(|line| {
+            let rest = line.trim().strip_prefix("CREATE TABLE IF NOT EXISTS ")?;
+            let name = rest.split(['(', ' ', ';']).next()?;
+            Some(name.to_string())
+        })
+        .collect()
 }
 
 #[test]
@@ -47,13 +25,15 @@ fn core_migrations_claim_only_core_storage() {
         .join("migrations/2026-04-29-122252-0000_initial_schema");
 
     assert!(!historical_path.exists());
-    assert!(core.contains("server_settings"));
-    assert!(core.contains("bot_meta"));
-    assert!(core.contains("plugin_kv"));
-    assert!(core.contains("guild_plugins"));
-    assert!(!core.contains("voice_sessions"));
-    assert!(!core.contains("feeds"));
-    assert!(core.starts_with(
-        "-- Each migration source owns only the tables in its up.sql and uses CREATE TABLE IF NOT EXISTS."
-    ));
+    assert_eq!(
+        declared_tables(core),
+        CORE_TABLES,
+        "the core migration declares exactly the host's own tables"
+    );
+    assert!(
+        core.starts_with(
+            "-- Each migration source owns only the tables in its up.sql and uses CREATE TABLE IF NOT EXISTS."
+        ),
+        "the migration source carries its ownership header"
+    );
 }
