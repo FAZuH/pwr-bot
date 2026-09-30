@@ -142,3 +142,4 @@ jobs:
           name: ${{ matrix.asset_name }}
           path: artifacts/${{ matrix.asset_name }}
           retention-days: 3
+          if-no-files-found: error
