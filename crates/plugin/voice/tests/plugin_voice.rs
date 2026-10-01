@@ -436,9 +436,10 @@ fn find_button_id(page: &Value, label: &str) -> Option<String> {
         match node {
             Value::Object(map) => {
                 if map.get("label").and_then(Value::as_str) == Some(label)
-                    && let Some(id) = map.get("custom_id").and_then(Value::as_str) {
-                        return Some(id.to_string());
-                    }
+                    && let Some(id) = map.get("custom_id").and_then(Value::as_str)
+                {
+                    return Some(id.to_string());
+                }
                 map.values().find_map(|value| walk(value, label))
             }
             Value::Array(items) => items.iter().find_map(|item| walk(item, label)),
