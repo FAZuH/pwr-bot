@@ -2,10 +2,8 @@
 //! announces and the static manifest the host registers commands from.
 
 use pwr_plugin_protocol::API_VERSION;
-use pwr_plugin_protocol::CommandDef;
 use pwr_plugin_protocol::Manifest;
 use pwr_plugin_protocol::SettingsSection;
-use serde_json::json;
 
 pub mod image_generator;
 pub mod repo;
@@ -15,17 +13,16 @@ pub mod storage;
 /// under.
 pub const PLUGIN_NAME: &str = "welcome";
 
-/// The command the host Settings section dispatches.
+/// The panel's invoke command. Not a slash command: the host dispatches it
+/// from the Settings section's tile, so the panel is opened only by
+/// `/settings welcome`, which parks a host Settings session behind it. A
+/// panel opened any other way has no session waiting, and its Back and About
+/// have nowhere to hand the message back to.
 pub const COMMAND_NAME: &str = "welcome-settings";
 
-/// The user-facing slash command: the plugin owns its own name, so `/welcome`
-/// is declared here rather than by a host Cog.
-pub const SLASH_COMMAND_NAME: &str = "welcome";
-
-/// Whether `cmd` is one of the names this panel answers — the Settings
-/// section's `welcome-settings` or the `/welcome` slash command.
+/// Whether `cmd` is the name this panel answers.
 pub fn is_panel_command(cmd: Option<&str>) -> bool {
-    matches!(cmd, Some(COMMAND_NAME) | Some(SLASH_COMMAND_NAME))
+    cmd == Some(COMMAND_NAME)
 }
 
 /// The plugin's static declaration, matching what its hello announces.
@@ -34,27 +31,12 @@ pub fn manifest() -> Manifest {
         name: PLUGIN_NAME.into(),
         description: "Manage welcome card settings".into(),
         version: "0.1.0".into(),
-        // The guild-only slash commands the host dispatches: a direct invoke
-        // carries no `guild_id` in its re-parsed args, so the host injects the
-        // invocation's guild into the args. No event handlers: an expiry
-        // persists nothing, so there is no `view.timeout` work for a plugin
-        // to do.
-        commands: vec![
-            CommandDef {
-                create_command: json!({
-                    "name": COMMAND_NAME,
-                    "description": "Manage welcome card settings",
-                    "dm_permission": false,
-                }),
-            },
-            CommandDef {
-                create_command: json!({
-                    "name": SLASH_COMMAND_NAME,
-                    "description": "Configure welcome cards for new members",
-                    "dm_permission": false,
-                }),
-            },
-        ],
+        // No slash command. The panel is reached through the host's
+        // `/settings` and its section tile, so there is nothing to register
+        // with Discord and nothing to sync when the panel comes and goes.
+        // No event handlers either: an expiry persists nothing, so there is
+        // no `view.timeout` work for a plugin to do.
+        commands: vec![],
         event_handlers: vec![],
         tasks: vec![],
         settings: vec![SettingsSection {

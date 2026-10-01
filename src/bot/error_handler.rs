@@ -60,12 +60,21 @@ impl ErrorHandler {
     }
 
     /// Classifies an error and returns user-friendly title and description.
+    ///
+    /// The single place a user-facing error's shape is decided: every command
+    /// error renders through here, so two messages cannot drift apart. An
+    /// absent plugin catalog gets its own title because it is a state to act
+    /// on, not a failure.
     fn classify_error(
         error: &Error,
         ctx: &poise::Context<'_, Data, Error>,
     ) -> (&'static str, String) {
         if let Some(bot_error) = error.downcast_ref::<BotError>() {
-            ("❌ Action Failed", bot_error.to_string())
+            let title = match bot_error {
+                BotError::NoPluginCatalog => "📦 No Plugins",
+                _ => "❌ Action Failed",
+            };
+            (title, bot_error.to_string())
         } else if let Some(service_error) = error.downcast_ref::<ServiceError>() {
             ("❌ Service Error", service_error.to_string())
         } else if let Some(message) = plugin_rejection_message(error) {

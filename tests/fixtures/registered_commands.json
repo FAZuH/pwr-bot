@@ -444,10 +444,10 @@
         "name": "enable",
         "options": [
           {
-            "autocomplete": false,
+            "autocomplete": true,
             "channel_types": [],
             "choices": [],
-            "description": "A slash command parameter",
+            "description": "The catalog plugin to enable",
             "max_length": null,
             "max_value": null,
             "min_length": null,
@@ -473,10 +473,10 @@
         "name": "disable",
         "options": [
           {
-            "autocomplete": false,
+            "autocomplete": true,
             "channel_types": [],
             "choices": [],
-            "description": "A slash command parameter",
+            "description": "The plugin to disable in this server",
             "max_length": null,
             "max_value": null,
             "min_length": null,
@@ -502,10 +502,10 @@
         "name": "swap",
         "options": [
           {
-            "autocomplete": false,
+            "autocomplete": true,
             "channel_types": [],
             "choices": [],
-            "description": "A slash command parameter",
+            "description": "The enabled plugin to swap to a freshly installed binary",
             "max_length": null,
             "max_value": null,
             "min_length": null,
@@ -525,11 +525,26 @@
     "contexts": [
       0
     ],
-    "description": "Open the server settings menu",
+    "description": "Open the server settings menu, or one plugin's settings panel directly.",
     "description_localizations": {},
     "name": "settings",
     "name_localizations": {},
     "nsfw": false,
-    "options": []
+    "options": [
+      {
+        "autocomplete": true,
+        "channel_types": [],
+        "choices": [],
+        "description": "A plugin's settings panel. Leave empty for this server's settings page.",
+        "max_length": null,
+        "max_value": null,
+        "min_length": null,
+        "min_value": null,
+        "name": "mode",
+        "options": [],
+        "required": false,
+        "type": 3
+      }
+    ]
   }
 ]

@@ -40,6 +40,7 @@ use crate::bot::command::about::AboutHandler;
 use crate::bot::command::settings::SettingsHandler;
 use crate::bot::navigation::Navigation;
 use crate::bot::translate::SettingsReturnPage;
+use crate::update::settings::SettingsSection;
 
 /// Trait for command modules (Cogs) that provide a set of Discord commands.
 ///
@@ -89,6 +90,11 @@ pub struct Router<'a> {
     nav_queue: NavQueue,
     /// Shared handle to the active message.
     reply_handle: SyncReplyHandle<'a>,
+    /// The settings section the session's first frame is handed straight to,
+    /// set before [`Self::run`] by a `/settings <mode>` invocation and taken
+    /// once by [`Self::handler_for`]. Held behind a lock because that read
+    /// happens on the session loop, not on the command's own task.
+    open_section: std::sync::Mutex<Option<SettingsSection>>,
 }
 
 impl<'a> Router<'a> {
@@ -98,12 +104,32 @@ impl<'a> Router<'a> {
             ctx,
             nav_queue: tokio::sync::Mutex::new(VecDeque::new()),
             reply_handle: tokio::sync::Mutex::new(None),
+            open_section: std::sync::Mutex::new(None),
         })
     }
 
     /// Returns the Poise context.
     pub fn context(&self) -> &Context<'a> {
         &self.ctx
+    }
+
+    /// Names the settings section the session's first frame hands straight to,
+    /// so `/settings <mode>` opens that panel instead of the list. Set once,
+    /// before the session runs.
+    pub fn open_section(&self, section: Option<SettingsSection>) {
+        if let Ok(mut slot) = self.open_section.lock() {
+            *slot = section;
+        }
+    }
+
+    /// Takes the section [`Self::open_section`] named, or `None` when the
+    /// session was opened as the plain hub. Taken rather than copied so a
+    /// second pass over the hub falls back to the hub's own event loop.
+    pub(crate) fn take_open_section(&self) -> Option<SettingsSection> {
+        self.open_section
+            .lock()
+            .ok()
+            .and_then(|mut slot| slot.take())
     }
 
     /// Queues a navigation target for the session loop to pop next.

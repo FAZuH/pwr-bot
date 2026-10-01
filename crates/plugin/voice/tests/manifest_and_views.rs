@@ -1,6 +1,7 @@
 use base64::Engine as _;
 use chrono::DateTime;
 use serde_json::json;
+use voice::COMMAND_NAME;
 use voice::GuildStatType;
 use voice::VoiceLeaderboardEntry;
 use voice::VoiceSettings;
@@ -30,8 +31,13 @@ fn plugin_migrations_claim_only_voice_storage() {
     assert!(!sentinel.exists());
 }
 
+/// The panel is reached only through the host's `/settings`, so the manifest
+/// declares one command root and no settings surface of its own. A
+/// `settings` subcommand or a standalone `voice-settings` command would open
+/// the panel with no host Settings session behind it, and its Back and About
+/// would have nowhere to return to.
 #[test]
-fn manifest_keeps_the_vc_surface_and_declares_voice_events() {
+fn manifest_declares_one_command_root_and_no_settings_command() {
     let manifest = manifest();
 
     assert_eq!(manifest.api_version, 2);
@@ -49,20 +55,30 @@ fn manifest_keeps_the_vc_surface_and_declares_voice_events() {
                 .and_then(|name| name.as_str())
         })
         .collect();
-    assert_eq!(names, ["vc", "voice-settings"]);
+    assert_eq!(names, ["vc"]);
     let root = &manifest.commands[0].create_command;
     let options = root["options"].as_array().expect("vc options");
-    assert_eq!(options[0]["name"], "settings");
-    assert_eq!(options[0]["default_member_permissions"], "40");
-    assert_eq!(options[1]["name"], "leaderboard");
-    assert_eq!(options[2]["name"], "stats");
-    let stats_options = options[2]["options"].as_array().expect("stats options");
+    let option_names: Vec<&str> = options
+        .iter()
+        .filter_map(|option| option["name"].as_str())
+        .collect();
+    assert_eq!(
+        option_names,
+        ["leaderboard", "stats"],
+        "no `settings` subcommand: /settings is the only panel route"
+    );
+    let stats_options = options[1]["options"].as_array().expect("stats options");
     assert_eq!(
         stats_options[0]["description"],
         "Time period to display. Defaults to \"This month\""
     );
     assert_eq!(stats_options[0]["choices"][1]["name"], "Monthly");
     assert_eq!(stats_options[0]["choices"][1]["value"], 1);
+
+    // The panel is still declared: the host dispatches this name from the
+    // Settings tile, so the panel is reachable even with no command.
+    assert_eq!(manifest.settings.len(), 1);
+    assert_eq!(manifest.settings[0].command, COMMAND_NAME);
 }
 
 #[test]

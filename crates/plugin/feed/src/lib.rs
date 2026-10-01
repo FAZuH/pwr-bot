@@ -33,7 +33,11 @@ pub use feed::Platforms;
 /// under.
 pub const PLUGIN_NAME: &str = "feed";
 
-/// The direct settings command used by the host Settings section.
+/// The panel's invoke command, named by the manifest's settings section and
+/// dispatched by the host from its `/settings` tile. Not a slash command: the
+/// panel is opened only through the host Settings session, which parks
+/// itself behind the message so the panel's Back and About have somewhere to
+/// return to.
 pub const COMMAND_NAME: &str = "feed-settings";
 
 /// The public feed command root.
@@ -70,64 +74,47 @@ pub fn manifest() -> Manifest {
         name: PLUGIN_NAME.into(),
         description: "Manage feed subscriptions and settings".into(),
         version: "0.1.0".into(),
-        commands: vec![
-            CommandDef {
-                create_command: json!({
-                    "name": FEED_COMMAND_NAME,
-                    "description": "Manage feed subscriptions and settings",
-                    "options": [
-                        {
-                            "name": "settings",
-                            "description": "Configure feed settings for this server",
-                            "type": 1,
-                            "default_member_permissions": "40",
-                        },
-                        {
-                            "name": "subscribe",
-                            "description": "Subscribe to one or more feeds",
-                            "type": 1,
-                            "options": [
-                                links_option,
-                                send_into_option(
-                                    "send_into",
-                                    "Where to send the notifications. Default to your DM",
-                                ),
-                            ],
-                        },
-                        {
-                            "name": "unsubscribe",
-                            "description": "Unsubscribe from one or more feeds",
-                            "type": 1,
-                            "options": [
-                                links_option.clone(),
-                                send_into_option(
-                                    "send_into",
-                                    "Where notifications were being sent. Default to DM",
-                                ),
-                            ],
-                        },
-                        {
-                            "name": "list",
-                            "description": "List your current feed subscriptions",
-                            "type": 1,
-                            "options": [send_into_option(
-                                "sent_into",
-                                "Where the notifications are being sent. Default to DM",
-                            )],
-                        },
-                    ],
-                }),
-            },
-            CommandDef {
-                create_command: json!({
-                    "name": COMMAND_NAME,
-                    "description": "Manage feed subscription settings",
-                    "dm_permission": false,
-                    "guild_only": true,
-                    "default_member_permissions": "40",
-                }),
-            },
-        ],
+        commands: vec![CommandDef {
+            create_command: json!({
+                "name": FEED_COMMAND_NAME,
+                "description": "Manage feed subscriptions",
+                "options": [
+                    {
+                        "name": "subscribe",
+                        "description": "Subscribe to one or more feeds",
+                        "type": 1,
+                        "options": [
+                            links_option,
+                            send_into_option(
+                                "send_into",
+                                "Where to send the notifications. Default to your DM",
+                            ),
+                        ],
+                    },
+                    {
+                        "name": "unsubscribe",
+                        "description": "Unsubscribe from one or more feeds",
+                        "type": 1,
+                        "options": [
+                            links_option.clone(),
+                            send_into_option(
+                                "send_into",
+                                "Where notifications were being sent. Default to DM",
+                            ),
+                        ],
+                    },
+                    {
+                        "name": "list",
+                        "description": "List your current feed subscriptions",
+                        "type": 1,
+                        "options": [send_into_option(
+                            "sent_into",
+                            "Where the notifications are being sent. Default to DM",
+                        )],
+                    },
+                ],
+            }),
+        }],
         event_handlers: vec!["view.timeout".into()],
         tasks: vec![],
         settings: vec![SettingsSection {

@@ -15,6 +15,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
+use log::debug;
 use pwr_plugin_protocol::Manifest;
 
 use crate::bot::add_plugin_commands;
@@ -45,8 +46,9 @@ pub async fn plugins(ctx: Context<'_>) -> Result<(), Error> {
 
 /// Lists every catalog plugin and its enabled state in this guild.
 ///
-/// When the catalog failed to load, the bot owner sees the real path and
-/// cause while other users keep the friendly empty message.
+/// A catalog that carries no entries is a normal state, not a failure to
+/// report: it answers through the shared error seam with a clean sentence and
+/// leaves the load failure in the log.
 #[poise::command(slash_command)]
 pub async fn list(ctx: Context<'_>) -> Result<(), Error> {
     is_author_guild_admin(ctx).await?;
@@ -55,10 +57,7 @@ pub async fn list(ctx: Context<'_>) -> Result<(), Error> {
     let model = guild_model(&data, guild_id).await?;
 
     if model.catalog.is_empty() {
-        let reply =
-            empty_catalog_message(data.plugin_catalog_error.as_ref(), author_is_bot_owner(ctx));
-        ctx.send(text_reply(reply)).await?;
-        return Ok(());
+        return Err(empty_catalog_error(data.plugin_catalog_error.as_ref()));
     }
     ctx.send(text_reply(
         list_lines(&data.plugin_catalog, &model.enabled).join("\n"),
@@ -91,11 +90,16 @@ fn list_lines(catalog: &HashMap<String, CatalogEntry>, enabled: &[String]) -> Ve
 /// Enables a catalog plugin for this guild, registering the union of all
 /// enabled plugins' commands.
 #[poise::command(slash_command)]
-pub async fn enable(ctx: Context<'_>, plugin: String) -> Result<(), Error> {
+pub async fn enable(
+    ctx: Context<'_>,
+    #[description = "The catalog plugin to enable"]
+    #[autocomplete = "plugin_choices"]
+    plugin: String,
+) -> Result<(), Error> {
     is_author_guild_admin(ctx).await?;
     let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?;
     let data = ctx.data();
-    catalog_entry(&data, &plugin, author_is_bot_owner(ctx))?;
+    catalog_entry(&data.plugin_catalog, &plugin)?;
     let mut model = guild_model(&data, guild_id).await?;
 
     match PluginsUpdate::update(PluginsMsg::Enable(plugin.clone()), &mut model) {
@@ -133,7 +137,12 @@ pub async fn enable(ctx: Context<'_>, plugin: String) -> Result<(), Error> {
 /// Disables a plugin for this guild: unregisters the remaining enabled
 /// plugins' commands.
 #[poise::command(slash_command)]
-pub async fn disable(ctx: Context<'_>, plugin: String) -> Result<(), Error> {
+pub async fn disable(
+    ctx: Context<'_>,
+    #[description = "The plugin to disable in this server"]
+    #[autocomplete = "plugin_choices"]
+    plugin: String,
+) -> Result<(), Error> {
     is_author_guild_admin(ctx).await?;
     let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?;
     let data = ctx.data();
@@ -183,11 +192,16 @@ pub async fn disable(ctx: Context<'_>, plugin: String) -> Result<(), Error> {
 
 /// Swaps an enabled plugin to its freshly installed binary.
 #[poise::command(slash_command)]
-pub async fn swap(ctx: Context<'_>, plugin: String) -> Result<(), Error> {
+pub async fn swap(
+    ctx: Context<'_>,
+    #[description = "The enabled plugin to swap to a freshly installed binary"]
+    #[autocomplete = "plugin_choices"]
+    plugin: String,
+) -> Result<(), Error> {
     is_author_guild_admin(ctx).await?;
     let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?;
     let data = ctx.data();
-    let entry = catalog_entry(&data, &plugin, author_is_bot_owner(ctx))?;
+    let entry = catalog_entry(&data.plugin_catalog, &plugin)?;
     let mut model = guild_model(&data, guild_id).await?;
 
     match PluginsUpdate::update(PluginsMsg::Swap(plugin.clone()), &mut model) {
@@ -213,42 +227,66 @@ pub async fn swap(ctx: Context<'_>, plugin: String) -> Result<(), Error> {
     Ok(())
 }
 
-/// The catalog entry for `name`, or an error when unknown. When the catalog
-/// failed to load, the bot owner's error names the real cause; other users
-/// keep the plain unknown-plugin message.
+/// The `plugin` choices for `/plugin enable|disable|swap`: every plugin the
+/// host knows, so the ids are discoverable without reading a catalog file.
+/// Both sources the host holds, always: the core manifests (the built-ins,
+/// which `disable` can switch off) and the catalog (what `enable` and `swap`
+/// resolve against). Never a list written here — a plugin that appears would
+/// be invisible.
+pub async fn plugin_choices<'a>(
+    ctx: Context<'a>,
+    query: &'a str,
+) -> CreateAutocompleteResponse<'a> {
+    let data = ctx.data();
+    let mut names: Vec<String> = data
+        .core_manifests
+        .keys()
+        .chain(data.plugin_catalog.keys())
+        .cloned()
+        .collect();
+    names.sort();
+    names.dedup();
+    let query = query.to_lowercase();
+    let choices: Vec<AutocompleteChoice> = names
+        .into_iter()
+        .filter(|name| name.to_lowercase().starts_with(&query))
+        .take(MAX_AUTOCOMPLETE_CHOICES)
+        .map(AutocompleteChoice::from)
+        .collect();
+    CreateAutocompleteResponse::new().set_choices(choices)
+}
+
+/// Discord's cap on choices per autocomplete response.
+const MAX_AUTOCOMPLETE_CHOICES: usize = 25;
+
+/// The catalog entry for `name`, or the refusal when the catalog does not
+/// carry it. The catalog's own load failure is never spliced into the
+/// message: an absent catalog is a normal state, and the path and IO cause
+/// belong in the log, not in a user's reply.
 fn catalog_entry<'a>(
-    data: &'a Arc<crate::bot::Data>,
+    catalog: &'a HashMap<String, CatalogEntry>,
     name: &str,
-    is_owner: bool,
 ) -> Result<&'a CatalogEntry, BotError> {
-    data.plugin_catalog
+    catalog
         .get(name)
         .ok_or_else(|| BotError::InvalidCommandArgument {
             parameter: "plugin".to_string(),
-            reason: unknown_plugin_reason(name, data.plugin_catalog_error.as_ref(), is_owner),
+            reason: format!("`{name}` is not in the plugin catalog"),
         })
 }
 
-/// The reason a plugin name is unknown: the plain message, or — for the bot
-/// owner when the catalog failed to load — the real path and cause.
-fn unknown_plugin_reason(
-    name: &str,
-    catalog_error: Option<&InstallError>,
-    is_owner: bool,
-) -> String {
-    match catalog_error {
-        Some(error) if is_owner => format!("`{name}` is not in the plugin catalog: {error}"),
-        _ => format!("`{name}` is not in the plugin catalog"),
+/// The message for a catalog that carries no entries.
+///
+/// An absent catalog is a normal state — the operator has configured no
+/// plugins — so it answers through the one error seam
+/// ([`ErrorHandler::classify_error`]) with a clean sentence and no path, no
+/// IO cause, and nothing doubled. The real cause stays in the log, where the
+/// operator reads it: this function does not embed it.
+fn empty_catalog_error(catalog_error: Option<&InstallError>) -> Error {
+    if let Some(error) = catalog_error {
+        debug!("the plugin catalog did not load, so there is nothing to list: {error}");
     }
-}
-
-/// The message for an empty catalog: the bot owner sees the real load
-/// failure when there is one; other users keep the friendly message.
-fn empty_catalog_message(catalog_error: Option<&InstallError>, is_owner: bool) -> String {
-    match catalog_error {
-        Some(error) if is_owner => format!("The plugin catalog is empty: {error}"),
-        _ => "The plugin catalog is empty.".to_string(),
-    }
+    BotError::NoPluginCatalog.into()
 }
 
 /// The guild's plugins model: catalog names plus the guild's enabled subset.
@@ -364,54 +402,64 @@ mod tests {
         }
     }
 
+    /// An absent catalog answers cleanly through the shared seam. The path and
+    /// the IO cause are in the log, not in the reply: a user has no
+    /// `plugins.toml` to fix and no error to read. Fails if the load failure
+    /// is spliced back into the message, or if the message arrives as bare
+    /// text instead of an error the seam renders.
     #[test]
-    fn empty_catalog_message_shows_the_load_failure_to_the_bot_owner() {
-        let message = empty_catalog_message(Some(&missing_catalog_error()), true);
+    fn an_absent_catalog_answers_through_the_error_seam_without_the_load_failure() {
+        let error = empty_catalog_error(Some(&missing_catalog_error()));
 
+        let bot_error = error
+            .downcast_ref::<BotError>()
+            .expect("the empty-catalog state answers through the error seam");
         assert!(
-            message.contains("/srv/pwr-bot/data/plugins.toml"),
-            "the owner sees the real path: {message}"
+            matches!(bot_error, BotError::NoPluginCatalog),
+            "the catalog-absent state is its own variant: {bot_error:?}"
+        );
+        let message = bot_error.to_string();
+        assert!(
+            !message.contains("plugins.toml"),
+            "the path does not leak into a user-facing message: {message}"
         );
         assert!(
-            message.contains("No such file or directory"),
-            "the owner sees the real cause: {message}"
+            !message.contains("os error"),
+            "the IO cause does not leak into a user-facing message: {message}"
         );
-    }
-
-    #[test]
-    fn empty_catalog_message_keeps_the_friendly_line_for_other_users() {
-        let message = empty_catalog_message(Some(&missing_catalog_error()), false);
-
-        assert_eq!(message, "The plugin catalog is empty.");
-    }
-
-    #[test]
-    fn empty_catalog_message_stays_friendly_when_the_catalog_is_genuinely_empty() {
-        let message = empty_catalog_message(None, true);
-
-        assert_eq!(message, "The plugin catalog is empty.");
-    }
-
-    #[test]
-    fn unknown_plugin_reason_names_the_load_failure_for_the_bot_owner() {
-        let reason = unknown_plugin_reason("hello", Some(&missing_catalog_error()), true);
-
         assert!(
-            reason.contains("No such file or directory"),
-            "the owner sees the real cause: {reason}"
+            !message.contains("failed to load plugin catalog"),
+            "the message is not the already-wrapped error, so nothing doubles: {message}"
+        );
+        let cause = missing_catalog_error().to_string();
+        assert!(
+            !message.contains(&cause),
+            "the load failure is not spliced into the message, so nothing doubles: {message}"
         );
     }
 
+    /// A catalog that parsed but holds nothing answers the same way, so the
+    /// two empty states cannot render differently.
     #[test]
-    fn unknown_plugin_reason_keeps_the_plain_message_for_other_users() {
-        let reason = unknown_plugin_reason("hello", Some(&missing_catalog_error()), false);
+    fn a_genuinely_empty_catalog_answers_the_same_sentence() {
+        let error = empty_catalog_error(None);
 
-        assert_eq!(reason, "`hello` is not in the plugin catalog");
+        let bot_error = error.downcast_ref::<BotError>().expect("seam");
+        assert!(matches!(bot_error, BotError::NoPluginCatalog));
+        assert_eq!(
+            bot_error.to_string(),
+            "No plugins are configured yet. The bot owner adds a plugin catalog to offer them."
+        );
     }
 
+    /// The unknown-plugin refusal never carries the catalog's load failure
+    /// either: it is the same leak through the other door.
     #[test]
-    fn unknown_plugin_reason_keeps_the_plain_message_without_a_load_failure() {
-        let reason = unknown_plugin_reason("hello", None, true);
+    fn an_unknown_plugin_name_never_carries_the_catalog_load_failure() {
+        let reason = match catalog_entry(&HashMap::new(), "hello").expect_err("unknown") {
+            BotError::InvalidCommandArgument { reason, .. } => reason,
+            other => panic!("expected an argument refusal, got {other:?}"),
+        };
 
         assert_eq!(reason, "`hello` is not in the plugin catalog");
     }

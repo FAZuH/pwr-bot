@@ -8,27 +8,41 @@ use crate::bot::error::BotError;
 
 /// Checks if the command author has server administrator permissions.
 pub async fn is_author_guild_admin(ctx: Context<'_>) -> Result<(), Error> {
+    if is_guild_admin_permissions(author_permissions(ctx).await?) {
+        Ok(())
+    } else {
+        Err(guild_admin_denied().into())
+    }
+}
+
+/// The invoking member's permissions in the guild the command ran in. The
+/// one place the host resolves them, so a command that needs the bitfield
+/// itself (rather than the verdict) reads the same notion
+/// [`is_author_guild_admin`] enforces.
+pub async fn author_permissions(ctx: Context<'_>) -> Result<Permissions, Error> {
     let member = ctx
         .author_member()
         .await
         .ok_or(BotError::GuildOnlyCommand)?;
-    let permissions = ctx
+    Ok(ctx
         .guild()
         .ok_or(BotError::GuildOnlyCommand)?
-        .member_permissions(member.as_ref());
-
-    if !is_guild_admin_permissions(permissions) {
-        Err(BotError::PermissionDenied(
-            "You need `Manage Server` or `Administrator` permission to perform this action."
-                .to_string(),
-        ))?
-    };
-    Ok(())
+        .member_permissions(member.as_ref()))
 }
 
-fn is_guild_admin_permissions(permissions: Permissions) -> bool {
+/// Whether `permissions` carry either bit the host treats as server
+/// management: `Administrator` or `Manage Server`.
+pub fn is_guild_admin_permissions(permissions: Permissions) -> bool {
     permissions.contains(Permissions::ADMINISTRATOR)
         || permissions.contains(Permissions::MANAGE_GUILD)
+}
+
+/// The refusal every guild-admin command answers with.
+pub fn guild_admin_denied() -> BotError {
+    BotError::PermissionDenied(
+        "You need `Manage Server` or `Administrator` permission to perform this action."
+            .to_string(),
+    )
 }
 
 /// Whether the command author is the bot owner: a query form of the owner

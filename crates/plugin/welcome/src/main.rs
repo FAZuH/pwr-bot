@@ -1274,7 +1274,6 @@ async fn main() -> ExitCode {
 mod tests {
     use pwr_poise_components::IS_COMPONENTS_V2;
     use welcome::COMMAND_NAME;
-    use welcome::SLASH_COMMAND_NAME;
 
     use super::*;
 
@@ -1829,15 +1828,17 @@ mod tests {
 
     // ── protocol ────────────────────────────────────────────────────────────
 
+    /// The panel is reached only through the host's `/settings`, so it
+    /// declares no slash command: one surface, one registration, and every
+    /// panel session has a host Settings session waiting behind it.
     #[test]
-    fn the_manifest_declares_the_command_and_the_settings_section() {
+    fn the_manifest_declares_no_slash_command_and_one_settings_section() {
         let m = manifest();
         assert_eq!(m.name, PLUGIN_NAME);
-        assert_eq!(m.commands.len(), 2);
-        assert_eq!(m.commands[0].create_command["name"], json!(COMMAND_NAME));
-        assert_eq!(
-            m.commands[1].create_command["name"],
-            json!(SLASH_COMMAND_NAME)
+        assert!(
+            m.commands.is_empty(),
+            "the panel is opened by the host Settings section, not by a command: {:?}",
+            m.commands
         );
         assert_eq!(m.settings.len(), 1);
         assert_eq!(m.settings[0].command, COMMAND_NAME);
@@ -1845,13 +1846,12 @@ mod tests {
         assert_eq!(m.api_version, API_VERSION);
     }
 
-    /// `/welcome` and the Settings section's `welcome-settings` open the same
-    /// panel: both names are answered, so a session opened through either one
-    /// keeps its clicks.
+    /// The panel's own invoke name is the only one it answers. A session
+    /// opened under any other name is not this panel's.
     #[test]
-    fn both_panel_command_names_are_answered() {
+    fn only_the_panel_command_name_is_answered() {
         assert!(welcome::is_panel_command(Some(COMMAND_NAME)));
-        assert!(welcome::is_panel_command(Some(SLASH_COMMAND_NAME)));
+        assert!(!welcome::is_panel_command(Some("welcome")));
         assert!(!welcome::is_panel_command(Some("something-else")));
         assert!(!welcome::is_panel_command(None));
     }
