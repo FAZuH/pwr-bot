@@ -1754,6 +1754,7 @@ dependencies = [
  "pwr-plugin-protocol",
  "pwr-plugin-support",
  "pwr-poise-components",
+ "pwr-test-support",
  "rustls-native-certs",
  "serde",
  "serde_json",
@@ -4228,6 +4229,7 @@ dependencies = [
  "pwr-plugin-protocol",
  "pwr-plugin-support",
  "pwr-poise-components",
+ "pwr-test-support",
  "pwr-viewgen",
  "rustls",
  "rustls-native-certs",
@@ -4310,6 +4312,19 @@ dependencies = [
  "pwr-viewgen",
  "serde_json",
  "tempfile",
+]
+
+[[package]]
+name = "pwr-test-support"
+version = "0.1.0"
+dependencies = [
+ "dotenv",
+ "libc",
+ "postgresql_embedded",
+ "serial_test",
+ "tokio",
+ "tokio-postgres",
+ "tokio-postgres-rustls",
 ]
 
 [[package]]
@@ -6732,6 +6747,7 @@ dependencies = [
  "pwr-plugin-protocol",
  "pwr-plugin-support",
  "pwr-poise-components",
+ "pwr-test-support",
  "resvg",
  "rustls-native-certs",
  "serde",
@@ -7007,6 +7023,7 @@ dependencies = [
  "pwr-plugin-protocol",
  "pwr-plugin-support",
  "pwr-poise-components",
+ "pwr-test-support",
  "resvg",
  "rustls-native-certs",
  "serde",

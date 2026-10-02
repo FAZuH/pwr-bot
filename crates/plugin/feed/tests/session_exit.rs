@@ -33,8 +33,7 @@ use serde_json::json;
 
 mod probe;
 use probe::probe_binary;
-#[path = "support/db.rs"]
-mod support_db;
+use pwr_test_support::db as support_db;
 
 /// The guild the panel keys its settings by.
 const GUILD_ID: u64 = 42;

@@ -41,11 +41,9 @@ use pwr_plugin_protocol::Msg;
 use pwr_plugin_protocol::ServerSettings;
 use pwr_plugin_protocol::WelcomeSettings;
 use pwr_poise_components::IS_COMPONENTS_V2;
+use pwr_test_support::db;
 use serde_json::Value;
 use serde_json::json;
-
-#[path = "support/db.rs"]
-mod db;
 mod probe;
 use probe::probe_binary;
 

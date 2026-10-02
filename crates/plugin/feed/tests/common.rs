@@ -10,9 +10,7 @@ use feed::Platform;
 use feed::PlatformInfo;
 use feed::feed::error::FeedError;
 use feed::repo::Repository;
-
-#[path = "support/db.rs"]
-pub mod db;
+pub use pwr_test_support::db;
 
 pub async fn setup_db() -> Repository {
     let db_url = db::db_url().await;

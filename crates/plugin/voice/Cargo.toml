@@ -36,6 +36,7 @@ wreq-util = "0.2"
 
 [dev-dependencies]
 dotenv = "0.15.0"
+pwr-test-support.workspace = true
 libc = "0.2.189"
 # The host-seam suite (`plugin_voice.rs`) drives this panel over the real
 # stdio wire through the host's plugin runtime, so it needs the host's own

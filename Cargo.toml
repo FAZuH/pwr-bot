@@ -2,6 +2,7 @@
 members = [
     "crates/pwr-plugin-protocol",
     "crates/pwr-poise-components",
+    "crates/pwr-test-support",
     "crates/plugin/hello",
     "crates/plugin/feed",
     "crates/plugin/voice",
@@ -15,6 +16,7 @@ resolver = "2"
 pwr-ext = { git = "https://github.com/FAZuH/pwr-ext", tag = "v0.1.0", features = ["macros"] }
 pwr-viewgen = { git = "https://github.com/FAZuH/pwr-viewgen", tag = "v0.1.1" }
 pwr-plugin-protocol = { path = "crates/pwr-plugin-protocol" }
+pwr-test-support = { path = "crates/pwr-test-support" }
 pwr-plugin-support = { path = "crates/plugin/pwr-plugin-support" }
 pwr-poise-components = { path = "crates/pwr-poise-components" }
 
@@ -92,6 +94,7 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 
 [dev-dependencies]
 httpmock = "0.7.0"
+pwr-test-support.workspace = true
 serial_test = "3.3.1"
 pwr-viewgen.workspace = true
 postgresql_embedded = { version = "=0.20.1", default-features = false, features = ["zonky", "tokio", "rustls"] }
@@ -103,7 +106,7 @@ tokio-postgres = "0.7"
 # tokio-postgres' SslMode only has Disable/Prefer/Require — verify-ca and
 # verify-full are REJECTED at URL parse time by tokio-postgres itself, and
 # our policy layer additionally rejects them with a clear error (see
-# tests/support/db.rs). The diesel connection used by run_migrations has no
+# crates/pwr-test-support/src/db.rs). The diesel connection used by run_migrations has no
 # TLS client support; `sslmode=require` URLs work for probe/scratch
 # provisioning but cannot drive diesel migrations — that combination errors
 # loudly instead of downgrading.

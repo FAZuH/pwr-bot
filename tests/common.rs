@@ -3,9 +3,7 @@
 use std::sync::Arc;
 
 use pwr_bot::repo::PgRepos;
-
-#[path = "support/db.rs"]
-pub mod db;
+pub use pwr_test_support::db;
 
 /// Sets up a test database connection to PostgreSQL.
 ///
