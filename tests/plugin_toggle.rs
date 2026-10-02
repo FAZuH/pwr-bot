@@ -16,6 +16,7 @@ use std::time::Instant;
 
 use poise::serenity_prelude::GuildId;
 use pwr_bot::bot::Data;
+use pwr_bot::bot::command::session_exit::section_plugin;
 use pwr_bot::bot::error::BotError;
 use pwr_bot::bot::translate::SettingsReturns;
 use pwr_bot::bot::translate::TranslateLayer;
@@ -260,6 +261,61 @@ async fn a_submission_without_a_plugin_route_is_left_to_the_other_routes() {
         None,
         "no route, nothing to refuse: the fall-through is unchanged"
     );
+
+    common::teardown_db(&db).await;
+}
+
+// ── the settings handoff ──────────────────────────────────────────────────
+
+/// `/settings` hands the live message to a section's panel, resolving the
+/// plugin process itself — a path that never passed the gate in
+/// `open_plugin_view`, so a disabled plugin's panel still opened. The handoff
+/// asks [`session_exit::section_plugin`] instead.
+///
+/// Nothing is spawned here, so the process lookup always fails; what the test
+/// reads is *which* refusal came back. The disabled guild must be refused by
+/// name, while the guild that left the plugin on (and a DM, which has no
+/// guild to be disabled in) gets past the gate and fails only on the missing
+/// process. Fails if the handoff skips the gate: then every guild reads
+/// `not running` and the disabled panel still opens.
+#[tokio::test]
+#[serial_test::serial]
+async fn a_settings_handoff_refuses_a_disabled_plugin_and_serves_the_others() {
+    let db = common::setup_db().await;
+    let data = host(db.clone()).await;
+    let (disabled_guild, serving_guild) = (GuildId::new(15), GuildId::new(16));
+
+    db.guild_plugins()
+        .set_enabled(disabled_guild.get(), "feed", false)
+        .await
+        .expect("`/plugin disable feed` in guild 15");
+
+    let refusal = match section_plugin(&data, Some(disabled_guild), "feed").await {
+        Err(error) => error,
+        Ok(_) => panic!("a disabled plugin hands off to nobody"),
+    };
+    let refused = refusal
+        .downcast_ref::<BotError>()
+        .expect("the refusal answers through the shared error seam");
+    assert!(
+        matches!(
+            refused,
+            BotError::PluginDisabledInGuild { plugin } if plugin == "feed"
+        ),
+        "the handoff refuses through the same seam the command gate uses: {refused:?}"
+    );
+
+    for guild in [Some(serving_guild), None] {
+        let serving = match section_plugin(&data, guild, "feed").await {
+            Err(error) => error,
+            Ok(_) => panic!("nothing is spawned in the harness"),
+        };
+        assert!(
+            serving.to_string().contains("not running"),
+            "a plugin left enabled passes the gate and only fails the process \
+             lookup (guild {guild:?}): {serving}"
+        );
+    }
 
     common::teardown_db(&db).await;
 }

@@ -46,8 +46,10 @@ use poise::ReplyHandle;
 use poise::serenity_prelude as serenity;
 use serde_json::json;
 
+use crate::bot::Data;
 use crate::bot::command::Context;
 use crate::bot::command::Error;
+use crate::bot::error::BotError;
 use crate::plugin::HostIo;
 use crate::plugin::InteractionEngine;
 use crate::plugin::RunningPlugin;
@@ -114,9 +116,9 @@ pub async fn dismiss_root_view(
 /// invocation's guild and actor context when the interaction ran in a guild —
 /// the panel plugins key their settings by guild and authorize writes.
 ///
-/// Fails when the plugin is not running, the invoke fails, the Gate rejects
-/// the payload, or the edit fails — the caller decides what a failed handoff
-/// means for the session.
+/// Fails when the plugin is disabled in this guild (see [`section_plugin`]),
+/// not running, the invoke fails, the Gate rejects the payload, or the edit
+/// fails — the caller decides what a failed handoff means for the session.
 pub async fn handoff_to_section(
     ctx: &Context<'_>,
     plugin: &str,
@@ -124,9 +126,7 @@ pub async fn handoff_to_section(
     message: &serenity::Message,
 ) -> Result<(), Error> {
     let data = ctx.data();
-    let Some(running) = data.plugin_manager.get(plugin).await else {
-        return Err(Error::from(format!("the `{plugin}` plugin is not running")));
-    };
+    let running = section_plugin(&data, ctx.guild_id(), plugin).await?;
     let mut args = json!({});
     if let Some(guild_id) = ctx.guild_id() {
         args["guild_id"] = json!(guild_id.get());
@@ -138,6 +138,34 @@ pub async fn handoff_to_section(
     }
     let io = SerenityHostIo::new(ctx.serenity_context().http.clone());
     adopt_message_into_section(&data.plugin_engine, running, command, args, &io, message).await
+}
+
+/// The running plugin a handoff resolves, or the refusal.
+///
+/// The per-guild gate, asked before the manager is consulted — the same
+/// [`Data::plugin_enabled_in`] every serving gate asks, so a plugin this
+/// guild switched off hands its panel to nobody, beside the command gate in
+/// [`open_plugin_view`]. That gate covers a panel opened from a plugin's own
+/// command; this one covers the Settings handoff, which resolves the process
+/// itself and so never passed through it. A plugin the guild left on resolves
+/// as before: the manager lookup, and its `not running` refusal.
+///
+/// [`open_plugin_view`]: crate::plugin::command::open_plugin_view
+pub async fn section_plugin(
+    data: &Data,
+    guild_id: Option<serenity::GuildId>,
+    plugin: &str,
+) -> Result<Arc<RunningPlugin>, Error> {
+    if !data.plugin_enabled_in(guild_id, plugin).await? {
+        return Err(BotError::PluginDisabledInGuild {
+            plugin: plugin.to_string(),
+        }
+        .into());
+    }
+    data.plugin_manager
+        .get(plugin)
+        .await
+        .ok_or_else(|| Error::from(format!("the `{plugin}` plugin is not running")))
 }
 
 /// The adoption half of the handoff, at the seam tests can drive offline:
