@@ -1,13 +1,9 @@
 use std::borrow::Borrow;
 use std::hash::Hash;
-use std::io::Write;
 use std::ops::Deref;
 
 use byteorder::ReadBytesExt;
 use byteorder::WriteBytesExt;
-use chrono::DateTime;
-use chrono::Utc;
-use diesel::backend::Backend;
 use diesel::deserialize::FromSql;
 use diesel::deserialize::FromSqlRow;
 use diesel::expression::AsExpression;
@@ -19,12 +15,7 @@ use serde::Deserialize;
 use serde::Serialize;
 
 use crate::repo::schema::bot_meta;
-use crate::repo::schema::feed_items;
-use crate::repo::schema::feed_subscriptions;
-use crate::repo::schema::feeds;
 use crate::repo::schema::guild_plugins;
-use crate::repo::schema::server_settings;
-use crate::repo::schema::subscribers;
 
 // =============================================================================
 // Custom type wrappers
@@ -96,153 +87,9 @@ impl ToSql<BigInt, diesel::pg::Pg> for DbU64 {
     }
 }
 
-/// Newtype for JSON values stored as `JSONB` in PostgreSQL.
-#[derive(Debug, Clone, AsExpression, FromSqlRow, Serialize, Deserialize, Default)]
-#[diesel(sql_type = Jsonb)]
-pub struct Json<T>(pub T);
-
-impl<T: Serialize + std::fmt::Debug> ToSql<Jsonb, diesel::pg::Pg> for Json<T> {
-    fn to_sql<'b>(
-        &'b self,
-        out: &mut diesel::serialize::Output<'b, '_, diesel::pg::Pg>,
-    ) -> diesel::serialize::Result {
-        out.write_all(&[1])?;
-        serde_json::to_writer(out, &self.0)
-            .map(|_| IsNull::No)
-            .map_err(Into::into)
-    }
-}
-
-impl<T: for<'de> Deserialize<'de>> FromSql<Jsonb, diesel::pg::Pg> for Json<T> {
-    fn from_sql(value: diesel::pg::PgValue<'_>) -> diesel::deserialize::Result<Self> {
-        let bytes = value.as_bytes();
-        if bytes.is_empty() || bytes[0] != 1 {
-            return Err("Unsupported JSONB encoding version".into());
-        }
-        Ok(Json(serde_json::from_slice(&bytes[1..])?))
-    }
-}
-
-// =============================================================================
-// Enums
-// =============================================================================
-
-/// Notification target type for feed updates.
-#[derive(
-    Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq, AsExpression, FromSqlRow,
-)]
-#[diesel(sql_type = Text)]
-#[serde(rename_all = "lowercase")]
-pub enum SubscriberType {
-    #[default]
-    Guild,
-    Dm,
-}
-
-impl<B> ToSql<Text, B> for SubscriberType
-where
-    B: Backend,
-    str: ToSql<Text, B>,
-{
-    fn to_sql<'b>(
-        &'b self,
-        out: &mut diesel::serialize::Output<'b, '_, B>,
-    ) -> diesel::serialize::Result {
-        match self {
-            SubscriberType::Guild => <str as ToSql<Text, B>>::to_sql("guild", out),
-            SubscriberType::Dm => <str as ToSql<Text, B>>::to_sql("dm", out),
-        }
-    }
-}
-
-impl<B> FromSql<Text, B> for SubscriberType
-where
-    B: Backend,
-    String: FromSql<Text, B>,
-{
-    fn from_sql(bytes: B::RawValue<'_>) -> diesel::deserialize::Result<Self> {
-        match <String as FromSql<Text, B>>::from_sql(bytes)?.as_str() {
-            "guild" => Ok(SubscriberType::Guild),
-            "dm" => Ok(SubscriberType::Dm),
-            other => Err(format!("unknown subscriber type: {other}").into()),
-        }
-    }
-}
-
 // =============================================================================
 // Table models
 // =============================================================================
-
-/// A content source that can be monitored for updates.
-#[derive(Queryable, Selectable, Insertable, Identifiable, AsChangeset)]
-#[diesel(table_name = feeds)]
-#[diesel(check_for_backend(diesel::pg::Pg))]
-#[derive(Serialize, Deserialize, Default, Clone, Debug)]
-pub struct FeedEntity {
-    pub id: i32,
-    pub name: String,
-    pub description: String,
-    pub platform_id: String,
-    pub source_id: String,
-    pub items_id: String,
-    pub source_url: String,
-    pub cover_url: String,
-    pub tags: String,
-}
-
-/// A specific version or episode of a feed.
-#[derive(Queryable, Selectable, Insertable, Identifiable, AsChangeset)]
-#[diesel(table_name = feed_items)]
-#[diesel(check_for_backend(diesel::pg::Pg))]
-#[derive(Serialize, Deserialize, Default, Clone, Debug)]
-pub struct FeedItemEntity {
-    pub id: i32,
-    pub feed_id: i32,
-    pub description: String,
-    pub published: DateTime<Utc>,
-}
-
-/// A notification target that can receive feed updates.
-#[derive(Queryable, Selectable, Insertable, Identifiable, AsChangeset)]
-#[diesel(table_name = subscribers)]
-#[diesel(check_for_backend(diesel::pg::Pg))]
-#[derive(Serialize, Deserialize, Default, Clone, Debug)]
-pub struct SubscriberEntity {
-    pub id: i32,
-    #[diesel(column_name = type_)]
-    pub r#type: SubscriberType,
-    pub target_id: String,
-}
-
-/// Links subscribers to the feeds they're monitoring.
-#[derive(Queryable, Selectable, Insertable, Identifiable, AsChangeset)]
-#[diesel(table_name = feed_subscriptions)]
-#[diesel(check_for_backend(diesel::pg::Pg))]
-#[derive(Serialize, Deserialize, Default, Clone, Debug)]
-pub struct FeedSubscriptionEntity {
-    pub id: i32,
-    pub feed_id: i32,
-    pub subscriber_id: i32,
-}
-
-#[derive(Queryable, Selectable, Insertable, Identifiable, AsChangeset)]
-#[diesel(table_name = server_settings)]
-#[diesel(primary_key(guild_id))]
-#[diesel(check_for_backend(diesel::pg::Pg))]
-#[derive(Serialize, Deserialize)]
-pub struct ServerSettingsEntity {
-    pub guild_id: DbU64,
-    pub settings: Json<ServerSettings>,
-}
-
-// The settings payload structs moved to `pwr-plugin-protocol/src/settings.rs`
-// so the shared wire contract owns the shape both sides serialize (ADR-0010).
-// Re-exported here to keep every in-crate import stable; the diesel coupling
-// stays in `ServerSettingsEntity` above.
-pub use pwr_plugin_protocol::FeedsSettings;
-pub use pwr_plugin_protocol::ServerSettings;
-pub use pwr_plugin_protocol::VoiceSettings;
-pub use pwr_plugin_protocol::WelcomeSettings;
 
 /// Key-value store for bot metadata.
 #[derive(Queryable, Selectable, Insertable, Identifiable, AsChangeset)]

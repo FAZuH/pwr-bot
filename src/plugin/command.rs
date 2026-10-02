@@ -56,7 +56,6 @@ use serde_json::Value;
 use serde_json::json;
 
 use crate::bot::Data;
-use crate::bot::checks::is_author_guild_admin;
 use crate::bot::command::Error;
 use crate::plugin::decode_runtime_files;
 use crate::plugin::edit_body_for_transport;
@@ -112,7 +111,7 @@ pub(crate) fn actor_context_from_parts_with_guild(
 /// A parsed `CreateCommand` blob, before poise mapping.
 #[derive(Debug, Clone, PartialEq)]
 pub struct HostCommandSpec {
-    /// Command name, e.g. `feed.list`.
+    /// Command name, e.g. `my-plugin.list`.
     pub name: String,
     /// One-line description shown in Discord.
     pub description: String,
@@ -843,11 +842,6 @@ fn qualified_command_name(
         .join(" ")
 }
 
-/// The two public command paths that open the feed settings panel.
-fn is_feed_settings_command(command_name: &str) -> bool {
-    matches!(command_name, "feed settings" | "feed-settings")
-}
-
 fn autocomplete_args(ctx: &poise::ApplicationContext<'_, Data, Error>, query: &str) -> Value {
     let guild_name = ctx.guild().map(|guild| guild.name.to_string());
     let mut args = json!({
@@ -981,11 +975,6 @@ fn plugin_slash_dispatch(
             Err(error) => return Err(poise::FrameworkError::new_command(ctx.into(), error.into())),
         };
         let command_ctx: poise::Context<'_, Data, Error> = ctx.into();
-        if is_feed_settings_command(&command_name)
-            && let Err(error) = is_author_guild_admin(command_ctx).await
-        {
-            return Err(poise::FrameworkError::new_command(command_ctx, error));
-        }
         let error_ctx = command_ctx;
         open_plugin_view(command_ctx, plugin_name, &command_name, args)
             .await
@@ -2304,13 +2293,6 @@ mod tests {
 
         let args = reparse_command_args(&command, &interaction).expect("downcast failure degrades");
         assert_eq!(args, json!({}));
-    }
-
-    #[test]
-    fn feed_settings_command_names_match_the_monolith_paths() {
-        assert!(is_feed_settings_command("feed settings"));
-        assert!(is_feed_settings_command("feed-settings"));
-        assert!(!is_feed_settings_command("feed subscribe"));
     }
 
     #[test]

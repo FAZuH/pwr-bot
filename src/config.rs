@@ -34,7 +34,7 @@ pub struct Config {
 /// [`Config::core_plugin_path`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CorePluginSpec {
-    /// Plugin name, e.g. `feed`.
+    /// Plugin name, e.g. `my-plugin`.
     pub name: String,
     /// Binary path to spawn.
     pub path: PathBuf,

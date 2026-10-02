@@ -37,6 +37,11 @@ wreq-util = "0.2"
 [dev-dependencies]
 dotenv = "0.15.0"
 libc = "0.2.189"
+# The host-seam suite (`plugin_voice.rs`) drives this panel over the real
+# stdio wire through the host's plugin runtime, so it needs the host's own
+# types. One-way: the host does not depend on this crate.
+pwr-bot = { path = "../../.." }
+poise = { git = "https://github.com/serenity-rs/poise", branch = "serenity-next" }
 postgresql_embedded = { version = "=0.20.1", default-features = false, features = ["zonky", "tokio", "rustls"] }
 pwr-poise-components = { path = "../../pwr-poise-components" }
 rustls-native-certs = "0.8"

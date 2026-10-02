@@ -31,7 +31,10 @@ their `Navigation` targets are deleted; the runtime is not.
    invoke → validate → defer → edit → register core extracted from
    `plugin_slash_dispatch`, and open their panel plugin's view directly.
    The helper ships the runtime `files` bytes the envelope carries, so
-   the welcome preview works on this path too.
+   the welcome preview works on this path too. Every one of those
+   commands is now declared by its plugin's manifest, so the same
+   `open_plugin_view` core answers every panel command and no host Cog
+   deep-links a plugin.
 3. **The preview resolver retired in phase 6 (#169).** `PreviewResolver`,
    `AttachmentRenderer`, and `WelcomeAttachmentRenderer` were deleted with
    `src/plugin/preview.rs`; `WELCOME_FILE`, the card renderer, and the
@@ -64,7 +67,20 @@ runtime for host-owned views; plugin views do not run through that host loop.
   remaining host views.
 - `open_plugin_view` is now the single initial-render path for plugin
   views opened from a slash interaction; `plugin_slash_dispatch` and
-  the three settings commands share it.
+  every manifest-declared panel command share it.
+
+## Update (2026-09-30, phase 7)
+
+The host `Cogs` list is now host primitives only: `about`, `plugins`,
+`register`, `register_owner`, `settings`, and `unregister`. The `/welcome`
+Cog and the owner-only `/dump_db` Cog are gone; the welcome plugin declares
+`/welcome` in its manifest beside `welcome-settings`, and the dump command
+hardcoded tables the core migration no longer creates. The last host-side
+feed reference went with them: `plugin_slash_dispatch` no longer
+special-cases the feed settings command for a guild-admin pre-check, which
+the plugin's own `verify_settings_invocation` and its manifest's
+`default_member_permissions` already enforce. The host routes every plugin
+command through the same path and names none of them.
 
 ## Update (2026-09-23)
 

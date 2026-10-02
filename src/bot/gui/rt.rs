@@ -64,6 +64,23 @@ where
         }
     }
 
+    /// Renders the view once and returns, without starting the collectors or
+    /// claiming the message.
+    ///
+    /// For a session whose next frame is already decided: the caller renders
+    /// to put a live message on the wire, then hands that message to whoever
+    /// the next navigation names (see
+    /// [`crate::bot::command::Router::handoff_and_wait`]). No claim is taken
+    /// on the way out, so the message carries no session until that handoff
+    /// registers one — a click landing in the gap finds no session and is
+    /// dropped as stale rather than answered twice.
+    pub async fn render_once(&mut self) -> Result<(), Error> {
+        let registry: Registry<F::Action> = Arc::new(RwLock::new(ActionRegistry::new()));
+        let (fx_tx, _fx_rx) = mpsc::unbounded_channel::<F::Msg>();
+        self.apply(F::start_msg(), &fx_tx);
+        self.render_view(&registry).await
+    }
+
     /// Runs the interactive loop until the feature terminates or times out.
     pub async fn run(&mut self) -> Result<(), Error> {
         let registry: Registry<F::Action> = Arc::new(RwLock::new(ActionRegistry::new()));

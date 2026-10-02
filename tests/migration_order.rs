@@ -1,4 +1,14 @@
-use std::collections::BTreeSet;
+//! The core migration source is idempotent and owns only core tables.
+//!
+//! This file holds the host's half of the shared-ledger contract and nothing
+//! else: core declares exactly one version, creates exactly its own tables,
+//! applies nothing to a database that already records it, and appends to a
+//! ledger holding rows it does not own. The workspace-wide version-uniqueness
+//! property lives in `tests/migration_versions.rs`, and each plugin crate
+//! asserts its own ownership and ledger survival in its own tests. No source's
+//! relative startup order is asserted anywhere: the ledger is keyed by version,
+//! so order between sources is decided by the timestamps they carry and is not
+//! an invariant.
 
 use diesel::Connection;
 use diesel::connection::SimpleConnection;
@@ -14,71 +24,28 @@ use tokio_postgres::NoTls;
 mod db;
 
 const CORE_MIGRATIONS: EmbeddedMigrations = embed_migrations!("migrations");
-const FEED_MIGRATIONS: EmbeddedMigrations = embed_migrations!("crates/plugin/feed/migrations");
-const VOICE_MIGRATIONS: EmbeddedMigrations = embed_migrations!("crates/plugin/voice/migrations");
-const WELCOME_MIGRATIONS: EmbeddedMigrations =
-    embed_migrations!("crates/plugin/welcome/migrations");
 
-struct StaticMigrations(&'static EmbeddedMigrations);
+/// Names the embedded source to the generic `MigrationHarness` method, which
+/// reports the migrations it applied. `Connection`'s inherent method of the
+/// same name returns `()`, so the source is handed over as a trait object to
+/// reach the counting one.
+struct CoreMigrations;
 
-impl MigrationSource<Pg> for StaticMigrations {
+impl MigrationSource<Pg> for CoreMigrations {
     fn migrations(&self) -> diesel::migration::Result<Vec<Box<dyn Migration<Pg>>>> {
-        <EmbeddedMigrations as MigrationSource<Pg>>::migrations(self.0)
+        <EmbeddedMigrations as MigrationSource<Pg>>::migrations(&CORE_MIGRATIONS)
     }
 }
 
-fn embedded_versions(source: &'static EmbeddedMigrations) -> Vec<String> {
-    <EmbeddedMigrations as MigrationSource<Pg>>::migrations(source)
-        .expect("embedded migrations are readable")
-        .into_iter()
-        .map(|migration| migration.name().version().to_string())
-        .collect()
-}
-
-const CORE_VERSION: &str = "202604291222520000";
-const PHASE_FOUR_VERSION: &str = "202609241200000000";
-const ABSENT_VERSION: &str = "29990101000000";
+/// The version the core source's single migration carries.
 const CORE_STORAGE_VERSION: &str = "202609250000000000";
-const FEED_PREVIOUS_VERSION: &str = "202609241300000000";
-const FEED_OWNED_VERSION: &str = "202609241301000000";
-const VOICE_PREVIOUS_VERSION: &str = "202609241400000000";
-const VOICE_OWNED_VERSION: &str = "202609241401000000";
-const WELCOME_OWNED_VERSION: &str = "202609241501000000";
+/// A retired monolith-era version that must never reappear in the ledger.
+const HISTORICAL_CORE_VERSION: &str = "202604291222520000";
+/// A version no source declares, used to prove the ledger is not rewritten.
+const ABSENT_VERSION: &str = "29990101000000";
 
-/// Every migration source a startup can run, and every ordering of them.
-fn startup_orders() -> Vec<Vec<&'static EmbeddedMigrations>> {
-    fn extend(
-        order: &mut Vec<&'static EmbeddedMigrations>,
-        remaining: &mut Vec<&'static EmbeddedMigrations>,
-        orders: &mut Vec<Vec<&'static EmbeddedMigrations>>,
-    ) {
-        if remaining.is_empty() {
-            orders.push(order.clone());
-            return;
-        }
-        for index in 0..remaining.len() {
-            let source = remaining.remove(index);
-            order.push(source);
-            extend(order, remaining, orders);
-            order.pop();
-            remaining.insert(index, source);
-        }
-    }
-
-    let mut orders = Vec::new();
-    extend(
-        &mut Vec::new(),
-        &mut vec![
-            &CORE_MIGRATIONS,
-            &FEED_MIGRATIONS,
-            &VOICE_MIGRATIONS,
-            &WELCOME_MIGRATIONS,
-        ],
-        &mut orders,
-    );
-    orders
-}
-
+/// Drops every table this and any sibling source could have created, so each
+/// assertion below starts from a known-empty schema.
 async fn reset_database(db_url: &str) {
     let (client, connection) = tokio_postgres::connect(db_url, NoTls)
         .await
@@ -91,15 +58,6 @@ async fn reset_database(db_url: &str) {
         "plugin_kv",
         "bot_meta",
         "server_settings",
-        "feed_settings",
-        "feed_subscriptions",
-        "feed_items",
-        "subscribers",
-        "feeds",
-        "voice_settings_import_state",
-        "voice_settings",
-        "voice_sessions",
-        "welcome_settings",
         "__diesel_schema_migrations",
     ] {
         client
@@ -112,19 +70,24 @@ async fn reset_database(db_url: &str) {
     }
 }
 
-fn run_sources(db_url: &str, sources: &[&'static EmbeddedMigrations]) {
+fn run_core_migrations(db_url: &str) -> usize {
     let mut connection = diesel::PgConnection::establish(db_url).expect("connect Diesel migration");
-    for &migrations in sources {
-        connection
-            .run_pending_migrations(StaticMigrations(migrations))
-            .expect("run migration source");
-    }
+    connection
+        .run_pending_migrations(CoreMigrations)
+        .expect("run core migration source")
+        .len()
 }
 
-fn run_source(db_url: &str, source: &'static EmbeddedMigrations) {
-    run_sources(db_url, &[source]);
+fn embedded_versions() -> Vec<String> {
+    <EmbeddedMigrations as MigrationSource<Pg>>::migrations(&CORE_MIGRATIONS)
+        .expect("core migrations are readable")
+        .into_iter()
+        .map(|migration: Box<dyn Migration<Pg>>| migration.name().version().to_string())
+        .collect()
 }
 
+/// Creates the two-column ledger diesel's migration harness writes, seeded
+/// with `versions`, so a pre-existing ledger can be replayed.
 fn seed_ledger(db_url: &str, versions: &[&str]) {
     let mut connection = diesel::PgConnection::establish(db_url).expect("connect legacy ledger");
     let values = versions
@@ -140,92 +103,6 @@ fn seed_ledger(db_url: &str, versions: &[&str]) {
              INSERT INTO __diesel_schema_migrations (version, run_on) VALUES {values};"
         ))
         .expect("seed existing migration ledger");
-}
-
-/// Creates the seven-table schema and two-column ledger used by the monolith.
-fn seed_legacy_core_schema(db_url: &str) {
-    let mut connection = diesel::PgConnection::establish(db_url).expect("connect legacy schema");
-    connection
-        .batch_execute(
-            "CREATE TABLE server_settings (guild_id BIGINT PRIMARY KEY, settings JSONB NOT NULL);\
-             CREATE TABLE bot_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);\
-             CREATE TABLE feeds (\
-                 id SERIAL PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',\
-                 platform_id TEXT NOT NULL, source_id TEXT NOT NULL, items_id TEXT NOT NULL,\
-                 source_url TEXT NOT NULL, cover_url TEXT NOT NULL DEFAULT '', tags TEXT NOT NULL DEFAULT ''\
-             );\
-             CREATE TABLE feed_items (\
-                 id SERIAL PRIMARY KEY, feed_id INTEGER NOT NULL, description TEXT NOT NULL,\
-                 published TIMESTAMPTZ NOT NULL\
-             );\
-             CREATE TABLE subscribers (id SERIAL PRIMARY KEY, type TEXT NOT NULL, target_id TEXT NOT NULL);\
-             CREATE TABLE feed_subscriptions (\
-                 id SERIAL PRIMARY KEY, feed_id INTEGER NOT NULL, subscriber_id INTEGER NOT NULL\
-             );\
-             CREATE TABLE voice_sessions (\
-                 id SERIAL PRIMARY KEY, user_id BIGINT NOT NULL, guild_id BIGINT NOT NULL,\
-                 channel_id BIGINT NOT NULL, join_time TIMESTAMPTZ NOT NULL,\
-                 leave_time TIMESTAMPTZ NOT NULL, is_active BOOLEAN NOT NULL DEFAULT FALSE\
-             );\
-             CREATE TABLE __diesel_schema_migrations (\
-                 version VARCHAR(50) PRIMARY KEY, run_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP\
-             );\
-             INSERT INTO __diesel_schema_migrations (version, run_on)\
-             VALUES ('202604291222520000', CURRENT_TIMESTAMP),\
-                    ('202609241200000000', CURRENT_TIMESTAMP),\
-                     ('29990101000000', CURRENT_TIMESTAMP);",
-        )
-        .expect("seed legacy core schema");
-}
-
-async fn assert_ledger_shape_and_versions(db_url: &str, expected_versions: &[&str]) {
-    let (client, connection) = tokio_postgres::connect(db_url, NoTls)
-        .await
-        .expect("connect migration ledger");
-    tokio::spawn(async move {
-        connection.await.expect("migration ledger connection");
-    });
-    let columns = client
-        .query(
-            "SELECT column_name FROM information_schema.columns \
-             WHERE table_schema = 'public' AND table_name = '__diesel_schema_migrations' \
-             ORDER BY ordinal_position",
-            &[],
-        )
-        .await
-        .expect("query migration ledger columns")
-        .into_iter()
-        .map(|row| row.get::<_, String>(0))
-        .collect::<Vec<_>>();
-    assert_eq!(columns, ["version", "run_on"]);
-    let rows = client
-        .query("SELECT version FROM __diesel_schema_migrations", &[])
-        .await
-        .expect("query migration ledger versions");
-    let versions: BTreeSet<String> = rows.into_iter().map(|row| row.get(0)).collect();
-    let expected: BTreeSet<String> = expected_versions
-        .iter()
-        .map(|version| (*version).to_string())
-        .collect();
-    assert_eq!(versions, expected, "migration ledger contents differ");
-}
-
-async fn assert_ledger_does_not_contain(db_url: &str, forbidden_version: &str) {
-    let (client, connection) = tokio_postgres::connect(db_url, NoTls)
-        .await
-        .expect("connect migration ledger");
-    tokio::spawn(async move {
-        connection.await.expect("migration ledger connection");
-    });
-    let present: bool = client
-        .query_one(
-            "SELECT EXISTS (SELECT 1 FROM __diesel_schema_migrations WHERE version = $1)",
-            &[&forbidden_version],
-        )
-        .await
-        .expect("query forbidden migration version")
-        .get(0);
-    assert!(!present, "migration source retained {forbidden_version}");
 }
 
 async fn assert_tables_exist(db_url: &str, tables: &[&str]) {
@@ -249,172 +126,90 @@ async fn assert_tables_exist(db_url: &str, tables: &[&str]) {
     }
 }
 
-async fn assert_schema_and_versions_with_existing(db_url: &str, existing_versions: &[&str]) {
-    assert_tables_exist(
-        db_url,
-        &[
-            "server_settings",
-            "bot_meta",
-            "plugin_kv",
-            "guild_plugins",
-            "feeds",
-            "feed_items",
-            "subscribers",
-            "feed_subscriptions",
-            "feed_settings",
-            "voice_sessions",
-            "voice_settings",
-            "voice_settings_import_state",
-            "welcome_settings",
-        ],
-    )
-    .await;
-    let mut expected = existing_versions.to_vec();
-    expected.extend([
-        CORE_STORAGE_VERSION,
-        FEED_OWNED_VERSION,
-        VOICE_OWNED_VERSION,
-        WELCOME_OWNED_VERSION,
-    ]);
-    assert_ledger_shape_and_versions(db_url, &expected).await;
+async fn ledger_versions(db_url: &str) -> Vec<String> {
+    let (client, connection) = tokio_postgres::connect(db_url, NoTls)
+        .await
+        .expect("connect migration ledger");
+    tokio::spawn(async move {
+        connection.await.expect("migration ledger connection");
+    });
+    client
+        .query("SELECT version FROM __diesel_schema_migrations", &[])
+        .await
+        .expect("query migration ledger versions")
+        .into_iter()
+        .map(|row| row.get(0))
+        .collect()
 }
 
-async fn assert_schema_and_versions(db_url: &str) {
-    assert_schema_and_versions_with_existing(db_url, &[]).await;
-}
-
+/// The core source owns exactly one migration, and its version is the one it
+/// declares — the host half of the uniqueness invariant its plugins each
+/// assert for themselves.
 #[test]
-fn embedded_owners_have_one_globally_unique_version_each() {
-    let core = embedded_versions(&CORE_MIGRATIONS);
-    let feed = embedded_versions(&FEED_MIGRATIONS);
-    let voice = embedded_versions(&VOICE_MIGRATIONS);
-    let welcome = embedded_versions(&WELCOME_MIGRATIONS);
-
-    assert_eq!(core, vec![CORE_STORAGE_VERSION.to_owned()]);
-    assert_eq!(feed, vec![FEED_OWNED_VERSION.to_owned()]);
-    assert_eq!(voice, vec![VOICE_OWNED_VERSION.to_owned()]);
-    assert_eq!(welcome, vec![WELCOME_OWNED_VERSION.to_owned()]);
-
-    let all = core
-        .iter()
-        .chain(&feed)
-        .chain(&voice)
-        .chain(&welcome)
-        .cloned()
-        .collect::<BTreeSet<_>>();
-    assert_eq!(all.len(), 4, "migration versions are globally unique");
+fn core_owns_exactly_one_migration_version() {
+    assert_eq!(embedded_versions(), vec![CORE_STORAGE_VERSION.to_owned()]);
 }
 
+/// A fresh database gets core's four tables and one ledger entry, and a
+/// repeated run applies nothing.
 #[tokio::test]
 #[serial_test::serial]
-async fn existing_feed_ledger_is_preserved_when_feed_migrations_run() {
+async fn core_migrations_are_idempotent_on_a_fresh_database() {
     let db_url = db::db_url().await;
     reset_database(&db_url).await;
+
     let url = db_url.clone();
-    tokio::task::spawn_blocking(move || {
-        seed_ledger(&url, &[FEED_PREVIOUS_VERSION]);
-        run_source(&url, &FEED_MIGRATIONS);
-    })
-    .await
-    .expect("feed ledger migration task");
-
-    assert_tables_exist(&db_url, &["feeds", "feed_settings"]).await;
-    assert_ledger_shape_and_versions(&db_url, &[FEED_PREVIOUS_VERSION, FEED_OWNED_VERSION]).await;
-}
-
-#[tokio::test]
-#[serial_test::serial]
-async fn existing_voice_ledger_is_preserved_when_voice_migrations_run() {
-    let db_url = db::db_url().await;
-    reset_database(&db_url).await;
-    let url = db_url.clone();
-    tokio::task::spawn_blocking(move || {
-        seed_ledger(&url, &[VOICE_PREVIOUS_VERSION]);
-        run_source(&url, &VOICE_MIGRATIONS);
-    })
-    .await
-    .expect("voice ledger migration task");
-
-    assert_tables_exist(&db_url, &["voice_sessions", "voice_settings"]).await;
-    assert_ledger_shape_and_versions(&db_url, &[VOICE_PREVIOUS_VERSION, VOICE_OWNED_VERSION]).await;
-}
-
-#[tokio::test]
-#[serial_test::serial]
-async fn existing_mixed_component_ledger_is_preserved_when_all_migrations_run() {
-    let db_url = db::db_url().await;
-    reset_database(&db_url).await;
-    let url = db_url.clone();
-    tokio::task::spawn_blocking(move || {
-        seed_ledger(
-            &url,
-            &[
-                FEED_PREVIOUS_VERSION,
-                VOICE_PREVIOUS_VERSION,
-                ABSENT_VERSION,
-            ],
-        );
-        run_sources(
-            &url,
-            &[
-                &CORE_MIGRATIONS,
-                &FEED_MIGRATIONS,
-                &VOICE_MIGRATIONS,
-                &WELCOME_MIGRATIONS,
-            ],
-        );
-    })
-    .await
-    .expect("mixed ledger migration task");
-
-    assert_schema_and_versions_with_existing(
+    tokio::task::spawn_blocking(move || run_core_migrations(&url))
+        .await
+        .expect("core migration task");
+    assert_tables_exist(
         &db_url,
-        &[
-            FEED_PREVIOUS_VERSION,
-            VOICE_PREVIOUS_VERSION,
-            ABSENT_VERSION,
-        ],
+        &["server_settings", "bot_meta", "plugin_kv", "guild_plugins"],
     )
     .await;
-}
+    let mut first = ledger_versions(&db_url).await;
+    first.sort();
+    assert_eq!(first, [CORE_STORAGE_VERSION]);
+    assert!(
+        !first.contains(&HISTORICAL_CORE_VERSION.to_string()),
+        "a retired monolith-era version never reappears"
+    );
 
-#[tokio::test]
-#[serial_test::serial]
-async fn core_and_plugin_migrations_converge_in_every_startup_order() {
-    let db_url = db::db_url().await;
-    let orders = startup_orders();
-    assert_eq!(orders.len(), 24, "four sources have 24 startup orders");
-    for order in &orders {
-        reset_database(&db_url).await;
+    let reapplied = tokio::task::spawn_blocking({
         let url = db_url.clone();
-        let order = order.clone();
-        tokio::task::spawn_blocking(move || run_sources(&url, &order))
-            .await
-            .expect("migration order task");
-        assert_schema_and_versions(&db_url).await;
-        assert_ledger_does_not_contain(&db_url, CORE_VERSION).await;
-        assert_ledger_does_not_contain(&db_url, PHASE_FOUR_VERSION).await;
-    }
+        move || run_core_migrations(&url)
+    })
+    .await
+    .expect("repeat core migration task");
+    assert_eq!(reapplied, 0, "an already-migrated database applies nothing");
+    assert_eq!(ledger_versions(&db_url).await.len(), 1);
+}
 
+/// A ledger that already records a retired or unrelated version keeps those
+/// rows: the harness appends, it never rewrites the shared ledger.
+#[tokio::test]
+#[serial_test::serial]
+async fn an_existing_shared_ledger_is_preserved() {
+    let db_url = db::db_url().await;
     reset_database(&db_url).await;
     let url = db_url.clone();
     tokio::task::spawn_blocking(move || {
-        seed_legacy_core_schema(&url);
-        run_sources(
-            &url,
-            &[
-                &CORE_MIGRATIONS,
-                &FEED_MIGRATIONS,
-                &VOICE_MIGRATIONS,
-                &WELCOME_MIGRATIONS,
-            ],
-        );
+        seed_ledger(&url, &[HISTORICAL_CORE_VERSION, ABSENT_VERSION]);
+        run_core_migrations(&url);
     })
     .await
-    .expect("legacy schema migration task");
-    assert_schema_and_versions_with_existing(
-        &db_url,
-        &[CORE_VERSION, PHASE_FOUR_VERSION, ABSENT_VERSION],
-    )
-    .await;
+    .expect("legacy ledger migration task");
+
+    let mut versions = ledger_versions(&db_url).await;
+    versions.sort();
+    let mut expected = vec![
+        ABSENT_VERSION.to_string(),
+        CORE_STORAGE_VERSION.to_string(),
+        HISTORICAL_CORE_VERSION.to_string(),
+    ];
+    expected.sort();
+    assert_eq!(
+        versions, expected,
+        "existing ledger rows survive; core's migration is appended"
+    );
 }

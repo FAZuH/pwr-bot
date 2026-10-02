@@ -38,7 +38,11 @@ pub use service::VoiceTrackingService;
 
 /// The plugin's name and hello identity.
 pub const PLUGIN_NAME: &str = "voice";
-/// The direct command used by the host Settings section.
+/// The panel's invoke command, named by the manifest's settings section and
+/// dispatched by the host from its `/settings` tile. Not a slash command: the
+/// panel is opened only through the host Settings session, which parks
+/// itself behind the message so the panel's Back and About have somewhere to
+/// return to.
 pub const COMMAND_NAME: &str = "voice-settings";
 /// The qualified public command paths.
 pub const VOICE_COMMAND_NAME: &str = "vc";
@@ -247,65 +251,48 @@ pub fn manifest() -> Manifest {
         name: PLUGIN_NAME.into(),
         description: "Manage voice tracking settings".into(),
         version: "0.1.0".into(),
-        commands: vec![
-            CommandDef {
-                create_command: json!({
-                    "name": VOICE_COMMAND_NAME,
-                    "description": "Voice channel tracking and leaderboard commands",
-                    "options": [
-                        {
-                            "name": "settings",
-                            "description": "Configure voice tracking settings for this server",
-                            "type": 1,
-                            "default_member_permissions": "40",
-                        },
-                        {
-                            "name": "leaderboard",
-                            "description": "Display the voice activity leaderboard",
-                            "type": 1,
-                            "options": [leaderboard_range],
-                        },
-                        {
-                            "name": "stats",
-                            "description": "Show voice activity statistics",
-                            "type": 1,
-                            "options": [
-                                stats_range,
-                                {
-                                    "name": "user",
-                                    "description": concat!(
-                                        "User to show stats for (defaults to server stats in ",
-                                        "server, yourself in DM)"
-                                    ),
-                                    "type": 6,
-                                    "required": false,
-                                },
-                                {
-                                    "name": "statistic",
-                                    "description": "Statistic to display for server view",
-                                    "type": 4,
-                                    "required": false,
-                                    "choices": [
-                                        choice("Average Time", 0),
-                                        choice("Active Users", 1),
-                                        choice("Total Time", 2),
-                                    ],
-                                },
-                            ],
-                        },
-                    ],
-                }),
-            },
-            CommandDef {
-                create_command: json!({
-                    "name": COMMAND_NAME,
-                    "description": "Manage voice tracking settings",
-                    "dm_permission": false,
-                    "guild_only": true,
-                    "default_member_permissions": "40",
-                }),
-            },
-        ],
+        commands: vec![CommandDef {
+            create_command: json!({
+                "name": VOICE_COMMAND_NAME,
+                "description": "Voice channel tracking and leaderboard commands",
+                "options": [
+                    {
+                        "name": "leaderboard",
+                        "description": "Display the voice activity leaderboard",
+                        "type": 1,
+                        "options": [leaderboard_range],
+                    },
+                    {
+                        "name": "stats",
+                        "description": "Show voice activity statistics",
+                        "type": 1,
+                        "options": [
+                            stats_range,
+                            {
+                                "name": "user",
+                                "description": concat!(
+                                    "User to show stats for (defaults to server stats in ",
+                                    "server, yourself in DM)"
+                                ),
+                                "type": 6,
+                                "required": false,
+                            },
+                            {
+                                "name": "statistic",
+                                "description": "Statistic to display for server view",
+                                "type": 4,
+                                "required": false,
+                                "choices": [
+                                    choice("Average Time", 0),
+                                    choice("Active Users", 1),
+                                    choice("Total Time", 2),
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            }),
+        }],
         event_handlers: vec![
             "voice_state".into(),
             "guild_create".into(),

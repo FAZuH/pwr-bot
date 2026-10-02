@@ -18,10 +18,7 @@ pub struct Services {
 impl Services {
     /// Creates the host services from the repository factory.
     pub async fn new(repos: Arc<dyn Repos + Send + Sync>) -> anyhow::Result<Self> {
-        let internal = Arc::new(InternalService::new(
-            Arc::from(repos.feed_dump()),
-            Arc::from(repos.bot_meta()),
-        ));
+        let internal = Arc::new(InternalService::new(Arc::from(repos.bot_meta())));
         Ok(Self { internal })
     }
 }

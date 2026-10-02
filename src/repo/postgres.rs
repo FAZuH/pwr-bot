@@ -26,60 +26,9 @@ macro_rules! impl_table_base {
     };
 }
 
-// ============================================================================
-// PgFeedDumpRepo
-// ============================================================================
-
-#[derive(Clone)]
-pub struct PgFeedDumpRepo {
-    pool: DbPool,
-}
-
-impl PgFeedDumpRepo {
-    pub fn new(pool: DbPool) -> Self {
-        Self { pool }
-    }
-}
-
-#[async_trait::async_trait]
-impl FeedDumpRepository for PgFeedDumpRepo {
-    async fn select_feeds(&self) -> Result<Vec<FeedEntity>, DatabaseError> {
-        let mut conn = self.pool.get().await?;
-        Ok(feeds::table
-            .select(FeedEntity::as_select())
-            .load(&mut conn)
-            .await?)
-    }
-
-    async fn select_feed_items(&self) -> Result<Vec<FeedItemEntity>, DatabaseError> {
-        let mut conn = self.pool.get().await?;
-        Ok(feed_items::table
-            .select(FeedItemEntity::as_select())
-            .load(&mut conn)
-            .await?)
-    }
-
-    async fn select_subscribers(&self) -> Result<Vec<SubscriberEntity>, DatabaseError> {
-        let mut conn = self.pool.get().await?;
-        Ok(subscribers::table
-            .select(SubscriberEntity::as_select())
-            .load(&mut conn)
-            .await?)
-    }
-
-    async fn select_subscriptions(&self) -> Result<Vec<FeedSubscriptionEntity>, DatabaseError> {
-        let mut conn = self.pool.get().await?;
-        Ok(feed_subscriptions::table
-            .select(FeedSubscriptionEntity::as_select())
-            .load(&mut conn)
-            .await?)
-    }
-}
-
-// ============================================================================
-// PgServerSettingsRepo
-// ============================================================================
-
+/// The legacy import source plugins read once. The host owns the table (its
+/// core migration creates it) but no payload type: each plugin copies the
+/// value it cares about into its own storage on first read (ADR-0015).
 #[derive(Clone)]
 pub struct PgServerSettingsRepo {
     pool: DbPool,
@@ -92,63 +41,6 @@ impl PgServerSettingsRepo {
 }
 
 impl_table_base!(PgServerSettingsRepo, server_settings::table);
-
-#[async_trait::async_trait]
-impl CrudTable<ServerSettingsEntity, u64> for PgServerSettingsRepo {
-    async fn select_all(&self) -> Result<Vec<ServerSettingsEntity>, DatabaseError> {
-        let mut conn = self.pool.get().await?;
-        Ok(server_settings::table
-            .select(ServerSettingsEntity::as_select())
-            .load(&mut conn)
-            .await?)
-    }
-
-    async fn insert(&self, model: &ServerSettingsEntity) -> Result<u64, DatabaseError> {
-        let mut conn = self.pool.get().await?;
-        let guild_id: DbU64 = diesel::insert_into(server_settings::table)
-            .values(model)
-            .returning(server_settings::guild_id)
-            .get_result(&mut conn)
-            .await?;
-        Ok(guild_id.into())
-    }
-
-    async fn select(&self, id: &u64) -> Result<Option<ServerSettingsEntity>, DatabaseError> {
-        let mut conn = self.pool.get().await?;
-        Ok(server_settings::table
-            .find(DbU64::from(*id))
-            .select(ServerSettingsEntity::as_select())
-            .first(&mut conn)
-            .await
-            .optional()?)
-    }
-
-    async fn update(&self, model: &ServerSettingsEntity) -> Result<(), DatabaseError> {
-        let mut conn = self.pool.get().await?;
-        diesel::update(server_settings::table.find(model.guild_id))
-            .set(model)
-            .execute(&mut conn)
-            .await?;
-        Ok(())
-    }
-
-    async fn delete(&self, id: &u64) -> Result<(), DatabaseError> {
-        let mut conn = self.pool.get().await?;
-        diesel::delete(server_settings::table.find(DbU64::from(*id)))
-            .execute(&mut conn)
-            .await?;
-        Ok(())
-    }
-
-    async fn replace(&self, model: &ServerSettingsEntity) -> Result<u64, DatabaseError> {
-        let gid: u64 = model.guild_id.into();
-        if self.select(&gid).await?.is_some() {
-            self.update(model).await?;
-            return Ok(gid);
-        }
-        self.insert(model).await
-    }
-}
 
 // ============================================================================
 // PgBotMetaRepo

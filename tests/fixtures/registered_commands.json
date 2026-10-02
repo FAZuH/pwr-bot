@@ -8,9 +8,9 @@
     "options": []
   },
   {
-    "description": "Manage feed subscriptions and settings",
+    "description": "Manage example subscriptions and settings",
     "description_localizations": {},
-    "name": "feed",
+    "name": "alpha",
     "name_localizations": {},
     "nsfw": false,
     "options": [
@@ -18,7 +18,7 @@
         "autocomplete": false,
         "channel_types": [],
         "choices": [],
-        "description": "Configure feed settings for this server",
+        "description": "Configure example settings for this server",
         "max_length": null,
         "max_value": null,
         "min_length": null,
@@ -32,7 +32,7 @@
         "autocomplete": false,
         "channel_types": [],
         "choices": [],
-        "description": "Subscribe to one or more feeds",
+        "description": "Subscribe to one or more examples",
         "max_length": null,
         "max_value": null,
         "min_length": null,
@@ -43,7 +43,7 @@
             "autocomplete": true,
             "channel_types": [],
             "choices": [],
-            "description": "Link(s) of the feeds. Separate links with commas (,)",
+            "description": "Link(s) of the examples. Separate links with commas (,)",
             "max_length": null,
             "max_value": null,
             "min_length": null,
@@ -86,7 +86,7 @@
         "autocomplete": false,
         "channel_types": [],
         "choices": [],
-        "description": "Unsubscribe from one or more feeds",
+        "description": "Unsubscribe from one or more examples",
         "max_length": null,
         "max_value": null,
         "min_length": null,
@@ -97,7 +97,7 @@
             "autocomplete": true,
             "channel_types": [],
             "choices": [],
-            "description": "Link(s) of the feeds. Separate links with commas (,)",
+            "description": "Link(s) of the examples. Separate links with commas (,)",
             "max_length": null,
             "max_value": null,
             "min_length": null,
@@ -140,7 +140,7 @@
         "autocomplete": false,
         "channel_types": [],
         "choices": [],
-        "description": "List your current feed subscriptions",
+        "description": "List your current example subscriptions",
         "max_length": null,
         "max_value": null,
         "min_length": null,
@@ -183,17 +183,17 @@
       0
     ],
     "default_member_permissions": "40",
-    "description": "Manage feed subscription settings",
+    "description": "Manage example subscription settings",
     "description_localizations": {},
-    "name": "feed-settings",
+    "name": "alpha-settings",
     "name_localizations": {},
     "nsfw": false,
     "options": []
   },
   {
-    "description": "Admin plugin management.",
+    "description": "Example tracking and leaderboard commands",
     "description_localizations": {},
-    "name": "plugins",
+    "name": "beta",
     "name_localizations": {},
     "nsfw": false,
     "options": [
@@ -201,128 +201,7 @@
         "autocomplete": false,
         "channel_types": [],
         "choices": [],
-        "description": "Lists every catalog plugin and its enabled state in this guild.",
-        "max_length": null,
-        "max_value": null,
-        "min_length": null,
-        "min_value": null,
-        "name": "list",
-        "options": [],
-        "required": false,
-        "type": 1
-      },
-      {
-        "autocomplete": false,
-        "channel_types": [],
-        "choices": [],
-        "description": "Enables a catalog plugin for this guild, registering the union of all enabled plugins' commands.",
-        "max_length": null,
-        "max_value": null,
-        "min_length": null,
-        "min_value": null,
-        "name": "enable",
-        "options": [
-          {
-            "autocomplete": false,
-            "channel_types": [],
-            "choices": [],
-            "description": "A slash command parameter",
-            "max_length": null,
-            "max_value": null,
-            "min_length": null,
-            "min_value": null,
-            "name": "plugin",
-            "options": [],
-            "required": true,
-            "type": 3
-          }
-        ],
-        "required": false,
-        "type": 1
-      },
-      {
-        "autocomplete": false,
-        "channel_types": [],
-        "choices": [],
-        "description": "Disables a plugin for this guild: unregisters the remaining enabled plugins' commands.",
-        "max_length": null,
-        "max_value": null,
-        "min_length": null,
-        "min_value": null,
-        "name": "disable",
-        "options": [
-          {
-            "autocomplete": false,
-            "channel_types": [],
-            "choices": [],
-            "description": "A slash command parameter",
-            "max_length": null,
-            "max_value": null,
-            "min_length": null,
-            "min_value": null,
-            "name": "plugin",
-            "options": [],
-            "required": true,
-            "type": 3
-          }
-        ],
-        "required": false,
-        "type": 1
-      },
-      {
-        "autocomplete": false,
-        "channel_types": [],
-        "choices": [],
-        "description": "Swaps an enabled plugin to its freshly installed binary.",
-        "max_length": null,
-        "max_value": null,
-        "min_length": null,
-        "min_value": null,
-        "name": "swap",
-        "options": [
-          {
-            "autocomplete": false,
-            "channel_types": [],
-            "choices": [],
-            "description": "A slash command parameter",
-            "max_length": null,
-            "max_value": null,
-            "min_length": null,
-            "min_value": null,
-            "name": "plugin",
-            "options": [],
-            "required": true,
-            "type": 3
-          }
-        ],
-        "required": false,
-        "type": 1
-      }
-    ]
-  },
-  {
-    "contexts": [
-      0
-    ],
-    "description": "Open the server settings menu",
-    "description_localizations": {},
-    "name": "settings",
-    "name_localizations": {},
-    "nsfw": false,
-    "options": []
-  },
-  {
-    "description": "Voice channel tracking and leaderboard commands",
-    "description_localizations": {},
-    "name": "vc",
-    "name_localizations": {},
-    "nsfw": false,
-    "options": [
-      {
-        "autocomplete": false,
-        "channel_types": [],
-        "choices": [],
-        "description": "Configure voice tracking settings for this server",
+        "description": "Configure example tracking settings for this server",
         "max_length": null,
         "max_value": null,
         "min_length": null,
@@ -336,7 +215,7 @@
         "autocomplete": false,
         "channel_types": [],
         "choices": [],
-        "description": "Display the voice activity leaderboard",
+        "description": "Display the example activity leaderboard",
         "max_length": null,
         "max_value": null,
         "min_length": null,
@@ -388,7 +267,7 @@
                 "value": 7
               }
             ],
-            "description": "Time period to filter voice activity. Defaults to \"This month\"",
+            "description": "Time period to filter example activity. Defaults to \"This month\"",
             "max_length": null,
             "max_value": null,
             "min_length": null,
@@ -406,7 +285,7 @@
         "autocomplete": false,
         "channel_types": [],
         "choices": [],
-        "description": "Show voice activity statistics",
+        "description": "Show example activity statistics",
         "max_length": null,
         "max_value": null,
         "min_length": null,
@@ -503,17 +382,9 @@
       0
     ],
     "default_member_permissions": "40",
-    "description": "Manage voice tracking settings",
+    "description": "Manage example tracking settings",
     "description_localizations": {},
-    "name": "voice-settings",
-    "name_localizations": {},
-    "nsfw": false,
-    "options": []
-  },
-  {
-    "description": "Configure welcome cards for new members",
-    "description_localizations": {},
-    "name": "welcome",
+    "name": "beta-settings",
     "name_localizations": {},
     "nsfw": false,
     "options": []
@@ -522,11 +393,158 @@
     "contexts": [
       0
     ],
-    "description": "Manage welcome card settings",
+    "description": "Configure example cards for new members",
     "description_localizations": {},
-    "name": "welcome-settings",
+    "name": "gamma",
     "name_localizations": {},
     "nsfw": false,
     "options": []
+  },
+  {
+    "contexts": [
+      0
+    ],
+    "description": "Manage example card settings",
+    "description_localizations": {},
+    "name": "gamma-settings",
+    "name_localizations": {},
+    "nsfw": false,
+    "options": []
+  },
+  {
+    "description": "Admin plugin management.",
+    "description_localizations": {},
+    "name": "plugins",
+    "name_localizations": {},
+    "nsfw": false,
+    "options": [
+      {
+        "autocomplete": false,
+        "channel_types": [],
+        "choices": [],
+        "description": "Lists every catalog plugin and its enabled state in this guild.",
+        "max_length": null,
+        "max_value": null,
+        "min_length": null,
+        "min_value": null,
+        "name": "list",
+        "options": [],
+        "required": false,
+        "type": 1
+      },
+      {
+        "autocomplete": false,
+        "channel_types": [],
+        "choices": [],
+        "description": "Enables a catalog plugin for this guild, registering the union of all enabled plugins' commands.",
+        "max_length": null,
+        "max_value": null,
+        "min_length": null,
+        "min_value": null,
+        "name": "enable",
+        "options": [
+          {
+            "autocomplete": true,
+            "channel_types": [],
+            "choices": [],
+            "description": "The catalog plugin to enable",
+            "max_length": null,
+            "max_value": null,
+            "min_length": null,
+            "min_value": null,
+            "name": "plugin",
+            "options": [],
+            "required": true,
+            "type": 3
+          }
+        ],
+        "required": false,
+        "type": 1
+      },
+      {
+        "autocomplete": false,
+        "channel_types": [],
+        "choices": [],
+        "description": "Disables a plugin for this guild: unregisters the remaining enabled plugins' commands.",
+        "max_length": null,
+        "max_value": null,
+        "min_length": null,
+        "min_value": null,
+        "name": "disable",
+        "options": [
+          {
+            "autocomplete": true,
+            "channel_types": [],
+            "choices": [],
+            "description": "The plugin to disable in this server",
+            "max_length": null,
+            "max_value": null,
+            "min_length": null,
+            "min_value": null,
+            "name": "plugin",
+            "options": [],
+            "required": true,
+            "type": 3
+          }
+        ],
+        "required": false,
+        "type": 1
+      },
+      {
+        "autocomplete": false,
+        "channel_types": [],
+        "choices": [],
+        "description": "Swaps an enabled plugin to its freshly installed binary.",
+        "max_length": null,
+        "max_value": null,
+        "min_length": null,
+        "min_value": null,
+        "name": "swap",
+        "options": [
+          {
+            "autocomplete": true,
+            "channel_types": [],
+            "choices": [],
+            "description": "The enabled plugin to swap to a freshly installed binary",
+            "max_length": null,
+            "max_value": null,
+            "min_length": null,
+            "min_value": null,
+            "name": "plugin",
+            "options": [],
+            "required": true,
+            "type": 3
+          }
+        ],
+        "required": false,
+        "type": 1
+      }
+    ]
+  },
+  {
+    "contexts": [
+      0
+    ],
+    "description": "Open the server settings menu, or one plugin's settings panel directly.",
+    "description_localizations": {},
+    "name": "settings",
+    "name_localizations": {},
+    "nsfw": false,
+    "options": [
+      {
+        "autocomplete": true,
+        "channel_types": [],
+        "choices": [],
+        "description": "A plugin's settings panel. Leave empty for this server's settings page.",
+        "max_length": null,
+        "max_value": null,
+        "min_length": null,
+        "min_value": null,
+        "name": "mode",
+        "options": [],
+        "required": false,
+        "type": 3
+      }
+    ]
   }
 ]

@@ -61,3 +61,12 @@ cache-first projection with display names and avatar URLs to voice views.
 retired: `ALL_OPS` holds 14 ops and no settings pair remains on the surface.
 Welcome owns its `welcome_settings` table, its copy-once legacy import, and
 its preview rendering, and ships preview bytes in the envelope `files`.
+
+**Update — 2026-09-30 (phase 7, #170):** The op surface is unchanged at 14
+ops, and the governing rule now holds in the host's dispatch code as well
+as in its design: `plugin_slash_dispatch` no longer special-cases the feed
+settings command for a guild-admin pre-check. It routes every plugin
+command the same way, and permission lives where ADR-0015 put it — in the
+plugin, which verifies the actor itself and declares
+`default_member_permissions` on the command. The host no longer carries a
+per-plugin name to make an exception for.

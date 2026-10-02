@@ -4,6 +4,20 @@
 //! one tile per settings section the loaded plugin manifests declare. A
 //! section click exits to [`Navigation::SettingsSection`], which the Router
 //! resolves into the Settings section handoff (see [`session_exit`]).
+//!
+//! `mode` names one of those sections up front, so `/settings feed` opens
+//! the feed panel directly. Its choices are autocomplete rather than a fixed
+//! `choices` list: a manifest that declares a settings panel does not have
+//! to be a slash command, so nothing is synced to Discord when a plugin
+//! gains or loses one — the same reason the plugin parameter on
+//! `/plugin` autocompletes (see [`plugins::plugin_choices`]).
+//!
+//! A panel is only ever reached through this command, so every panel session
+//! has a live Settings session waiting behind it: the panel's Back and About
+//! hand the message back to a parked waiter (see
+//! [`crate::bot::translate::SettingsReturns`]). A plugin that also published
+//! its own panel slash command would open the panel with nobody waiting, and
+//! its Back and About would have nowhere to return to.
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -17,15 +31,77 @@ use crate::update::settings::SettingsEffect;
 use crate::update::settings::SettingsMsg;
 use crate::update::settings::SettingsSection;
 
-/// Open the server settings menu
+/// Open the server settings menu, or one plugin's settings panel directly.
 #[poise::command(slash_command, guild_only)]
-pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
-    invoke(Router::new(ctx)).await
+pub async fn settings(
+    ctx: Context<'_>,
+    #[description = "A plugin's settings panel. Leave empty for this server's settings page."]
+    #[autocomplete = "settings_mode"]
+    mode: Option<String>,
+) -> Result<(), Error> {
+    // Every settings section is a plugin's panel and every panel write is
+    // keyed by guild, so the whole command is guild-admin gated up front:
+    // a member without server management is refused before the hub renders
+    // and before any panel is handed a message. This is the same notion
+    // `/plugin` enforces (`is_author_guild_admin`).
+    is_author_guild_admin(ctx).await?;
+    let coordinator = Router::new(ctx);
+    let open = match mode
+        .as_deref()
+        .map(str::trim)
+        .filter(|mode| !mode.is_empty())
+    {
+        None => None,
+        Some(plugin) => Some(section_for(&coordinator, plugin)?),
+    };
+    coordinator.open_section(open);
+    invoke(coordinator).await
 }
 
 pub async fn invoke(coordinator: Arc<Router<'_>>) -> Result<(), Error> {
     coordinator.run(Navigation::SettingsMain).await?;
     Ok(())
+}
+
+/// The settings section `plugin` declares, or the refusal for a plugin that
+/// declares none. Read from the manifests, never from a host-side list.
+fn section_for(coordinator: &Router<'_>, plugin: &str) -> Result<SettingsSection, Error> {
+    let sections = gather_sections(coordinator.context());
+    sections
+        .into_iter()
+        .find(|section| section.plugin == plugin)
+        .ok_or_else(|| {
+            BotError::InvalidCommandArgument {
+                parameter: "mode".to_string(),
+                reason: format!("`{plugin}` has no settings panel"),
+            }
+            .into()
+        })
+}
+
+/// Discord's cap on choices per autocomplete response.
+const MAX_AUTOCOMPLETE_CHOICES: usize = 25;
+
+/// The `mode` choices: every plugin that declared a settings section, by the
+/// plugin name the manifests key it under. Sorted, so the list a user sees
+/// does not move between invocations, and matched as a prefix so a partial
+/// name narrows it — the point of a choice, since the plugin ids are not
+/// otherwise discoverable.
+pub async fn settings_mode<'a>(ctx: Context<'a>, query: &'a str) -> CreateAutocompleteResponse<'a> {
+    let mut names: Vec<String> = gather_sections(&ctx)
+        .into_iter()
+        .map(|section| section.plugin)
+        .collect();
+    names.sort();
+    names.dedup();
+    let query = query.to_lowercase();
+    let choices: Vec<AutocompleteChoice> = names
+        .into_iter()
+        .filter(|name| name.to_lowercase().starts_with(&query))
+        .take(MAX_AUTOCOMPLETE_CHOICES)
+        .map(AutocompleteChoice::from)
+        .collect();
+    CreateAutocompleteResponse::new().set_choices(choices)
 }
 
 handler! { pub struct SettingsHandler {} }
@@ -53,7 +129,23 @@ impl CommandHandler for SettingsHandler {
             coordinator.clone(),
         );
 
-        host.run().await?;
+        // `/settings <mode>` names the panel that appears, so the session
+        // renders one frame and exits into the handoff instead of running
+        // the hub's event loop. The section rides the session (taken here,
+        // once) rather than a handler field, so the hub's own entry point
+        // stays the empty handler the rest of the Router builds.
+        match coordinator.take_open_section() {
+            Some(section) => {
+                host.render_once().await?;
+                coordinator
+                    .navigate(Navigation::SettingsSection {
+                        plugin: section.plugin,
+                        command: section.command,
+                    })
+                    .await;
+            }
+            None => host.run().await?,
+        }
 
         Ok(())
     }

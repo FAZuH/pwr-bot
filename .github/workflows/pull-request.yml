@@ -49,7 +49,11 @@ jobs:
           components: rustfmt
 
       - name: Set up Stable Rust
-        uses: dtolnay/rust-toolchain@stable
+        # Pinned to 1.98: stable 1.99 added clippy::double_must_use, which
+        # fires on async-trait 0.1.89's generated bare #[must_use] for every
+        # async trait method returning Result. Unpin once async-trait emits a
+        # message or the lint is otherwise satisfied.
+        uses: dtolnay/rust-toolchain@1.98
         with:
           components: clippy
 

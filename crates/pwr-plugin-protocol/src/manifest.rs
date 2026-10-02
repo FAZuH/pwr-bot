@@ -39,7 +39,8 @@ pub struct Manifest {
     /// Recurring tasks the host should drive.
     pub tasks: Vec<TaskDef>,
     /// Settings sections the plugin contributes to the host `/settings`
-    /// surface; each targets one of the plugin's own commands.
+    /// surface; each targets the plugin's own panel (see
+    /// [`SettingsSection::command`]).
     #[serde(default)]
     pub settings: Vec<SettingsSection>,
     /// Host authority the plugin declares it needs, over the closed
@@ -56,8 +57,9 @@ pub struct Manifest {
 impl Manifest {
     /// Validates the manifest against this host: the `api_version` must equal
     /// [`API_VERSION`], every command blob must be a JSON object carrying at
-    /// least `name` and `description` strings, and every `requires` entry
-    /// must be in [`ALL_REQUIREMENTS`].
+    /// least `name` and `description` strings, every settings section must
+    /// name a panel, and every `requires` entry must be in
+    /// [`ALL_REQUIREMENTS`].
     pub fn validate(&self) -> Result<(), ManifestError> {
         if self.api_version != API_VERSION {
             return Err(ManifestError::UnsupportedApiVersion {
@@ -69,7 +71,7 @@ impl Manifest {
             validate_command_blob(index, &command.create_command)?;
         }
         for (index, section) in self.settings.iter().enumerate() {
-            validate_settings_section(index, section, &self.commands)?;
+            validate_settings_section(index, section)?;
         }
         for requirement in &self.requires {
             if !ALL_REQUIREMENTS.contains(&requirement.as_str()) {
@@ -117,8 +119,10 @@ pub struct SettingsSection {
     pub name: String,
     /// One-line human-readable description shown on the tile.
     pub description: String,
-    /// The plugin command invoking this section opens; must name one of the
-    /// manifest's own commands (see [`Manifest::validate`]).
+    /// The plugin's panel invoke target: the `cmd` its settings section passes
+    /// to `invoke`, matched inside the plugin. A panel is not a slash
+    /// command, so this need not appear in [`Manifest::commands`] — only name
+    /// something (see [`Manifest::validate`]).
     pub command: String,
 }
 
@@ -141,7 +145,7 @@ pub enum ManifestError {
         /// Why the entry failed, e.g. `name` must be a string.
         reason: String,
     },
-    /// A settings section does not name one of the manifest's own commands.
+    /// A settings section names no panel to open.
     #[error("settings section {index} is invalid: {reason}")]
     InvalidSettings {
         /// Index of the offending entry in `settings`.
@@ -182,32 +186,19 @@ fn validate_command_blob(index: usize, blob: &Value) -> Result<(), ManifestError
     Ok(())
 }
 
-/// Validates one settings section: its `command` must name a command the
-/// manifest itself declares — a section pointing outside the plugin has no
-/// invocable target.
-fn validate_settings_section(
-    index: usize,
-    section: &SettingsSection,
-    commands: &[CommandDef],
-) -> Result<(), ManifestError> {
-    let declared = commands.iter().any(|command| {
-        command
-            .create_command
-            .get("name")
-            .and_then(Value::as_str)
-            .is_some_and(|name| name == section.command)
-    });
-    if declared {
-        Ok(())
-    } else {
-        Err(ManifestError::InvalidSettings {
+/// Validates one settings section: its `command` is the plugin's own panel
+/// invoke target, so it must be present and name something. It is
+/// deliberately *not* cross-checked against [`Manifest::commands`] — a
+/// settings panel is not a slash command, and a plugin need not register
+/// one to contribute a panel.
+fn validate_settings_section(index: usize, section: &SettingsSection) -> Result<(), ManifestError> {
+    if section.command.trim().is_empty() {
+        return Err(ManifestError::InvalidSettings {
             index,
-            reason: format!(
-                "`command` `{}` is not one of the manifest's commands",
-                section.command
-            ),
-        })
+            reason: "`command` must name a panel to open".into(),
+        });
     }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -460,18 +451,29 @@ mod tests {
     }
 
     #[test]
-    fn settings_section_targeting_an_undeclared_command_is_rejected() {
+    fn settings_section_targeting_an_unregistered_panel_command_validates() {
         let mut manifest = sample_manifest();
         manifest.settings = vec![SettingsSection {
-            name: "Feeds".into(),
+            name: "Feed".into(),
             description: "Manage feed subscriptions".into(),
-            command: "feed.add".into(),
+            command: "feed-settings".into(),
+        }];
+        assert_eq!(manifest.validate(), Ok(()));
+    }
+
+    #[test]
+    fn settings_section_without_a_panel_is_rejected() {
+        let mut manifest = sample_manifest();
+        manifest.settings = vec![SettingsSection {
+            name: "Feed".into(),
+            description: "Manage feed subscriptions".into(),
+            command: "  ".into(),
         }];
         assert_eq!(
             manifest.validate(),
             Err(ManifestError::InvalidSettings {
                 index: 0,
-                reason: "`command` `feed.add` is not one of the manifest's commands".into(),
+                reason: "`command` must name a panel to open".into(),
             })
         );
     }
@@ -483,19 +485,19 @@ mod tests {
             SettingsSection {
                 name: "Feeds".into(),
                 description: "Fine".into(),
-                command: "feed.list".into(),
+                command: "feed-settings".into(),
             },
             SettingsSection {
                 name: "Broken".into(),
-                description: "No target".into(),
-                command: "ghost".into(),
+                description: "No panel".into(),
+                command: String::new(),
             },
         ];
         assert_eq!(
             manifest.validate(),
             Err(ManifestError::InvalidSettings {
                 index: 1,
-                reason: "`command` `ghost` is not one of the manifest's commands".into(),
+                reason: "`command` must name a panel to open".into(),
             })
         );
     }

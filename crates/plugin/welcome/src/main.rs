@@ -81,7 +81,6 @@ use pwr_plugin_support::reply_err;
 use pwr_plugin_support::write_msg;
 use serde_json::Value;
 use serde_json::json;
-use welcome::COMMAND_NAME;
 use welcome::PLUGIN_NAME;
 use welcome::image_generator::WelcomeCardData;
 use welcome::image_generator::WelcomeImageGenerator;
@@ -928,7 +927,7 @@ async fn main() -> ExitCode {
                 // between calls. A modal trigger instead opens its modal
                 // and answers the click with the modal-opened marker.
                 let host_call = match (op.as_str(), cmd.as_deref()) {
-                    ("invoke", Some(COMMAND_NAME)) => {
+                    ("invoke", cmd) if welcome::is_panel_command(cmd) => {
                         // The host forwards the source interaction's guild
                         // id; the model loads before the first render.
                         let Some(guild_id) = args
@@ -963,7 +962,7 @@ async fn main() -> ExitCode {
                         }
                         continue;
                     }
-                    ("view.interact", Some(COMMAND_NAME)) => {
+                    ("view.interact", cmd) if welcome::is_panel_command(cmd) => {
                         // The session state the host echoed back.
                         let Some(session) =
                             SessionState::from_value(args.as_ref().and_then(|a| a.get("view")))
@@ -1274,6 +1273,7 @@ async fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use pwr_poise_components::IS_COMPONENTS_V2;
+    use welcome::COMMAND_NAME;
 
     use super::*;
 
@@ -1828,16 +1828,32 @@ mod tests {
 
     // ── protocol ────────────────────────────────────────────────────────────
 
+    /// The panel is reached only through the host's `/settings`, so it
+    /// declares no slash command: one surface, one registration, and every
+    /// panel session has a host Settings session waiting behind it.
     #[test]
-    fn the_manifest_declares_the_command_and_the_settings_section() {
+    fn the_manifest_declares_no_slash_command_and_one_settings_section() {
         let m = manifest();
         assert_eq!(m.name, PLUGIN_NAME);
-        assert_eq!(m.commands.len(), 1);
-        assert_eq!(m.commands[0].create_command["name"], json!(COMMAND_NAME));
+        assert!(
+            m.commands.is_empty(),
+            "the panel is opened by the host Settings section, not by a command: {:?}",
+            m.commands
+        );
         assert_eq!(m.settings.len(), 1);
         assert_eq!(m.settings[0].command, COMMAND_NAME);
         assert!(m.event_handlers.is_empty(), "expiry persists nothing");
         assert_eq!(m.api_version, API_VERSION);
+    }
+
+    /// The panel's own invoke name is the only one it answers. A session
+    /// opened under any other name is not this panel's.
+    #[test]
+    fn only_the_panel_command_name_is_answered() {
+        assert!(welcome::is_panel_command(Some(COMMAND_NAME)));
+        assert!(!welcome::is_panel_command(Some("welcome")));
+        assert!(!welcome::is_panel_command(Some("something-else")));
+        assert!(!welcome::is_panel_command(None));
     }
 
     #[test]
