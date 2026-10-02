@@ -35,6 +35,7 @@ wreq-util = "0.2"
 [dev-dependencies]
 dotenv = "0.15.0"
 httpmock = "0.7.0"
+pwr-test-support.workspace = true
 libc = "0.2.182"
 mockall = "0.13.1"
 # The host-seam suites (`plugin_feed.rs`, `session_exit.rs`) drive this plugin

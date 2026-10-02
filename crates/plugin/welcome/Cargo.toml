@@ -28,6 +28,7 @@ wreq-util = "0.2"
 
 [dev-dependencies]
 dotenv = "0.15.0"
+pwr-test-support.workspace = true
 libc = "0.2.182"
 mockall = "0.13.1"
 # The host-seam suite (`plugin_welcome.rs`) drives this panel over the real

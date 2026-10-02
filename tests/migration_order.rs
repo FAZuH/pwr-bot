@@ -18,10 +18,8 @@ use diesel::pg::Pg;
 use diesel_migrations::EmbeddedMigrations;
 use diesel_migrations::MigrationHarness;
 use diesel_migrations::embed_migrations;
+use pwr_test_support::db;
 use tokio_postgres::NoTls;
-
-#[path = "support/db.rs"]
-mod db;
 
 const CORE_MIGRATIONS: EmbeddedMigrations = embed_migrations!("migrations");
 

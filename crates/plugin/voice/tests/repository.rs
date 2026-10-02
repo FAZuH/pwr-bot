@@ -3,6 +3,7 @@ use std::sync::Arc;
 use chrono::Duration;
 use chrono::SubsecRound;
 use chrono::Utc;
+use pwr_test_support::db;
 use serde_json::json;
 use voice::VoiceLeaderboardOpt;
 use voice::VoiceLeaderboardOptBuilder;
@@ -15,9 +16,6 @@ use voice::service::VoiceTrackingService;
 use voice::subscriber::VoiceState;
 use voice::subscriber::VoiceStateEvent;
 use voice::subscriber::VoiceStateSubscriber;
-
-#[path = "support/db.rs"]
-mod db;
 
 async fn setup_repository() -> Repository {
     let db_url = db::db_url().await;
