@@ -136,6 +136,26 @@ impl ModalRouter {
     /// typed, never a hang.
     pub async fn take(&self, author: u64) -> Result<ModalBinding, ModalRouteError> {
         let binding = self.bindings.lock().await.remove(&author);
+        self.windowed(author, binding)
+    }
+
+    /// Reads the route for `author` **without** consuming it: the per-guild
+    /// gate asks who owns a pending modal before deciding whether it may be
+    /// delivered, and a gate that only looked must not have eaten the
+    /// submission it is about to refuse. Same window and expiry as
+    /// [`take`](Self::take), so both agree on what is still routable.
+    pub async fn peek(&self, author: u64) -> Result<ModalBinding, ModalRouteError> {
+        let binding = self.bindings.lock().await.get(&author).cloned();
+        self.windowed(author, binding)
+    }
+
+    /// The shared window check, so `take` and `peek` cannot drift on when a
+    /// route stops being routable.
+    fn windowed(
+        &self,
+        author: u64,
+        binding: Option<ModalBinding>,
+    ) -> Result<ModalBinding, ModalRouteError> {
         match binding {
             Some(binding) if binding.opened_at.elapsed() < self.window => Ok(binding),
             Some(_) => Err(ModalRouteError::Expired(author)),
@@ -170,6 +190,12 @@ impl PluginManager {
     /// Consumes the author's modal route without delivering anything.
     pub async fn take_modal(&self, author: u64) -> Result<ModalBinding, ModalRouteError> {
         self.modals.take(author).await
+    }
+
+    /// Reads the author's modal route without consuming it, so a gate can
+    /// ask who owns a pending submission before routing or refusing it.
+    pub async fn peek_modal(&self, author: u64) -> Result<ModalBinding, ModalRouteError> {
+        self.modals.peek(author).await
     }
 
     /// Delivers one raw Discord modal submission (the serialized
@@ -275,6 +301,51 @@ mod tests {
 
         let error = router.take(7).await.unwrap_err();
         assert_eq!(error, ModalRouteError::NoBinding(7));
+    }
+
+    // ── peek ─────────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn peek_names_the_owner_without_consuming_the_route() {
+        let router = ModalRouter::new(Duration::from_secs(60));
+        router.bind(7, "hello", "hello:modal").await;
+
+        let binding = router.peek(7).await.expect("route present");
+        assert_eq!(binding.owner, "hello");
+
+        // A gate that only looked leaves the submission it is about to refuse
+        // still there for the consuming take.
+        let binding = router.peek(7).await.expect("still present after a peek");
+        assert_eq!(binding.custom_id, "hello:modal");
+        assert!(router.take(7).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn peek_after_take_finds_no_route() {
+        let router = ModalRouter::new(Duration::from_secs(60));
+        router.bind(7, "hello", "hello:modal").await;
+        router.take(7).await.expect("route consumed");
+
+        assert_eq!(
+            router.peek(7).await.unwrap_err(),
+            ModalRouteError::NoBinding(7)
+        );
+    }
+
+    #[tokio::test]
+    async fn peek_reports_expiry_like_take() {
+        let router = ModalRouter::new(Duration::ZERO);
+        router.bind(7, "hello", "hello:modal").await;
+        tokio::time::sleep(Duration::from_millis(5)).await;
+
+        assert_eq!(
+            router.peek(7).await.unwrap_err(),
+            ModalRouteError::Expired(7)
+        );
+        assert_eq!(
+            router.take(7).await.unwrap_err(),
+            ModalRouteError::Expired(7)
+        );
     }
 
     #[tokio::test]

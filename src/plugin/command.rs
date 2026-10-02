@@ -57,6 +57,7 @@ use serde_json::json;
 
 use crate::bot::Data;
 use crate::bot::command::Error;
+use crate::bot::error::BotError;
 use crate::plugin::decode_runtime_files;
 use crate::plugin::edit_body_for_transport;
 use crate::plugin::validate_view_spec;
@@ -777,6 +778,15 @@ pub async fn open_plugin_view(
         return Err(anyhow::anyhow!("open_plugin_view requires an application interaction").into());
     };
     let data = ctx.data();
+    // A plugin this guild switched off serves no one here: refuse before the
+    // manager is consulted, so the shared process keeps running for every
+    // other guild while this guild's commands stop answering.
+    if !data.plugin_enabled_in(ctx.guild_id(), plugin_name).await? {
+        return Err(BotError::PluginDisabledInGuild {
+            plugin: plugin_name.to_string(),
+        }
+        .into());
+    }
     let Some(plugin) = data.plugin_manager.get(plugin_name).await else {
         return Err(anyhow::anyhow!("plugin `{plugin_name}` is not running").into());
     };

@@ -284,6 +284,18 @@ impl<P> InteractionEngine<P> {
             .map(|session| session.view.clone())
     }
 
+    /// The command name the session for `message_id` was opened from, if one
+    /// is open. The host's route table maps that command back to its plugin,
+    /// so this is how the owning plugin of a rendered view is recovered.
+    pub async fn session_command(&self, message_id: serenity::MessageId) -> Option<String> {
+        self.inner
+            .sessions
+            .lock()
+            .await
+            .get(&message_id)
+            .map(|session| session.command.clone())
+    }
+
     /// Returns the number of active sessions.
     pub async fn session_count(&self) -> usize {
         self.inner.sessions.lock().await.len()
@@ -1128,6 +1140,25 @@ mod tests {
 
         assert!(engine.has_session(id).await);
         assert_eq!(engine.view_state(id).await, Some(Value::Null));
+    }
+
+    /// A session remembers the command it was opened from, which is how the
+    /// host recovers the plugin that owns a rendered view and can gate a
+    /// click from a guild that has since disabled it. Fails if the session
+    /// loses that name, leaving the gate with no plugin to check.
+    #[tokio::test]
+    async fn a_session_reports_the_command_that_opened_it() {
+        let plugin = Arc::new(FakePlugin::default());
+        let engine = InteractionEngine::new();
+        let id = opened(&engine, plugin).await;
+
+        assert_eq!(engine.session_command(id).await.as_deref(), Some("hello"));
+        engine.abandon(id).await.expect("abandon");
+        assert_eq!(
+            engine.session_command(id).await,
+            None,
+            "an abandoned session names no plugin"
+        );
     }
 
     #[tokio::test]

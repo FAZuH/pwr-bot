@@ -45,6 +45,7 @@ type Error = Box<dyn std::error::Error + Send + Sync>;
 
 use crate::bot::command::Cog;
 use crate::bot::command::Cogs;
+use crate::bot::error::BotError;
 use crate::bot::error_handler::ErrorHandler;
 use crate::bot::translate::TranslateLayer;
 use crate::config::Config;
@@ -702,11 +703,17 @@ impl BotEventHandler {
     async fn route_view_interaction(
         &self,
         message_id: MessageId,
+        guild_id: Option<GuildId>,
         custom_id: &str,
         interaction: Value,
         interaction_token: &str,
         kind: &str,
     ) {
+        if !self.session_plugin_enabled(message_id, guild_id).await {
+            self.drop_disabled_view(message_id).await;
+            return;
+        }
+
         let result = self
             .data
             .plugin_engine
@@ -798,6 +805,15 @@ impl BotEventHandler {
             return;
         }
 
+        if !self
+            .session_plugin_enabled(message_id, interaction.guild_id)
+            .await
+        {
+            self.ack_component(interaction, message_id).await;
+            self.drop_disabled_view(message_id).await;
+            return;
+        }
+
         let mut raw = serde_json::to_value(interaction).unwrap_or_default();
         if let Some(raw_object) = raw.as_object_mut() {
             raw_object.insert(
@@ -868,6 +884,52 @@ impl BotEventHandler {
         }
     }
 
+    /// Whether the plugin behind `message_id`'s open view session may still
+    /// serve `guild_id`.
+    ///
+    /// The session records the command it was opened from, and the route
+    /// table names that command's plugin, so a plugin switched off *after* its
+    /// view was rendered stops serving the clicks too — the second half of the
+    /// per-guild disable, next to the command gate in
+    /// [`open_plugin_view`](crate::plugin::command::open_plugin_view). No
+    /// session or no route means routing already refuses the interaction, and
+    /// a DM carries no guild, so there is no per-guild state to gate either
+    /// way.
+    ///
+    /// A row read that fails serves the view anyway, with the cause in the
+    /// log: the panel is already on screen and answered by the author, and a
+    /// database blip must not freeze every open panel.
+    async fn session_plugin_enabled(
+        &self,
+        message_id: MessageId,
+        guild_id: Option<GuildId>,
+    ) -> bool {
+        let data = &self.data;
+        let Some(command) = data.plugin_engine.session_command(message_id).await else {
+            return true;
+        };
+        let Some(plugin) = data.plugin_routes.get(&command) else {
+            return true;
+        };
+        match data.plugin_enabled_in(guild_id, plugin).await {
+            Ok(enabled) => enabled,
+            Err(e) => {
+                warn!("failed to read the guild plugin rows for `{plugin}`: {e}");
+                true
+            }
+        }
+    }
+
+    /// Drops the view session for a plugin this guild switched off. The panel
+    /// on screen is stale, so the session goes the way a stale session does:
+    /// `view.timeout` and dropped, leaving the click acknowledged.
+    async fn drop_disabled_view(&self, message_id: MessageId) {
+        debug!("plugin view {message_id} is disabled in this guild; dropping the session");
+        if let Err(e) = self.data.plugin_engine.abandon(message_id).await {
+            warn!("failed to abandon session for message {message_id}: {e}");
+        }
+    }
+
     /// Acknowledges a click without a visible reply, leaving the message for
     /// a later webhook edit.
     async fn ack_component(&self, interaction: &ComponentInteraction, message_id: MessageId) {
@@ -927,6 +989,20 @@ impl BotEventHandler {
             return;
         }
 
+        // A plugin this guild switched off since the modal was opened must
+        // not have its write land: the gate consumes the route and refuses,
+        // so the same submit cannot be retried. Checked before delivery,
+        // which would otherwise take the route and answer.
+        if let Some(plugin) = self
+            .data
+            .take_disabled_modal(interaction.user.id.get(), interaction.guild_id)
+            .await
+        {
+            self.refuse_disabled_modal_submission(interaction, &plugin)
+                .await;
+            return;
+        }
+
         // Plugin-opened modal: deliver first, so the route consumption
         // decides who answers. A terminal invalid response must not fall
         // through: the message-keyed route would call the plugin a second
@@ -969,12 +1045,34 @@ impl BotEventHandler {
 
         self.route_view_interaction(
             message.id,
+            interaction.guild_id,
             &interaction.data.custom_id,
             serde_json::to_value(interaction).unwrap_or_default(),
             interaction.token.as_str(),
             "modal submit",
         )
         .await;
+    }
+
+    /// Answers a submission of a modal whose plugin this guild switched off:
+    /// the same refusal a disabled plugin command gives, sent as the
+    /// submission's own response, privately — it concerns one author's
+    /// submission. The route is already consumed by
+    /// [`take_disabled_modal`](Data::take_disabled_modal), so the answer is
+    /// all that is left for this submission.
+    async fn refuse_disabled_modal_submission(&self, interaction: &ModalInteraction, plugin: &str) {
+        debug!("plugin `{plugin}` is disabled in this guild; refusing its modal submission");
+        let refusal = BotError::PluginDisabledInGuild {
+            plugin: plugin.to_string(),
+        };
+        let answer = CreateInteractionResponse::Message(
+            CreateInteractionResponseMessage::new()
+                .content(refusal.to_string())
+                .ephemeral(true),
+        );
+        if let Err(e) = interaction.create_response(&self.http, answer).await {
+            warn!("failed to refuse a modal submission of disabled plugin `{plugin}`: {e}");
+        }
     }
 
     /// Renders a plugin's answer to its own modal submission as the
