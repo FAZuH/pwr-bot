@@ -59,7 +59,8 @@ pub async fn plugins(ctx: Context<'_>) -> Result<(), Error> {
 ///
 /// A catalog that carries no entries is a normal state, not a failure to
 /// report: it answers through the shared error seam with a clean sentence and
-/// leaves the load failure in the log.
+/// leaves the load failure in the log (see [`list_body`], which decides both
+/// from the catalog itself — the collection this command lists).
 #[poise::command(slash_command)]
 pub async fn list(ctx: Context<'_>) -> Result<(), Error> {
     is_author_guild_admin(ctx).await?;
@@ -67,14 +68,34 @@ pub async fn list(ctx: Context<'_>) -> Result<(), Error> {
     let data = ctx.data();
     let model = guild_model(&data, guild_id).await?;
 
-    if model.catalog.is_empty() {
-        return Err(empty_catalog_error(data.plugin_catalog_error.as_ref()));
-    }
-    ctx.send(text_reply(
-        list_lines(&data.plugin_catalog, &model.enabled).join("\n"),
-    ))
-    .await?;
+    let body = list_body(
+        &data.plugin_catalog,
+        &model.enabled,
+        data.plugin_catalog_error.as_ref(),
+    )?;
+    ctx.send(text_reply(body)).await?;
     Ok(())
+}
+
+/// What `/plugins list` sends: [`list_lines`] joined into one body, or the
+/// refusal for a catalog that carries no entries.
+///
+/// The emptiness is read from `catalog`, the collection the lines are built
+/// from, never from the guild's known-plugin names: core plugins are known
+/// and toggleable without being catalog entries, so an empty catalog beside a
+/// core plugin is the state that has to answer here — otherwise the body is
+/// the empty string and Discord rejects the whole message (a 400
+/// `BASE_TYPE_BAD_LENGTH` on the first component's content) instead of the
+/// clean sentence the two empty states have always shared.
+fn list_body(
+    catalog: &HashMap<String, CatalogEntry>,
+    enabled: &[String],
+    catalog_error: Option<&InstallError>,
+) -> Result<String, Error> {
+    if catalog.is_empty() {
+        return Err(empty_catalog_error(catalog_error));
+    }
+    Ok(list_lines(catalog, enabled).join("\n"))
 }
 
 /// The `/plugins list` body: one line per catalog plugin with its guild
@@ -103,7 +124,7 @@ fn list_lines(catalog: &HashMap<String, CatalogEntry>, enabled: &[String]) -> Ve
 pub async fn enable(
     ctx: Context<'_>,
     #[description = "The plugin to enable"]
-    #[autocomplete = "plugin_choices"]
+    #[autocomplete = "disabled_plugin_choices"]
     plugin: String,
 ) -> Result<(), Error> {
     is_author_guild_admin(ctx).await?;
@@ -151,7 +172,7 @@ pub async fn enable(
 pub async fn disable(
     ctx: Context<'_>,
     #[description = "The plugin to disable in this server"]
-    #[autocomplete = "plugin_choices"]
+    #[autocomplete = "enabled_plugin_choices"]
     plugin: String,
 ) -> Result<(), Error> {
     is_author_guild_admin(ctx).await?;
@@ -241,13 +262,9 @@ pub async fn swap(
     Ok(())
 }
 
-/// The `plugin` choices for `/plugin enable|disable|swap`: every plugin the
-/// host knows, so the ids are discoverable without reading a catalog file.
-/// Both sources the host holds, always: the core manifests (the built-ins,
-/// which `disable` can switch off) and the catalog (what `enable` and `swap`
-/// resolve against). Never a list written here — a plugin that appears would
-/// be invisible. `swap` offers core names too and refuses them with a reason,
-/// which beats hiding them.
+/// The `plugin` choices for `/plugin swap`: every plugin the host knows, so
+/// the ids are discoverable without reading a catalog file. `swap` offers
+/// core names too and refuses them with a reason, which beats hiding them.
 ///
 /// Shares [`known_plugin_names`] with the toggle lookups, so an offered name
 /// always resolves.
@@ -255,8 +272,52 @@ pub async fn plugin_choices<'a>(
     ctx: Context<'a>,
     query: &'a str,
 ) -> CreateAutocompleteResponse<'a> {
+    choices_for(ctx, query, None).await
+}
+
+/// The `plugin` choices for `/plugin disable`: the plugins this guild has on,
+/// and nothing else — a toggle's offer is what the command does next, and
+/// `disable` acts on an enabled plugin.
+pub async fn enabled_plugin_choices<'a>(
+    ctx: Context<'a>,
+    query: &'a str,
+) -> CreateAutocompleteResponse<'a> {
+    choices_for(ctx, query, Some(true)).await
+}
+
+/// The `plugin` choices for `/plugin enable`: the plugins this guild has off,
+/// and nothing else — the mirror of [`enabled_plugin_choices`], so an
+/// already-enabled plugin is not offered the toggle it would no-op.
+pub async fn disabled_plugin_choices<'a>(
+    ctx: Context<'a>,
+    query: &'a str,
+) -> CreateAutocompleteResponse<'a> {
+    choices_for(ctx, query, Some(false)).await
+}
+
+/// The offered names, filtered to the guild's enabled set when the subcommand
+/// acts on one (`want_enabled`), prefix-matched and capped.
+///
+/// A read failure offers every known plugin instead: the toggle commands
+/// answer the offered name either way, and a list narrowed against a failed
+/// read would hide the plugins the admin needs.
+async fn choices_for<'a>(
+    ctx: Context<'a>,
+    query: &'a str,
+    want_enabled: Option<bool>,
+) -> CreateAutocompleteResponse<'a> {
     let data = ctx.data();
     let names = known_plugin_names(&data.core_manifests, &data.plugin_catalog);
+    let names = match (want_enabled, ctx.guild_id()) {
+        (Some(want), Some(guild_id)) => match guild_model(&data, guild_id).await {
+            Ok(model) => toggle_names(names, &model.enabled, want),
+            Err(error) => {
+                warn!("plugin autocomplete read no guild rows, offering every plugin: {error}");
+                names
+            }
+        },
+        _ => names,
+    };
     let query = query.to_lowercase();
     let choices: Vec<AutocompleteChoice> = names
         .into_iter()
@@ -265,6 +326,17 @@ pub async fn plugin_choices<'a>(
         .map(AutocompleteChoice::from)
         .collect();
     CreateAutocompleteResponse::new().set_choices(choices)
+}
+
+/// The known names whose guild state is `want_enabled`: what `disable` offers
+/// (the on ones) and what `enable` offers (the off ones). `enabled` is the
+/// resolved set [`guild_model`] builds — auto-enabled plugins included — so a
+/// name outside it really is off.
+fn toggle_names(names: Vec<String>, enabled: &[String], want_enabled: bool) -> Vec<String> {
+    names
+        .into_iter()
+        .filter(|name| enabled.contains(name) == want_enabled)
+        .collect()
 }
 
 /// Discord's cap on choices per autocomplete response.
@@ -345,7 +417,7 @@ fn empty_catalog_error(catalog_error: Option<&InstallError>) -> Error {
 /// A listing failure propagates instead of masquerading as "no rows" —
 /// the admin sees the real database error rather than wrong enablement
 /// states (the startup path logs and skips; this path can reply).
-async fn guild_model(data: &Data, guild_id: GuildId) -> Result<PluginsModel, Error> {
+pub(crate) async fn guild_model(data: &Data, guild_id: GuildId) -> Result<PluginsModel, Error> {
     let rows = data
         .repos
         .guild_plugins()
@@ -731,6 +803,69 @@ mod tests {
             .collect();
 
         assert_eq!(names, ["voice"]);
+    }
+
+    /// A catalog that carries no entries answers the shared sentence, never a
+    /// body: the empty string is what Discord rejects with a 400, so a check
+    /// that misses this state turns a listing into a broken command. Core
+    /// plugins are the case that made it reachable — they are known and
+    /// toggleable without being catalog entries, so an empty catalog beside a
+    /// core plugin is exactly the state that has to be caught. Fails if the
+    /// emptiness is read from the known names, where that state reads as a
+    /// full catalog.
+    #[test]
+    fn an_empty_catalog_answers_the_shared_sentence_instead_of_an_empty_body() {
+        let core = HashMap::from([("feed".to_string(), manifest_named("feed"))]);
+        let known = known_plugin_names(&core, &HashMap::new());
+        assert!(
+            !known.is_empty(),
+            "the guild's known names carry the core plugin, which is not a catalog entry"
+        );
+
+        let error = list_body(&HashMap::new(), &known, None).expect_err("nothing to list");
+
+        let bot_error = error.downcast_ref::<BotError>().expect("seam");
+        assert!(matches!(bot_error, BotError::NoPluginCatalog));
+        assert!(
+            !bot_error.to_string().is_empty(),
+            "the refusal is a sentence the admin reads"
+        );
+    }
+
+    /// The listed body is what Discord receives, so a catalog with entries
+    /// yields a non-empty body inside its length limits. Fails if the empty
+    /// case is silenced by returning an empty body instead of the refusal.
+    #[test]
+    fn a_catalog_with_entries_lists_a_body_discord_accepts() {
+        let catalog = HashMap::from([("hello".to_string(), entry_named("hello"))]);
+
+        let body = list_body(&catalog, &[], None).expect("a catalog with entries lists");
+
+        assert!(
+            !body.trim().is_empty(),
+            "an empty body is the 400: {body:?}"
+        );
+        assert!(body.chars().count() <= 4000, "{body}");
+    }
+
+    /// Each toggle offers what it acts on: `disable` the plugins this guild
+    /// has on, `enable` the ones it has off. Fails if both subcommands share
+    /// one unfiltered list, so an admin is offered a toggle that no-ops.
+    #[test]
+    fn the_toggle_autocompletes_offer_each_plugin_on_the_side_the_command_acts_on() {
+        let names = vec!["feed".to_string(), "voice".to_string()];
+        let enabled = vec!["feed".to_string()];
+
+        assert_eq!(
+            toggle_names(names.clone(), &enabled, true),
+            ["feed".to_string()],
+            "`disable` offers the enabled plugins"
+        );
+        assert_eq!(
+            toggle_names(names, &enabled, false),
+            ["voice".to_string()],
+            "`enable` offers the disabled plugins"
+        );
     }
 
     #[test]
