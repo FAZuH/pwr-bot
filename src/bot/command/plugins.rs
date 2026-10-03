@@ -14,6 +14,12 @@
 //! [`PluginsCmd`] drives the Discord/DB side
 //! effects.
 //!
+//! `list` is the one subcommand with a view: it runs the host
+//! [`PluginsListFeature`] on a Router session and supplies the per-plugin line
+//! wording ([`plugin_line`], shared by both groups), so the catalog group and
+//! the internal group behind its Show/Hide Internal button render the same
+//! states the toggles read.
+//!
 //! Disabling an internal plugin gates it at the host for that guild and leaves the
 //! shared process running for every other guild; only a catalog plugin, which
 //! runs per guild, is unloaded.
@@ -22,6 +28,8 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
+use std::time::Duration;
 
 use log::debug;
 use log::warn;
@@ -30,16 +38,21 @@ use pwr_plugin_protocol::Manifest;
 use crate::bot::Data;
 use crate::bot::add_plugin_commands;
 use crate::bot::command::prelude::*;
+use crate::bot::gui::Host;
+use crate::bot::gui::effects::NoopEffectHandler;
+use crate::bot::gui::plugins::PluginsListConfig;
+use crate::bot::gui::plugins::PluginsListFeature;
 use crate::bot::host_command_names;
 use crate::bot::manifest_for;
 use crate::bot::reply::text_reply;
 use crate::entity::GuildPluginEntity;
 use crate::plugin::CatalogEntry;
-use crate::plugin::InstallError;
 use crate::plugin::PluginError;
 use crate::plugin::command::register_in_guild;
 use crate::plugin::install;
 use crate::update::PluginsCmd;
+use crate::update::PluginsListEffect;
+use crate::update::PluginsListMsg;
 use crate::update::PluginsModel;
 use crate::update::PluginsMsg;
 use crate::update::PluginsUpdate;
@@ -55,69 +68,117 @@ pub async fn plugins(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-/// Lists every catalog plugin and its enabled state in this guild.
+/// Lists every plugin the host knows and its enabled state in this guild, as
+/// an interactive view.
 ///
-/// A catalog that carries no entries is a normal state, not a failure to
-/// report: it answers through the shared error seam with a clean sentence and
-/// leaves the load failure in the log (see [`list_body`], which decides both
-/// from the catalog itself — the collection this command lists).
+/// The catalog group and the internal group behind a Show/Hide Internal button
+/// are rendered by the host [`PluginsListFeature`], whose per-plugin wording
+/// this module supplies. An empty catalog renders its own group with
+/// `none configured` rather than refusing: a group that disappeared would be
+/// indistinguishable from a command that never knew about the catalog.
 #[poise::command(slash_command)]
 pub async fn list(ctx: Context<'_>) -> Result<(), Error> {
     is_author_guild_admin(ctx).await?;
-    let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?;
-    let data = ctx.data();
-    let model = guild_model(&data, guild_id).await?;
+    invoke(Router::new(ctx)).await
+}
 
-    let body = list_body(
-        &data.plugin_catalog,
-        &model.enabled,
-        data.plugin_catalog_error.as_ref(),
-    )?;
-    ctx.send(text_reply(body)).await?;
+pub async fn invoke(coordinator: Arc<Router<'_>>) -> Result<(), Error> {
+    coordinator.run(Navigation::PluginsList).await?;
     Ok(())
 }
 
-/// What `/plugins list` sends: [`list_lines`] joined into one body, or the
-/// refusal for a catalog that carries no entries.
-///
-/// The emptiness is read from `catalog`, the collection the lines are built
-/// from, never from the guild's known-plugin names: internal plugins are known
-/// and toggleable without being catalog entries, so an empty catalog beside a
-/// internal plugin is the state that has to answer here — otherwise the body is
-/// the empty string and Discord rejects the whole message (a 400
-/// `BASE_TYPE_BAD_LENGTH` on the first component's content) instead of the
-/// clean sentence the two empty states have always shared.
-fn list_body(
-    catalog: &HashMap<String, CatalogEntry>,
-    enabled: &[String],
-    catalog_error: Option<&InstallError>,
-) -> Result<String, Error> {
-    if catalog.is_empty() {
-        return Err(empty_catalog_error(catalog_error));
+handler! { pub struct PluginsListHandler {} }
+
+#[async_trait::async_trait]
+impl CommandHandler for PluginsListHandler {
+    async fn run(&mut self, coordinator: Arc<Router<'_>>) -> Result<(), Error> {
+        let ctx = *coordinator.context();
+        // A re-run after a section handoff wakes on an already-responded
+        // interaction: the live reply exists, and only the first render
+        // defers.
+        if coordinator.reply_handle().await.is_none() {
+            ctx.defer().await?;
+        }
+
+        let data = ctx.data();
+        let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?;
+        let model = guild_model(&data, guild_id).await?;
+
+        let config = PluginsListConfig {
+            internal: internal_lines(&data.internal_manifests, &model.enabled),
+            catalog: list_lines(&data.plugin_catalog, &model.enabled),
+        };
+        // An absent catalog is a normal state the view renders as
+        // `none configured`; the load failure behind it belongs in the log,
+        // where the operator reads it, not in the group's sentence.
+        if config.catalog.is_empty()
+            && let Some(error) = data.plugin_catalog_error.as_ref()
+        {
+            debug!("the plugin catalog did not load, so the list has no catalog plugins: {error}");
+        }
+
+        let mut host = Host::<PluginsListFeature, _>::new(
+            ctx,
+            config,
+            NoopEffectHandler::<PluginsListEffect, PluginsListMsg>::new(),
+            Duration::from_secs(120),
+            coordinator.clone(),
+        );
+
+        host.run().await?;
+        Ok(())
     }
-    Ok(list_lines(catalog, enabled).join("\n"))
 }
 
-/// The `/plugins list` body: one line per catalog plugin with its guild
-/// state and the authority the operator granted it — the Discord token, or
-/// the shaped `host.*` op surface alone.
+/// The `/plugins list` catalog group: one line per catalog plugin with its
+/// guild state and the authority the operator granted it — the Discord token,
+/// or the shaped `host.*` op surface alone.
+///
+/// Sorted by plugin name, so the rendered group does not move between renders.
 fn list_lines(catalog: &HashMap<String, CatalogEntry>, enabled: &[String]) -> Vec<String> {
-    let mut lines = Vec::with_capacity(catalog.len());
-    for (name, entry) in catalog {
-        let state = if enabled.contains(name) {
-            "enabled"
-        } else {
-            "disabled"
-        };
-        let authority = if entry.discord_token {
-            "discord token"
-        } else {
-            "host ops only"
-        };
-        lines.push(format!("`{name}` — {state}, {authority}"));
-    }
-    lines
+    let mut names: Vec<&String> = catalog.keys().collect();
+    names.sort();
+    names
+        .into_iter()
+        .map(|name| {
+            let authority = if catalog[name].discord_token {
+                DISCORD_TOKEN_AUTHORITY
+            } else {
+                HOST_OPS_AUTHORITY
+            };
+            plugin_line(name, enabled.contains(name), authority)
+        })
+        .collect()
 }
+
+/// The `/plugins list` internal group: the same line wording for the plugins
+/// that ship inside this host binary. They hold the host's own Discord
+/// authority — there is no separate binary, so there is no token grant to
+/// withhold. Sorted by plugin name, like the catalog group.
+fn internal_lines(
+    internal_manifests: &HashMap<String, Manifest>,
+    enabled: &[String],
+) -> Vec<String> {
+    let mut names: Vec<&String> = internal_manifests.keys().collect();
+    names.sort();
+    names
+        .into_iter()
+        .map(|name| plugin_line(name, enabled.contains(name), DISCORD_TOKEN_AUTHORITY))
+        .collect()
+}
+
+/// One listed plugin: its state in this guild and the authority it holds.
+/// Shared by both groups, so the wording exists once.
+fn plugin_line(name: &str, enabled: bool, authority: &str) -> String {
+    let state = if enabled { "enabled" } else { "disabled" };
+    format!("`{name}` — {state}, {authority}")
+}
+
+/// The authority wording for a plugin the operator granted the Discord token.
+const DISCORD_TOKEN_AUTHORITY: &str = "discord token";
+
+/// The authority wording for a plugin held to the shaped `host.*` ops.
+const HOST_OPS_AUTHORITY: &str = "host ops only";
 
 /// Enables an internal or catalog plugin for this guild.
 #[poise::command(slash_command)]
@@ -390,20 +451,6 @@ fn known_plugin_names(
     names
 }
 
-/// The message for a catalog that carries no entries.
-///
-/// An absent catalog is a normal state — the operator has configured no
-/// plugins — so it answers through the one error seam
-/// ([`ErrorHandler::classify_error`]) with a clean sentence and no path, no
-/// IO cause, and nothing doubled. The real cause stays in the log, where the
-/// operator reads it: this function does not embed it.
-fn empty_catalog_error(catalog_error: Option<&InstallError>) -> Error {
-    if let Some(error) = catalog_error {
-        debug!("the plugin catalog did not load, so there is nothing to list: {error}");
-    }
-    BotError::NoPluginCatalog.into()
-}
-
 /// The guild's plugins model: the names the host knows plus the guild's
 /// enabled subset, read from that guild's `guild_plugins` rows.
 ///
@@ -573,8 +620,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-
     use serde_json::json;
 
     use super::*;
@@ -590,64 +635,6 @@ mod tests {
             }),
         }];
         manifest
-    }
-
-    /// The catalog load failure a fresh checkout produces: no `plugins.toml`.
-    fn missing_catalog_error() -> InstallError {
-        InstallError::Catalog {
-            path: PathBuf::from("/srv/pwr-bot/data/plugins.toml"),
-            detail: "No such file or directory (os error 2)".to_string(),
-        }
-    }
-
-    /// An absent catalog answers cleanly through the shared seam. The path and
-    /// the IO cause are in the log, not in the reply: a user has no
-    /// `plugins.toml` to fix and no error to read. Fails if the load failure
-    /// is spliced back into the message, or if the message arrives as bare
-    /// text instead of an error the seam renders.
-    #[test]
-    fn an_absent_catalog_answers_through_the_error_seam_without_the_load_failure() {
-        let error = empty_catalog_error(Some(&missing_catalog_error()));
-
-        let bot_error = error
-            .downcast_ref::<BotError>()
-            .expect("the empty-catalog state answers through the error seam");
-        assert!(
-            matches!(bot_error, BotError::NoPluginCatalog),
-            "the catalog-absent state is its own variant: {bot_error:?}"
-        );
-        let message = bot_error.to_string();
-        assert!(
-            !message.contains("plugins.toml"),
-            "the path does not leak into a user-facing message: {message}"
-        );
-        assert!(
-            !message.contains("os error"),
-            "the IO cause does not leak into a user-facing message: {message}"
-        );
-        assert!(
-            !message.contains("failed to load plugin catalog"),
-            "the message is not the already-wrapped error, so nothing doubles: {message}"
-        );
-        let cause = missing_catalog_error().to_string();
-        assert!(
-            !message.contains(&cause),
-            "the load failure is not spliced into the message, so nothing doubles: {message}"
-        );
-    }
-
-    /// A catalog that parsed but holds nothing answers the same way, so the
-    /// two empty states cannot render differently.
-    #[test]
-    fn a_genuinely_empty_catalog_answers_the_same_sentence() {
-        let error = empty_catalog_error(None);
-
-        let bot_error = error.downcast_ref::<BotError>().expect("seam");
-        assert!(matches!(bot_error, BotError::NoPluginCatalog));
-        assert_eq!(
-            bot_error.to_string(),
-            "No plugins are configured yet. The bot owner adds a plugin catalog to offer them."
-        );
     }
 
     /// The unknown-plugin refusal never carries the catalog's load failure
@@ -805,49 +792,100 @@ mod tests {
         assert_eq!(names, ["voice"]);
     }
 
-    /// A catalog that carries no entries answers the shared sentence, never a
-    /// body: the empty string is what Discord rejects with a 400, so a check
-    /// that misses this state turns a listing into a broken command. Internal
-    /// plugins are the case that made it reachable — they are known and
-    /// toggleable without being catalog entries, so an empty catalog beside a
-    /// internal plugin is exactly the state that has to be caught. Fails if the
-    /// emptiness is read from the known names, where that state reads as a
-    /// full catalog.
+    /// An empty catalog is a group with no lines, not a refusal: the view
+    /// renders it as `none configured`, which an omitted group could not be
+    /// mistaken for. Internal plugins are the case that made the old empty-body
+    /// 400 reachable — they are known and toggleable without being catalog
+    /// entries, so an empty catalog beside an internal plugin is exactly the
+    /// state that has to render something. Fails if the emptiness is read from
+    /// the known names, where that state reads as a full catalog.
     #[test]
-    fn an_empty_catalog_answers_the_shared_sentence_instead_of_an_empty_body() {
-        let core = HashMap::from([("feed".to_string(), manifest_named("feed"))]);
-        let known = known_plugin_names(&core, &HashMap::new());
+    fn an_empty_catalog_yields_an_empty_group_rather_than_a_refusal() {
+        let internal = HashMap::from([("feed".to_string(), manifest_named("feed"))]);
+        let known = known_plugin_names(&internal, &HashMap::new());
         assert!(
             !known.is_empty(),
             "the guild's known names carry the internal plugin, which is not a catalog entry"
         );
 
-        let error = list_body(&HashMap::new(), &known, None).expect_err("nothing to list");
-
-        let bot_error = error.downcast_ref::<BotError>().expect("seam");
-        assert!(matches!(bot_error, BotError::NoPluginCatalog));
         assert!(
-            !bot_error.to_string().is_empty(),
-            "the refusal is a sentence the admin reads"
+            list_lines(&HashMap::new(), &known).is_empty(),
+            "no catalog plugins means no catalog lines, and the view says so itself"
+        );
+        assert_eq!(
+            internal_lines(&internal, &known),
+            ["`feed` — enabled, discord token"],
+            "the internal group is unaffected by an empty catalog"
         );
     }
 
-    /// The listed body is what Discord receives, so a catalog with entries
-    /// yields a non-empty body inside its length limits. Fails if the empty
-    /// case is silenced by returning an empty body instead of the refusal.
+    /// Both groups are built by the same wording helper, so a plugin reads the
+    /// same in either group and the two lists cannot drift apart.
     #[test]
-    fn a_catalog_with_entries_lists_a_body_discord_accepts() {
-        let catalog = HashMap::from([("hello".to_string(), entry_named("hello"))]);
-
-        let body = list_body(&catalog, &[], None).expect("a catalog with entries lists");
-
-        assert!(
-            !body.trim().is_empty(),
-            "an empty body is the 400: {body:?}"
+    fn both_groups_share_one_line_wording() {
+        assert_eq!(
+            plugin_line("feed", true, DISCORD_TOKEN_AUTHORITY),
+            "`feed` — enabled, discord token"
         );
-        assert!(body.chars().count() <= 4000, "{body}");
+        assert_eq!(
+            plugin_line("hello", false, HOST_OPS_AUTHORITY),
+            "`hello` — disabled, host ops only"
+        );
     }
 
+    /// The internal group carries each internal plugin's guild state under the
+    /// shared wording, so the Show/Hide button reveals the same information the
+    /// catalog group shows rather than a second, differently-worded list.
+    #[test]
+    fn the_internal_group_shows_each_plugins_state_under_the_shared_wording() {
+        let internal = HashMap::from([
+            ("feed".to_string(), manifest_named("feed")),
+            ("voice".to_string(), manifest_named("voice")),
+        ]);
+
+        let lines = internal_lines(&internal, &["feed".to_string()]);
+
+        assert_eq!(
+            lines,
+            [
+                "`feed` — enabled, discord token",
+                "`voice` — disabled, discord token"
+            ]
+        );
+    }
+
+    /// Both groups render in plugin-name order whatever the map's iteration
+    /// order is: a view whose rows reshuffle between renders reads as noise.
+    #[test]
+    fn both_groups_are_sorted_by_plugin_name() {
+        let internal = HashMap::from([
+            ("zebra".to_string(), manifest_named("zebra")),
+            ("alpha".to_string(), manifest_named("alpha")),
+            ("mango".to_string(), manifest_named("mango")),
+        ]);
+        let catalog = HashMap::from([
+            ("yak".to_string(), entry_named("yak")),
+            ("bee".to_string(), entry_named("bee")),
+            ("cat".to_string(), entry_named("cat")),
+        ]);
+
+        assert_eq!(
+            internal_lines(&internal, &[]),
+            [
+                "`alpha` — disabled, discord token",
+                "`mango` — disabled, discord token",
+                "`zebra` — disabled, discord token",
+            ]
+        );
+        assert_eq!(
+            list_lines(&catalog, &[]),
+            [
+                "`bee` — disabled, host ops only",
+                "`cat` — disabled, host ops only",
+                "`yak` — disabled, host ops only",
+            ]
+        );
+    }
     /// Each toggle offers what it acts on: `disable` the plugins this guild
     /// has on, `enable` the ones it has off. Fails if both subcommands share
     /// one unfiltered list, so an admin is offered a toggle that no-ops.

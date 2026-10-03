@@ -37,6 +37,7 @@ use poise::ReplyHandle;
 
 use crate::bot::Data;
 use crate::bot::command::about::AboutHandler;
+use crate::bot::command::plugins::PluginsListHandler;
 use crate::bot::command::settings::SettingsHandler;
 use crate::bot::navigation::Navigation;
 use crate::bot::translate::SettingsReturnPage;
@@ -162,6 +163,7 @@ impl<'a> Router<'a> {
         match target {
             SettingsMain => Some(Box::new(SettingsHandler::new())),
             SettingsAbout => Some(Box::new(AboutHandler::new())),
+            PluginsList => Some(Box::new(PluginsListHandler::new())),
             SettingsSection { .. } | Back | Exit => {
                 unreachable!("pop_step resolves the terminal targets itself")
             }
