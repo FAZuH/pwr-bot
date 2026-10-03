@@ -35,6 +35,7 @@
 pub mod about;
 pub mod effects;
 pub mod feature;
+pub mod plugins;
 pub mod register;
 pub mod rt;
 pub mod settings;

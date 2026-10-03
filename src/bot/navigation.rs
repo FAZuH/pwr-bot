@@ -26,6 +26,11 @@ pub enum Navigation {
     /// Navigate to about page (within settings context)
     SettingsAbout,
 
+    /// Run the host `/plugins list` GUI: the frame the `/plugins list` command
+    /// opens, listing the catalog plugins and — behind a Show/Hide Internal
+    /// button — the internal ones.
+    PluginsList,
+
     // -- Universal navigation --
     /// Pop one navigation level: the target revealed behind the marker runs
     /// and morphs the same message; with an empty stack behind it the root

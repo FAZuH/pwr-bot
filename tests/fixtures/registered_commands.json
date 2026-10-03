@@ -422,7 +422,7 @@
         "autocomplete": false,
         "channel_types": [],
         "choices": [],
-        "description": "Lists every catalog plugin and its enabled state in this guild.",
+        "description": "Lists every plugin the host knows and its enabled state in this guild, as an interactive view.",
         "max_length": null,
         "max_value": null,
         "min_length": null,
