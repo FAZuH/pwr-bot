@@ -38,8 +38,8 @@ host checks both before the plugin starts:
 
 A declaration without a grant, or a grant without a declaration, refuses the
 plugin. The bot logs the refusal and stays up. Only catalog plugins can be
-granted: a core plugin has no pinned digest, so a grant would attach to
-whatever bytes happen to sit on disk. A core plugin that declares the need is
+granted: an internal plugin has no pinned digest, so a grant would attach to
+whatever bytes happen to sit on disk. An internal plugin that declares the need is
 refused at the handshake for the same reason. Move a first-party plugin into
 the catalog first, or give it a shaped `host.*` operation instead.
 
@@ -62,30 +62,30 @@ The host also re-checks the entry's `sha256` against the binary every time
 it spawns it, so a binary swapped after install is refused at the seam rather
 than inheriting the grant you made for the bytes you reviewed.
 
-## Core plugins
+## Internal plugins
 
 The built-in plugins that ship with the host binary (`feed`, `voice`,
 `welcome`) are not in the catalog. The host spawns the plugins
-named in `CORE_PLUGINS` (a comma-separated list) at startup; each binary's
+named in `INTERNAL_PLUGINS` (a comma-separated list) at startup; each binary's
 path resolves as [Configuration](configuration.md) documents. An unknown
 name or a binary that fails to spawn is skipped with a warning and the
 bot stays up.
 
 ## Feed
 
-The `feed` core plugin owns feed subscriptions, delivery, and its settings
+The `feed` internal plugin owns feed subscriptions, delivery, and its settings
 storage. It applies the migrations under
 `crates/plugin/feed/migrations/` at startup and exposes the `/feed` command
 group plus the `/feed-settings` panel command. Its single migration has a
 unique version and creates only feed-owned tables with `IF NOT EXISTS`. Its own
 service and repository write feed tables; the host bridges Discord and plugin
 operations, and reads no feed table. The owner-only `/dump_db` command and the
-host's read-only feed dump repository are gone: they selected tables the core
+host's read-only feed dump repository are gone: they selected tables the internal
 migration no longer creates, so the command could not run.
 
 ## Voice
 
-The `voice` core plugin owns voice-session tracking, statistics, leaderboard
+The `voice` internal plugin owns voice-session tracking, statistics, leaderboard
 views, and voice settings. It subscribes to the host's `voice_state` and
 `guild_create` events, stores sessions in its own PostgreSQL tables, keeps its
 crash-recovery marker at `$DATA_PATH/voice_heartbeat`, and imports legacy voice
@@ -102,13 +102,13 @@ version `2`. A plugin's manifest may declare `voice_state`, `guild_create`, and
 
 ## Welcome
 
-The `welcome` core plugin owns the welcome panel, the welcome-card renderer,
+The `welcome` internal plugin owns the welcome panel, the welcome-card renderer,
 and welcome settings storage. It applies the migrations under
 `crates/plugin/welcome/migrations/` into its own `welcome_settings` table and
 copies the legacy `server_settings.welcome` value into that table on a guild's
 first read, then reads only its own table. The renderer, the twelve SVG cards
 in `assets/welcome/`, and the font embedded with `include_bytes!` live in the
-crate, so a preview renders with no host involvement. The core `/welcome`
+crate, so a preview renders with no host involvement. The internal `/welcome`
 command opens the panel; the plugin itself registers `welcome-settings`. The
 host supplies `host.get_config`,
 `host.open_view`, and `host.open_modal`; there is no welcome-settings RPC. The

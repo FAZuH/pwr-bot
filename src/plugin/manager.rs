@@ -649,7 +649,7 @@ fn start_crash_supervisor(
 /// instance's exit watch channel and owns every exit-driven decision: a
 /// clean exit (code 0) unloads without respawn, anything else is a crash
 /// and gets respawned under the policy. Runs unconditionally, so plugins
-/// spawned without a [`HealthConfig`] — the core plugins — are supervised
+/// spawned without a [`HealthConfig`] — the internal plugins — are supervised
 /// too; `HealthConfig` stays solely responsible for liveness pings.
 ///
 /// Ownership: this task — never [`health_loop`] — classifies an exit, so a

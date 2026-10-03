@@ -329,31 +329,34 @@ mod guild_plugins_table_tests {
         assert!(rows.is_empty(), "Plugin state must not leak across guilds");
     });
 
-    // A core plugin's per-guild state lives in the same table as a catalog
+    // An internal plugin's per-guild state lives in the same table as a catalog
     // plugin's: `/plugin disable feed` persists `enabled = false` and the next
-    // read has to hand that row back, or the core plugin re-enables itself on
+    // read has to hand that row back, or the internal plugin re-enables itself on
     // the next start or guild join.
-    db_test!(a_core_plugins_state_round_trips_through_the_table, |db| {
-        db.guild_plugins
-            .set_enabled(123, "feed", false)
-            .await
-            .expect("disable a core plugin");
+    db_test!(
+        a_internal_plugins_state_round_trips_through_the_table,
+        |db| {
+            db.guild_plugins
+                .set_enabled(123, "feed", false)
+                .await
+                .expect("disable an internal plugin");
 
-        let rows = db.guild_plugins.list_for_guild(123).await.unwrap();
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].plugin_name, "feed");
-        assert!(
-            !rows[0].enabled,
-            "the disabled core plugin reads back disabled"
-        );
+            let rows = db.guild_plugins.list_for_guild(123).await.unwrap();
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].plugin_name, "feed");
+            assert!(
+                !rows[0].enabled,
+                "the disabled internal plugin reads back disabled"
+            );
 
-        db.guild_plugins
-            .set_enabled(123, "feed", true)
-            .await
-            .expect("enable a core plugin");
+            db.guild_plugins
+                .set_enabled(123, "feed", true)
+                .await
+                .expect("enable an internal plugin");
 
-        let rows = db.guild_plugins.list_for_guild(123).await.unwrap();
-        assert_eq!(rows.len(), 1, "re-enabling upserts the same row");
-        assert!(rows[0].enabled);
-    });
+            let rows = db.guild_plugins.list_for_guild(123).await.unwrap();
+            assert_eq!(rows.len(), 1, "re-enabling upserts the same row");
+            assert!(rows[0].enabled);
+        }
+    );
 }

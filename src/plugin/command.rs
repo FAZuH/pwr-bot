@@ -373,7 +373,7 @@ pub enum ReparseError {
 
 /// Parses a `CreateCommand` blob into a routing poise command.
 ///
-/// The command's `slash_action` is the core-plugin dispatch
+/// The command's `slash_action` is the internal-plugin dispatch
 /// (`plugin_slash_dispatch`); `on_error`/`checks` are left at framework
 /// defaults.
 pub fn command_from_blob(blob: &Value) -> Result<Command<Data, Error>, CommandSpecError> {

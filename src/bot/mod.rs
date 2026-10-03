@@ -101,8 +101,8 @@ pub struct Data {
     /// Command-name → plugin-name routes for dispatch; built at startup from
     /// the loaded manifests ([`routes_from_manifests`]).
     pub plugin_routes: Arc<PluginRoutes>,
-    /// Manifests of the core plugins spawned at startup, by plugin name.
-    pub core_manifests: Arc<HashMap<String, Manifest>>,
+    /// Manifests of the internal plugins spawned at startup, by plugin name.
+    pub internal_manifests: Arc<HashMap<String, Manifest>>,
     /// Tracks the messages owned by live Host (TEA) sessions, so the global
     /// event handler skips their interactions and the Host acknowledges them
     /// exactly once. See [`crate::bot::translate`].
@@ -116,11 +116,11 @@ pub struct Data {
 
 impl Data {
     /// The names of plugins that auto-enable in every guild: the configured
-    /// core plugins plus catalog entries flagged `auto_enable`.
+    /// internal plugins plus catalog entries flagged `auto_enable`.
     pub fn auto_enable_plugins(&self) -> Vec<String> {
         let mut names: Vec<String> = self
             .config
-            .core_plugins
+            .internal_plugins
             .iter()
             .map(|spec| spec.name.clone())
             .collect();
@@ -133,23 +133,23 @@ impl Data {
         names
     }
 
-    /// The manifest for an auto-enabled plugin: the core plugin's manifest
+    /// The manifest for an auto-enabled plugin: the internal plugin's manifest
     /// captured at spawn when there is one, else the catalog entry's.
     pub fn manifest_for(&self, name: &str) -> Option<&Manifest> {
-        manifest_for(&self.core_manifests, &self.plugin_catalog, name)
+        manifest_for(&self.internal_manifests, &self.plugin_catalog, name)
     }
 }
 
-/// The manifest for `name`: the core plugin's manifest when there is one,
+/// The manifest for `name`: the internal plugin's manifest when there is one,
 /// else the catalog entry's. Shared by [`Data::manifest_for`] and the
 /// `/plugins` toggle union, which look up by plugin name over the same two
 /// maps.
 pub(crate) fn manifest_for<'a>(
-    core_manifests: &'a HashMap<String, Manifest>,
+    internal_manifests: &'a HashMap<String, Manifest>,
     catalog: &'a HashMap<String, CatalogEntry>,
     name: &str,
 ) -> Option<&'a Manifest> {
-    core_manifests
+    internal_manifests
         .get(name)
         .or_else(|| catalog.get(name).map(|entry| &entry.manifest))
 }
@@ -215,12 +215,12 @@ impl Bot {
                 )),
         );
 
-        // Core plugins are spawned once at startup. Their manifest event
+        // Internal plugins are spawned once at startup. Their manifest event
         // handlers are subscribed after the handshake; per-guild command
         // registration follows in Ready/GuildCreate. A missing binary is not
         // fatal: the bot stays up and the plugin's commands stay unregistered.
         let mut manifest_sources: Vec<(String, Option<Manifest>)> = Vec::new();
-        for spec in &config.core_plugins {
+        for spec in &config.internal_plugins {
             match plugin_manager
                 .spawn(&spec.name, &spec.path, None, &[], &[])
                 .await
@@ -233,10 +233,10 @@ impl Bot {
                     }
                     manifest_sources.push((spec.name.clone(), plugin.manifest().cloned()));
                 }
-                Err(e) => warn!("failed to spawn core plugin {}: {e}", spec.name),
+                Err(e) => warn!("failed to spawn internal plugin {}: {e}", spec.name),
             }
         }
-        let core_manifests = Arc::new(
+        let internal_manifests = Arc::new(
             manifest_sources
                 .iter()
                 .filter_map(|(name, manifest)| manifest.clone().map(|m| (name.clone(), m)))
@@ -247,8 +247,8 @@ impl Bot {
             route_sources.push((name.clone(), Some(entry.manifest.clone())));
         }
         route_sources.sort_by(|(left_name, _), (right_name, _)| {
-            let left_is_catalog = !core_manifests.contains_key(left_name);
-            let right_is_catalog = !core_manifests.contains_key(right_name);
+            let left_is_catalog = !internal_manifests.contains_key(left_name);
+            let right_is_catalog = !internal_manifests.contains_key(right_name);
             right_is_catalog
                 .cmp(&left_is_catalog)
                 .then_with(|| left_name.cmp(right_name))
@@ -260,7 +260,7 @@ impl Bot {
         ));
 
         let framework =
-            Self::create_framework(&config, &catalog, &core_manifests, &host_command_names)?;
+            Self::create_framework(&config, &catalog, &internal_manifests, &host_command_names)?;
 
         let start_time = Instant::now();
         let data = Arc::new(Data {
@@ -272,14 +272,14 @@ impl Bot {
             plugin_catalog_error: catalog_error,
             plugin_engine,
             plugin_routes,
-            core_manifests,
+            internal_manifests,
             translate_layer: Arc::new(TranslateLayer::new()),
             settings_returns,
             start_time,
         });
 
         // The command count comes from the finished framework options, so the
-        // source can only ride the pre-start handle here — after the core
+        // source can only ride the pre-start handle here — after the internal
         // plugins spawned. Calls before this point answer `HostUnavailable`
         // (the handle serves a typed error until a source is attached).
         let stats_source = Arc::new(SerenityStatsSource::new(
@@ -357,19 +357,23 @@ impl Bot {
     /// Creates the Poise framework with commands and configuration.
     ///
     /// The command list is the merge seam: the Cog commands first, then one
-    /// routing command per core plugin manifest captured at spawn, then one
-    /// routing command per catalog plugin manifest not itself a core plugin
+    /// routing command per internal plugin manifest captured at spawn, then one
+    /// routing command per catalog plugin manifest not itself an internal plugin
     /// — each group sorted by plugin name for a stable order across restarts
     /// (see [`plugin_commands`]) — so plugin commands are registered on the
     /// framework before `Framework::builder().build()`.
     fn create_framework(
         config: &Config,
         catalog: &HashMap<String, CatalogEntry>,
-        core_manifests: &HashMap<String, Manifest>,
+        internal_manifests: &HashMap<String, Manifest>,
         host_command_names: &HashSet<String>,
     ) -> Result<Box<Framework<Data, Error>>> {
         let mut commands = Cogs.commands();
-        commands.extend(plugin_commands(core_manifests, catalog, host_command_names));
+        commands.extend(plugin_commands(
+            internal_manifests,
+            catalog,
+            host_command_names,
+        ));
 
         let options = FrameworkOptions::<Data, Error> {
             commands,
@@ -430,22 +434,22 @@ pub(crate) fn host_command_names() -> HashSet<String> {
         .collect()
 }
 
-/// The plugin routing commands for the framework: core plugin manifests
+/// The plugin routing commands for the framework: internal plugin manifests
 /// first, then catalog plugin manifests, each group sorted by plugin name
 /// so the assembled command order is stable across restarts.
 ///
 /// Host Cog roots and earlier plugin roots are reserved. A catalog entry
-/// whose plugin also runs as a core plugin contributes nothing: its commands
-/// come from the core manifest only. Catalog entries for core plugins exist so
+/// whose plugin also runs as an internal plugin contributes nothing: its commands
+/// come from the internal manifest only. Catalog entries for internal plugins exist so
 /// `/plugins list` and the install/update sources see them.
 fn plugin_commands(
-    core_manifests: &HashMap<String, Manifest>,
+    internal_manifests: &HashMap<String, Manifest>,
     catalog: &HashMap<String, CatalogEntry>,
     reserved_names: &HashSet<String>,
 ) -> Vec<poise::Command<Data, Error>> {
     let mut commands = Vec::new();
     let mut registered_names = HashSet::new();
-    let mut core: Vec<&Manifest> = core_manifests.values().collect();
+    let mut core: Vec<&Manifest> = internal_manifests.values().collect();
     core.sort_by(|a, b| a.name.cmp(&b.name));
     for manifest in core {
         add_plugin_commands(
@@ -458,9 +462,9 @@ fn plugin_commands(
     let mut entries: Vec<&CatalogEntry> = catalog.values().collect();
     entries.sort_by(|a, b| a.name.cmp(&b.name));
     for entry in entries {
-        if core_manifests.contains_key(&entry.name) {
+        if internal_manifests.contains_key(&entry.name) {
             warn!(
-                "skipping catalog commands for `{}`: it is a core plugin, its commands come from the core manifest",
+                "skipping catalog commands for `{}`: it is an internal plugin, its commands come from the internal manifest",
                 entry.name
             );
             continue;
@@ -583,7 +587,7 @@ impl BotEventHandler {
 
                 let mut commands = Cogs.commands();
                 commands.extend(plugin_commands(
-                    &self.data.core_manifests,
+                    &self.data.internal_manifests,
                     &self.data.plugin_catalog,
                     &host_command_names(),
                 ));
@@ -1236,7 +1240,7 @@ mod tests {
             plugin_catalog_error: None,
             plugin_engine: engine.clone(),
             plugin_routes: Arc::new(HashMap::new()),
-            core_manifests: Arc::new(HashMap::new()),
+            internal_manifests: Arc::new(HashMap::new()),
             translate_layer: Arc::new(TranslateLayer::new()),
             settings_returns: Arc::new(crate::bot::translate::SettingsReturns::default()),
             start_time: Instant::now(),
@@ -1354,7 +1358,7 @@ mod tests {
 
     #[test]
     fn plugin_commands_sort_each_group_by_plugin_name() {
-        let core_manifests = HashMap::from([
+        let internal_manifests = HashMap::from([
             ("zeta".to_string(), manifest_named("zeta")),
             ("alpha".to_string(), manifest_named("alpha")),
         ]);
@@ -1363,7 +1367,7 @@ mod tests {
             ("bravo".to_string(), entry_named("bravo")),
         ]);
 
-        let commands = plugin_commands(&core_manifests, &catalog, &HashSet::new());
+        let commands = plugin_commands(&internal_manifests, &catalog, &HashSet::new());
         let names: Vec<&str> = commands
             .iter()
             .map(|command| command.name.as_ref())
@@ -1381,13 +1385,13 @@ mod tests {
                 "description": "Plugin settings"
             }),
         }];
-        let core_manifests = HashMap::from([("plugin".to_string(), manifest.clone())]);
+        let internal_manifests = HashMap::from([("plugin".to_string(), manifest.clone())]);
         let reserved = host_command_names();
         let routes = routes_from_manifests_with_reserved(
             [("plugin".to_string(), Some(manifest))],
             &reserved,
         );
-        let commands = plugin_commands(&core_manifests, &HashMap::new(), &reserved);
+        let commands = plugin_commands(&internal_manifests, &HashMap::new(), &reserved);
 
         assert!(!routes.contains_key("settings"));
         assert!(
@@ -1397,15 +1401,16 @@ mod tests {
         );
     }
 
-    /// A catalog entry for a plugin that also runs as a core plugin is
-    /// skipped: the core manifest is the only source for its commands, so
+    /// A catalog entry for a plugin that also runs as an internal plugin is
+    /// skipped: the internal manifest is the only source for its commands, so
     /// `set_commands` never sees the same command name twice.
     #[test]
-    fn plugin_commands_skip_a_catalog_entry_that_duplicates_a_core_plugin() {
-        let core_manifests = HashMap::from([("settings".to_string(), manifest_named("settings"))]);
+    fn plugin_commands_skip_a_catalog_entry_that_duplicates_a_internal_plugin() {
+        let internal_manifests =
+            HashMap::from([("settings".to_string(), manifest_named("settings"))]);
         let catalog = HashMap::from([("settings".to_string(), entry_named("settings"))]);
 
-        let commands = plugin_commands(&core_manifests, &catalog, &HashSet::new());
+        let commands = plugin_commands(&internal_manifests, &catalog, &HashSet::new());
         let names: Vec<&str> = commands
             .iter()
             .map(|command| command.name.as_ref())
@@ -1413,14 +1418,15 @@ mod tests {
 
         assert_eq!(names, ["settings"]);
     }
-    /// A catalog entry whose plugin is not a core plugin still contributes
+    /// A catalog entry whose plugin is not an internal plugin still contributes
     /// its commands.
     #[test]
     fn plugin_commands_keep_a_catalog_entry_whose_plugin_is_not_core() {
-        let core_manifests = HashMap::from([("settings".to_string(), manifest_named("settings"))]);
+        let internal_manifests =
+            HashMap::from([("settings".to_string(), manifest_named("settings"))]);
         let catalog = HashMap::from([("greet".to_string(), entry_named("greet"))]);
 
-        let commands = plugin_commands(&core_manifests, &catalog, &HashSet::new());
+        let commands = plugin_commands(&internal_manifests, &catalog, &HashSet::new());
         let names: Vec<&str> = commands
             .iter()
             .map(|command| command.name.as_ref())
@@ -1430,25 +1436,26 @@ mod tests {
     }
 
     /// The full registered command surface — the host Cog commands plus one
-    /// routing command per core plugin manifest, assembled through the same
+    /// routing command per internal plugin manifest, assembled through the same
     /// `commands_from_manifest` path the host registers through — pinned
     /// against a committed snapshot. With `UPDATE_SNAPSHOT=1` the test
     /// rewrites the fixture instead of asserting.
     #[test]
     fn the_registered_command_surface_matches_the_committed_snapshot() {
         let manifest_fixture = fs::read_to_string(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/core_manifests.json"),
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/internal_manifests.json"),
         )
-        .expect("core manifest fixture is readable");
+        .expect("internal manifest fixture is readable");
         let manifests: Vec<Manifest> =
-            serde_json::from_str(&manifest_fixture).expect("core manifest fixture is valid");
-        let core_manifests = manifests
+            serde_json::from_str(&manifest_fixture).expect("internal manifest fixture is valid");
+        let internal_manifests = manifests
             .into_iter()
             .map(|manifest| (manifest.name.clone(), manifest))
             .collect();
         let mut commands = Cogs.commands();
         commands.extend(plugin_commands(
-            &core_manifests,
+            &internal_manifests,
             &HashMap::new(),
             &HashSet::new(),
         ));

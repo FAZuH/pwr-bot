@@ -1,7 +1,7 @@
 //! The `/settings` feature shell — a [`GuiFeature`] over the pure settings
 //! core.
 //!
-//! Renders the Settings list: one tile per section the running core plugins
+//! Renders the Settings list: one tile per section the running internal plugins
 //! declare in their manifests, plus the Root Back row. The feature holds no
 //! service or manifest fetch: the sections arrive at model construction
 //! (data-in via `Config`), and a section click is a navigation exit — the
