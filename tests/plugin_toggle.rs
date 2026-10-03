@@ -1,4 +1,4 @@
-//! The per-guild plugin toggle as the serving path sees it: a core plugin
+//! The per-guild plugin toggle as the serving path sees it: an internal plugin
 //! switched off in one guild is refused there and still served in another.
 //!
 //! What is exercised is [`Data::plugin_enabled_in`] — the enabled-set
@@ -21,7 +21,7 @@ use pwr_bot::bot::error::BotError;
 use pwr_bot::bot::translate::SettingsReturns;
 use pwr_bot::bot::translate::TranslateLayer;
 use pwr_bot::config::Config;
-use pwr_bot::config::CorePluginSpec;
+use pwr_bot::config::InternalPluginSpec;
 use pwr_bot::plugin::InteractionEngine;
 use pwr_bot::plugin::ModalRouteError;
 use pwr_bot::plugin::PluginManager;
@@ -33,16 +33,16 @@ use pwr_bot::service::Services;
 
 mod common;
 
-/// A host whose auto-enabled plugins are the two core names, over `db`.
-/// `core_plugins` is the production source of the auto-enable list
-/// (`CORE_PLUGINS`), so a plugin with no row is enabled exactly as it is in a
+/// A host whose auto-enabled plugins are the two internal names, over `db`.
+/// `internal_plugins` is the production source of the auto-enable list
+/// (`INTERNAL_PLUGINS`), so a plugin with no row is enabled exactly as it is in a
 /// running bot. Nothing is spawned: the gates read rows, not processes.
 async fn host(db: Arc<PgRepos>) -> Arc<Data> {
     let repos: Arc<dyn Repos + Send + Sync> = db;
     let config = Config {
-        core_plugins: ["feed", "voice"]
+        internal_plugins: ["feed", "voice"]
             .into_iter()
-            .map(|name| CorePluginSpec {
+            .map(|name| InternalPluginSpec {
                 name: name.to_string(),
                 path: PathBuf::from("/srv/pwr-bot/plugins").join(name),
             })
@@ -63,19 +63,19 @@ async fn host(db: Arc<PgRepos>) -> Arc<Data> {
         plugin_catalog_error: None,
         plugin_engine: Arc::new(InteractionEngine::<RunningPlugin>::new()),
         plugin_routes: Arc::new(HashMap::new()),
-        core_manifests: Arc::new(HashMap::new()),
+        internal_manifests: Arc::new(HashMap::new()),
         translate_layer: Arc::new(TranslateLayer::new()),
         settings_returns: Arc::new(SettingsReturns::default()),
         start_time: Instant::now(),
     })
 }
 
-/// The gate refuses a core plugin in the guild that switched it off and keeps
+/// The gate refuses an internal plugin in the guild that switched it off and keeps
 /// serving it everywhere else — the whole point of a per-guild toggle, since
 /// the plugin is one process shared by every guild.
 #[tokio::test]
 #[serial_test::serial]
-async fn a_core_plugin_disabled_in_one_guild_is_refused_there_and_served_in_the_other() {
+async fn a_internal_plugin_disabled_in_one_guild_is_refused_there_and_served_in_the_other() {
     let db = common::setup_db().await;
     let data = host(db.clone()).await;
     let (disabled_guild, serving_guild) = (GuildId::new(7), GuildId::new(8));
@@ -102,11 +102,11 @@ async fn a_core_plugin_disabled_in_one_guild_is_refused_there_and_served_in_the_
     common::teardown_db(&db).await;
 }
 
-/// An untouched core plugin is served: the gate reads an absent row as
+/// An untouched internal plugin is served: the gate reads an absent row as
 /// enabled, so it must not refuse every plugin that has never been toggled.
 #[tokio::test]
 #[serial_test::serial]
-async fn a_core_plugin_that_was_never_toggled_is_served() {
+async fn a_internal_plugin_that_was_never_toggled_is_served() {
     let db = common::setup_db().await;
     let data = host(db.clone()).await;
     let guild = GuildId::new(9);

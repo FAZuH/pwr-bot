@@ -13,7 +13,7 @@ framing of ADR-0009 (panels are no longer the only thing pluginized — the
 whole feature set is); ADR-0013's kept gui runtime now hosts the Settings
 capability instead of monolith features.
 
-**Update — 2026-09-25 (phase 5):** Voice is a full core plugin. The host
+**Update — 2026-09-25 (phase 5):** Voice is a full internal plugin. The host
 retains only generic event fan-out, `host.resolve_users`, plugin views, and
 the Settings bridge; voice owns its repository, migrations, command views,
 event subscriber, and heartbeat file.

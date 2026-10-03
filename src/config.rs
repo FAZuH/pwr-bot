@@ -22,18 +22,18 @@ pub struct Config {
     pub logs_path: PathBuf,
     pub plugins_toml: PathBuf,
     pub plugins_dir: PathBuf,
-    /// Core plugins the host spawns at startup, in order.
-    pub core_plugins: Vec<CorePluginSpec>,
+    /// Internal plugins the host spawns at startup, in order.
+    pub internal_plugins: Vec<InternalPluginSpec>,
     pub features: Features,
     pub version: String,
 }
 
-/// One core plugin the host spawns at startup: its name and binary path.
-/// The set of core plugins is configuration, not source: `CORE_PLUGINS`
+/// One internal plugin the host spawns at startup: its name and binary path.
+/// The set of internal plugins is configuration, not source: `INTERNAL_PLUGINS`
 /// lists their names, and each binary's path resolves through
-/// [`Config::core_plugin_path`].
+/// [`Config::internal_plugin_path`].
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CorePluginSpec {
+pub struct InternalPluginSpec {
     /// Plugin name, e.g. `my-plugin`.
     pub name: String,
     /// Binary path to spawn.
@@ -94,13 +94,14 @@ impl Config {
             );
         });
 
-        self.core_plugins = parse_core_plugins(&std::env::var("CORE_PLUGINS").unwrap_or_default())
-            .into_iter()
-            .map(|name| CorePluginSpec {
-                path: self.core_plugin_path(&name),
-                name,
-            })
-            .collect();
+        self.internal_plugins =
+            parse_internal_plugins(&std::env::var("INTERNAL_PLUGINS").unwrap_or_default())
+                .into_iter()
+                .map(|name| InternalPluginSpec {
+                    path: self.internal_plugin_path(&name),
+                    name,
+                })
+                .collect();
 
         self.features = Features {
             autoregister_cmds: parse_bool_env("ENABLE_AUTOREGISTER_CMD", true),
@@ -111,10 +112,10 @@ impl Config {
         Ok(())
     }
 
-    /// Resolves a core plugin's binary path: the `<NAME>_PLUGIN_PATH` env
+    /// Resolves an internal plugin's binary path: the `<NAME>_PLUGIN_PATH` env
     /// var (the plugin's uppercased name) when set, else the binary shipped
     /// next to the bot binary, else one under the data path.
-    fn core_plugin_path(&self, name: &str) -> PathBuf {
+    fn internal_plugin_path(&self, name: &str) -> PathBuf {
         std::env::var(format!("{}_PLUGIN_PATH", name.to_uppercase()))
             .map(PathBuf::from)
             .unwrap_or_else(|_| {
@@ -149,9 +150,9 @@ impl Config {
     }
 }
 
-/// The core plugin names from a `CORE_PLUGINS` value: a comma-separated
+/// The internal plugin names from a `INTERNAL_PLUGINS` value: a comma-separated
 /// list, trimmed, empty entries dropped.
-fn parse_core_plugins(list: &str) -> Vec<String> {
+fn parse_internal_plugins(list: &str) -> Vec<String> {
     list.split(',')
         .map(str::trim)
         .filter(|name| !name.is_empty())
@@ -177,19 +178,19 @@ fn parse_bool_env(var: &str, default: bool) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_core_plugins;
+    use super::parse_internal_plugins;
 
     #[test]
-    fn core_plugins_list_is_split_trimmed_and_empties_dropped() {
+    fn internal_plugins_list_is_split_trimmed_and_empties_dropped() {
         assert_eq!(
-            parse_core_plugins(" feed , voice ,,welcome"),
+            parse_internal_plugins(" feed , voice ,,welcome"),
             vec![
                 "feed".to_string(),
                 "voice".to_string(),
                 "welcome".to_string()
             ]
         );
-        assert!(parse_core_plugins("").is_empty());
-        assert!(parse_core_plugins(" , ,").is_empty());
+        assert!(parse_internal_plugins("").is_empty());
+        assert!(parse_internal_plugins(" , ,").is_empty());
     }
 }

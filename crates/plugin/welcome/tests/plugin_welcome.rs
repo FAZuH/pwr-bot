@@ -1,7 +1,7 @@
 //! End-to-end tests for the welcome settings panel plugin (#151, the
 //! panel-migration's third panel; #169, the plugin's own storage): the panel
 //! is spawned over the real stdio and database seams — no Discord — through
-//! the plugin manager, like the core plugins the host spawns at startup. The
+//! the plugin manager, like the internal plugins the host spawns at startup. The
 //! plugin reads and writes its own `welcome_settings` table and copies the
 //! legacy `server_settings.settings.welcome` section into it once, on the
 //! guild's first read.
@@ -66,8 +66,8 @@ fn sample_welcome() -> WelcomeSettings {
     }
 }
 
-/// A per-process test database with the core schema migrated and emptied.
-/// The core migration creates the `server_settings` table the panel copies
+/// A per-process test database with the internal schema migrated and emptied.
+/// The internal migration creates the `server_settings` table the panel copies
 /// its legacy settings from on a guild's first read; the panel applies its own
 /// migration at startup.
 async fn database() -> String {
@@ -131,7 +131,7 @@ fn services_with_io(
 }
 
 /// Spawns the panel plugin under a manager wired with the shared services,
-/// like the host's startup loop spawns its core plugins.
+/// like the host's startup loop spawns its internal plugins.
 async fn spawn_panel(io: Arc<dyn HostIo>, db_url: String) -> Arc<RunningPlugin> {
     let manager =
         Arc::new(

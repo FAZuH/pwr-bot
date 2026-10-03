@@ -137,7 +137,7 @@ pub struct Authority {
     /// The catalog's pinned sha256, normalised (trimmed, lowercased) the
     /// way [`install::sha256_hex`] emits it, so the spawn seam compares
     /// without re-normalising. `None` for a plugin the catalog does not
-    /// pin — a `CORE_PLUGINS` plugin, which is never grantable.
+    /// pin — a `INTERNAL_PLUGINS` plugin, which is never grantable.
     pinned: Option<String>,
     /// The Discord token to inject. Never `Some` without a digest pin:
     /// authority attaches to bytes, so a grant only ever rides along with
@@ -293,7 +293,7 @@ impl RunningPlugin {
     /// being dropped.
     ///
     /// `name` is the plugin's configured name — the one a catalog entry, a
-    /// `CORE_PLUGINS` spec, and `/plugins list` use — so the spawn audit line
+    /// `INTERNAL_PLUGINS` spec, and `/plugins list` use — so the spawn audit line
     /// names the plugin rather than the binary's file stem. An empty `name`
     /// falls back to the stem, for a caller holding no configured name.
     ///
@@ -449,7 +449,7 @@ impl RunningPlugin {
         // about: the plugin would run without the authority it declared, and
         // a refusal is what the ADR promises (ADR-0016). A catalog plugin is
         // refused before spawn by the snapshot's AND, so this cannot
-        // double-fire; it chiefly catches a core plugin, which is never
+        // double-fire; it chiefly catches an internal plugin, which is never
         // grantable and is unknowable before the handshake.
         if let Some(manifest) = &manifest
             && manifest.requires_discord_token()
@@ -1086,9 +1086,9 @@ mod tests {
     }
 
     #[test]
-    fn a_core_plugin_is_never_grantable() {
+    fn a_internal_plugin_is_never_grantable() {
         // The snapshot holds only catalog entries: a name the catalog does
-        // not pin is a `CORE_PLUGINS` plugin, and there the host knows no
+        // not pin is a `INTERNAL_PLUGINS` plugin, and there the host knows no
         // manifest before spawn, so it gets no pin and no token.
         let authority = snapshot(true, true)
             .resolve("feed")

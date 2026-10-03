@@ -1,6 +1,6 @@
 //! Application entry point for pwr-bot.
 //!
-//! Initializes the host database, starts the bot, and lets core plugins own
+//! Initializes the host database, starts the bot, and lets internal plugins own
 //! their domains.
 
 use std::sync::Arc;

@@ -1,6 +1,6 @@
 //! Admin plugin management commands: list, enable, disable, and swap plugins.
 //!
-//! A toggle takes any plugin the host knows — a core plugin (feed, voice,
+//! A toggle takes any plugin the host knows — an internal plugin (feed, voice,
 //! welcome) or a catalog entry — so [`plugin_choices`] and the lookups share
 //! [`known_plugin_names`] as their single name list. `swap` is the exception:
 //! it installs a freshly downloaded binary, so it resolves against catalog
@@ -14,7 +14,7 @@
 //! [`PluginsCmd`] drives the Discord/DB side
 //! effects.
 //!
-//! Disabling a core plugin gates it at the host for that guild and leaves the
+//! Disabling an internal plugin gates it at the host for that guild and leaves the
 //! shared process running for every other guild; only a catalog plugin, which
 //! runs per guild, is unloaded.
 
@@ -81,9 +81,9 @@ pub async fn list(ctx: Context<'_>) -> Result<(), Error> {
 /// refusal for a catalog that carries no entries.
 ///
 /// The emptiness is read from `catalog`, the collection the lines are built
-/// from, never from the guild's known-plugin names: core plugins are known
+/// from, never from the guild's known-plugin names: internal plugins are known
 /// and toggleable without being catalog entries, so an empty catalog beside a
-/// core plugin is the state that has to answer here — otherwise the body is
+/// internal plugin is the state that has to answer here — otherwise the body is
 /// the empty string and Discord rejects the whole message (a 400
 /// `BASE_TYPE_BAD_LENGTH` on the first component's content) instead of the
 /// clean sentence the two empty states have always shared.
@@ -119,7 +119,7 @@ fn list_lines(catalog: &HashMap<String, CatalogEntry>, enabled: &[String]) -> Ve
     lines
 }
 
-/// Enables a core or catalog plugin for this guild.
+/// Enables an internal or catalog plugin for this guild.
 #[poise::command(slash_command)]
 pub async fn enable(
     ctx: Context<'_>,
@@ -130,7 +130,7 @@ pub async fn enable(
     is_author_guild_admin(ctx).await?;
     let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?;
     let data = ctx.data();
-    if manifest_for(&data.core_manifests, &data.plugin_catalog, &plugin).is_none() {
+    if manifest_for(&data.internal_manifests, &data.plugin_catalog, &plugin).is_none() {
         return Err(unknown_plugin(&plugin).into());
     }
     let mut model = guild_model(&data, guild_id).await?;
@@ -138,7 +138,7 @@ pub async fn enable(
     match PluginsUpdate::update(PluginsMsg::Enable(plugin.clone()), &mut model) {
         PluginsCmd::Register(_) => {
             register_enabled_plugins(
-                &data.core_manifests,
+                &data.internal_manifests,
                 &data.plugin_catalog,
                 &model.enabled,
                 |commands| {
@@ -183,7 +183,7 @@ pub async fn disable(
     match PluginsUpdate::update(PluginsMsg::Disable(plugin.clone()), &mut model) {
         PluginsCmd::Unregister(_) => {
             register_enabled_plugins(
-                &data.core_manifests,
+                &data.internal_manifests,
                 &data.plugin_catalog,
                 &model.enabled,
                 |commands| {
@@ -204,7 +204,7 @@ pub async fn disable(
                 .set_enabled(guild_id.get(), &plugin, false)
                 .await?;
             // Only a catalog plugin runs per guild, so only it can be
-            // unloaded. A core plugin is one process shared by every guild:
+            // unloaded. An internal plugin is one process shared by every guild:
             // disabling it here gates it at the host for this guild only, and
             // the process keeps serving the others.
             if data.plugin_catalog.contains_key(&plugin)
@@ -236,7 +236,7 @@ pub async fn swap(
     is_author_guild_admin(ctx).await?;
     let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?;
     let data = ctx.data();
-    let entry = swap_target(&data.core_manifests, &data.plugin_catalog, &plugin)?;
+    let entry = swap_target(&data.internal_manifests, &data.plugin_catalog, &plugin)?;
     let mut model = guild_model(&data, guild_id).await?;
 
     match PluginsUpdate::update(PluginsMsg::Swap(plugin.clone()), &mut model) {
@@ -264,7 +264,7 @@ pub async fn swap(
 
 /// The `plugin` choices for `/plugin swap`: every plugin the host knows, so
 /// the ids are discoverable without reading a catalog file. `swap` offers
-/// core names too and refuses them with a reason, which beats hiding them.
+/// internal names too and refuses them with a reason, which beats hiding them.
 ///
 /// Shares [`known_plugin_names`] with the toggle lookups, so an offered name
 /// always resolves.
@@ -307,7 +307,7 @@ async fn choices_for<'a>(
     want_enabled: Option<bool>,
 ) -> CreateAutocompleteResponse<'a> {
     let data = ctx.data();
-    let names = known_plugin_names(&data.core_manifests, &data.plugin_catalog);
+    let names = known_plugin_names(&data.internal_manifests, &data.plugin_catalog);
     let names = match (want_enabled, ctx.guild_id()) {
         (Some(want), Some(guild_id)) => match guild_model(&data, guild_id).await {
             Ok(model) => toggle_names(names, &model.enabled, want),
@@ -344,20 +344,20 @@ const MAX_AUTOCOMPLETE_CHOICES: usize = 25;
 
 /// The catalog entry `name` swaps onto, or the refusal. A swap installs a
 /// freshly downloaded binary from the catalog, so it resolves only against
-/// catalog entries: a core plugin ships inside this host binary and has
+/// catalog entries: an internal plugin ships inside this host binary and has
 /// nothing to swap. The catalog's own load failure is never spliced into the
 /// message — an absent catalog is a normal state, and the path and IO cause
 /// belong in the log, not in a user's reply.
 fn swap_target<'a>(
-    core_manifests: &HashMap<String, Manifest>,
+    internal_manifests: &HashMap<String, Manifest>,
     catalog: &'a HashMap<String, CatalogEntry>,
     name: &str,
 ) -> Result<&'a CatalogEntry, BotError> {
-    if core_manifests.contains_key(name) {
+    if internal_manifests.contains_key(name) {
         return Err(BotError::InvalidCommandArgument {
             parameter: "plugin".to_string(),
             reason: format!(
-                "`{name}` is a core plugin: it ships with the bot, so there is \
+                "`{name}` is an internal plugin: it ships with the bot, so there is \
                  nothing to swap"
             ),
         });
@@ -373,14 +373,14 @@ fn unknown_plugin(name: &str) -> BotError {
     }
 }
 
-/// Every plugin the host knows, sorted and deduplicated: the core manifests
+/// Every plugin the host knows, sorted and deduplicated: the internal manifests
 /// plus the catalog. The two sources `/plugin enable|disable|swap` resolve
 /// against, so both offer the same names.
 fn known_plugin_names(
-    core_manifests: &HashMap<String, Manifest>,
+    internal_manifests: &HashMap<String, Manifest>,
     catalog: &HashMap<String, CatalogEntry>,
 ) -> Vec<String> {
-    let mut names: Vec<String> = core_manifests
+    let mut names: Vec<String> = internal_manifests
         .keys()
         .chain(catalog.keys())
         .cloned()
@@ -407,7 +407,7 @@ fn empty_catalog_error(catalog_error: Option<&InstallError>) -> Error {
 /// The guild's plugins model: the names the host knows plus the guild's
 /// enabled subset, read from that guild's `guild_plugins` rows.
 ///
-/// Auto-enabled plugins (core plugins plus catalog entries flagged
+/// Auto-enabled plugins (internal plugins plus catalog entries flagged
 /// `auto_enable`) are seeded into the enabled subset: an absent
 /// `guild_plugins` row means enabled, so only an explicit `enabled = false`
 /// row opts one out. This mirrors
@@ -424,7 +424,7 @@ pub(crate) async fn guild_model(data: &Data, guild_id: GuildId) -> Result<Plugin
         .list_for_guild(guild_id.get())
         .await?;
     Ok(guild_plugins_model(
-        &data.core_manifests,
+        &data.internal_manifests,
         &data.plugin_catalog,
         &data.auto_enable_plugins(),
         &rows,
@@ -437,7 +437,7 @@ impl Data {
     /// no row is auto-enabled, an `enabled = false` row switches it off.
     ///
     /// The serving path asks this before invoking a plugin, so a per-guild
-    /// disable stops a shared core plugin's process serving that guild
+    /// disable stops a shared internal plugin's process serving that guild
     /// without unloading it. A `None` guild is a DM: there is no per-guild
     /// state to gate, so the plugin is served.
     ///
@@ -500,11 +500,11 @@ impl Data {
 }
 
 /// The guild's plugins model over the host's two sources and the guild's
-/// `guild_plugins` rows. Both sources count as known: a core plugin name is
+/// `guild_plugins` rows. Both sources count as known: an internal plugin name is
 /// as toggleable as a catalog one, so it has to reach the model or
 /// [`PluginsUpdate`] reads it as unknown and refuses the toggle.
 fn guild_plugins_model(
-    core_manifests: &HashMap<String, Manifest>,
+    internal_manifests: &HashMap<String, Manifest>,
     catalog: &HashMap<String, CatalogEntry>,
     auto_enable: &[String],
     rows: &[GuildPluginEntity],
@@ -519,7 +519,7 @@ fn guild_plugins_model(
             enabled.push(plugin.clone());
         }
     }
-    PluginsModel::new(known_plugin_names(core_manifests, catalog), enabled)
+    PluginsModel::new(known_plugin_names(internal_manifests, catalog), enabled)
 }
 
 /// The routing commands of every plugin in `enabled`: the union a
@@ -528,7 +528,7 @@ fn guild_plugins_model(
 /// (a failed spawn with no catalog entry) contribute nothing. Sorted by
 /// plugin name so the registered order is stable across restarts.
 fn commands_for_enabled_plugins(
-    core_manifests: &HashMap<String, Manifest>,
+    internal_manifests: &HashMap<String, Manifest>,
     catalog: &HashMap<String, CatalogEntry>,
     enabled: &[String],
 ) -> Vec<poise::Command<Data, Error>> {
@@ -538,7 +538,7 @@ fn commands_for_enabled_plugins(
     let mut enabled_names: Vec<&String> = enabled.iter().collect();
     enabled_names.sort();
     for name in enabled_names {
-        let Some(manifest) = manifest_for(core_manifests, catalog, name) else {
+        let Some(manifest) = manifest_for(internal_manifests, catalog, name) else {
             continue;
         };
         add_plugin_commands(
@@ -557,7 +557,7 @@ fn commands_for_enabled_plugins(
 /// recording closure so the wiring is asserted without a Discord
 /// connection.
 async fn register_enabled_plugins<F>(
-    core_manifests: &HashMap<String, Manifest>,
+    internal_manifests: &HashMap<String, Manifest>,
     catalog: &HashMap<String, CatalogEntry>,
     enabled: &[String],
     register: F,
@@ -567,7 +567,7 @@ where
         Vec<poise::Command<Data, Error>>,
     ) -> Pin<Box<dyn Future<Output = Result<(), Error>> + Send + 'static>>,
 {
-    let commands = commands_for_enabled_plugins(core_manifests, catalog, enabled);
+    let commands = commands_for_enabled_plugins(internal_manifests, catalog, enabled);
     register(commands).await
 }
 
@@ -651,7 +651,7 @@ mod tests {
     }
 
     /// The unknown-plugin refusal never carries the catalog's load failure
-    /// either: it is the same leak through the other door. A core plugin is
+    /// either: it is the same leak through the other door. An internal plugin is
     /// not unknown, so `swap` names the real reason instead.
     #[test]
     fn an_unknown_plugin_name_never_carries_the_catalog_load_failure() {
@@ -664,11 +664,11 @@ mod tests {
         assert_eq!(reason, "`hello` is not a known plugin");
     }
 
-    /// A core plugin has no catalog URL and no separate binary, so `swap`
+    /// An internal plugin has no catalog URL and no separate binary, so `swap`
     /// cannot serve it: the refusal says why instead of claiming the plugin
-    /// does not exist. Fails if the core refusal reads like the unknown one.
+    /// does not exist. Fails if the internal refusal reads like the unknown one.
     #[test]
-    fn swapping_a_core_plugin_is_refused_because_it_ships_with_the_bot() {
+    fn swapping_a_internal_plugin_is_refused_because_it_ships_with_the_bot() {
         let core = HashMap::from([("feed".to_string(), manifest_named("feed"))]);
 
         let reason = match swap_target(&core, &HashMap::new(), "feed").expect_err("core") {
@@ -678,13 +678,13 @@ mod tests {
 
         assert_eq!(
             reason,
-            "`feed` is a core plugin: it ships with the bot, so there is nothing \
+            "`feed` is an internal plugin: it ships with the bot, so there is nothing \
                           to swap"
         );
     }
 
-    /// A catalog plugin still swaps onto its entry, core manifests present or
-    /// not: the refusal is scoped to the core name, not to the command.
+    /// A catalog plugin still swaps onto its entry, internal manifests present or
+    /// not: the refusal is scoped to the internal name, not to the command.
     #[test]
     fn swap_still_targets_a_catalog_plugin_alongside_a_core_one() {
         let core = HashMap::from([("feed".to_string(), manifest_named("feed"))]);
@@ -695,17 +695,17 @@ mod tests {
         assert_eq!(entry.name, "hello");
     }
 
-    /// The names `/plugin enable` accepts are the host's two sources: a core
+    /// The names `/plugin enable` accepts are the host's two sources: an internal
     /// plugin is as enableable as a catalog one, so the offered names must
     /// resolve. Fails if `enable` still gates on the catalog alone.
     #[test]
-    fn enable_accepts_a_core_plugin_name_the_host_knows() {
+    fn enable_accepts_a_internal_plugin_name_the_host_knows() {
         let core = HashMap::from([("feed".to_string(), manifest_named("feed"))]);
         let catalog = HashMap::new();
 
         assert!(
             manifest_for(&core, &catalog, "feed").is_some(),
-            "a core plugin resolves over the same lookup the toggle guards with"
+            "an internal plugin resolves over the same lookup the toggle guards with"
         );
         assert!(
             manifest_for(&core, &catalog, "nope").is_none(),
@@ -721,7 +721,7 @@ mod tests {
             ("feed".to_string(), manifest_named("feed")),
             ("voice".to_string(), manifest_named("voice")),
         ]);
-        // `feed` is in both sources: a catalog entry for a core plugin must
+        // `feed` is in both sources: a catalog entry for an internal plugin must
         // not produce a duplicate choice.
         let catalog = HashMap::from([("feed".to_string(), entry_named("feed"))]);
 
@@ -730,14 +730,14 @@ mod tests {
         assert_eq!(names, ["feed", "voice"]);
     }
 
-    /// A `guild_plugins` row round-trips a core plugin's state through the
+    /// A `guild_plugins` row round-trips an internal plugin's state through the
     /// toggle: `disable` writes `enabled = false`, the next model build keeps
-    /// the core plugin out, `enable` registers it again, and the rebuild from
+    /// the internal plugin out, `enable` registers it again, and the rebuild from
     /// the `enabled = true` row has it back. Fails if the model knows only
-    /// catalog names (the core plugin never enables) or ignores the row (a
-    /// disabled core plugin re-enables itself).
+    /// catalog names (the internal plugin never enables) or ignores the row (a
+    /// disabled internal plugin re-enables itself).
     #[test]
-    fn a_core_plugin_toggles_and_round_trips_through_its_guild_plugin_row() {
+    fn a_internal_plugin_toggles_and_round_trips_through_its_guild_plugin_row() {
         let core = HashMap::from([("feed".to_string(), manifest_named("feed"))]);
         let catalog = HashMap::new();
         let auto_enable = vec!["feed".to_string()];
@@ -747,7 +747,7 @@ mod tests {
             enabled,
         };
 
-        // No row yet: the auto-enabled core plugin is in the model, and the
+        // No row yet: the auto-enabled internal plugin is in the model, and the
         // toggle knows its name.
         let mut model = guild_plugins_model(&core, &catalog, &auto_enable, &[]);
         assert!(model.catalog.contains(&"feed".to_string()));
@@ -761,7 +761,7 @@ mod tests {
         let model = guild_plugins_model(&core, &catalog, &auto_enable, &[row(false)]);
         assert!(
             !model.enabled.contains(&"feed".to_string()),
-            "the enabled = false row keeps the core plugin off"
+            "the enabled = false row keeps the internal plugin off"
         );
 
         // `/plugin enable feed` registers again, and the enabled = true row
@@ -775,11 +775,11 @@ mod tests {
         assert!(model.enabled.contains(&"feed".to_string()));
     }
 
-    /// The re-registered command union follows the row: a core plugin left
+    /// The re-registered command union follows the row: an internal plugin left
     /// out of the guild's enabled set contributes no commands, which is what
     /// makes the disable gate real in that guild.
     #[test]
-    fn a_disabled_core_plugin_contributes_no_commands_to_the_guild() {
+    fn a_disabled_internal_plugin_contributes_no_commands_to_the_guild() {
         let core = HashMap::from([
             ("feed".to_string(), manifest_named("feed")),
             ("voice".to_string(), manifest_named("voice")),
@@ -807,10 +807,10 @@ mod tests {
 
     /// A catalog that carries no entries answers the shared sentence, never a
     /// body: the empty string is what Discord rejects with a 400, so a check
-    /// that misses this state turns a listing into a broken command. Core
+    /// that misses this state turns a listing into a broken command. Internal
     /// plugins are the case that made it reachable — they are known and
     /// toggleable without being catalog entries, so an empty catalog beside a
-    /// core plugin is exactly the state that has to be caught. Fails if the
+    /// internal plugin is exactly the state that has to be caught. Fails if the
     /// emptiness is read from the known names, where that state reads as a
     /// full catalog.
     #[test]
@@ -819,7 +819,7 @@ mod tests {
         let known = known_plugin_names(&core, &HashMap::new());
         assert!(
             !known.is_empty(),
-            "the guild's known names carry the core plugin, which is not a catalog entry"
+            "the guild's known names carry the internal plugin, which is not a catalog entry"
         );
 
         let error = list_body(&HashMap::new(), &known, None).expect_err("nothing to list");

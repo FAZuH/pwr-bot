@@ -163,7 +163,7 @@ impl CommandHandler for SettingsHandler {
 
 /// Collects the settings sections this guild may open: the sections the
 /// loaded plugin manifests declare (the same source set command registration
-/// uses, core plus catalog), ordered by plugin name so the list is stable
+/// uses, internal plus catalog), ordered by plugin name so the list is stable
 /// across restarts, narrowed to the plugins the guild has enabled.
 ///
 /// The gate in [`session_exit::section_plugin`] already refuses a disabled
@@ -198,7 +198,7 @@ fn sections_for(declared: Vec<SettingsSection>, enabled: &[String]) -> Vec<Setti
 /// sources as command registration, ordered by plugin name.
 fn declared_sections(data: &Data) -> Vec<SettingsSection> {
     let mut manifests: Vec<(String, Manifest)> = data
-        .core_manifests
+        .internal_manifests
         .iter()
         .map(|(name, manifest)| (name.clone(), manifest.clone()))
         .collect();

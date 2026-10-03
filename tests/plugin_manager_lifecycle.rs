@@ -322,7 +322,7 @@ async fn killed_plugin_is_respawned_and_serves_fresh_instances() {
 
 #[tokio::test]
 async fn killed_plugin_is_respawned_even_without_a_health_config() {
-    // Core plugins spawn with health = None (src/bot/mod.rs); supervision
+    // Internal plugins spawn with health = None (src/bot/mod.rs); supervision
     // must not depend on it.
     let manager = Arc::new(PluginManager::new(None, test_policy()));
     manager
@@ -666,12 +666,12 @@ async fn a_respawned_plugin_keeps_the_authority_it_was_granted() {
     );
 }
 
-// ── a core plugin that declares the need is refused, not warned about ──────
+// ── an internal plugin that declares the need is refused, not warned about ──────
 
 #[tokio::test]
-async fn a_core_plugin_declaring_the_token_need_is_refused() {
+async fn a_internal_plugin_declaring_the_token_need_is_refused() {
     // `token_need_probe.sh` is spawned with no catalog behind it, exactly as
-    // `CORE_PLUGINS` spawns one, so its resolved authority is `none` while
+    // `INTERNAL_PLUGINS` spawns one, so its resolved authority is `none` while
     // its own manifest declares the need. The host cannot learn that before
     // the handshake, so the handshake itself must refuse it: the plugin does
     // not run, rather than running on an ungranted declaration (ADR-0016).
@@ -682,7 +682,7 @@ async fn a_core_plugin_declaring_the_token_need_is_refused() {
         .await
     {
         Err(err) => err,
-        Ok(_) => panic!("a core plugin declaring the token need must not run"),
+        Ok(_) => panic!("an internal plugin declaring the token need must not run"),
     };
     assert!(
         matches!(&err, PluginError::UngrantedDeclaration { name } if name == "token-need-probe"),

@@ -1,7 +1,7 @@
 //! pwr-bot host process for Discord plugin services.
 //!
 //! Plugin-owned domains live in separate plugin crates. This crate owns host
-//! routing, the Settings capability, and core plugin state.
+//! routing, the Settings capability, and internal plugin state.
 
 pub mod bot;
 pub mod config;

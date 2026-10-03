@@ -23,7 +23,7 @@
 #                `"requires":["discord_token"]`, and the two must agree in
 #                both directions or the plugin is refused. The host
 #                re-checks `sha256` at every spawn, so authority attaches to
-#                the bytes you reviewed. Core plugins cannot be granted.
+#                the bytes you reviewed. Internal plugins cannot be granted.
 #
 # Unknown keys are rejected, so a typo fails the whole catalog at startup
 # instead of leaving a plugin silently ungranted.

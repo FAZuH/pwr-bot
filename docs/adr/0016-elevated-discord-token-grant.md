@@ -55,19 +55,19 @@ nobody declared is authority a plugin holds on a technicality. The declaration h
 operator's assertion in the catalog entry, not the plugin's own handshake manifest, so a binary
 whose manifest disagrees with the catalog is not caught by this check.
 
-Consequence, and it is intended: `CORE_PLUGINS` plugins cannot be granted. There the host knows only
+Consequence, and it is intended: `INTERNAL_PLUGINS` plugins cannot be granted. There the host knows only
 a name and a path (`src/config.rs:36`), so the declaration half is unknowable before spawn and the
-AND cannot be enforced before the environment exists. A core plugin that declares the need anyway is
+AND cannot be enforced before the environment exists. An internal plugin that declares the need anyway is
 therefore refused at the handshake instead: the grant is still `none`, and the declaration the host
 can finally read disagrees with it. A first-party plugin that ever needs Discord authority therefore
 either gains a shaped op or moves into the catalog, where it becomes pinned and digest-verified like
 any other granted plugin. The pressure is deliberate — a grant is a statement about a reviewed
-binary, and a core plugin is only a binary on disk. The trade-off, stated plainly: because only
+binary, and an internal plugin is only a binary on disk. The trade-off, stated plainly: because only
 catalog plugins are grantable, granting a first-party plugin means moving it into the catalog, which
 turns "binary on disk" into "downloaded and digest-verified".
 
 Refusal is an error and the plugin does not run; the bot stays up. That is existing behavior for a
-failed core-plugin spawn at `src/bot/mod.rs:253`, where a missing binary is already logged and
+failed internal-plugin spawn at `src/bot/mod.rs:253`, where a missing binary is already logged and
 skipped.
 
 The grant is snapshotted at startup and reused for every spawn, including respawns after a crash, so
@@ -84,7 +84,7 @@ without re-deriving the trim and case rules), and the name must be non-empty —
 catalog at boot rather than producing a silently ungranted plugin.
 
 A separate `[grants]` table keyed by name is rejected: its only justification was serving both spawn
-paths, and the catalog-only rule removed the second path. Grants for `CORE_PLUGINS` plugins are
+paths, and the catalog-only rule removed the second path. Grants for `INTERNAL_PLUGINS` plugins are
 rejected for the reason above. A `--manifest` pre-read flag in the plugin SDK, which would close the
 pre-spawn window on both paths, buys a second exec and a new SDK surface against an attacker who
 could already drop a binary in the plugins directory.

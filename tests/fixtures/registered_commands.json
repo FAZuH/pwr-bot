@@ -436,7 +436,7 @@
         "autocomplete": false,
         "channel_types": [],
         "choices": [],
-        "description": "Enables a core or catalog plugin for this guild.",
+        "description": "Enables an internal or catalog plugin for this guild.",
         "max_length": null,
         "max_value": null,
         "min_length": null,

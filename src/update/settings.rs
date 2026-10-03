@@ -3,7 +3,7 @@
 //! Holds the single source of truth for the Settings view (`SettingsModel`),
 //! the exhaustive message vocabulary (`SettingsMsg`), and an empty effect
 //! vocabulary (`SettingsEffect`). The view is static — it lists the settings
-//! sections the running core plugins declare and offers a back button — so
+//! sections the running internal plugins declare and offers a back button — so
 //! `update` never mutates the model and never performs IO. A section click
 //! and Back are navigation exits, handled by the shell's `exit_navigation`
 //! and the Router's session loop.
