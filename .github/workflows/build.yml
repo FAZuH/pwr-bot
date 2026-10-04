@@ -39,7 +39,11 @@ jobs:
           fetch-depth: 1
 
       - name: Set up Stable Rust
-        uses: dtolnay/rust-toolchain@stable
+        # Pinned to 1.98, matching _release.yml and pull-request.yml: stable
+        # 1.99 changed poise's parent_commands method shape, which breaks this
+        # build (the release binaries job runs through here). Unpin with the
+        # other two.
+        uses: dtolnay/rust-toolchain@1.98
 
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
