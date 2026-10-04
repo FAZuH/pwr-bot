@@ -422,13 +422,28 @@
         "autocomplete": false,
         "channel_types": [],
         "choices": [],
-        "description": "Lists every plugin the host knows and its enabled state in this guild, as an interactive view.",
+        "description": "Lists every plugin the host knows and its state in this guild; internal ones stay hidden.",
         "max_length": null,
         "max_value": null,
         "min_length": null,
         "min_value": null,
         "name": "list",
-        "options": [],
+        "options": [
+          {
+            "autocomplete": false,
+            "channel_types": [],
+            "choices": [],
+            "description": "Show the plugins that ship inside the bot",
+            "max_length": null,
+            "max_value": null,
+            "min_length": null,
+            "min_value": null,
+            "name": "show_internal",
+            "options": [],
+            "required": false,
+            "type": 5
+          }
+        ],
         "required": false,
         "type": 1
       },

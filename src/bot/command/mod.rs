@@ -96,6 +96,11 @@ pub struct Router<'a> {
     /// once by [`Self::handler_for`]. Held behind a lock because that read
     /// happens on the session loop, not on the command's own task.
     open_section: std::sync::Mutex<Option<SettingsSection>>,
+    /// Whether `/plugins list` opens with the internal plugins on screen, set
+    /// by that command's `show_internal` argument before [`Self::run`] and
+    /// read by [`Self::handler_for`] when it builds the list handler. `false`
+    /// — hidden — is the default.
+    show_internal: std::sync::atomic::AtomicBool,
 }
 
 impl<'a> Router<'a> {
@@ -106,6 +111,7 @@ impl<'a> Router<'a> {
             nav_queue: tokio::sync::Mutex::new(VecDeque::new()),
             reply_handle: tokio::sync::Mutex::new(None),
             open_section: std::sync::Mutex::new(None),
+            show_internal: std::sync::atomic::AtomicBool::new(false),
         })
     }
 
@@ -131,6 +137,21 @@ impl<'a> Router<'a> {
             .lock()
             .ok()
             .and_then(|mut slot| slot.take())
+    }
+
+    /// Whether `/plugins list` opens with the internal plugins on screen. Set
+    /// once, before the session runs.
+    pub fn show_internal(&self, on: bool) {
+        self.show_internal
+            .store(on, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Whether [`Self::show_internal`] was set: the state the plugins list
+    /// opens in. Copied rather than taken — the flag describes the session, so
+    /// a re-run of the list opens the same way.
+    pub fn shows_internal(&self) -> bool {
+        self.show_internal
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Queues a navigation target for the session loop to pop next.
@@ -163,7 +184,7 @@ impl<'a> Router<'a> {
         match target {
             SettingsMain => Some(Box::new(SettingsHandler::new())),
             SettingsAbout => Some(Box::new(AboutHandler::new())),
-            PluginsList => Some(Box::new(PluginsListHandler::new())),
+            PluginsList => Some(Box::new(PluginsListHandler::new(self.shows_internal()))),
             SettingsSection { .. } | Back | Exit => {
                 unreachable!("pop_step resolves the terminal targets itself")
             }

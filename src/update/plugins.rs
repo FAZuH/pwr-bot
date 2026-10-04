@@ -95,8 +95,9 @@ impl Update for PluginsUpdate {
 /// The lines arrive pre-rendered (the shell owns the per-plugin wording, which
 /// the toggle must not change), so the core never needs the catalog or the
 /// manifests and holds no serenity types. `show_internal` is session state: it
-/// starts hidden and never leaves the model, so the view forgets it on the
-/// next `/plugins list`.
+/// starts at whatever the command asked for — hidden unless the admin asked
+/// otherwise — and never leaves the model, so the view forgets it on the next
+/// `/plugins list`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PluginsListModel {
     internal: Vec<String>,
@@ -105,13 +106,14 @@ pub struct PluginsListModel {
 }
 
 impl PluginsListModel {
-    /// Builds the model from the two groups' lines. The internal group starts
-    /// hidden.
-    pub fn new(internal: Vec<String>, catalog: Vec<String>) -> Self {
+    /// Builds the model from the two groups' lines and the opening visibility the
+    /// command asked for: `show_internal` seeds the button's state, which the
+    /// toggle then flips from.
+    pub fn new(internal: Vec<String>, catalog: Vec<String>, show_internal: bool) -> Self {
         Self {
             internal,
             catalog,
-            show_internal: false,
+            show_internal,
         }
     }
 
@@ -190,6 +192,7 @@ mod tests {
         PluginsListModel::new(
             vec!["`feed` — enabled, discord token".to_string()],
             vec!["`hello` — disabled, host ops only".to_string()],
+            false,
         )
     }
 
@@ -276,6 +279,27 @@ mod tests {
         assert_eq!(model.toggle_label(), "Show Internal");
     }
 
+    /// The command argument seeds the opening state: `/plugin list` asked to
+    /// show the internal plugins opens on them, and the toggle then hides them.
+    /// Fails if the argument never reaches the model, or if it pins the toggle
+    /// instead of seeding it.
+    #[test]
+    fn an_explicit_show_opens_on_the_internal_group_and_the_toggle_still_flips_it() {
+        let mut model = PluginsListModel::new(
+            vec!["`feed` — enabled, discord token".to_string()],
+            vec!["`hello` — disabled, host ops only".to_string()],
+            true,
+        );
+
+        assert!(model.show_internal());
+        assert_eq!(model.toggle_label(), "Hide Internal");
+
+        plugins_list_update(PluginsListMsg::ToggleInternal, &mut model);
+
+        assert!(!model.show_internal());
+        assert_eq!(model.toggle_label(), "Show Internal");
+    }
+
     /// Toggling the group's visibility never touches its lines: the toggle
     /// hides what the view renders, so the plugin states an admin toggles back
     /// to are the same ones the list was built from.
@@ -293,8 +317,11 @@ mod tests {
     /// model keeps the catalog list it was built with, empty.
     #[test]
     fn an_empty_catalog_group_carries_no_lines_and_no_error() {
-        let model =
-            PluginsListModel::new(vec!["`feed` — enabled, discord token".to_string()], vec![]);
+        let model = PluginsListModel::new(
+            vec!["`feed` — enabled, discord token".to_string()],
+            vec![],
+            false,
+        );
 
         assert!(model.catalog().is_empty());
         assert_eq!(model.internal(), ["`feed` — enabled, discord token"]);

@@ -18,7 +18,8 @@
 //! [`PluginsListFeature`] on a Router session and supplies the per-plugin line
 //! wording ([`plugin_line`], shared by both groups), so the catalog group and
 //! the internal group behind its Show/Hide Internal button render the same
-//! states the toggles read.
+//! states the toggles read. Its `show_internal` argument seeds that button's
+//! state — hidden unless the admin asks — and the button toggles from there.
 //!
 //! Disabling an internal plugin gates it at the host for that guild and leaves the
 //! shared process running for every other guild; only a catalog plugin, which
@@ -68,26 +69,31 @@ pub async fn plugins(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-/// Lists every plugin the host knows and its enabled state in this guild, as
-/// an interactive view.
+/// Lists every plugin the host knows and its state in this guild; internal ones stay hidden.
 ///
-/// The catalog group and the internal group behind a Show/Hide Internal button
-/// are rendered by the host [`PluginsListFeature`], whose per-plugin wording
-/// this module supplies. An empty catalog renders its own group with
-/// `none configured` rather than refusing: a group that disappeared would be
-/// indistinguishable from a command that never knew about the catalog.
+/// The catalog group is always rendered; the internal group is left out unless
+/// `show_internal` says True, and the view's Show/Hide Internal button toggles
+/// from whichever state the argument set. Both groups are rendered by the host
+/// [`PluginsListFeature`], whose per-plugin wording this module supplies. An
+/// empty catalog renders its own group with `none configured` rather than
+/// refusing: a group that disappeared would be indistinguishable from a
+/// command that never knew about the catalog.
 #[poise::command(slash_command)]
-pub async fn list(ctx: Context<'_>) -> Result<(), Error> {
+pub async fn list(
+    ctx: Context<'_>,
+    #[description = "Show the plugins that ship inside the bot"] show_internal: Option<bool>,
+) -> Result<(), Error> {
     is_author_guild_admin(ctx).await?;
-    invoke(Router::new(ctx)).await
+    invoke(Router::new(ctx), show_internal.unwrap_or(false)).await
 }
 
-pub async fn invoke(coordinator: Arc<Router<'_>>) -> Result<(), Error> {
+pub async fn invoke(coordinator: Arc<Router<'_>>, show_internal: bool) -> Result<(), Error> {
+    coordinator.show_internal(show_internal);
     coordinator.run(Navigation::PluginsList).await?;
     Ok(())
 }
 
-handler! { pub struct PluginsListHandler {} }
+handler! { pub struct PluginsListHandler { show_internal: bool } }
 
 #[async_trait::async_trait]
 impl CommandHandler for PluginsListHandler {
@@ -107,6 +113,7 @@ impl CommandHandler for PluginsListHandler {
         let config = PluginsListConfig {
             internal: internal_lines(&data.internal_manifests, &model.enabled),
             catalog: list_lines(&data.plugin_catalog, &model.enabled),
+            show_internal: self.show_internal,
         };
         // An absent catalog is a normal state the view renders as
         // `none configured`; the load failure behind it belongs in the log,

@@ -3,10 +3,10 @@
 //! Holds the single source of truth for the Settings view (`SettingsModel`),
 //! the exhaustive message vocabulary (`SettingsMsg`), and an empty effect
 //! vocabulary (`SettingsEffect`). The view is static — it lists the settings
-//! sections the running internal plugins declare and offers a back button — so
-//! `update` never mutates the model and never performs IO. A section click
-//! and Back are navigation exits, handled by the shell's `exit_navigation`
-//! and the Router's session loop.
+//! sections the running internal plugins declare and offers an About button —
+//! so `update` never mutates the model and never performs IO. A section click,
+//! About, and Back are navigation exits, handled by the shell's
+//! `exit_navigation` and the Router's session loop.
 //!
 //! IO (collecting the sections from the loaded plugin manifests) lives in the
 //! shell layer ([`crate::bot::command::settings`]).
@@ -92,6 +92,9 @@ pub enum SettingsMsg {
     },
     /// The back button was pressed: Root Back.
     Back,
+    /// The About button was pressed: the session exits to the about view, whose
+    /// own Back returns here.
+    About,
 }
 
 impl From<Lifecycle> for SettingsMsg {
@@ -114,7 +117,7 @@ pub enum SettingsEffect {}
 pub fn update(msg: SettingsMsg, _model: &mut SettingsModel) -> Vec<SettingsEffect> {
     match msg {
         SettingsMsg::Lifecycle(lifecycle) => lifecycle.handle(Vec::new),
-        SettingsMsg::Section { .. } | SettingsMsg::Back => Vec::new(),
+        SettingsMsg::Section { .. } | SettingsMsg::Back | SettingsMsg::About => Vec::new(),
     }
 }
 
@@ -160,6 +163,15 @@ mod tests {
     fn back_is_a_noop() {
         let mut m = model();
         let effects = update(SettingsMsg::Back, &mut m);
+        assert!(effects.is_empty());
+    }
+
+    /// About is a navigation exit like a section click: the core flips nothing
+    /// and asks for no effect, so the shell can hand it to the Router.
+    #[test]
+    fn about_is_a_noop() {
+        let mut m = model();
+        let effects = update(SettingsMsg::About, &mut m);
         assert!(effects.is_empty());
     }
 

@@ -2,11 +2,12 @@
 //! core.
 //!
 //! Renders the Settings list: one tile per section the running internal plugins
-//! declare in their manifests, plus the Root Back row. The feature holds no
+//! declare in their manifests, plus the About button. The feature holds no
 //! service or manifest fetch: the sections arrive at model construction
 //! (data-in via `Config`), and a section click is a navigation exit — the
 //! Router resolves it into the Settings section handoff (see
-//! [`crate::bot::command::session_exit`]).
+//! [`crate::bot::command::session_exit`]). The root renders no Back button: it
+//! is the root, so there is no frame behind it to pop.
 
 use std::borrow::Cow;
 
@@ -35,8 +36,8 @@ action_enum! {
         /// A section tile: `plugin`/`command` identify the panel to open.
         #[label = "Open"]
         Section { plugin: String, command: String },
-        #[label = "❮ Back"]
-        Back,
+        #[label = "About"]
+        About,
     }
 }
 
@@ -94,7 +95,7 @@ impl GuiFeature for SettingsFeature {
             CreateContainerComponent::ActionRow(CreateActionRow::Buttons(Cow::Owned(buttons)))
         });
 
-        let back_action = registry.register(SettingsAction::Back);
+        let about_action = registry.register(SettingsAction::About);
 
         let mut container_children: Vec<CreateContainerComponent<'a>> =
             vec![CreateContainerComponent::TextDisplay(component! {
@@ -106,17 +107,20 @@ impl GuiFeature for SettingsFeature {
         let container: CreateComponent<'a> =
             CreateComponent::Container(CreateContainer::new(Cow::Owned(container_children)));
 
-        let back_button = component! {
+        // About is a nav affordance, not one of the view's jobs, so it wears
+        // the nav style (Secondary) the other host panels' nav buttons use;
+        // Primary stays with the section tiles the root exists to open.
+        let about_button = component! {
             action_row {
                 button {
-                    custom_id: back_action.id,
-                    label: back_action.label,
+                    custom_id: about_action.id,
+                    label: about_action.label,
                     style: ButtonStyle::Secondary
                 }
             }
         };
 
-        vec![container, CreateComponent::ActionRow(back_button)]
+        vec![container, CreateComponent::ActionRow(about_button)]
     }
 
     fn translate(
@@ -129,7 +133,7 @@ impl GuiFeature for SettingsFeature {
                 plugin: plugin.clone(),
                 command: command.clone(),
             }),
-            SettingsAction::Back => Some(SettingsMsg::Back),
+            SettingsAction::About => Some(SettingsMsg::About),
         }
     }
 
@@ -139,6 +143,7 @@ impl GuiFeature for SettingsFeature {
                 plugin: plugin.clone(),
                 command: command.clone(),
             }),
+            SettingsMsg::About => Some(Navigation::SettingsAbout),
             SettingsMsg::Back => Some(Navigation::Back),
             _ => None,
         }
@@ -171,6 +176,30 @@ mod tests {
                 ),
             ],
         }
+    }
+
+    /// The visible text of every button the view actually renders, in order.
+    /// A button is an object carrying both `custom_id` and `label`, which is
+    /// what separates it from a select option.
+    fn rendered_labels(model: &SettingsModel) -> Vec<String> {
+        fn collect(value: &serde_json::Value, out: &mut Vec<String>) {
+            match value {
+                serde_json::Value::Object(map) => {
+                    if let (Some(_), Some(label)) = (map.get("custom_id"), map.get("label")) {
+                        out.push(label.as_str().expect("a label is a string").to_string());
+                    }
+                    map.values().for_each(|value| collect(value, out));
+                }
+                serde_json::Value::Array(items) => {
+                    items.iter().for_each(|value| collect(value, out));
+                }
+                _ => {}
+            }
+        }
+
+        let mut labels = Vec::new();
+        collect(&cycle::capture::<SettingsFeature>(model), &mut labels);
+        labels
     }
 
     #[test]
@@ -218,7 +247,7 @@ mod tests {
                         "type": 2,
                         "custom_id": "id:SettingsAction",
                         "disabled": false,
-                        "label": "❮ Back",
+                        "label": "About",
                         "style": 2
                     }
                 ]
@@ -275,20 +304,47 @@ mod tests {
         );
     }
 
+    /// The root is the root: it renders no Back button, because there is no
+    /// frame behind it to pop. Fails if the dead control comes back, and names
+    /// every button the root does render so the failure says what did.
     #[test]
-    fn back_translates_to_back_msg_and_exits_to_root_back() {
+    fn the_root_renders_no_back_button() {
         let model = SettingsFeature::initial(config());
 
-        let back = cycle::find_by_rendered_label::<SettingsFeature>(&model, "❮ Back");
-        let msg = cycle::translate_action::<SettingsFeature>(&back, &model);
-        assert_eq!(msg, SettingsMsg::Back);
+        assert_eq!(rendered_labels(&model), ["Feed", "Voice", "About"]);
+    }
+
+    /// The About button is a real control, not a dead one: the button the user
+    /// sees resolves through the registry to the About action. Fails if it is
+    /// rendered with no custom id, or with an unregistered one.
+    #[test]
+    fn the_about_button_is_a_registered_control() {
+        let model = SettingsFeature::initial(config());
+
+        let about = cycle::find_by_rendered_label::<SettingsFeature>(&model, "About");
+
+        assert_eq!(about, SettingsAction::About);
+    }
+
+    /// The About click leaves the root for the about view: the rendered button
+    /// translates to the About message, the pure update asks for no side
+    /// effects, and the shell exits with the navigation the Router already
+    /// resolves to the about view. Fails if the click navigates nowhere, or
+    /// builds a route the Router does not know.
+    #[test]
+    fn the_about_button_reaches_the_about_view() {
+        let model = SettingsFeature::initial(config());
+
+        let action = cycle::find_by_rendered_label::<SettingsFeature>(&model, "About");
+        let msg = cycle::translate_action::<SettingsFeature>(&action, &model);
+        assert_eq!(msg, SettingsMsg::About);
 
         let mut model = model;
         let effects = SettingsFeature::update(msg, &mut model);
         assert!(effects.is_empty());
         assert_eq!(
-            SettingsFeature::exit_navigation(&SettingsMsg::Back),
-            Some(Navigation::Back)
+            SettingsFeature::exit_navigation(&SettingsMsg::About),
+            Some(Navigation::SettingsAbout)
         );
     }
 
