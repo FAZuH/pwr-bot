@@ -1,7 +1,5 @@
 //! Permission checks for bot commands.
 
-use std::borrow::Cow;
-
 use poise::serenity_prelude::*;
 
 use crate::bot::command::Context;
@@ -10,24 +8,41 @@ use crate::bot::error::BotError;
 
 /// Checks if the command author has server administrator permissions.
 pub async fn is_author_guild_admin(ctx: Context<'_>) -> Result<(), Error> {
+    if is_guild_admin_permissions(author_permissions(ctx).await?) {
+        Ok(())
+    } else {
+        Err(guild_admin_denied().into())
+    }
+}
+
+/// The invoking member's permissions in the guild the command ran in. The
+/// one place the host resolves them, so a command that needs the bitfield
+/// itself (rather than the verdict) reads the same notion
+/// [`is_author_guild_admin`] enforces.
+pub async fn author_permissions(ctx: Context<'_>) -> Result<Permissions, Error> {
     let member = ctx
         .author_member()
         .await
         .ok_or(BotError::GuildOnlyCommand)?;
-    let permissions = ctx
+    Ok(ctx
         .guild()
         .ok_or(BotError::GuildOnlyCommand)?
-        .member_permissions(member.as_ref());
+        .member_permissions(member.as_ref()))
+}
 
-    let is_admin = permissions.contains(Permissions::ADMINISTRATOR)
-        || permissions.contains(Permissions::MANAGE_GUILD);
-    if !is_admin {
-        Err(BotError::PermissionDenied(
-            "You need `Manage Server` or `Administrator` permission to perform this action."
-                .to_string(),
-        ))?
-    };
-    Ok(())
+/// Whether `permissions` carry either bit the host treats as server
+/// management: `Administrator` or `Manage Server`.
+pub fn is_guild_admin_permissions(permissions: Permissions) -> bool {
+    permissions.contains(Permissions::ADMINISTRATOR)
+        || permissions.contains(Permissions::MANAGE_GUILD)
+}
+
+/// The refusal every guild-admin command answers with.
+pub fn guild_admin_denied() -> BotError {
+    BotError::PermissionDenied(
+        "You need `Manage Server` or `Administrator` permission to perform this action."
+            .to_string(),
+    )
 }
 
 /// Whether the command author is the bot owner: a query form of the owner
@@ -38,50 +53,18 @@ pub fn author_is_bot_owner(ctx: Context<'_>) -> bool {
     owners.contains(&author)
 }
 
-/// Checks if the command author has any of the required roles.
-pub async fn check_author_roles<'a>(
-    ctx: Context<'_>,
-    required_role_ids: impl Into<Cow<'a, [RoleId]>>,
-) -> Result<(), Error> {
-    let member = ctx
-        .author_member()
-        .await
-        .ok_or(BotError::GuildOnlyCommand)?;
-    Ok(check_permissions_inner(
-        &member.roles,
-        &required_role_ids.into(),
-    )?)
-}
-
-/// Internal function to check if user has required permissions.
-fn check_permissions_inner(
-    user_roles: &[RoleId],
-    required_role_ids: &[RoleId],
-) -> Result<(), BotError> {
-    if let Some(id) = required_role_ids.iter().find(|id| !user_roles.contains(id)) {
-        return Err(BotError::PermissionDenied(format!(
-            "You need the <@&{id}> role to perform this action."
-        )));
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn check_permissions_with_required_role() {
-        let role_id = RoleId::new(123);
-        let user_roles = vec![role_id];
-        let result = check_permissions_inner(&user_roles, &[RoleId::new(123)]);
-        assert!(result.is_ok());
+    fn guild_admin_permissions_accept_both_management_bits() {
+        assert!(is_guild_admin_permissions(Permissions::ADMINISTRATOR));
+        assert!(is_guild_admin_permissions(Permissions::MANAGE_GUILD));
     }
 
     #[test]
-    fn check_permissions_without_required_role_fails() {
-        let user_roles = vec![RoleId::new(456)];
-        let result = check_permissions_inner(&user_roles, &[RoleId::new(123)]);
-        assert!(result.is_err());
+    fn guild_admin_permissions_reject_an_unprivileged_member() {
+        assert!(!is_guild_admin_permissions(Permissions::MANAGE_MESSAGES));
     }
 }

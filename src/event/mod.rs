@@ -1,11 +1,6 @@
 //! Event system for pub/sub communication between components.
 
 pub mod event_bus;
-pub mod feed_update;
-
-pub use feed_update::FeedUpdateData;
-pub use feed_update::FeedUpdateEvent;
-use poise::serenity_prelude::VoiceState;
 
 /// Marker trait for events that can be dispatched through the event bus.
 ///
@@ -22,19 +17,6 @@ pub trait Event: std::any::Any + Send + Sync + 'static {
     /// Get the name of the event type.
     fn event_name(&self) -> String {
         std::any::type_name::<Self>().to_string()
-    }
-}
-
-/// Event fired when a user's voice state changes.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct VoiceStateEvent {
-    pub old: Option<VoiceState>,
-    pub new: VoiceState,
-}
-
-impl Event for VoiceStateEvent {
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
     }
 }
 

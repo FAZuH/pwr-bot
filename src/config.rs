@@ -22,20 +22,19 @@ pub struct Config {
     pub logs_path: PathBuf,
     pub plugins_toml: PathBuf,
     pub plugins_dir: PathBuf,
-    pub settings_plugin_path: PathBuf,
-    pub feed_settings_plugin_path: PathBuf,
-    pub voice_settings_plugin_path: PathBuf,
-    pub welcome_settings_plugin_path: PathBuf,
-    /// Core plugins the host spawns at startup, in order.
-    pub core_plugins: Vec<CorePluginSpec>,
+    /// Internal plugins the host spawns at startup, in order.
+    pub internal_plugins: Vec<InternalPluginSpec>,
     pub features: Features,
     pub version: String,
 }
 
-/// One core plugin the host spawns at startup: its name and binary path.
+/// One internal plugin the host spawns at startup: its name and binary path.
+/// The set of internal plugins is configuration, not source: `INTERNAL_PLUGINS`
+/// lists their names, and each binary's path resolves through
+/// [`Config::internal_plugin_path`].
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CorePluginSpec {
-    /// Plugin name, e.g. `settings`.
+pub struct InternalPluginSpec {
+    /// Plugin name, e.g. `my-plugin`.
     pub name: String,
     /// Binary path to spawn.
     pub path: PathBuf,
@@ -44,8 +43,6 @@ pub struct CorePluginSpec {
 /// Feature flags for optional bot components.
 #[derive(Clone, Default, Debug)]
 pub struct Features {
-    pub voice_tracking: bool,
-    pub feed_publisher: bool,
     pub autoregister_cmds: bool,
 }
 
@@ -97,70 +94,37 @@ impl Config {
             );
         });
 
-        self.settings_plugin_path = std::env::var("SETTINGS_PLUGIN_PATH")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| {
-                std::env::current_exe()
-                    .ok()
-                    .and_then(|exe| exe.parent().map(|p| p.to_path_buf()))
-                    .map(|dir| dir.join("settings"))
-                    .unwrap_or_else(|| self.data_path.join("settings"))
-            });
-        self.feed_settings_plugin_path = std::env::var("FEED_SETTINGS_PLUGIN_PATH")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| {
-                std::env::current_exe()
-                    .ok()
-                    .and_then(|exe| exe.parent().map(|p| p.to_path_buf()))
-                    .map(|dir| dir.join("feed-settings"))
-                    .unwrap_or_else(|| self.data_path.join("feed-settings"))
-            });
-        self.voice_settings_plugin_path = std::env::var("VOICE_SETTINGS_PLUGIN_PATH")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| {
-                std::env::current_exe()
-                    .ok()
-                    .and_then(|exe| exe.parent().map(|p| p.to_path_buf()))
-                    .map(|dir| dir.join("voice-settings"))
-                    .unwrap_or_else(|| self.data_path.join("voice-settings"))
-            });
-        self.welcome_settings_plugin_path = std::env::var("WELCOME_SETTINGS_PLUGIN_PATH")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| {
-                std::env::current_exe()
-                    .ok()
-                    .and_then(|exe| exe.parent().map(|p| p.to_path_buf()))
-                    .map(|dir| dir.join("welcome-settings"))
-                    .unwrap_or_else(|| self.data_path.join("welcome-settings"))
-            });
-        self.core_plugins = vec![
-            CorePluginSpec {
-                name: "settings".to_string(),
-                path: self.settings_plugin_path.clone(),
-            },
-            CorePluginSpec {
-                name: "feed-settings".to_string(),
-                path: self.feed_settings_plugin_path.clone(),
-            },
-            CorePluginSpec {
-                name: "voice-settings".to_string(),
-                path: self.voice_settings_plugin_path.clone(),
-            },
-            CorePluginSpec {
-                name: "welcome-settings".to_string(),
-                path: self.welcome_settings_plugin_path.clone(),
-            },
-        ];
+        self.internal_plugins =
+            parse_internal_plugins(&std::env::var("INTERNAL_PLUGINS").unwrap_or_default())
+                .into_iter()
+                .map(|name| InternalPluginSpec {
+                    path: self.internal_plugin_path(&name),
+                    name,
+                })
+                .collect();
 
         self.features = Features {
-            voice_tracking: parse_bool_env("ENABLE_VOICE_TRACKING", true),
-            feed_publisher: parse_bool_env("ENABLE_FEED_PUBLISHER", true),
             autoregister_cmds: parse_bool_env("ENABLE_AUTOREGISTER_CMD", true),
         };
 
         self.version = env!("CARGO_PKG_VERSION").to_string();
 
         Ok(())
+    }
+
+    /// Resolves an internal plugin's binary path: the `<NAME>_PLUGIN_PATH` env
+    /// var (the plugin's uppercased name) when set, else the binary shipped
+    /// next to the bot binary, else one under the data path.
+    fn internal_plugin_path(&self, name: &str) -> PathBuf {
+        std::env::var(format!("{}_PLUGIN_PATH", name.to_uppercase()))
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| {
+                std::env::current_exe()
+                    .ok()
+                    .and_then(|exe| exe.parent().map(|p| p.to_path_buf()))
+                    .map(|dir| dir.join(name))
+                    .unwrap_or_else(|| self.data_path.join(name))
+            })
     }
 
     /// Gets a directory path from environment variable, creating it if needed.
@@ -186,6 +150,16 @@ impl Config {
     }
 }
 
+/// The internal plugin names from a `INTERNAL_PLUGINS` value: a comma-separated
+/// list, trimmed, empty entries dropped.
+fn parse_internal_plugins(list: &str) -> Vec<String> {
+    list.split(',')
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
 /// Parse boolean from environment variable.
 /// Accepts: "true", "1", "yes", "on" (case-insensitive) as true.
 fn parse_bool_env(var: &str, default: bool) -> bool {
@@ -200,4 +174,23 @@ fn parse_bool_env(var: &str, default: bool) -> bool {
             }
         })
         .unwrap_or(default)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_internal_plugins;
+
+    #[test]
+    fn internal_plugins_list_is_split_trimmed_and_empties_dropped() {
+        assert_eq!(
+            parse_internal_plugins(" feed , voice ,,welcome"),
+            vec![
+                "feed".to_string(),
+                "voice".to_string(),
+                "welcome".to_string()
+            ]
+        );
+        assert!(parse_internal_plugins("").is_empty());
+        assert!(parse_internal_plugins(" , ,").is_empty());
+    }
 }

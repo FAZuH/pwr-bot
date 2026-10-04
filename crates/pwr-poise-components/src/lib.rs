@@ -440,6 +440,7 @@ mod tests {
             data,
             ephemeral: true,
             view: json!({"page": 1}),
+            files: vec![],
         };
         let json = serde_json::to_string(&spec).unwrap();
         let back: ViewSpec = serde_json::from_str(&json).unwrap();

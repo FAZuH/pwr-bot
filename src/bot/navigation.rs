@@ -2,55 +2,34 @@
 //!
 //! Provides unified navigation enum for cross-domain handler navigation.
 
-use poise::serenity_prelude::User;
-
-use crate::bot::command::feed::SendInto;
-use crate::bot::command::voice::GuildStatType;
-use crate::bot::command::voice::VoiceLeaderboardTimeRange;
-use crate::bot::command::voice::VoiceStatsTimeRange;
-
 /// Result type for handler navigation.
 ///
 /// Handlers return this enum to indicate where the coordinator should
-/// navigate next. Each domain (Settings, Feed, Voice) has its own section.
+/// navigate next. Each host domain has its own section.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Navigation {
     // -- Settings section --
-    /// Hand the session's message to the settings plugin's hub view: the
-    /// host run morphs the message into the hub and ends, and the message
-    /// continues as a plugin view session. See
-    /// [`crate::bot::command::session_exit`].
+    /// Run the host Settings GUI: the frame the `/settings` command opens,
+    /// listing the settings sections the loaded plugin manifests declare.
+    /// Every other host feature's Back lands here.
     SettingsMain,
+    /// Hand the session's message to a settings section's panel plugin: the
+    /// host run invokes the plugin command, morphs the message into the
+    /// returned view, and ends — the message continues as a plugin view
+    /// session. See [`crate::bot::command::session_exit`].
+    SettingsSection {
+        /// The plugin the section belongs to.
+        plugin: String,
+        /// The plugin's command the section click invokes.
+        command: String,
+    },
     /// Navigate to about page (within settings context)
     SettingsAbout,
 
-    // -- Feed commands section --
-    /// Show subscriptions list
-    FeedSubscriptions { send_into: Option<SendInto> },
-    /// Start subscribe flow
-    FeedSubscribe {
-        links: String,
-        send_into: Option<SendInto>,
-    },
-    /// Start unsubscribe flow
-    FeedUnsubscribe {
-        links: String,
-        send_into: Option<SendInto>,
-    },
-    /// Start subscription list flow
-    FeedList(Option<SendInto>),
-
-    // Voice commands section
-    VoiceLeaderboard {
-        time_range: VoiceLeaderboardTimeRange,
-    },
-
-    // -- /vc stats --
-    VoiceStats {
-        time_range: VoiceStatsTimeRange,
-        target_user: Box<Option<User>>,
-        stat_type: GuildStatType,
-    },
+    /// Run the host `/plugins list` GUI: the frame the `/plugins list` command
+    /// opens, listing the catalog plugins and — behind a Show/Hide Internal
+    /// button — the internal ones.
+    PluginsList,
 
     // -- Universal navigation --
     /// Pop one navigation level: the target revealed behind the marker runs

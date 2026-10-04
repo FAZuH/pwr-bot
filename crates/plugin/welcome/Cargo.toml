@@ -1,0 +1,46 @@
+[package]
+name = "welcome"
+version = "0.1.0"
+edition = "2024"
+authors = ["FAZuH <mail@fazuh.com>"]
+description = "The welcome settings panel plugin for pwr-bot: per-guild welcome-card settings served as a plugin view"
+license = "MIT"
+repository = "https://github.com/FAZuH/pwr-bot"
+
+[dependencies]
+anyhow = "1.0.101"
+base64 = "0.22.1"
+diesel = { version = "2.3", features = ["postgres", "serde_json"] }
+diesel-async = { version = "0.8", features = ["deadpool", "postgres"] }
+diesel_migrations = { version = "2.3", features = ["postgres"] }
+image = "0.25"
+minijinja = "2.15.1"
+pwr-ext = { git = "https://github.com/FAZuH/pwr-ext", tag = "v0.1.0", features = ["macros"] }
+pwr-plugin-protocol = { path = "../../pwr-plugin-protocol" }
+pwr-plugin-support = { path = "../pwr-plugin-support" }
+resvg = "0.47.0"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+thiserror = "2.0.18"
+tokio = { version = "1.49.0", features = ["macros", "rt-multi-thread"] }
+wreq = { version = "0.16", features = ["stream", "query"] }
+wreq-util = "0.2"
+
+[dev-dependencies]
+dotenv = "0.15.0"
+pwr-test-support.workspace = true
+libc = "0.2.182"
+mockall = "0.13.1"
+# The host-seam suite (`plugin_welcome.rs`) drives this panel over the real
+# stdio wire through the host's plugin runtime, so it needs the host's own
+# types, plus the test-database seam's own set. One-way: the host does not
+# depend on this crate.
+pwr-bot = { path = "../../.." }
+poise = { git = "https://github.com/serenity-rs/poise", branch = "serenity-next" }
+postgresql_embedded = { version = "=0.20.1", default-features = false, features = ["zonky", "tokio", "rustls"] }
+rustls-native-certs = "0.8"
+serial_test = "3.3.1"
+tokio-postgres = "0.7"
+tokio-postgres-rustls = { version = "0.14", default-features = false, features = ["ring", "native-certs"] }
+# Only the tests read `IS_COMPONENTS_V2`; production is `view!`-authored.
+pwr-poise-components = { path = "../../pwr-poise-components" }

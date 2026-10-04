@@ -1,21 +1,20 @@
-//! Server settings wire types: the whole [`ServerSettings`] snapshot that
-//! crosses the host↔plugin seam through the `host.feed.get_settings` /
-//! `host.feed.update_settings` ops (ADR-0010).
+//! Legacy shared settings wire types.
 //!
-//! These structs were the host crate's `entity.rs` types; they moved here so
-//! the shared contract owns the payload both sides serialize. The host
-//! re-exports them from `entity.rs`, so its imports stay stable, and the
-//! diesel coupling stays behind in the host's `ServerSettingsEntity`.
-//! `current_year`-style render-only values never appear here — a payload
-//! field must be data the service itself stores.
+//! The voice and feed plugins own their settings repositories. These types
+//! remain for one-time legacy imports from `server_settings`; they are not a
+//! voice host-settings RPC.
+//!
+//! `current_year`-style render-only values never appear here. A payload field
+//! must be data the service itself stores.
 
 use serde::Deserialize;
 use serde::Serialize;
 
 /// The whole per-guild settings snapshot: every feature section together.
-/// The feed settings ops carry it in one piece, mirroring the service's
-/// `get_server_settings`/`update_server_settings` pair and its
-/// persist-the-whole-snapshot semantics.
+/// Plugins deserialize it from `server_settings` during their one-time
+/// legacy import; no host operation consumes it. Feed and voice settings are
+/// owned by their plugins; their fields remain for transitional legacy
+/// imports only.
 #[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
 pub struct ServerSettings {
     #[serde(default)]

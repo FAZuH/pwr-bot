@@ -2,11 +2,11 @@
 members = [
     "crates/pwr-plugin-protocol",
     "crates/pwr-poise-components",
+    "crates/pwr-test-support",
     "crates/plugin/hello",
-    "crates/plugin/settings",
-    "crates/plugin/feed-settings",
-    "crates/plugin/voice-settings",
-    "crates/plugin/welcome-settings",
+    "crates/plugin/feed",
+    "crates/plugin/voice",
+    "crates/plugin/welcome",
     "crates/plugin/pwr-plugin-support",
     "crates/preview",
 ]
@@ -16,6 +16,7 @@ resolver = "2"
 pwr-ext = { git = "https://github.com/FAZuH/pwr-ext", tag = "v0.1.0", features = ["macros"] }
 pwr-viewgen = { git = "https://github.com/FAZuH/pwr-viewgen", tag = "v0.1.1" }
 pwr-plugin-protocol = { path = "crates/pwr-plugin-protocol" }
+pwr-test-support = { path = "crates/pwr-test-support" }
 pwr-plugin-support = { path = "crates/plugin/pwr-plugin-support" }
 pwr-poise-components = { path = "crates/pwr-poise-components" }
 
@@ -31,10 +32,10 @@ version = "0.4.0"
 
 edition = "2024"
 authors = ["FAZuH <mail@fazuh.com>"]
-description = "Discord bot with feed subscriptions and voice channel tracking"
+description = "Discord plugin host: spawns plugin subprocesses and routes their views"
 license = "MIT"
 repository = "https://github.com/FAZuH/pwr-bot"
-keywords = ["discord", "bot", "serenity", "feed-reader", "voice"]
+keywords = ["discord", "bot", "serenity", "plugin", "framework"]
 
 [lints.clippy]
 uninlined_format_args = "warn"
@@ -70,21 +71,14 @@ libc = "0.2.182"
 log = "0.4.29"
 thiserror = "2.0.18"
 uuid = { version = "1.21.0", features = ["v4"] }
-governor = "0.10.4"
 tracing-appender = "0.2.4"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 wreq = { version = "0.16", features = ["stream", "query"] }
 wreq-util = "0.2"
 url = "2"
 image = "0.25"
-html2md = "0.2.15"
 sysinfo = "0.33"
-derive_builder = "0.20.2"
-contribution-grid = "2.0.1"
-minijinja = "2.15.1"
 base64 = "0.22.1"
-resvg = "0.47.0"
-plotters = "0.3.7"
 diesel = { version = "2.3", features = ["chrono", "postgres", "serde_json", "uuid"] }
 diesel-async = { version = "0.8", features = ["deadpool", "postgres"] }
 diesel_migrations = { version = "2.3", features = ["postgres"] }
@@ -100,6 +94,7 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 
 [dev-dependencies]
 httpmock = "0.7.0"
+pwr-test-support.workspace = true
 serial_test = "3.3.1"
 pwr-viewgen.workspace = true
 postgresql_embedded = { version = "=0.20.1", default-features = false, features = ["zonky", "tokio", "rustls"] }
@@ -111,7 +106,7 @@ tokio-postgres = "0.7"
 # tokio-postgres' SslMode only has Disable/Prefer/Require — verify-ca and
 # verify-full are REJECTED at URL parse time by tokio-postgres itself, and
 # our policy layer additionally rejects them with a clear error (see
-# tests/support/db.rs). The diesel connection used by run_migrations has no
+# crates/pwr-test-support/src/db.rs). The diesel connection used by run_migrations has no
 # TLS client support; `sslmode=require` URLs work for probe/scratch
 # provisioning but cannot drive diesel migrations — that combination errors
 # loudly instead of downgrading.

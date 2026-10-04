@@ -1,24 +1,19 @@
 # Publish typed service RPCs across the plugin boundary
 
 A plugin runs in a subprocess. It shares no memory with the host, and it
-cannot call a service directly. The only channel is the host-op protocol: a
-plugin sends a `Call` message with an op string, and the host answers it in
-`handle_host_call` (`src/plugin/host.rs`). The v1 surface holds eleven ops
-after `host.stats` landed — Discord I/O, the plugin kv store, host config,
-navigation, and live stats (`crates/pwr-plugin-protocol/src/caps.rs`). No
-op reaches the host's services.
-
-The panels from ADR-0009 read and write per-service settings. Their
-EffectHandlers call the service traits directly today —
-`get_server_settings` and `update_server_settings` on the feed and voice
-services (`src/service/traits.rs`) — through Context-free adapters
-(`src/bot/gui/feed_settings.rs`, `src/bot/gui/voice_settings.rs`,
-`src/bot/gui/welcome.rs`). Those calls must cross the process boundary,
-and the protocol must say how.
+cannot call a host service object directly. The only channel to host-owned
+services is the host-op protocol: a plugin sends a `Call` message with an op
+string, and the host answers it in `handle_host_call` (`src/plugin/host.rs`).
+The surface holds
+fourteen ops: Discord I/O, the plugin kv store, host config, navigation,
+live stats, and user resolution (`crates/pwr-plugin-protocol/src/ops.rs`).
+The voice and welcome settings pairs were retired as voice (phase 5) and
+welcome (phase 6, #169) took ownership of their storage; feed uses no host
+settings op and owns its repository directly.
 
 We decided that the host publishes typed RPC endpoints that mirror its own
-service methods — `host.feed.get_settings`, for example. Each endpoint has
-a fixed argument schema, like `parse_send_message` has today
+service methods, such as `host.voice.get_settings`. Each endpoint has a
+fixed argument schema, like `parse_send_message` has today
 (`src/plugin/host.rs`). A service stays the single source of truth for its
 data. A plugin stays a thin client: it calls the endpoint, gets typed data
 back, and renders. The calls map close to one-to-one onto the service
@@ -39,20 +34,39 @@ The consequences:
 - **Adding a plugin needs zero host changes.** A plugin is a catalog
   entry. It calls ops the host already serves, and no op names a plugin.
 - **Adding a capability grows the op surface additively, in one place.**
-  The addition touches the enum variant, the `ALL_CAPS` list, and
-  `as_str` in the caps module (`crates/pwr-plugin-protocol/src/caps.rs`
+  The addition touches the enum variant, the `ALL_OPS` list, and
+  `as_str` in the ops module (`crates/pwr-plugin-protocol/src/ops.rs`
   documents the procedure), plus one dispatch arm in `handle_host_call`.
   Nothing else changes.
 - **The failure mode to avoid is the bespoke per-plugin op.** An op named
-  after a plugin — `host.welcome.set_color`, for example — inverts the
+  after a plugin — `host.welcome.set_color`, say — inverts the
   dependency. The host API grows because a plugin asked for it, and the
   op surface mirrors plugins instead of services.
-- **The rejected alternative is panels owning their settings state in the
-  plugin kv store** (`host.kv.get`, `host.kv.set`, `host.kv.delete`).
-  That inverts data ownership, splits the source of truth, and forces
-  service rewrites for code outside the panels that reads the same
-  settings — voice tracking checks `is_enabled` per guild
-  (`src/service/traits.rs`).
+- **The rejected alternative is host panels owning their settings state in
+  the plugin kv store** (`host.kv.get`, `host.kv.set`, `host.kv.delete`).
+  That inverts data ownership for plugins that own their storage and forces
+  service rewrites for code outside the panels that reads the same settings.
+  Feed, voice, and welcome now own their settings tables directly.
 
 ADR-0009 records the migration that creates the need. ADR-0011 records
 the modal capability the same seam needs.
+
+**Update — 2026-09-25 (phase 5):** The live protocol calls this surface `ops`
+(`HostOp` in `crates/pwr-plugin-protocol/src/ops.rs`) and uses API version
+`2`. Voice owns its settings repository, legacy import, migrations, heartbeat
+file, and event subscriber. The `host.resolve_users` operation provides a
+cache-first projection with display names and avatar URLs to voice views.
+
+**Update — 2026-09-28 (phase 6, #169):** The welcome settings pair is
+retired: `ALL_OPS` holds 14 ops and no settings pair remains on the surface.
+Welcome owns its `welcome_settings` table, its copy-once legacy import, and
+its preview rendering, and ships preview bytes in the envelope `files`.
+
+**Update — 2026-09-30 (phase 7, #170):** The op surface is unchanged at 14
+ops, and the governing rule now holds in the host's dispatch code as well
+as in its design: `plugin_slash_dispatch` no longer special-cases the feed
+settings command for a guild-admin pre-check. It routes every plugin
+command the same way, and permission lives where ADR-0015 put it — in the
+plugin, which verifies the actor itself and declares
+`default_member_permissions` on the command. The host no longer carries a
+per-plugin name to make an exception for.

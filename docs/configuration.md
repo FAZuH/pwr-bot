@@ -16,11 +16,10 @@ in the repository root. The bot reads the file at startup.
 | `DATA_PATH` | Directory for data files. | `./data` |
 | `PLUGINS_TOML` | Plugin catalog file. See [Plugin catalog](plugins.md). | `$DATA_PATH/plugins.toml` |
 | `PLUGINS_DIR` | Directory where the bot installs plugin binaries. | `$DATA_PATH/plugins` |
-| `SETTINGS_PLUGIN_PATH` | Path to the settings core plugin binary. | `./settings` next to the bot binary, then `$DATA_PATH/settings` |
-| `FEED_SETTINGS_PLUGIN_PATH` | Path to the feed settings panel plugin binary. | `./feed-settings` next to the bot binary, then `$DATA_PATH/feed-settings` |
-| `VOICE_SETTINGS_PLUGIN_PATH` | Path to the voice settings panel plugin binary. | `./voice-settings` next to the bot binary, then `$DATA_PATH/voice-settings` |
-| `ENABLE_VOICE_TRACKING` | Enable voice channel tracking and heartbeat. | `true` |
-| `ENABLE_FEED_PUBLISHER` | Enable feed polling and publishing. | `true` |
+| `INTERNAL_PLUGINS` | Comma-separated internal plugin names, spawned at startup in order. See [Plugin catalog](plugins.md). | empty — no internal plugins |
+| `FEED_PLUGIN_PATH` | Path to the feed internal plugin binary. | `./feed` next to the bot binary, then `$DATA_PATH/feed` |
+| `VOICE_PLUGIN_PATH` | Path to the voice internal plugin binary. | `./voice` next to the bot binary, then `$DATA_PATH/voice` |
+| `WELCOME_PLUGIN_PATH` | Path to the welcome internal plugin binary. | `./welcome` next to the bot binary, then `$DATA_PATH/welcome` |
 | `ENABLE_AUTOREGISTER_CMD` | Enable command autoregistration. | `true` |
 | `DISCORD_APPLICATION_ID` | Discord application ID. Required for command autoregistration. | `1234567890` |
 | `RUST_LOG` | Log level, for example `info` or `debug`. See [log filter syntax](https://rust-lang-nursery.github.io/rust-cookbook/development_tools/debugging/config_log.html). | `pwr_bot=info` |

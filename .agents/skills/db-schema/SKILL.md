@@ -139,7 +139,6 @@ pub struct UserPreferencesEntity {
 **Model Naming Conventions:**
 - Table: `user_preferences` → Entity: `UserPreferencesEntity`
 - Use `DbU64` newtype for Discord snowflakes (`u64`) stored as `BIGINT`
-- Use `Json<T>` newtype for JSONB columns
 - Use `DateTime<Utc>` for timestamps (Diesel PostgreSQL maps `Timestamptz` to `DateTime<Utc>`)
 
 **For u64 IDs:**
@@ -147,23 +146,19 @@ pub struct UserPreferencesEntity {
 use crate::entity::DbU64;
 
 #[derive(Queryable, Selectable, Insertable)]
-#[diesel(table_name = server_settings)]
+#[diesel(table_name = guild_plugins)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct ServerSettingsEntity {
+pub struct SomeEntity {
     pub guild_id: DbU64,
     // ...
 }
 ```
 
-**For JSONB columns:**
-```rust
-use crate::entity::Json;
-
-pub struct ServerSettingsEntity {
-    pub guild_id: DbU64,
-    pub settings: Json<ServerSettings>,
-}
-```
+**For JSONB columns:** bind a `serde_json::Value`. There is no `Json<T>`
+newtype in `src/entity.rs`, and the host types no payload for the legacy
+`server_settings` table — plugins read it with raw `sql_query` and copy the
+section they own into their own storage. Reach for a typed struct only when
+the host itself owns the column.
 
 ### Step 8: Modify Repository Table (src/repo/table.rs)
 

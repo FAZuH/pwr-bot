@@ -20,7 +20,6 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     rm -rf src crates
 
 # Build app (and plugin binaries the image ships)
-COPY ./assets ./assets
 COPY ./src ./src
 COPY ./crates ./crates
 COPY ./migrations ./migrations
@@ -32,10 +31,9 @@ RUN apt-get update && apt-get install -y libfontconfig1 libpq5 && rm -rf /var/li
 
 COPY --from=build /app/migrations /app/migrations
 COPY --from=build /app/target/release/pwr-bot /app/pwr-bot
-COPY --from=build /app/target/release/feed-settings /app/feed-settings
-COPY --from=build /app/target/release/settings /app/settings
-COPY --from=build /app/target/release/voice-settings /app/voice-settings
-COPY --from=build /app/target/release/welcome-settings /app/welcome-settings
+COPY --from=build /app/target/release/feed /app/feed
+COPY --from=build /app/target/release/voice /app/voice
+COPY --from=build /app/target/release/welcome /app/welcome
 
 WORKDIR /app
 CMD ["./pwr-bot"]

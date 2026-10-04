@@ -32,7 +32,11 @@ handler! { pub struct AboutHandler {} }
 impl CommandHandler for AboutHandler {
     async fn run(&mut self, coordinator: Arc<Router<'_>>) -> Result<(), Error> {
         let ctx = *coordinator.context();
-        ctx.defer().await?;
+        // A re-run after a section handoff wake (a panel's About press) sits
+        // on an already-responded interaction: only the first render defers.
+        if coordinator.reply_handle().await.is_none() {
+            ctx.defer().await?;
+        }
 
         let stats = AboutStats::gather_stats(&ctx).await?;
         let avatar_url = ctx.cache().current_user().face();
