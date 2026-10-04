@@ -2,10 +2,12 @@
 //! list core.
 //!
 //! Renders the two groups of plugins the host knows — the catalog group, and
-//! the internal group behind a Show/Hide Internal button — with the button as
-//! the last row. The feature holds no service: both groups arrive at model
-//! construction (data-in via `Config`) with their per-plugin wording already
-//! rendered by the command, and the button is a state flip inside the model.
+//! the internal group, which `/plugin list` keeps hidden unless its
+//! `show_internal` argument asks for it and the Show/Hide Internal button then
+//! toggles — with the button as the last row. The feature holds no service:
+//! both groups arrive at model construction (data-in via `Config`) with their
+//! per-plugin wording already rendered by the command, and the button is a
+//! state flip inside the model.
 
 use std::borrow::Cow;
 
@@ -39,6 +41,9 @@ pub struct PluginsListConfig {
     pub internal: Vec<String>,
     /// One line per catalog plugin. Empty is a normal state.
     pub catalog: Vec<String>,
+    /// Whether the internal group starts on screen: the command argument, so
+    /// the button toggles from it rather than replacing it.
+    pub show_internal: bool,
 }
 
 action_enum! {
@@ -65,7 +70,7 @@ impl GuiFeature for PluginsListFeature {
     type Config = PluginsListConfig;
 
     fn initial(config: Self::Config) -> Self::Model {
-        PluginsListModel::new(config.internal, config.catalog)
+        PluginsListModel::new(config.internal, config.catalog, config.show_internal)
     }
 
     fn update(msg: Self::Msg, model: &mut Self::Model) -> Vec<Self::Effect> {
@@ -141,6 +146,7 @@ mod tests {
                 "`hello` — disabled, host ops only".to_string(),
                 "`pro` — enabled, discord token".to_string(),
             ],
+            show_internal: false,
         }
     }
 
@@ -153,10 +159,12 @@ mod tests {
             .to_string()
     }
 
+    /// The list as `/plugin list` opens it: the catalog group alone, with the
+    /// button offering to reveal the internal one. Fails if the internal group
+    /// shows up unasked, or if the button stops reading as the reveal.
     #[test]
     fn plugins_list_view_render_snapshot() {
-        let mut model = PluginsListFeature::initial(config());
-        plugins_list_update(PluginsListMsg::ToggleInternal, &mut model);
+        let model = PluginsListFeature::initial(config());
 
         let value = cycle::capture::<PluginsListFeature>(&model);
 
@@ -166,7 +174,7 @@ mod tests {
                 "components": [
                     {
                         "type": 10,
-                        "content": "-# **Plugins**\n## Catalog Plugins\n- `hello` — disabled, host ops only\n- `pro` — enabled, discord token\n## Internal Plugins\n- `feed` — enabled, discord token\n- `voice` — disabled, discord token\n"
+                        "content": "-# **Plugins**\n## Catalog Plugins\n- `hello` — disabled, host ops only\n- `pro` — enabled, discord token\n"
                     }
                 ]
             },
@@ -177,7 +185,7 @@ mod tests {
                         "type": 2,
                         "custom_id": "id:PluginsListAction",
                         "disabled": false,
-                        "label": "Hide Internal",
+                        "label": "Show Internal",
                         "style": 2
                     }
                 ]
@@ -185,6 +193,37 @@ mod tests {
         ]);
 
         assert_eq!(value, expected);
+    }
+
+    /// The command argument seeds the opening state rather than pinning it: the
+    /// list opens on both groups when asked, and the same button still hides
+    /// them from there. Fails if the argument never reaches the view, or if it
+    /// takes the toggle over.
+    #[test]
+    fn the_argument_opens_the_list_with_the_internal_group_shown() {
+        let model = PluginsListFeature::initial(PluginsListConfig {
+            show_internal: true,
+            ..config()
+        });
+
+        assert!(
+            content(&model).contains("## Internal Plugins"),
+            "the argument put the internal group on screen: {}",
+            content(&model)
+        );
+
+        let hide = cycle::find_by_rendered_label::<PluginsListFeature>(&model, "Hide Internal");
+        let mut model = model;
+        PluginsListFeature::update(
+            cycle::translate_action::<PluginsListFeature>(&hide, &model),
+            &mut model,
+        );
+
+        assert!(
+            !content(&model).contains("## Internal Plugins"),
+            "the button still toggles from the argument's state: {}",
+            content(&model)
+        );
     }
 
     /// Both groups render with their per-plugin state, and the catalog group is
@@ -222,11 +261,11 @@ mod tests {
     /// command that never learned about the catalog.
     #[test]
     fn an_empty_catalog_still_renders_its_group_with_none_configured() {
-        let mut model = PluginsListFeature::initial(PluginsListConfig {
+        let model = PluginsListFeature::initial(PluginsListConfig {
             internal: config().internal,
             catalog: vec![],
+            show_internal: false,
         });
-        plugins_list_update(PluginsListMsg::ToggleInternal, &mut model);
 
         let content = content(&model);
 
