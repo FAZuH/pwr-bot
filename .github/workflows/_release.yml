@@ -143,7 +143,10 @@ jobs:
           printf '%s' "$MANIFESTS_B64" | base64 -d | tar xzf -
 
       - name: Install Rust Toolchain
-        uses: dtolnay/rust-toolchain@stable
+        # Pinned to 1.98, matching pull-request.yml: stable 1.99 changed
+        # poise's parent_commands method shape, which breaks the release
+        # build. Unpin with the PR-checks pin.
+        uses: dtolnay/rust-toolchain@1.98
       
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
