@@ -36,7 +36,7 @@ action_enum! {
         /// A section tile: `plugin`/`command` identify the panel to open.
         #[label = "Open"]
         Section { plugin: String, command: String },
-        #[label = "About"]
+        #[label = "🛈 About"]
         About,
     }
 }
@@ -247,7 +247,7 @@ mod tests {
                         "type": 2,
                         "custom_id": "id:SettingsAction",
                         "disabled": false,
-                        "label": "About",
+                        "label": "🛈 About",
                         "style": 2
                     }
                 ]
@@ -311,7 +311,7 @@ mod tests {
     fn the_root_renders_no_back_button() {
         let model = SettingsFeature::initial(config());
 
-        assert_eq!(rendered_labels(&model), ["Feed", "Voice", "About"]);
+        assert_eq!(rendered_labels(&model), ["Feed", "Voice", "🛈 About"]);
     }
 
     /// The About button is a real control, not a dead one: the button the user
@@ -321,7 +321,7 @@ mod tests {
     fn the_about_button_is_a_registered_control() {
         let model = SettingsFeature::initial(config());
 
-        let about = cycle::find_by_rendered_label::<SettingsFeature>(&model, "About");
+        let about = cycle::find_by_rendered_label::<SettingsFeature>(&model, "🛈 About");
 
         assert_eq!(about, SettingsAction::About);
     }
@@ -335,7 +335,7 @@ mod tests {
     fn the_about_button_reaches_the_about_view() {
         let model = SettingsFeature::initial(config());
 
-        let action = cycle::find_by_rendered_label::<SettingsFeature>(&model, "About");
+        let action = cycle::find_by_rendered_label::<SettingsFeature>(&model, "🛈 About");
         let msg = cycle::translate_action::<SettingsFeature>(&action, &model);
         assert_eq!(msg, SettingsMsg::About);
 
