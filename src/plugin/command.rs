@@ -925,7 +925,7 @@ fn plugin_autocomplete<'a>(
     query: &'a str,
 ) -> poise::BoxFuture<'a, serenity::CreateAutocompleteResponse<'a>> {
     Box::pin(async move {
-        let command_name = qualified_command_name(ctx.command(), ctx.parent_commands);
+        let command_name = qualified_command_name(ctx.command(), ctx.parent_commands());
         let data = ctx.framework.user_data();
         let Some(plugin_name) = data.plugin_routes.get(&command_name) else {
             warn!("no plugin route for autocomplete command `{command_name}`");
@@ -970,7 +970,7 @@ fn plugin_slash_dispatch(
     ctx: poise::ApplicationContext<'_, Data, Error>,
 ) -> poise::BoxFuture<'_, Result<(), poise::FrameworkError<'_, Data, Error>>> {
     Box::pin(async move {
-        let command_name = qualified_command_name(ctx.command(), ctx.parent_commands);
+        let command_name = qualified_command_name(ctx.command(), ctx.parent_commands());
         let data = ctx.framework.user_data();
         let Some(plugin_name) = data.plugin_routes.get(&command_name) else {
             return Err(poise::FrameworkError::new_command_structure_mismatch(
