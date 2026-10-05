@@ -27,7 +27,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo build --release --workspace
 
 FROM debian:bookworm-slim AS app
-RUN apt-get update && apt-get install -y libfontconfig1 libpq5 && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y libfontconfig1 libpq5 ca-certificates && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /app/migrations /app/migrations
 COPY --from=build /app/target/release/pwr-bot /app/pwr-bot
