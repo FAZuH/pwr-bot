@@ -27,7 +27,7 @@ default-run = "pwr-bot"
 # Avoid modifying version manually or it will break CI
 
 
-version = "0.4.1"
+version = "0.4.2"
 
 
 edition = "2024"
