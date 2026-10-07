@@ -1173,9 +1173,9 @@ dependencies = [
 
 [[package]]
 name = "ctutils"
-version = "0.4.2"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d5515a3834141de9eafb9717ad39eea8247b5674e6066c404e8c4b365d2a29e"
+checksum = "03bb0e1cc970d482d121d9a1744999169b69a07470b3d644a7894e53fcaf4574"
 dependencies = [
  "cmov",
 ]
@@ -3970,7 +3970,7 @@ dependencies = [
 [[package]]
 name = "poise"
 version = "0.7.0"
-source = "git+https://github.com/serenity-rs/poise?branch=serenity-next#a1d0e3ee23e0a95b1192378acad27fa51a2bb8f0"
+source = "git+https://github.com/serenity-rs/poise?rev=a1d0e3ee23e0a95b1192378acad27fa51a2bb8f0#a1d0e3ee23e0a95b1192378acad27fa51a2bb8f0"
 dependencies = [
  "async-trait",
  "derive-where",
@@ -3987,7 +3987,7 @@ dependencies = [
 [[package]]
 name = "poise_macros"
 version = "0.7.0"
-source = "git+https://github.com/serenity-rs/poise?branch=serenity-next#a1d0e3ee23e0a95b1192378acad27fa51a2bb8f0"
+source = "git+https://github.com/serenity-rs/poise?rev=a1d0e3ee23e0a95b1192378acad27fa51a2bb8f0#a1d0e3ee23e0a95b1192378acad27fa51a2bb8f0"
 dependencies = [
  "darling 0.24.1",
  "proc-macro2",
@@ -6449,9 +6449,9 @@ dependencies = [
 
 [[package]]
 name = "trim-in-place"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e7d6719f139c2eebdc67eb3c1bae4fe8f70923492acac034c2d425742e08f80d"
+checksum = "09d826c8ebee0710d3e5bbe1a5769a9d12f5f03e1c7f99e56bbbc70be6846aca"
 
 [[package]]
 name = "try-lock"
@@ -6585,9 +6585,9 @@ dependencies = [
 
 [[package]]
 name = "unicase"
-version = "2.9.0"
+version = "2.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dbc4bc3a9f746d862c45cb89d705aa10f187bb96c76001afab07a0d35ce60142"
+checksum = "357cc3acc6a036009fd6c973ed009037c732d60d0b4f6c673e9041497482a28f"
 
 [[package]]
 name = "unicode-bidi"
@@ -6827,9 +6827,9 @@ dependencies = [
 
 [[package]]
 name = "want"
-version = "0.3.1"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bfa7760aed19e106de2c7c0b581b509f2f25d3dacaf737cb82ac61bc6d760b0e"
+checksum = "ec4cdd0dd910afe868b7ef477227d8d538b46b3075031afee8a9f2acb0a2ed0b"
 dependencies = [
  "try-lock",
 ]
@@ -7608,18 +7608,18 @@ dependencies = [
 
 [[package]]
 name = "zerocopy"
-version = "0.8.59"
+version = "0.8.60"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6df92bf3d9227be3d53173901ddbffac2babc27ae50f397776ffd6dc33f800cb"
+checksum = "6400fc4bb7426f6faac3fb07566122bb18622e3022bd2c36426a92ed489b1dbe"
 dependencies = [
  "zerocopy-derive",
 ]
 
 [[package]]
 name = "zerocopy-derive"
-version = "0.8.59"
+version = "0.8.60"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac4f328cf2f05d084e496c3e9c3f33ed0a183656a16e1fcec4d464d8373aec82"
+checksum = "99c27cc7525bad4df59a45e073c45b2c2aa820efb588234cc23a547ec69a34db"
 dependencies = [
  "proc-macro2",
  "quote",
