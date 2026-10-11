@@ -26,6 +26,9 @@ tokio = { version = "1.49.0", features = ["macros", "rt-multi-thread"] }
 wreq = { version = "0.16", features = ["stream", "query"] }
 wreq-util = "0.2"
 
+[build-dependencies]
+pwr-libpq-rpath = { path = "../../pwr-libpq-rpath" }
+
 [dev-dependencies]
 dotenv = "0.15.0"
 pwr-test-support.workspace = true

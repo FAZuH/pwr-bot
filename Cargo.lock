@@ -1784,6 +1784,7 @@ dependencies = [
  "postgresql_embedded",
  "pwr-bot",
  "pwr-ext",
+ "pwr-libpq-rpath",
  "pwr-plugin-protocol",
  "pwr-plugin-support",
  "pwr-poise-components",
@@ -4312,6 +4313,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "pwr-libpq-rpath"
+version = "0.1.0"
+
+[[package]]
 name = "pwr-plugin-protocol"
 version = "0.1.0"
 dependencies = [
@@ -6797,6 +6802,7 @@ dependencies = [
  "postgresql_embedded",
  "pwr-bot",
  "pwr-ext",
+ "pwr-libpq-rpath",
  "pwr-plugin-protocol",
  "pwr-plugin-support",
  "pwr-poise-components",
@@ -7039,6 +7045,7 @@ dependencies = [
  "postgresql_embedded",
  "pwr-bot",
  "pwr-ext",
+ "pwr-libpq-rpath",
  "pwr-plugin-protocol",
  "pwr-plugin-support",
  "pwr-poise-components",

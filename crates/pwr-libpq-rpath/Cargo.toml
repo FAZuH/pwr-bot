@@ -1,0 +1,8 @@
+[package]
+name = "pwr-libpq-rpath"
+version = "0.1.0"
+edition = "2024"
+authors = ["FAZuH <mail@fazuh.com>"]
+description = "Build-time helper: gives diesel-linked plugin binaries a runpath to their libpq"
+license = "MIT"
+repository = "https://github.com/FAZuH/pwr-bot"
