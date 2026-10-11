@@ -32,6 +32,9 @@ uuid = { version = "1.21.0", features = ["v4"] }
 wreq = { version = "0.16", features = ["stream", "query"] }
 wreq-util = "0.2"
 
+[build-dependencies]
+pwr-libpq-rpath = { path = "../../pwr-libpq-rpath" }
+
 [dev-dependencies]
 dotenv = "0.15.0"
 httpmock = "0.7.0"
