@@ -133,38 +133,25 @@ docker compose logs -f
 
 ### Command-line interface
 
-The `pwr-bot` binary is also a CLI. Bare `pwr-bot` makes sure the service is up,
-then follows the log until you stop it. `pwr-bot serve` runs the bot in the
-foreground. `pwr-bot serve --service` runs it as a detached service. The service
-stores the env file path in a private config file and reads that file at spawn,
-so secrets never enter the process arguments.
-
-Manage the detached service:
+The `pwr-bot` binary is also a CLI. See the [CLI reference](docs/cli.md) for all commands and flags.
 
 ```sh
-pwr-bot service install --env-file <path>   # store the env file path
-pwr-bot service start
-pwr-bot service stop
-pwr-bot service restart
-pwr-bot service status
+pwr-bot                                         # ensure service up, then follow logs
+pwr-bot serve                                   # run in the foreground
+pwr-bot serve --service                         # run detached
+pwr-bot service install --env-file <path>       # store the env file path
+pwr-bot service start                           # start the detached service
+pwr-bot service stop                            # stop it
+pwr-bot service restart                         # restart it
+pwr-bot service status                          # show its state
+pwr-bot plugin add --name <name> --url <url> --sha256 <digest> --manifest <file>   # install a plugin
+pwr-bot plugin list                             # print the catalog
+pwr-bot plugin remove --name <name>             # drop the entry, keep the binary
+pwr-bot version                                 # print the version
+pwr-bot debug paths                             # print resolved paths
 ```
 
-Manage the plugin catalog with `pwr-bot plugin add|list|remove`. For example:
-
-```sh
-pwr-bot plugin add --name hello --url https://example.com/hello.tar.gz \
-  --sha256 <digest> --manifest ./manifest.json --auto-enable
-```
-
-`--grant-token` grants the plugin the bot's Discord token. It must agree with
-the manifest's `requires: ["discord_token"]` declaration in both directions.
-The add fails if only one of them is set. `--auto-enable` enables the plugin
-when the bot starts. `pwr-bot plugin list` prints the catalog.
-`pwr-bot plugin remove --name <name>` drops the entry and leaves the binary on
-disk.
-
-`pwr-bot version` prints the package version. `pwr-bot debug paths` prints the
-resolved config, data, log, and registration paths.
+### Discord commands
 
 Then try these commands in Discord (each command comes from the plugin or host part named beside it):
 
@@ -203,6 +190,7 @@ The bot reads a `.env` file next to the binary or mounted into the container. Th
 - [Plugin catalog](docs/plugins.md) — `plugins.toml` format and startup behavior
 - [Deployment](docs/deployment.md) — database migrations, logs, and Docker volumes
 - [Architecture](docs/architecture.md) — system layers and module boundaries
+- [CLI reference](docs/cli.md): commands, flags, and the detached service
 - [Changelog](CHANGELOG.md) — release history
 - [Issues](https://github.com/FAZuH/pwr-bot/issues) — bug reports and feature requests
 
