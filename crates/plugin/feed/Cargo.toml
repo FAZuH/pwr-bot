@@ -11,7 +11,7 @@ repository = "https://github.com/FAZuH/pwr-bot"
 redundant_field_names = "allow"
 
 [dependencies]
-poise = { git = "https://github.com/FAZuH/poise", rev = "c8d5fed0dd56ce0d827125f7a6e70ea0c26c4b40", features = ["view-macros"] }
+poise = { git = "https://github.com/FAZuH/poise", rev = "d3348676d92d9fb1cec3b68ee722850ff000fd26", features = ["view-macros"] }
 anyhow = "1.0.101"
 async-trait = "0.1.89"
 chrono = { version = "0.4.43", features = ["serde"] }
