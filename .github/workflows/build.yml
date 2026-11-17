@@ -54,16 +54,20 @@ jobs:
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y pkg-config libfontconfig1-dev libpq-dev
 
-      - name: Download Patched Cargo.toml
+      - name: Restore patched manifests
         id: download-cargo
-        uses: actions/download-artifact@v4
+        uses: actions/cache/restore@v4
         with:
-          name: patched-cargo-toml
-          path: .
+          key: release-manifests-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            Cargo.toml
+            Cargo.lock
+            crates/**/Cargo.toml
+          fail-on-cache-miss: false
         continue-on-error: true
 
       - name: Verify Patched Cargo.toml
-        if: inputs.require-patched-cargo && steps.download-cargo.outcome == 'failure'
+        if: inputs.require-patched-cargo && steps.download-cargo.outputs.cache-hit != 'true'
         run: |
           echo "::error::Patched Cargo.toml artifact is required but was not found. Ensure patch-version ran before this job."
           exit 1
@@ -95,11 +99,15 @@ jobs:
           submodules: recursive
           fetch-depth: 1
 
-      - name: Download Patched Cargo.toml
-        uses: actions/download-artifact@v4
+      - name: Restore patched manifests
+        uses: actions/cache/restore@v4
         with:
-          name: patched-cargo-toml
-          path: .
+          key: release-manifests-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            Cargo.toml
+            Cargo.lock
+            crates/**/Cargo.toml
+          fail-on-cache-miss: false
         continue-on-error: true
 
       - name: Set up Docker Buildx

@@ -19,8 +19,8 @@ graph TB
         FeedListCmd["/feed list"]
         FeedSubCmd["/feed subscribe"]
         FeedUnsubCmd["/feed unsubscribe"]
-        VoiceLBCmd["/voice leaderboard"]
-        VoiceStatsCmd["/voice stats"]
+        VoiceLBCmd["/vc leaderboard"]
+        VoiceStatsCmd["/vc stats"]
         AboutCmd["/about"]
     end
 
@@ -35,6 +35,7 @@ graph TB
             SettingsAbout -->|"Back"| SettingsMain
             SettingsMain -->|"section click — handoff"| SectionHandoff["SettingsSection<br/>(the host message morphs into<br/>the section's plugin panel view;<br/>the session parks until the panel's<br/>Back returns via the host-reserved<br/>`settings` open_view target)"]
             SectionHandoff -->|"panel Back — return"| SettingsMain
+            SettingsMain -->|"About"| SettingsAbout
         end
 
         subgraph FeedFlow["Feed Flow"]

@@ -179,6 +179,13 @@ impl<'a> Router<'a> {
     /// `None` ends the session. Terminal targets never reach this map:
     /// [`pop_step`] resolves them into the section handoff, the root
     /// dismissal, or the end of the session.
+    ///
+    /// No test drives this with a real [`Context`]: `Router::new` takes a
+    /// `poise::Context`, whose `FrameworkContext` borrows a
+    /// `serenity::Context` that serenity keeps unconstructible outside itself
+    /// (`pub(crate)` fields, no public constructor), so a hermetic unit test
+    /// cannot build one. Both `show_internal` states stay covered by the
+    /// `PluginsListFeature` snapshot tests instead (see `gui::plugins`).
     fn handler_for(&self, target: Navigation) -> Option<Box<dyn CommandHandler>> {
         use Navigation::*;
         match target {

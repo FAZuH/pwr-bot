@@ -33,9 +33,10 @@ Commands are organized by domain. Each top-level module is a command group; subc
 
 | Module | Commands |
 |--------|----------|
-| `crates/plugin/voice` manifest | `/vc` group and `/voice-settings` panel |
-| `crates/plugin/feed` manifest | `/feed` group and `/feed-settings` |
-| `crates/plugin/welcome` manifest | `/welcome` and `/welcome-settings` |
+| `crates/plugin/voice` manifest | `/vc` group (`leaderboard`, `stats`); `voice-settings` is its settings-section panel, not a Discord command |
+| `crates/plugin/feed` manifest | `/feed` group (`subscribe`, `unsubscribe`, `list`); `feed-settings` is its settings-section panel, not a Discord command |
+| `crates/plugin/welcome` manifest | no slash commands; the `welcome-settings` panel is reached through the `/settings` Welcome section |
+| `plugins.rs` | `/plugins` group (`list`, `enable`, `disable`, `swap`) |
 | `settings.rs` | `/settings` — the host Settings GUI |
 | `about.rs` | `/about` |
 | `register.rs` | `/register` |

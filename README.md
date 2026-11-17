@@ -2,7 +2,7 @@
 
 # pwr-bot
 
-**Discord bot that sends feed update notifications to your DM or server.**
+**Thin Discord plugin runner. It loads the plugins you name and registers the commands they declare.**
 
 </div>
 
@@ -60,6 +60,8 @@ To pass single variables instead of `--env-file`, use `-e DISCORD_TOKEN="..."` a
 
 ## Preview
 
+These screens come from the `feed` plugin, which ships in this repo. The host shows whatever the enabled plugins declare.
+
 <table>
 <tr>
 <td width="50%" valign="middle">
@@ -100,7 +102,7 @@ List every feed you follow with its source, last entry, and last update.
 <tr>
 <td width="50%" valign="middle">
 
-### Server feed settings
+### Server feed settings (feed plugin panel)
 
 Per-guild panel: toggle feeds, pick the notification channel, and set who may subscribe.
 
@@ -129,12 +131,14 @@ Check the log output (Docker Compose):
 docker compose logs -f
 ```
 
-Then try these commands in Discord:
+Then try these commands in Discord (each command comes from the plugin or host part named beside it):
 
-- `/feed subscribe <links>` — subscribe to anime and manga feeds
-- `/feed list` — show your subscriptions
-- `/vc stats` — show your voice channel activity
-- `/about` — show bot information
+- `/feed subscribe <links>` — subscribe to anime and manga feeds (feed plugin)
+- `/feed list` — show your subscriptions (feed plugin)
+- `/vc stats` — show your voice channel activity (voice plugin)
+- `/settings` — open one settings panel per enabled plugin (host)
+- `/plugins list` — show the plugin catalog and internal plugins (host)
+- `/about` — show bot information (host)
 
 ### Command Registration
 
@@ -147,13 +151,15 @@ After the bot runs and joins your server, type `!register_owner` in a channel it
 
 ### Configuration
 
-The bot reads a `.env` file next to the binary or mounted into the container. The values you must set are `DISCORD_TOKEN` and `ADMIN_ID`; `DB_URL` points at PostgreSQL. Every variable and its default is in [Configuration reference](docs/configuration.md).
+The bot reads a `.env` file next to the binary or mounted into the container. The values you must set are `DISCORD_TOKEN` and `ADMIN_ID`; `DB_URL` points at PostgreSQL. Set `INTERNAL_PLUGINS` to name the internal plugins the host spawns at startup (default `feed,voice,welcome`). Pin external plugins in the catalog file (`plugins.toml`). Every variable and its default is in [Configuration reference](docs/configuration.md).
 
 ## Features
 
-- **Feed Subscriptions:** Subscribe to updates from AniList, MangaDex, and Comick. The bot sends the updates to your DMs or to a server channel.
-- **Voice Activity Tracking:** The bot measures the time members spend in voice channels. View server leaderboards with user rankings.
-- **External Plugins:** Add features with plugins pinned in a catalog file. See [Plugin catalog](docs/plugins.md).
+- **Plugin runner host:** The host spawns the internal plugins that `INTERNAL_PLUGINS` names, loads the external plugins that the catalog file pins, and registers the commands and views that their manifests declare. It also provides `/about`, `/settings`, `/plugins`, `!register`, and `!unregister`.
+- **Feed plugin:** Subscribe to updates from AniList, MangaDex, and Comick. The plugin sends the updates to your DMs or to a server channel, and provides its settings panel through `/settings`.
+- **Voice plugin:** The plugin measures the time members spend in voice channels. View server leaderboards and user rankings. Its settings panel opens through `/settings`.
+- **Welcome plugin:** The plugin owns the welcome-card renderer and its settings storage. It has no slash command; its settings panel opens through `/settings`.
+- **External plugins:** Add features with plugins pinned in a catalog file. See [Plugin catalog](docs/plugins.md).
 
 ## Docs
 

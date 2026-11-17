@@ -105,16 +105,20 @@ jobs:
           echo "SQLITE3_LIB_DIR=C:/vcpkg/installed/x64-windows-static/lib" >> $env:GITHUB_ENV
           echo "VCPKGRS_DYNAMIC=0" >> $env:GITHUB_ENV
 
-      - name: Download Patched Cargo.toml
+      - name: Restore patched manifests
         id: download-cargo
-        uses: actions/download-artifact@v4
+        uses: actions/cache/restore@v4
         with:
-          name: patched-cargo-toml
-          path: .
+          key: release-manifests-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            Cargo.toml
+            Cargo.lock
+            crates/**/Cargo.toml
+          fail-on-cache-miss: false
         continue-on-error: true
 
       - name: Verify Patched Cargo.toml
-        if: inputs.require-patched-cargo && steps.download-cargo.outcome == 'failure'
+        if: inputs.require-patched-cargo && steps.download-cargo.outputs.cache-hit != 'true'
         run: |
           echo "::error::Patched Cargo.toml artifact is required but was not found. Ensure patch-version ran before this job."
           exit 1

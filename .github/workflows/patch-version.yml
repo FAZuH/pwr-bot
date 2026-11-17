@@ -213,12 +213,11 @@ jobs:
           echo "manifests_b64=$B64" >> "$GITHUB_OUTPUT"
           echo "Encoded $(wc -c < /tmp/patched-manifests.tar.gz) bytes gzipped (${#B64} chars b64)"
 
-      - name: Upload patched manifests
-        uses: actions/upload-artifact@v4
+      - name: Save patched manifests
+        uses: actions/cache/save@v4
         with:
-          name: patched-cargo-toml
+          key: release-manifests-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             Cargo.toml
             Cargo.lock
             crates/**/Cargo.toml
-          retention-days: 3

@@ -367,6 +367,25 @@ async fn spawn_rejects_a_binary_that_never_announces() {
     );
 }
 
+#[tokio::test]
+#[serial_test::serial]
+#[cfg(target_os = "linux")]
+async fn spawn_voice_plugin_with_no_loader_env_completes_its_handshake() {
+    // The voice binary links libpq, which lives off the default loader path
+    // on some machines. The binary must carry its own runpath to libpq, so
+    // the handshake completes even with no loader variable in the outer
+    // environment and none crossing the cleared spawn seam.
+    let previous = std::env::var_os("LD_LIBRARY_PATH");
+    unsafe { std::env::remove_var("LD_LIBRARY_PATH") };
+    let spawned = RunningPlugin::spawn(probe_binary("voice")).await;
+    match previous {
+        Some(value) => unsafe { std::env::set_var("LD_LIBRARY_PATH", value) },
+        None => unsafe { std::env::remove_var("LD_LIBRARY_PATH") },
+    }
+    let plugin = spawned.expect("voice must handshake without any loader env");
+    plugin.stop().await.expect("stop voice");
+}
+
 // ── the spawn audit line names the configured plugin (ADR-0016) ─────────────
 
 #[tokio::test]

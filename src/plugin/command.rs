@@ -920,6 +920,19 @@ fn parse_autocomplete_response<'a>(
     Ok(response)
 }
 
+/// The per-guild answer to an autocomplete call: `Ok(())` serves,
+/// `Err(reason)` declines through the shared error seam in
+/// [`plugin_autocomplete`]. A plugin this guild switched off suggests nothing;
+/// a row read that fails declines the same way — no suggestions is the answer
+/// every other autocomplete failure gives.
+fn autocomplete_gate(enabled: Result<bool, Error>, plugin_name: &str) -> Result<(), String> {
+    match enabled {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(format!("plugin `{plugin_name}` is disabled in this guild")),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
 fn plugin_autocomplete<'a>(
     ctx: poise::ApplicationContext<'a, Data, Error>,
     query: &'a str,
@@ -931,6 +944,17 @@ fn plugin_autocomplete<'a>(
             warn!("no plugin route for autocomplete command `{command_name}`");
             return serenity::CreateAutocompleteResponse::new();
         };
+        // The same per-guild gate `open_plugin_view` and `section_plugin`
+        // ask, refused before the manager is consulted so a switched-off
+        // plugin's commands suggest nothing while the shared process keeps
+        // serving every other guild.
+        if let Err(error) = autocomplete_gate(
+            data.plugin_enabled_in(ctx.guild_id(), plugin_name).await,
+            plugin_name,
+        ) {
+            warn!("autocomplete for `{command_name}` failed: {error}");
+            return serenity::CreateAutocompleteResponse::new();
+        }
         let Some(plugin) = data.plugin_manager.get(plugin_name).await else {
             warn!("autocomplete plugin `{plugin_name}` is not running");
             return serenity::CreateAutocompleteResponse::new();
@@ -2343,6 +2367,28 @@ mod tests {
 
         assert_eq!(commands.len(), 1);
         assert_eq!(commands[0].name, "ok");
+    }
+
+    #[test]
+    fn a_disabled_plugin_declines_autocomplete() {
+        let refusal = autocomplete_gate(Ok(false), "feed").expect_err("disabled declines");
+
+        assert!(
+            refusal.contains("disabled"),
+            "the refusal names the reason: {refusal}"
+        );
+    }
+
+    #[test]
+    fn an_enabled_plugin_passes_the_autocomplete_gate() {
+        autocomplete_gate(Ok(true), "feed").expect("enabled serves");
+    }
+
+    #[test]
+    fn unreadable_plugin_rows_decline_autocomplete() {
+        let error: Error = "db down".into();
+
+        autocomplete_gate(Err(error), "feed").expect_err("unreadable rows decline");
     }
 
     #[test]
