@@ -46,6 +46,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::process::ExitStatus;
 use std::sync::Arc;
+use std::sync::RwLock;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -257,10 +258,9 @@ pub struct PluginManager {
     /// binds the author to the calling session, and the author's later
     /// submission rides the route back to that session.
     pub(crate) modals: ModalRouter,
-    /// The catalog's authority, snapshotted at startup. Every spawn resolves
-    /// its grant and digest against it, so authority never changes
-    /// mid-flight.
-    grants: AuthoritySnapshot,
+    /// The current catalog authority. Every spawn resolves its grant and
+    /// digest against it; an operator reload replaces it at commit time.
+    grants: RwLock<AuthoritySnapshot>,
 }
 
 impl PluginManager {
@@ -276,16 +276,23 @@ impl PluginManager {
             event_router: None,
             respawn_policy,
             modals: ModalRouter::new(DEFAULT_VIEW_TIMEOUT),
-            grants: AuthoritySnapshot::none(),
+            grants: RwLock::new(AuthoritySnapshot::none()),
         }
     }
 
-    /// Wires the startup authority snapshot into the manager so every spawn
-    /// — and every respawn — resolves its grant and digest against the
-    /// catalog as it stood at boot. Builder-style: consumes `self`.
+    /// Wires the initial authority snapshot into the manager so every spawn
+    /// and respawn resolves its grant and digest against it. Builder-style:
+    /// consumes `self`; a live manager uses [`Self::set_grants`].
     pub fn with_grants(mut self, grants: AuthoritySnapshot) -> Self {
-        self.grants = grants;
+        self.grants = RwLock::new(grants);
         self
+    }
+
+    /// Replaces the grant snapshot on a live manager after an operator reload.
+    /// Every later spawn and respawn resolves against this snapshot, so a grant
+    /// changed in `plugins.toml` takes effect for future spawns (ADR-0017).
+    pub fn set_grants(&self, grants: AuthoritySnapshot) {
+        *self.grants.write().expect("grant snapshot lock poisoned") = grants;
     }
 
     /// Wires host services into the manager so every spawned plugin can be
@@ -319,7 +326,7 @@ impl PluginManager {
     /// declared command on its interval). Fails with
     /// [`PluginError::AlreadyRunning`] if the name is already registered.
     ///
-    /// The name's authority is resolved from the startup snapshot first, so
+    /// The name's authority is resolved from the current snapshot first, so
     /// a plugin whose grant and declared needs disagree is refused before
     /// any child exists.
     pub async fn spawn(
@@ -330,7 +337,27 @@ impl PluginManager {
         event_handlers: &[String],
         tasks: &[TaskDef],
     ) -> Result<Arc<RunningPlugin>, PluginError> {
-        let authority = self.grants.resolve(name)?;
+        let authority = self
+            .grants
+            .read()
+            .expect("grant snapshot lock poisoned")
+            .resolve(name)?;
+        self.spawn_granted(name, path, health, event_handlers, tasks, authority)
+            .await
+    }
+
+    /// [`PluginManager::spawn`] with an authority resolved from a catalog
+    /// snapshot that is not published on this manager yet. Reload uses it to
+    /// finish all fallible install/spawn work before committing new grants.
+    pub async fn spawn_with_authority(
+        self: &Arc<Self>,
+        name: &str,
+        path: impl AsRef<Path>,
+        health: Option<HealthConfig>,
+        event_handlers: &[String],
+        tasks: &[TaskDef],
+        authority: Authority,
+    ) -> Result<Arc<RunningPlugin>, PluginError> {
         self.spawn_granted(name, path, health, event_handlers, tasks, authority)
             .await
     }

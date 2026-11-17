@@ -45,7 +45,7 @@ const MAX_DOWNLOAD_BYTES: u64 = 128 * 1024 * 1024;
 ///
 /// Parsing is strict: an unrecognised key fails the whole catalog at boot
 /// rather than producing a silently ungranted plugin (ADR-0016).
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CatalogEntry {
     /// Plugin name; also the installed binary's file name.
@@ -361,7 +361,7 @@ fn check_elf(entry: &CatalogEntry, path: &Path) -> Result<(), InstallError> {
 
 /// Validates one catalog entry: non-empty name (and not `.`/`..`), https
 /// url, 64-hex sha256, and a manifest that validates and names the entry.
-fn validate_entry(entry: &CatalogEntry, path: &Path) -> Result<(), InstallError> {
+pub fn validate_entry(entry: &CatalogEntry, path: &Path) -> Result<(), InstallError> {
     if entry.name.trim().is_empty()
         || entry.name.contains(['/', '\\'])
         || entry.name == "."

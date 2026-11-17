@@ -2,6 +2,8 @@
 //!
 //! Handles loading configuration from environment variables.
 
+use std::fs;
+use std::path::Path;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -80,7 +82,7 @@ impl Config {
         })?;
 
         self.data_path = self.get_dirpath_mustexist("DATA_PATH", "./data")?;
-        self.logs_path = self.get_dirpath_mustexist("LOGS_PATH", "./logs")?;
+        self.logs_path = canonical_dir(&self.get_dirpath_mustexist("LOGS_PATH", "./logs")?)?;
         self.plugins_toml = std::env::var("PLUGINS_TOML")
             .map(PathBuf::from)
             .unwrap_or_else(|_| self.data_path.join("plugins.toml"));
@@ -150,6 +152,19 @@ impl Config {
     }
 }
 
+/// Creates the directory if needed and returns an absolute path. The rolling
+/// appender's latest-file symlink stores a path relative to the log directory,
+/// so a relative directory would make that target dangle.
+pub(crate) fn canonical_dir(path: &Path) -> Result<PathBuf, AppError> {
+    fs::create_dir_all(path).map_err(|e| AppError::ConfigurationError {
+        msg: format!("Failed to create log directory '{}': {e}", path.display()),
+    })?;
+    path.canonicalize()
+        .map_err(|e| AppError::ConfigurationError {
+            msg: format!("Failed to resolve log directory '{}': {e}", path.display()),
+        })
+}
+
 /// The internal plugin names from a `INTERNAL_PLUGINS` value: a comma-separated
 /// list, trimmed, empty entries dropped.
 fn parse_internal_plugins(list: &str) -> Vec<String> {
@@ -178,7 +193,10 @@ fn parse_bool_env(var: &str, default: bool) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_internal_plugins;
+    use tracing_appender::rolling::RollingFileAppender;
+    use tracing_appender::rolling::Rotation;
+
+    use super::*;
 
     #[test]
     fn internal_plugins_list_is_split_trimmed_and_empties_dropped() {
@@ -192,5 +210,26 @@ mod tests {
         );
         assert!(parse_internal_plugins("").is_empty());
         assert!(parse_internal_plugins(" , ,").is_empty());
+    }
+
+    #[test]
+    fn relative_log_dir_yields_a_resolvable_latest_symlink() {
+        let relative = PathBuf::from(format!("./pwr-bot-log-test-{}", std::process::id()));
+        let absolute = canonical_dir(&relative).expect("canonical dir");
+        assert!(absolute.is_absolute());
+
+        let appender = RollingFileAppender::builder()
+            .rotation(Rotation::DAILY)
+            .filename_prefix("pwr-bot")
+            .filename_suffix("log")
+            .latest_symlink("pwr-bot.latest.log")
+            .build(&absolute)
+            .expect("appender");
+        drop(appender);
+        assert!(
+            fs::metadata(absolute.join("pwr-bot.latest.log")).is_ok(),
+            "latest symlink must resolve"
+        );
+        fs::remove_dir_all(&absolute).expect("cleanup");
     }
 }

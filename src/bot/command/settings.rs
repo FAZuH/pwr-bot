@@ -197,12 +197,13 @@ fn sections_for(declared: Vec<SettingsSection>, enabled: &[String]) -> Vec<Setti
 /// Every settings section the loaded plugin manifests declare, over the same
 /// sources as command registration, ordered by plugin name.
 fn declared_sections(data: &Data) -> Vec<SettingsSection> {
-    let mut manifests: Vec<(String, Manifest)> = data
+    let snapshot = data.snapshot();
+    let mut manifests: Vec<(String, Manifest)> = snapshot
         .internal_manifests
         .iter()
         .map(|(name, manifest)| (name.clone(), manifest.clone()))
         .collect();
-    for (name, entry) in data.plugin_catalog.iter() {
+    for (name, entry) in snapshot.catalog.iter() {
         manifests.push((name.clone(), entry.manifest.clone()));
     }
     manifests.sort_by(|a, b| a.0.cmp(&b.0));

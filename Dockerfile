@@ -36,4 +36,4 @@ COPY --from=build /app/target/release/voice /app/voice
 COPY --from=build /app/target/release/welcome /app/welcome
 
 WORKDIR /app
-CMD ["./pwr-bot"]
+CMD ["./pwr-bot", "serve"]

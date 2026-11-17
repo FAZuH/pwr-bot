@@ -940,7 +940,7 @@ fn plugin_autocomplete<'a>(
     Box::pin(async move {
         let command_name = qualified_command_name(ctx.command(), ctx.parent_commands());
         let data = ctx.framework.user_data();
-        let Some(plugin_name) = data.plugin_routes.get(&command_name) else {
+        let Some(plugin_name) = data.snapshot().routes.get(&command_name).cloned() else {
             warn!("no plugin route for autocomplete command `{command_name}`");
             return serenity::CreateAutocompleteResponse::new();
         };
@@ -949,13 +949,13 @@ fn plugin_autocomplete<'a>(
         // plugin's commands suggest nothing while the shared process keeps
         // serving every other guild.
         if let Err(error) = autocomplete_gate(
-            data.plugin_enabled_in(ctx.guild_id(), plugin_name).await,
-            plugin_name,
+            data.plugin_enabled_in(ctx.guild_id(), &plugin_name).await,
+            &plugin_name,
         ) {
             warn!("autocomplete for `{command_name}` failed: {error}");
             return serenity::CreateAutocompleteResponse::new();
         }
-        let Some(plugin) = data.plugin_manager.get(plugin_name).await else {
+        let Some(plugin) = data.plugin_manager.get(&plugin_name).await else {
             warn!("autocomplete plugin `{plugin_name}` is not running");
             return serenity::CreateAutocompleteResponse::new();
         };
@@ -996,7 +996,7 @@ fn plugin_slash_dispatch(
     Box::pin(async move {
         let command_name = qualified_command_name(ctx.command(), ctx.parent_commands());
         let data = ctx.framework.user_data();
-        let Some(plugin_name) = data.plugin_routes.get(&command_name) else {
+        let Some(plugin_name) = data.snapshot().routes.get(&command_name).cloned() else {
             return Err(poise::FrameworkError::new_command_structure_mismatch(
                 ctx,
                 "command has no plugin route",
@@ -1010,7 +1010,7 @@ fn plugin_slash_dispatch(
         };
         let command_ctx: poise::Context<'_, Data, Error> = ctx.into();
         let error_ctx = command_ctx;
-        open_plugin_view(command_ctx, plugin_name, &command_name, args)
+        open_plugin_view(command_ctx, &plugin_name, &command_name, args)
             .await
             .map_err(|error| poise::FrameworkError::new_command(error_ctx, error))?;
         Ok(())

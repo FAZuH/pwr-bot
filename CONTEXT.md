@@ -53,8 +53,8 @@ _Avoid_: canonicalization
 **Preview loop**:
 The `crates/preview` bin behind `./dev.sh preview`. It spawns a plugin over
 the same protocol port that the host uses. It captures the view that a
-command returns, and `pwr-viewgen` renders the payload to HTML or PNG under
-`.scratch/preview/`.
+command returns, and `pwr-viewgen` renders the payload to HTML or PNG under a
+repo-local preview directory.
 _Avoid_: preview tool, fixture renderer
 
 **Components library**:
@@ -169,3 +169,27 @@ the Settings GUI through `host.open_view` against the host-reserved
 `settings` target: the panel's Back persists plugin-side, then the parked
 Settings session re-renders on the same message.
 _Avoid_: settings entry, hub entry
+
+**Catalog**:
+The `plugins.toml` file. It lists the external plugins the host can run,
+one `[[plugins]]` entry each with a name, download url, binary sha256,
+manifest, and the `auto_enable` and `discord_token` flags. The host reads
+it at startup and reloads it at runtime when the file changes. See
+Token grant, ADR-0016, and ADR-0017.
+_Avoid_: plugin registry, catalog table
+
+**Token grant**:
+The operator's recorded decision to give one catalog plugin the bot's own
+Discord token. It is the `discord_token` flag on a catalog entry, and it must
+agree with the plugin's manifest `requires: ["discord_token"]` declaration
+in both directions. Only the operator's configuration grants it, and the
+host snapshots it at startup and rebuilds the snapshot on each config
+reload. See Catalog, ADR-0016, and ADR-0017.
+_Avoid_: token permission, plugin authority
+
+**Service**:
+The detached pwr-bot process that the CLI starts and manages in the background.
+It runs `pwr-bot serve --service` and holds a lease in the registration file at
+`$XDG_STATE_HOME/pwr-bot/service.json`. It is not Service RPC, a host op that
+plugins call. See ADR-0019.
+_Avoid_: daemon, background process, server

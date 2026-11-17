@@ -177,6 +177,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1"
 
 [[package]]
+name = "arc-swap"
+version = "1.9.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "84a22b5d51209f6de83d37a0b33d320acb8da88823e42a94c075140708f032a5"
+dependencies = [
+ "rustversion",
+]
+
+[[package]]
 name = "arg_enum_proc_macro"
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1780,7 +1789,7 @@ dependencies = [
  "libc",
  "log",
  "mockall",
- "poise",
+ "poise 0.7.0 (git+https://github.com/serenity-rs/poise?rev=a1d0e3ee23e0a95b1192378acad27fa51a2bb8f0)",
  "postgresql_embedded",
  "pwr-bot",
  "pwr-ext",
@@ -3971,18 +3980,47 @@ dependencies = [
 [[package]]
 name = "poise"
 version = "0.7.0"
+source = "git+https://github.com/FAZuH/poise?rev=8a5c3fce021a3e9a39f4dc7fe245cb4757a8708a#8a5c3fce021a3e9a39f4dc7fe245cb4757a8708a"
+dependencies = [
+ "arc-swap",
+ "async-trait",
+ "derive-where",
+ "futures-util",
+ "parking_lot",
+ "poise_macros 0.7.0 (git+https://github.com/FAZuH/poise?rev=8a5c3fce021a3e9a39f4dc7fe245cb4757a8708a)",
+ "regex",
+ "serenity",
+ "tokio",
+ "tracing",
+ "trim-in-place",
+]
+
+[[package]]
+name = "poise"
+version = "0.7.0"
 source = "git+https://github.com/serenity-rs/poise?rev=a1d0e3ee23e0a95b1192378acad27fa51a2bb8f0#a1d0e3ee23e0a95b1192378acad27fa51a2bb8f0"
 dependencies = [
  "async-trait",
  "derive-where",
  "futures-util",
  "parking_lot",
- "poise_macros",
+ "poise_macros 0.7.0 (git+https://github.com/serenity-rs/poise?rev=a1d0e3ee23e0a95b1192378acad27fa51a2bb8f0)",
  "regex",
  "serenity",
  "tokio",
  "tracing",
  "trim-in-place",
+]
+
+[[package]]
+name = "poise_macros"
+version = "0.7.0"
+source = "git+https://github.com/FAZuH/poise?rev=8a5c3fce021a3e9a39f4dc7fe245cb4757a8708a#8a5c3fce021a3e9a39f4dc7fe245cb4757a8708a"
+dependencies = [
+ "darling 0.24.1",
+ "proc-macro2",
+ "quote",
+ "syn 3.0.6",
 ]
 
 [[package]]
@@ -4247,10 +4285,12 @@ name = "pwr-bot"
 version = "0.4.3"
 dependencies = [
  "anyhow",
+ "arc-swap",
  "async-trait",
  "base64 0.22.1",
  "byteorder",
  "chrono",
+ "clap",
  "diesel",
  "diesel-async",
  "diesel_migrations",
@@ -4261,7 +4301,7 @@ dependencies = [
  "libc",
  "log",
  "mockall",
- "poise",
+ "poise 0.7.0 (git+https://github.com/FAZuH/poise?rev=8a5c3fce021a3e9a39f4dc7fe245cb4757a8708a)",
  "postgresql_embedded",
  "pwr-ext",
  "pwr-plugin-protocol",
@@ -4282,6 +4322,7 @@ dependencies = [
  "tokio-postgres",
  "tokio-postgres-rustls",
  "toml 1.1.6+spec-1.1.0",
+ "toml_edit",
  "tracing-appender",
  "tracing-subscriber",
  "url",
@@ -6291,6 +6332,12 @@ dependencies = [
 
 [[package]]
 name = "toml_datetime"
+version = "0.6.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "22cddaf88f4fbc13c51aebbf5f8eceb5c7c5a9da2ac40a13519eb5b0a0e8f11c"
+
+[[package]]
+name = "toml_datetime"
 version = "0.7.5+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92e1cfed4a3038bc5a127e35a2d360f145e1f4b971b551a2ba5fd7aedf7e1347"
@@ -6308,6 +6355,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "toml_edit"
+version = "0.22.27"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "41fe8c660ae4257887cf66394862d21dbca4a6ddd26f04a3560410406a2f819a"
+dependencies = [
+ "indexmap",
+ "toml_datetime 0.6.11",
+ "toml_write",
+ "winnow 0.7.15",
+]
+
+[[package]]
 name = "toml_parser"
 version = "1.1.3+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6315,6 +6374,12 @@ checksum = "1d38ac1cf9b95face32296c0a3ede1fdc270627c9d9c02a7274dd6d960dc4d56"
 dependencies = [
  "winnow 1.0.4",
 ]
+
+[[package]]
+name = "toml_write"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5d99f8c9a7727884afe522e9bd5edbfc91a3312b36a77b5fb8926e4c31a41801"
 
 [[package]]
 name = "toml_writer"
@@ -6798,7 +6863,7 @@ dependencies = [
  "log",
  "minijinja",
  "plotters",
- "poise",
+ "poise 0.7.0 (git+https://github.com/serenity-rs/poise?rev=a1d0e3ee23e0a95b1192378acad27fa51a2bb8f0)",
  "postgresql_embedded",
  "pwr-bot",
  "pwr-ext",
@@ -7041,7 +7106,7 @@ dependencies = [
  "libc",
  "minijinja",
  "mockall",
- "poise",
+ "poise 0.7.0 (git+https://github.com/serenity-rs/poise?rev=a1d0e3ee23e0a95b1192378acad27fa51a2bb8f0)",
  "postgresql_embedded",
  "pwr-bot",
  "pwr-ext",
@@ -7413,6 +7478,9 @@ name = "winnow"
 version = "0.7.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df79d97927682d2fd8adb29682d1140b343be4ac0f08fd68b7765d9c059d3945"
+dependencies = [
+ "memchr",
+]
 
 [[package]]
 name = "winnow"

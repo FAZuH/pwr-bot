@@ -18,13 +18,16 @@ pub mod view;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::future::Future;
+use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::sync::OnceLock;
 use std::time::Duration;
 use std::time::Instant;
 
 use anyhow;
 use anyhow::Result;
+use arc_swap::ArcSwap;
 use async_trait::async_trait;
 use futures::lock::Mutex;
 use log::debug;
@@ -62,8 +65,10 @@ use crate::plugin::InteractionError;
 use crate::plugin::ModalDeliveryError;
 use crate::plugin::PgKvStore;
 use crate::plugin::PluginCatalog;
+use crate::plugin::PluginError;
 use crate::plugin::PluginEventRouter;
 use crate::plugin::PluginManager;
+use crate::plugin::ReloadPlan;
 use crate::plugin::RespawnPolicy;
 use crate::plugin::RunningPlugin;
 use crate::plugin::SerenityHostIo;
@@ -72,6 +77,7 @@ use crate::plugin::SerenityUserResolver;
 use crate::plugin::StatsHandle;
 use crate::plugin::UserResolverHandle;
 use crate::plugin::VOICE_STATE_EVENT;
+use crate::plugin::catalog_writer::check_grant;
 use crate::plugin::command::ACTOR_CONTEXT_KEY;
 use crate::plugin::command::PluginRoutes;
 use crate::plugin::command::actor_context_from_parts_with_guild;
@@ -80,11 +86,32 @@ use crate::plugin::command::register_in_guild;
 use crate::plugin::command::routes_from_manifests_with_reserved;
 use crate::plugin::decode_runtime_files;
 use crate::plugin::edit_body_for_transport;
+use crate::plugin::install::install_verified;
 use crate::plugin::interaction::DEFAULT_VIEW_TIMEOUT;
+use crate::plugin::reload_plan;
 use crate::plugin::validate_view_spec;
 use crate::repo::traits::Repos;
 use crate::service::Services;
 use crate::update::about::AboutStats;
+
+/// One atomic view of every catalog-derived fact a reader consults. A reload
+/// builds a fresh snapshot and swaps it in one step, so no reader sees a new
+/// grant beside an old route (ADR-0017).
+pub struct PluginSnapshot {
+    pub catalog: HashMap<String, CatalogEntry>,
+    /// Why the catalog failed to load: owners see the real path and cause
+    /// through `/plugins`, plain members keep the friendly empty-catalog view.
+    pub catalog_error: Option<InstallError>,
+    /// Manifests of the internal plugins spawned at startup, by plugin name.
+    pub internal_manifests: HashMap<String, Manifest>,
+    /// Command-name → plugin-name routes for dispatch.
+    pub routes: PluginRoutes,
+    pub grants: AuthoritySnapshot,
+    /// A mirror of the framework's command list, rebuilt from the same
+    /// snapshot so the command count and Discord registration agree with
+    /// dispatch.
+    pub commands: Vec<poise::Command<Data, Error>>,
+}
 
 /// Data shared across bot commands and contexts.
 pub struct Data {
@@ -92,17 +119,14 @@ pub struct Data {
     pub service: Arc<Services>,
     pub repos: Arc<dyn Repos + Send + Sync>,
     pub plugin_manager: Arc<PluginManager>,
-    pub plugin_catalog: Arc<HashMap<String, CatalogEntry>>,
-    /// Why the plugin catalog failed to load, if it did: owners see the real
-    /// path and cause through the `/plugins` commands while plain members
-    /// keep the friendly empty-catalog message.
-    pub plugin_catalog_error: Option<InstallError>,
+    /// All catalog-derived state behind one atomic swap. Load a snapshot once
+    /// per operation rather than reading fields across two reloads.
+    pub plugins: ArcSwap<PluginSnapshot>,
     pub plugin_engine: Arc<InteractionEngine<RunningPlugin>>,
-    /// Command-name → plugin-name routes for dispatch; built at startup from
-    /// the loaded manifests ([`routes_from_manifests`]).
-    pub plugin_routes: Arc<PluginRoutes>,
-    /// Manifests of the internal plugins spawned at startup, by plugin name.
-    pub internal_manifests: Arc<HashMap<String, Manifest>>,
+    /// The framework handle is published here by the delegating
+    /// [`serenity::Framework`] wrapper during `init`, then used by reloads to
+    /// swap the live command list.
+    pub framework: Arc<OnceLock<Arc<Framework<Data, Error>>>>,
     /// Tracks the messages owned by live Host (TEA) sessions, so the global
     /// event handler skips their interactions and the Host acknowledges them
     /// exactly once. See [`crate::bot::translate`].
@@ -115,16 +139,29 @@ pub struct Data {
 }
 
 impl Data {
+    /// A single consistent view of the catalog-derived state.
+    pub fn snapshot(&self) -> Arc<PluginSnapshot> {
+        self.plugins.load_full()
+    }
+
+    /// The live framework, published during serenity's `init`.
+    pub fn framework(&self) -> &Arc<Framework<Data, Error>> {
+        self.framework
+            .get()
+            .expect("framework handle not published yet")
+    }
+
     /// The names of plugins that auto-enable in every guild: the configured
     /// internal plugins plus catalog entries flagged `auto_enable`.
     pub fn auto_enable_plugins(&self) -> Vec<String> {
+        let snapshot = self.snapshot();
         let mut names: Vec<String> = self
             .config
             .internal_plugins
             .iter()
             .map(|spec| spec.name.clone())
             .collect();
-        for (name, entry) in self.plugin_catalog.iter() {
+        for (name, entry) in snapshot.catalog.iter() {
             if entry.auto_enable && !names.contains(name) {
                 names.push(name.clone());
             }
@@ -132,18 +169,11 @@ impl Data {
         names.sort();
         names
     }
-
-    /// The manifest for an auto-enabled plugin: the internal plugin's manifest
-    /// captured at spawn when there is one, else the catalog entry's.
-    pub fn manifest_for(&self, name: &str) -> Option<&Manifest> {
-        manifest_for(&self.internal_manifests, &self.plugin_catalog, name)
-    }
 }
 
 /// The manifest for `name`: the internal plugin's manifest when there is one,
-/// else the catalog entry's. Shared by [`Data::manifest_for`] and the
-/// `/plugins` toggle union, which look up by plugin name over the same two
-/// maps.
+/// else the catalog entry's. The `/plugins` command and registration paths
+/// look up by plugin name over the same two maps.
 pub(crate) fn manifest_for<'a>(
     internal_manifests: &'a HashMap<String, Manifest>,
     catalog: &'a HashMap<String, CatalogEntry>,
@@ -154,9 +184,40 @@ pub(crate) fn manifest_for<'a>(
         .or_else(|| catalog.get(name).map(|entry| &entry.manifest))
 }
 
+/// Serenity owns the framework as a `Box<dyn Framework>` and offers no
+/// `Framework for Arc<T>`, so the same framework lives behind an `Arc` handle
+/// in [`Data`]. `init` gets `&mut self` while serenity still owns the box
+/// exclusively; that is the one chance to run poise's mutable init and
+/// publish the `Arc` clone for reloads. `dispatch` then just forwards.
+struct FrameworkHandle {
+    inner: Arc<Framework<Data, Error>>,
+    published: Arc<OnceLock<Arc<Framework<Data, Error>>>>,
+}
+
+#[async_trait]
+impl poise::serenity_prelude::Framework for FrameworkHandle {
+    async fn init(&mut self, client: &poise::serenity_prelude::Client) {
+        Arc::get_mut(&mut self.inner)
+            .expect("framework handle must be the sole owner during init")
+            .init(client)
+            .await;
+        let _ = self.published.set(Arc::clone(&self.inner));
+    }
+
+    async fn dispatch(
+        &self,
+        ctx: &poise::serenity_prelude::Context,
+        event: &poise::serenity_prelude::FullEvent,
+    ) {
+        self.inner.dispatch(ctx, event).await;
+    }
+}
+
 /// Discord bot client and framework.
 pub struct Bot {
     pub http: Arc<Http>,
+    /// Shared with the client and the catalog watcher started in [`Bot::start`].
+    data: Arc<Data>,
     client_builder: Option<ClientBuilder>,
     client: Arc<Mutex<Option<Client>>>,
     /// The real source behind the `host.stats` handle; its gateway cache is
@@ -236,31 +297,22 @@ impl Bot {
                 Err(e) => warn!("failed to spawn internal plugin {}: {e}", spec.name),
             }
         }
-        let internal_manifests = Arc::new(
-            manifest_sources
-                .iter()
-                .filter_map(|(name, manifest)| manifest.clone().map(|m| (name.clone(), m)))
-                .collect::<HashMap<_, _>>(),
-        );
-        let mut route_sources = manifest_sources;
-        for (name, entry) in &catalog {
-            route_sources.push((name.clone(), Some(entry.manifest.clone())));
-        }
-        route_sources.sort_by(|(left_name, _), (right_name, _)| {
-            let left_is_catalog = !internal_manifests.contains_key(left_name);
-            let right_is_catalog = !internal_manifests.contains_key(right_name);
-            right_is_catalog
-                .cmp(&left_is_catalog)
-                .then_with(|| left_name.cmp(right_name))
-        });
-        let host_command_names = host_command_names();
-        let plugin_routes = Arc::new(routes_from_manifests_with_reserved(
-            route_sources,
-            &host_command_names,
-        ));
-
-        let framework =
-            Self::create_framework(&config, &catalog, &internal_manifests, &host_command_names)?;
+        let internal_manifests: HashMap<String, Manifest> = manifest_sources
+            .iter()
+            .filter_map(|(name, manifest)| manifest.clone().map(|m| (name.clone(), m)))
+            .collect();
+        let grants = AuthoritySnapshot::from_catalog(&catalog, config.discord_token.clone());
+        let snapshot = build_snapshot(catalog, catalog_error, internal_manifests, grants);
+        let command_count = AboutStats::count_commands(&snapshot.commands);
+        let framework = Arc::new(Self::create_framework(
+            &config,
+            Self::build_commands(
+                &snapshot.internal_manifests,
+                &snapshot.catalog,
+                &host_command_names(),
+            ),
+        )?);
+        let published = Arc::new(OnceLock::new());
 
         let start_time = Instant::now();
         let data = Arc::new(Data {
@@ -268,25 +320,19 @@ impl Bot {
             service,
             repos,
             plugin_manager,
-            plugin_catalog: Arc::new(catalog),
-            plugin_catalog_error: catalog_error,
+            plugins: ArcSwap::from_pointee(snapshot),
             plugin_engine,
-            plugin_routes,
-            internal_manifests,
+            framework: published.clone(),
             translate_layer: Arc::new(TranslateLayer::new()),
             settings_returns,
             start_time,
         });
 
-        // The command count comes from the finished framework options, so the
-        // source can only ride the pre-start handle here — after the internal
-        // plugins spawned. Calls before this point answer `HostUnavailable`
-        // (the handle serves a typed error until a source is attached).
         let stats_source = Arc::new(SerenityStatsSource::new(
             http.clone(),
             start_time,
             config.version.clone(),
-            AboutStats::count_commands(&framework.options().commands),
+            command_count,
         ));
         stats_handle.attach(stats_source.clone());
 
@@ -298,8 +344,11 @@ impl Bot {
 
         let client_builder = ClientBuilder::new(token.clone(), intents)
             .event_handler(event_handler)
-            .framework(framework)
-            .data(data)
+            .framework(Box::new(FrameworkHandle {
+                inner: framework,
+                published,
+            }))
+            .data(data.clone())
             .activity(ActivityData::playing(format!(
                 "v{}",
                 config.version.clone()
@@ -307,6 +356,7 @@ impl Bot {
 
         Ok(Self {
             http,
+            data,
             client_builder: Some(client_builder),
             client: Arc::new(Mutex::new(None)),
             stats_source,
@@ -322,6 +372,9 @@ impl Bot {
         let stats_source = self.stats_source.clone();
         let user_resolver = self.user_resolver.clone();
         let http = self.http.clone();
+        let data = self.data.clone();
+        let watcher_http = http.clone();
+        let watcher_config = data.config.clone();
 
         tokio::spawn(async move {
             info!("Connecting bot to Discord...");
@@ -329,6 +382,10 @@ impl Bot {
             let built_client = client_builder
                 .await
                 .expect("Failed to build Discord client");
+
+            // The framework's `init` has published the Arc handle by now, so
+            // a catalog edit can swap commands immediately after startup.
+            start_catalog_watcher(watcher_config, data, watcher_http);
 
             // The gateway cache only exists after the build; from here the
             // `host.stats` gather serves live guild/user counts.
@@ -354,27 +411,29 @@ impl Bot {
         info!("Bot client start initiated.");
     }
 
-    /// Creates the Poise framework with commands and configuration.
-    ///
-    /// The command list is the merge seam: the Cog commands first, then one
-    /// routing command per internal plugin manifest captured at spawn, then one
-    /// routing command per catalog plugin manifest not itself an internal plugin
-    /// — each group sorted by plugin name for a stable order across restarts
-    /// (see [`plugin_commands`]) — so plugin commands are registered on the
-    /// framework before `Framework::builder().build()`.
-    fn create_framework(
-        config: &Config,
-        catalog: &HashMap<String, CatalogEntry>,
+    /// Builds the full command list from a snapshot's plugin facts. Called
+    /// twice per reload: once for the framework's dispatch list, once for the
+    /// snapshot's mirror used by the command count and Discord registration.
+    fn build_commands(
         internal_manifests: &HashMap<String, Manifest>,
+        catalog: &HashMap<String, CatalogEntry>,
         host_command_names: &HashSet<String>,
-    ) -> Result<Box<Framework<Data, Error>>> {
+    ) -> Vec<poise::Command<Data, Error>> {
         let mut commands = Cogs.commands();
         commands.extend(plugin_commands(
             internal_manifests,
             catalog,
             host_command_names,
         ));
+        commands
+    }
 
+    /// Creates the Poise framework with commands and configuration. The
+    /// command list is the merge seam; see [`Self::build_commands`].
+    fn create_framework(
+        config: &Config,
+        commands: Vec<poise::Command<Data, Error>>,
+    ) -> Result<Framework<Data, Error>> {
         let options = FrameworkOptions::<Data, Error> {
             commands,
             on_error: |error| Box::pin(Self::on_error(error)),
@@ -390,16 +449,14 @@ impl Bot {
             ..Default::default()
         };
 
-        Ok(Box::new(
-            poise::Framework::builder().options(options).build(),
-        ))
+        Ok(poise::Framework::builder().options(options).build())
     }
 
     /// Loads the plugin catalog from `plugins.toml`. A missing or invalid
     /// catalog keeps the bot up with plugin commands absent rather than
     /// failing startup, but the failure is logged loudly and returned so
     /// owners see the real path and cause through the `/plugins`
-    /// commands ([`Data::plugin_catalog_error`]).
+    /// commands ([`PluginSnapshot::catalog_error`]).
     fn load_plugin_catalog(
         config: &Config,
     ) -> (HashMap<String, CatalogEntry>, Option<InstallError>) {
@@ -499,6 +556,235 @@ pub(crate) fn add_plugin_commands(
     }
 }
 
+/// Builds one self-consistent snapshot from a catalog and the manifests
+/// captured at plugin spawn. Shared by startup, reload, and the snapshot tests
+/// so the routes, grants, and command list always derive from the same facts.
+fn build_snapshot(
+    catalog: HashMap<String, CatalogEntry>,
+    catalog_error: Option<InstallError>,
+    internal_manifests: HashMap<String, Manifest>,
+    grants: AuthoritySnapshot,
+) -> PluginSnapshot {
+    let mut route_sources: Vec<(String, Option<Manifest>)> = internal_manifests
+        .iter()
+        .map(|(name, manifest)| (name.clone(), Some(manifest.clone())))
+        .collect();
+    for (name, entry) in &catalog {
+        route_sources.push((name.clone(), Some(entry.manifest.clone())));
+    }
+    route_sources.sort_by(|(left_name, _), (right_name, _)| {
+        let left_is_catalog = !internal_manifests.contains_key(left_name);
+        let right_is_catalog = !internal_manifests.contains_key(right_name);
+        right_is_catalog
+            .cmp(&left_is_catalog)
+            .then_with(|| left_name.cmp(right_name))
+    });
+    let host_names = host_command_names();
+    let routes = routes_from_manifests_with_reserved(route_sources, &host_names);
+    let commands = Bot::build_commands(&internal_manifests, &catalog, &host_names);
+    PluginSnapshot {
+        catalog,
+        catalog_error,
+        internal_manifests,
+        routes,
+        grants,
+        commands,
+    }
+}
+
+const CATALOG_POLL_INTERVAL: Duration = Duration::from_secs(2);
+const CATALOG_DEBOUNCE: Duration = Duration::from_millis(400);
+
+fn catalog_mtime(path: &Path) -> Option<std::time::SystemTime> {
+    std::fs::metadata(path)
+        .ok()
+        .and_then(|meta| meta.modified().ok())
+}
+
+/// Polls `plugins.toml` for a settled mtime change. One task handles every
+/// reload, so two rapid writes cannot interleave a spawn with a swap. Polling
+/// avoids a watcher dependency; the quiet period absorbs the several writes an
+/// editor or the operator CLI makes for one logical change.
+fn start_catalog_watcher(config: Arc<Config>, data: Arc<Data>, http: Arc<Http>) {
+    let path = config.plugins_toml.clone();
+    tokio::spawn(async move {
+        let mut last = catalog_mtime(&path);
+        let mut ticker = tokio::time::interval(CATALOG_POLL_INTERVAL);
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            ticker.tick().await;
+            let seen = catalog_mtime(&path);
+            if seen == last {
+                continue;
+            }
+            tokio::time::sleep(CATALOG_DEBOUNCE).await;
+            let settled = catalog_mtime(&path);
+            if settled != seen {
+                continue;
+            }
+            match apply_catalog_reload(&config, &data, &http).await {
+                Ok(()) => last = settled,
+                Err(e) => warn!("plugin catalog reload failed: {e}; will retry the same change"),
+            }
+        }
+    });
+}
+
+/// Rejects an entry whose operator grant and manifest declaration disagree.
+/// Direct edits to `plugins.toml` are supported, so the reload path must run
+/// the same both-directions check the CLI add path runs.
+fn validate_grant_agreement(
+    catalog: &HashMap<String, CatalogEntry>,
+) -> Result<(), (String, crate::plugin::catalog_writer::GrantMismatch)> {
+    for (name, entry) in catalog {
+        check_grant(entry.discord_token, &entry.manifest)
+            .map_err(|mismatch| (name.clone(), mismatch))?;
+    }
+    Ok(())
+}
+
+/// Performs every fallible process operation before any state is published.
+/// A failed install or spawn leaves grants, snapshot, and commands untouched;
+/// plugins started before the failure are stopped so no child keeps a token
+/// the committed snapshot does not authorize.
+async fn prepare_processes(
+    config: &Config,
+    data: &Data,
+    catalog: &HashMap<String, CatalogEntry>,
+    grants: &AuthoritySnapshot,
+    plan: &ReloadPlan,
+) -> Result<(), Error> {
+    let client = crate::plugin::install::download_client();
+    let mut started: Vec<String> = Vec::new();
+    let mut replaced_down: Vec<String> = Vec::new();
+    let result = async {
+        for name in plan.spawn.iter().chain(plan.replace.iter()) {
+            let entry = &catalog[name];
+            let authority = grants.resolve(name)?;
+            let path = install_verified(&client, entry, &config.plugins_dir).await?;
+            if plan.replace.contains(name) {
+                match data.plugin_manager.unload(name, &[]).await {
+                    Ok(_) => replaced_down.push(name.clone()),
+                    Err(PluginError::NotRunning { .. }) => {}
+                    Err(e) => {
+                        warn!("hot reload could not unload `{name}` before replacing it: {e}")
+                    }
+                }
+            }
+            data.plugin_manager
+                .spawn_with_authority(
+                    name,
+                    path,
+                    None,
+                    &entry.manifest.event_handlers,
+                    &entry.manifest.tasks,
+                    authority,
+                )
+                .await?;
+            started.push(name.clone());
+            info!("hot reload started catalog plugin `{name}`");
+        }
+        for name in &plan.unload {
+            match data.plugin_manager.unload(name, &[]).await {
+                Ok(_) => {
+                    info!(
+                        "hot reload unloaded removed catalog plugin `{name}`; binary left on disk"
+                    )
+                }
+                Err(PluginError::NotRunning { .. }) => {}
+                Err(e) => return Err(e.into()),
+            }
+        }
+        Ok::<(), Error>(())
+    }
+    .await;
+
+    if result.is_err() {
+        for name in &started {
+            if let Err(e) = data.plugin_manager.unload(name, &[]).await {
+                warn!("rollback could not stop newly started plugin `{name}`: {e}");
+            }
+        }
+        for name in replaced_down.iter().filter(|name| !started.contains(name)) {
+            warn!(
+                "plugin `{name}` was unloaded for replacement and could not be restarted; it is down while the command list still advertises it"
+            );
+        }
+    }
+    result
+}
+
+/// Applies one settled catalog change: validate, finish all fallible process
+/// I/O, then publish grants, snapshot, and commands and register with Discord.
+async fn apply_catalog_reload(config: &Config, data: &Data, http: &Http) -> Result<(), Error> {
+    let (catalog, catalog_error) = Bot::load_plugin_catalog(config);
+    let previous = data.snapshot();
+    let internal_names: HashSet<String> = config
+        .internal_plugins
+        .iter()
+        .map(|spec| spec.name.clone())
+        .collect();
+    let plan: ReloadPlan = reload_plan(&previous.catalog, &catalog, &internal_names);
+    let grants = AuthoritySnapshot::from_catalog(&catalog, config.discord_token.clone());
+
+    if let Err((name, mismatch)) = validate_grant_agreement(&catalog) {
+        warn!(
+            "plugin catalog reload rejected `{name}`: grant and declaration disagree: {mismatch}"
+        );
+        return Err(anyhow::anyhow!("plugin `{name}`: {mismatch}").into());
+    }
+
+    prepare_processes(config, data, &catalog, &grants, &plan).await?;
+
+    let entry_count = catalog.len();
+    let snapshot = build_snapshot(
+        catalog,
+        catalog_error,
+        previous.internal_manifests.clone(),
+        grants.clone(),
+    );
+    let framework = data.framework().clone();
+    let host_names = host_command_names();
+    data.plugin_manager.set_grants(grants);
+    info!("plugin grant snapshot rebuilt from the reloaded catalog: {entry_count} entries");
+
+    let _ = data.plugins.swap(Arc::new(snapshot));
+    let current = data.snapshot();
+    let poise_commands =
+        Bot::build_commands(&current.internal_manifests, &current.catalog, &host_names);
+    let _previous_commands = framework.replace_commands(poise_commands);
+    info!(
+        "plugin catalog reload applied locally: {} commands",
+        current.commands.len()
+    );
+
+    if config.features.autoregister_cmds {
+        if let Err(e) = poise::builtins::register_globally(http, &current.commands).await {
+            let rollback_commands =
+                Bot::build_commands(&previous.internal_manifests, &previous.catalog, &host_names);
+            let _discarded = framework.replace_commands(rollback_commands);
+            data.plugin_manager.set_grants(previous.grants.clone());
+            if let Err(register_err) =
+                poise::builtins::register_globally(http, &previous.commands).await
+            {
+                warn!(
+                    "rollback could not restore the previous commands on Discord: {register_err}"
+                );
+            } else {
+                info!("rollback restored the previous commands on Discord");
+            }
+            data.plugins.store(previous);
+            warn!("plugin catalog reload could not register with Discord ({e}); rolled back");
+            return Err(e.into());
+        }
+        info!(
+            "plugin catalog reload registered {} commands with Discord",
+            current.commands.len()
+        );
+    }
+    Ok(())
+}
+
 /// What a plugin's answer to a view interaction means for the message it
 /// edits. See [`BotEventHandler::view_answer`].
 enum ViewAnswer {
@@ -585,10 +871,11 @@ impl BotEventHandler {
                     stored_version.ok().flatten()
                 );
 
+                let snapshot = self.data.snapshot();
                 let mut commands = Cogs.commands();
                 commands.extend(plugin_commands(
-                    &self.data.internal_manifests,
-                    &self.data.plugin_catalog,
+                    &snapshot.internal_manifests,
+                    &snapshot.catalog,
                     &host_command_names(),
                 ));
                 match poise::builtins::register_globally(&self.http, &commands).await {
@@ -641,6 +928,7 @@ impl BotEventHandler {
         let mut commands = Vec::new();
         let mut registered_names = HashSet::new();
         let host_command_names = host_command_names();
+        let snapshot = self.data.snapshot();
         for plugin_name in self.data.auto_enable_plugins() {
             let disabled = rows
                 .iter()
@@ -652,8 +940,12 @@ impl BotEventHandler {
                 );
                 continue;
             }
-            let Some(manifest) = self.data.manifest_for(&plugin_name) else {
-                let catalog_suffix = match self.data.plugin_catalog_error.as_ref() {
+            let Some(manifest) = manifest_for(
+                &snapshot.internal_manifests,
+                &snapshot.catalog,
+                &plugin_name,
+            ) else {
+                let catalog_suffix = match snapshot.catalog_error.as_ref() {
                     Some(catalog_error) => {
                         format!(": the plugin catalog failed to load: {catalog_error}")
                     }
@@ -912,10 +1204,10 @@ impl BotEventHandler {
         let Some(command) = data.plugin_engine.session_command(message_id).await else {
             return true;
         };
-        let Some(plugin) = data.plugin_routes.get(&command) else {
+        let Some(plugin) = data.snapshot().routes.get(&command).cloned() else {
             return true;
         };
-        match data.plugin_enabled_in(guild_id, plugin).await {
+        match data.plugin_enabled_in(guild_id, &plugin).await {
             Ok(enabled) => enabled,
             Err(e) => {
                 warn!("failed to read the guild plugin rows for `{plugin}`: {e}");
@@ -1182,6 +1474,57 @@ mod tests {
     use crate::test_helpers::entry_named;
     use crate::test_helpers::manifest_named;
 
+    #[test]
+    fn a_snapshot_swap_publishes_catalog_routes_grants_and_commands_together() {
+        let host_command_count = host_command_names().len();
+        let store = ArcSwap::from_pointee(build_snapshot(
+            HashMap::new(),
+            None,
+            HashMap::new(),
+            AuthoritySnapshot::none(),
+        ));
+
+        let catalog = HashMap::from([("voice".to_string(), entry_named("voice"))]);
+        let grants = AuthoritySnapshot::from_catalog(&catalog, "bot-token".to_string());
+        let fresh = build_snapshot(catalog, None, HashMap::new(), grants);
+        let old = store.swap(Arc::new(fresh));
+        let current = store.load_full();
+
+        assert!(old.catalog.is_empty());
+        assert_eq!(current.catalog.len(), 1);
+        assert_eq!(
+            current.routes.get("voice").map(String::as_str),
+            Some("voice")
+        );
+        assert!(current.grants.resolve("voice").is_ok());
+        assert_eq!(current.commands.len(), host_command_count + 1);
+    }
+
+    #[test]
+    fn reload_rejects_a_grant_without_a_manifest_declaration() {
+        let mut entry = entry_named("voice");
+        entry.discord_token = true;
+        let catalog = HashMap::from([("voice".to_string(), entry)]);
+        assert!(validate_grant_agreement(&catalog).is_err());
+    }
+
+    #[test]
+    fn reload_rejects_a_declaration_without_an_operator_grant() {
+        let mut entry = entry_named("voice");
+        entry.manifest.requires = vec![pwr_plugin_protocol::DISCORD_TOKEN.into()];
+        let catalog = HashMap::from([("voice".to_string(), entry)]);
+        assert!(validate_grant_agreement(&catalog).is_err());
+    }
+
+    #[test]
+    fn reload_accepts_an_entry_whose_grant_and_declaration_agree() {
+        let mut entry = entry_named("voice");
+        entry.discord_token = true;
+        entry.manifest.requires = vec![pwr_plugin_protocol::DISCORD_TOKEN.into()];
+        let catalog = HashMap::from([("voice".to_string(), entry)]);
+        assert!(validate_grant_agreement(&catalog).is_ok());
+    }
+
     #[tokio::test]
     async fn invalid_modal_response_does_not_fall_through_to_view_interaction() {
         let server = MockServer::start();
@@ -1236,11 +1579,16 @@ mod tests {
             ),
             repos,
             plugin_manager: manager,
-            plugin_catalog: Arc::new(HashMap::new()),
-            plugin_catalog_error: None,
+            plugins: ArcSwap::from_pointee(PluginSnapshot {
+                catalog: HashMap::new(),
+                catalog_error: None,
+                internal_manifests: HashMap::new(),
+                routes: HashMap::new(),
+                grants: AuthoritySnapshot::none(),
+                commands: Vec::new(),
+            }),
             plugin_engine: engine.clone(),
-            plugin_routes: Arc::new(HashMap::new()),
-            internal_manifests: Arc::new(HashMap::new()),
+            framework: Arc::new(OnceLock::new()),
             translate_layer: Arc::new(TranslateLayer::new()),
             settings_returns: Arc::new(crate::bot::translate::SettingsReturns::default()),
             start_time: Instant::now(),

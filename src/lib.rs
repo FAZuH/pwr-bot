@@ -4,6 +4,7 @@
 //! routing, the Settings capability, and internal plugin state.
 
 pub mod bot;
+pub mod cli;
 pub mod config;
 pub mod entity;
 pub mod error;
