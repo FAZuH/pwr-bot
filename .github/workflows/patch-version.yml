@@ -199,10 +199,57 @@ jobs:
           done
 
       - name: Install Rust Toolchain
-        uses: dtolnay/rust-toolchain@stable
+        # Pinned to 1.98 like pull-request.yml and _release.yml: stable 1.100
+        # changed poise's parent_commands shape and broke the release build.
+        uses: dtolnay/rust-toolchain@1.98
 
-      - name: Regenerate Cargo.lock
-        run: cargo generate-lockfile
+      - name: Sync workspace versions into Cargo.lock
+        # A full `cargo generate-lockfile` discards the committed lock and
+        # re-resolves poise's floating serenity `next` branch to a head that
+        # dropped the `chrono` feature poise needs. Patch only the local
+        # package version entries so every dependency stays pinned (see the
+        # lock-pinning note in Cargo.toml).
+        run: |
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+
+          versions = {}
+          for manifest in [Path("Cargo.toml"), *sorted(Path("crates").glob("**/Cargo.toml"))]:
+              pkg = re.search(r"^\[package\]\s*$([\s\S]*?)(?=^\[|\Z)", manifest.read_text(), re.M)
+              if not pkg:
+                  continue
+              name = re.search(r'^name\s*=\s*"([^"]+)"', pkg.group(1), re.M)
+              version = re.search(r'^version\s*=\s*"([^"]+)"', pkg.group(1), re.M)
+              if name and version:
+                  versions[name.group(1)] = version.group(1)
+
+          lock = Path("Cargo.lock")
+          lines = lock.read_text().split("\n")
+          out, i, patched = [], 0, []
+          while i < len(lines):
+              if lines[i] == "[[package]]":
+                  block = [lines[i]]
+                  i += 1
+                  while i < len(lines) and lines[i] != "[[package]]":
+                      block.append(lines[i])
+                      i += 1
+                  names = [b for b in block if b.startswith("name = ")]
+                  if names and not any(b.startswith("source = ") for b in block):
+                      name = names[0].split('"')[1]
+                      if name in versions:
+                          for j, b in enumerate(block):
+                              if b.startswith("version = "):
+                                  block[j] = f'version = "{versions[name]}"'
+                                  patched.append(name)
+                                  break
+                  out.extend(block)
+              else:
+                  out.append(lines[i])
+                  i += 1
+          lock.write_text("\n".join(out))
+          print("Synced Cargo.lock versions:", ", ".join(patched) or "(none)")
+          PY
 
       - name: Encode patched manifests
         id: encode-manifests
