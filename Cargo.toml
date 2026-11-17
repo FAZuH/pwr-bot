@@ -60,7 +60,7 @@ dotenv = "0.15.0"
 # entry is rejected outright ("patches must point to different sources",
 # cargo#5478). To move the pin: `cargo update -p serenity` (or -p poise) and
 # commit the lock delta. Never run a bare `cargo update`.
-poise = { git = "https://github.com/FAZuH/poise", rev = "c8d5fed0dd56ce0d827125f7a6e70ea0c26c4b40", features = ["view-macros"] }
+poise = { git = "https://github.com/FAZuH/poise", rev = "d3348676d92d9fb1cec3b68ee722850ff000fd26", features = ["view-macros"] }
 pwr-plugin-protocol.workspace = true
 pwr-plugin-support.workspace = true
 pwr-poise-components.workspace = true

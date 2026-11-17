@@ -3978,8 +3978,8 @@ dependencies = [
 
 [[package]]
 name = "poise"
-version = "0.7.0"
-source = "git+https://github.com/FAZuH/poise?rev=c8d5fed0dd56ce0d827125f7a6e70ea0c26c4b40#c8d5fed0dd56ce0d827125f7a6e70ea0c26c4b40"
+version = "0.7.1"
+source = "git+https://github.com/FAZuH/poise?rev=d3348676d92d9fb1cec3b68ee722850ff000fd26#d3348676d92d9fb1cec3b68ee722850ff000fd26"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -4000,8 +4000,8 @@ dependencies = [
 
 [[package]]
 name = "poise_macros"
-version = "0.7.0"
-source = "git+https://github.com/FAZuH/poise?rev=c8d5fed0dd56ce0d827125f7a6e70ea0c26c4b40#c8d5fed0dd56ce0d827125f7a6e70ea0c26c4b40"
+version = "0.7.1"
+source = "git+https://github.com/FAZuH/poise?rev=d3348676d92d9fb1cec3b68ee722850ff000fd26#d3348676d92d9fb1cec3b68ee722850ff000fd26"
 dependencies = [
  "darling 0.24.1",
  "proc-macro2",
@@ -4012,7 +4012,7 @@ dependencies = [
 [[package]]
 name = "poise_view_macros"
 version = "0.1.0"
-source = "git+https://github.com/FAZuH/poise?rev=c8d5fed0dd56ce0d827125f7a6e70ea0c26c4b40#c8d5fed0dd56ce0d827125f7a6e70ea0c26c4b40"
+source = "git+https://github.com/FAZuH/poise?rev=d3348676d92d9fb1cec3b68ee722850ff000fd26#d3348676d92d9fb1cec3b68ee722850ff000fd26"
 dependencies = [
  "proc-macro2",
  "quote",
