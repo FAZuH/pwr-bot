@@ -1,7 +1,7 @@
 //! Host-side validation for plugin-provided Discord view payloads, and the
 //! transport preparation that turns a validated payload into an edit body.
 
-use pwr_ext::prelude::CreateMessageDe;
+use poise::ext::prelude::CreateMessageDe;
 use pwr_plugin_protocol::WireError;
 use pwr_poise_components::IS_COMPONENTS_V2;
 use serde_json::Value;

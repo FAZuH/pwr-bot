@@ -37,7 +37,7 @@ The host's validate-only check of `ViewSpec.data` at every raw-send
 boundary: initial slash dispatch, component and modal re-render,
 `host.open_view`, and the view handoff's message morph. The host parses a
 clone of the payload through
-`pwr_ext::prelude::CreateMessageDe`, discards the parsed value, and sends
+`poise::ext::prelude::CreateMessageDe`, discards the parsed value, and sends
 the original JSON unchanged. A failure is a `WireError` with kind
 `InvalidView`, and the host sends, registers, and commits nothing. The
 gate applies to every view, whether `view!` or the components library
@@ -59,14 +59,14 @@ _Avoid_: preview tool, fixture renderer
 
 **Components library**:
 The reusable typed builders in `crates/pwr-poise-components`, rebuilt on
-`pwr-ext`, kept for shared pieces the `view!` grammar does not fit
-(pagination). Runtime assembly now composes `pwr-ext` `component!`/splices
-plus the typed `view_support` builders inside a single `view!` literal:
+poise's view macros, kept for shared pieces the `view!` grammar does not fit
+(pagination). Runtime assembly now composes poise `component!`/splices
+plus the typed `poise::view_support` builders inside a single `view!` literal:
 plugins author the whole view with `view!` and splice runtime data
 (conditional rows, per-section buttons) at pinned positions,
 `Option`-gated on state. No in-repo view is library-composed any more.
 See ADR-0004.
-_Avoid_: pwr-ext
+_Avoid_: external view-macro crate
 
 **Translation Layer**:
 The routing decision that gives every interactive view message exactly one

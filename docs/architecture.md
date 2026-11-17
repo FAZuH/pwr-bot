@@ -228,7 +228,7 @@ core, not a layer of it.
 | `crates/pwr-plugin-protocol` | Wire types: `Msg`, `Manifest`, `ViewSpec`, `HostOp`, `WireError` |
 | `src/plugin/` | Plugin host: `manager` (spawn, health, respawn, unload), `interaction` (session engine), `host` (`host.*` ops), `command` (slash dispatch), `events` (gateway fan-out), `install` (pinned catalog), `view` (gate) |
 | `crates/plugin/` | Plugins: `hello` (fixture), `feed` (subscriptions and delivery), `voice` (tracking, statistics, leaderboard, settings), `welcome` (settings panel, welcome-card renderer, `welcome_settings` storage) |
-| `crates/pwr-poise-components` | Reusable components library on pwr-ext (typed builders, pagination) |
+| `crates/pwr-poise-components` | Reusable components library on poise's view macros (typed builders, pagination) |
 
 ### Plugin Data Flow
 
@@ -253,9 +253,9 @@ Component / modal interaction
 ### Validate-Only Gate
 
 `validate_view_spec` (`src/plugin/host.rs`) parses a clone of
-`ViewSpec.data` through pwr-ext `CreateMessageDe` and validates the complete
-runtime-file list at every raw-send boundary: initial dispatch, component and
-modal re-render, and the Settings section handoff's message morph. It discards
+`ViewSpec.data` through `poise::ext::prelude::CreateMessageDe` and validates
+the complete runtime-file list at every raw-send boundary: initial dispatch,
+component and modal re-render, and the Settings section handoff's message morph. It discards
 the parsed message value and sends the original JSON verbatim. A failure is a
 `WireError` with kind `InvalidView`. The host never partially sends, registers,
 or commits. The runtime attachment count is limited to 10.
@@ -265,12 +265,13 @@ An invalid re-render keeps the prior session view and `last_active` unchanged.
 
 | View kind | Surface | Example |
 |-----------|---------|---------|
-| Fixed view | pwr-ext `view!` → `CreateMessage` → `ViewSpec.data` | `hello` view |
-| Runtime-assembled | pwr-ext `component!` + splices inside a `view!` literal | panel plugin views (conditional rows, 0..N) |
+| Fixed view | poise `view!` → `CreateMessage` → `ViewSpec.data` | `hello` view |
+| Runtime-assembled | poise `component!` + splices inside a `view!` literal | panel plugin views (conditional rows, 0..N) |
 
 No in-repo view is library-composed any more: `crates/pwr-poise-components`
 no longer assembles a live view, and stays as the reusable library for
-shared pieces the grammar does not fit (pagination, for example).
+shared pieces the grammar does not fit (pagination, for example). The macros
+come from poise's `view-macros` feature (ADR-0020).
 
 ### Preview Loop
 

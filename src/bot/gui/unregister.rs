@@ -5,7 +5,7 @@
 //! sending the unregistering reply, then applying the
 //! [`UnregisterMsg::Unregistered`] result and editing to the complete reply).
 
-use pwr_ext::component;
+use poise::component;
 
 use crate::bot::command::prelude::*;
 use crate::bot::gui::feature::GuiFeature;

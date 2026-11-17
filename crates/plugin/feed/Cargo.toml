@@ -11,6 +11,7 @@ repository = "https://github.com/FAZuH/pwr-bot"
 redundant_field_names = "allow"
 
 [dependencies]
+poise = { git = "https://github.com/FAZuH/poise", rev = "c8d5fed0dd56ce0d827125f7a6e70ea0c26c4b40", features = ["view-macros"] }
 anyhow = "1.0.101"
 async-trait = "0.1.89"
 chrono = { version = "0.4.43", features = ["serde"] }
@@ -21,7 +22,6 @@ futures = "0.3.32"
 governor = "0.10.4"
 html2md = "0.2.15"
 log = "0.4.29"
-pwr-ext = { git = "https://github.com/FAZuH/pwr-ext", tag = "v0.1.0", features = ["macros"] }
 pwr-plugin-protocol = { path = "../../pwr-plugin-protocol" }
 pwr-plugin-support = { path = "../pwr-plugin-support" }
 serde = { version = "1.0.228", features = ["derive"] }
@@ -45,7 +45,6 @@ mockall = "0.13.1"
 # over the real stdio wire through the host's plugin runtime, so they need the
 # host's own types. One-way: the host does not depend on this crate.
 pwr-bot = { path = "../../.." }
-poise = { git = "https://github.com/serenity-rs/poise", rev = "a1d0e3ee23e0a95b1192378acad27fa51a2bb8f0" }
 postgresql_embedded = { version = "=0.20.1", default-features = false, features = ["zonky", "tokio", "rustls"] }
 rustls-native-certs = "0.8"
 serial_test = "3.3.1"

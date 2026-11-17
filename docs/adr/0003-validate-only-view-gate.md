@@ -5,7 +5,7 @@ host must not let a malformed payload reach Discord, and it must not rewrite
 the plugin's JSON. A validate-only gate meets both requirements.
 
 `validate_view_data` in `src/plugin/view.rs` parses a clone of
-`ViewSpec.data` through `pwr_ext::prelude::CreateMessageDe`. The gate
+`ViewSpec.data` through `poise::ext::prelude::CreateMessageDe`. The gate
 discards the parsed builder mirror. The send paths then transmit the
 original JSON verbatim, never `into_canonical_value()` output. The gate runs
 at every raw-send boundary:

@@ -8,6 +8,7 @@ license = "MIT"
 repository = "https://github.com/FAZuH/pwr-bot"
 
 [dependencies]
+poise = { git = "https://github.com/FAZuH/poise", rev = "c8d5fed0dd56ce0d827125f7a6e70ea0c26c4b40", features = ["view-macros"] }
 anyhow = "1.0.101"
 base64 = "0.22.1"
 diesel = { version = "2.3", features = ["postgres", "serde_json"] }
@@ -15,7 +16,6 @@ diesel-async = { version = "0.8", features = ["deadpool", "postgres"] }
 diesel_migrations = { version = "2.3", features = ["postgres"] }
 image = "0.25"
 minijinja = "2.15.1"
-pwr-ext = { git = "https://github.com/FAZuH/pwr-ext", tag = "v0.1.0", features = ["macros"] }
 pwr-plugin-protocol = { path = "../../pwr-plugin-protocol" }
 pwr-plugin-support = { path = "../pwr-plugin-support" }
 resvg = "0.47.0"
@@ -39,7 +39,6 @@ mockall = "0.13.1"
 # types, plus the test-database seam's own set. One-way: the host does not
 # depend on this crate.
 pwr-bot = { path = "../../.." }
-poise = { git = "https://github.com/serenity-rs/poise", rev = "a1d0e3ee23e0a95b1192378acad27fa51a2bb8f0" }
 postgresql_embedded = { version = "=0.20.1", default-features = false, features = ["zonky", "tokio", "rustls"] }
 rustls-native-certs = "0.8"
 serial_test = "3.3.1"

@@ -23,8 +23,8 @@ use base64::Engine as _;
 use log::debug;
 use log::warn;
 use mockall::automock;
+use poise::ext::prelude::CreateModalDe;
 use poise::serenity_prelude as serenity;
-use pwr_ext::prelude::CreateModalDe;
 use pwr_plugin_protocol::HostOp;
 use pwr_plugin_protocol::HostStats;
 use pwr_plugin_protocol::Msg;
@@ -1390,7 +1390,7 @@ mod tests {
 
     use mockall::predicate::always;
     use mockall::predicate::eq;
-    use pwr_ext::prelude::CreateMessageDe;
+    use poise::ext::prelude::CreateMessageDe;
     use serde_json::json;
 
     use super::*;
@@ -2522,7 +2522,7 @@ mod tests {
     }
 
     // ── open_modal ────────────────────────────────────────────────────────────
-    // The modal spec grammar is pwr-ext's: a label-wrapped input text is the
+    // The modal spec grammar is poise's: a label-wrapped input text is the
     // smallest valid component. `style`, the length fields, and `required` are
     // non-defaulted there, so the fixture carries them explicitly.
 

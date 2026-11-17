@@ -51,3 +51,6 @@ The settings hub plugin is retired (#165). The live exemplars of the
 runtime splices at pinned positions and `Option`-gated rows. The host
 Settings GUI (`src/bot/gui/settings.rs`) assembles its view from
 `component!` pieces the same way.
+
+The `view!` and `component!` macros now come from poise's `view-macros` feature
+at `poise::`, not from `pwr_ext` (ADR-0020).

@@ -5,7 +5,7 @@
 //! from the command count, sending the registering reply, then applying the
 //! [`RegisterMsg::Registered`] result and editing to the complete reply).
 
-use pwr_ext::component;
+use poise::component;
 
 use crate::bot::command::prelude::*;
 use crate::bot::gui::feature::GuiFeature;
