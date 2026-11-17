@@ -1,7 +1,3 @@
-## 0.4.2 (2026-10-05)
-
-## 0.4.1 (2026-10-05)
-
 ## [Unreleased]
 
 ### feat
@@ -31,6 +27,10 @@
 * **settings:** give the root an About button, and take Back off it ([353356f](https://github.com/FAZuH/pwr-bot/commit/353356f14bc815cacdc08ad29c2c00ab5c884b84))
 * **settings:** label the root's About button with the glyph the plugins already use ([639b93a](https://github.com/FAZuH/pwr-bot/commit/639b93ad30de660f3f685389cd2fa871ccf5ce1c))
 * **docker:** install ca-certificates in the runtime stage ([a8f1690](https://github.com/FAZuH/pwr-bot/commit/a8f1690ea934b4343342d6713998592e5ed637ed))
+
+## 0.4.2 (2026-10-05)
+
+## 0.4.1 (2026-10-05)
 
 ## 0.4.0 (2026-09-16)
 
