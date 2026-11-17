@@ -1789,10 +1789,9 @@ dependencies = [
  "libc",
  "log",
  "mockall",
- "poise 0.7.0 (git+https://github.com/serenity-rs/poise?rev=a1d0e3ee23e0a95b1192378acad27fa51a2bb8f0)",
+ "poise",
  "postgresql_embedded",
  "pwr-bot",
- "pwr-ext",
  "pwr-libpq-rpath",
  "pwr-plugin-protocol",
  "pwr-plugin-support",
@@ -2430,7 +2429,7 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 name = "hello"
 version = "0.1.0"
 dependencies = [
- "pwr-ext",
+ "poise",
  "pwr-plugin-protocol",
  "pwr-plugin-support",
  "serde_json",
@@ -3980,33 +3979,20 @@ dependencies = [
 [[package]]
 name = "poise"
 version = "0.7.0"
-source = "git+https://github.com/FAZuH/poise?rev=8a5c3fce021a3e9a39f4dc7fe245cb4757a8708a#8a5c3fce021a3e9a39f4dc7fe245cb4757a8708a"
+source = "git+https://github.com/FAZuH/poise?rev=c8d5fed0dd56ce0d827125f7a6e70ea0c26c4b40#c8d5fed0dd56ce0d827125f7a6e70ea0c26c4b40"
 dependencies = [
  "arc-swap",
  "async-trait",
  "derive-where",
  "futures-util",
  "parking_lot",
- "poise_macros 0.7.0 (git+https://github.com/FAZuH/poise?rev=8a5c3fce021a3e9a39f4dc7fe245cb4757a8708a)",
+ "poise_macros",
+ "poise_view_macros",
  "regex",
+ "serde",
+ "serde_json",
  "serenity",
- "tokio",
- "tracing",
- "trim-in-place",
-]
-
-[[package]]
-name = "poise"
-version = "0.7.0"
-source = "git+https://github.com/serenity-rs/poise?rev=a1d0e3ee23e0a95b1192378acad27fa51a2bb8f0#a1d0e3ee23e0a95b1192378acad27fa51a2bb8f0"
-dependencies = [
- "async-trait",
- "derive-where",
- "futures-util",
- "parking_lot",
- "poise_macros 0.7.0 (git+https://github.com/serenity-rs/poise?rev=a1d0e3ee23e0a95b1192378acad27fa51a2bb8f0)",
- "regex",
- "serenity",
+ "small-fixed-array",
  "tokio",
  "tracing",
  "trim-in-place",
@@ -4015,7 +4001,7 @@ dependencies = [
 [[package]]
 name = "poise_macros"
 version = "0.7.0"
-source = "git+https://github.com/FAZuH/poise?rev=8a5c3fce021a3e9a39f4dc7fe245cb4757a8708a#8a5c3fce021a3e9a39f4dc7fe245cb4757a8708a"
+source = "git+https://github.com/FAZuH/poise?rev=c8d5fed0dd56ce0d827125f7a6e70ea0c26c4b40#c8d5fed0dd56ce0d827125f7a6e70ea0c26c4b40"
 dependencies = [
  "darling 0.24.1",
  "proc-macro2",
@@ -4024,14 +4010,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "poise_macros"
-version = "0.7.0"
-source = "git+https://github.com/serenity-rs/poise?rev=a1d0e3ee23e0a95b1192378acad27fa51a2bb8f0#a1d0e3ee23e0a95b1192378acad27fa51a2bb8f0"
+name = "poise_view_macros"
+version = "0.1.0"
+source = "git+https://github.com/FAZuH/poise?rev=c8d5fed0dd56ce0d827125f7a6e70ea0c26c4b40#c8d5fed0dd56ce0d827125f7a6e70ea0c26c4b40"
 dependencies = [
- "darling 0.24.1",
  "proc-macro2",
  "quote",
- "syn 3.0.6",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -4301,9 +4286,8 @@ dependencies = [
  "libc",
  "log",
  "mockall",
- "poise 0.7.0 (git+https://github.com/FAZuH/poise?rev=8a5c3fce021a3e9a39f4dc7fe245cb4757a8708a)",
+ "poise",
  "postgresql_embedded",
- "pwr-ext",
  "pwr-plugin-protocol",
  "pwr-plugin-support",
  "pwr-poise-components",
@@ -4336,21 +4320,10 @@ name = "pwr-ext"
 version = "0.1.0"
 source = "git+https://github.com/FAZuH/pwr-ext?tag=v0.1.0#54310c1adc16e2ed3a3aa73ea3a70159e174b5af"
 dependencies = [
- "pwr-ext-macros",
  "serde",
  "serde_json",
  "serenity",
  "small-fixed-array",
-]
-
-[[package]]
-name = "pwr-ext-macros"
-version = "0.1.0"
-source = "git+https://github.com/FAZuH/pwr-ext?tag=v0.1.0#54310c1adc16e2ed3a3aa73ea3a70159e174b5af"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
 ]
 
 [[package]]
@@ -4380,7 +4353,7 @@ dependencies = [
 name = "pwr-poise-components"
 version = "0.1.0"
 dependencies = [
- "pwr-ext",
+ "poise",
  "pwr-plugin-protocol",
  "serde",
  "serde_json",
@@ -6863,10 +6836,9 @@ dependencies = [
  "log",
  "minijinja",
  "plotters",
- "poise 0.7.0 (git+https://github.com/serenity-rs/poise?rev=a1d0e3ee23e0a95b1192378acad27fa51a2bb8f0)",
+ "poise",
  "postgresql_embedded",
  "pwr-bot",
- "pwr-ext",
  "pwr-libpq-rpath",
  "pwr-plugin-protocol",
  "pwr-plugin-support",
@@ -7106,10 +7078,9 @@ dependencies = [
  "libc",
  "minijinja",
  "mockall",
- "poise 0.7.0 (git+https://github.com/serenity-rs/poise?rev=a1d0e3ee23e0a95b1192378acad27fa51a2bb8f0)",
+ "poise",
  "postgresql_embedded",
  "pwr-bot",
- "pwr-ext",
  "pwr-libpq-rpath",
  "pwr-plugin-protocol",
  "pwr-plugin-support",

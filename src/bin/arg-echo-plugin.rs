@@ -12,7 +12,7 @@
 use std::io::BufRead;
 use std::process::ExitCode;
 
-use pwr_ext::view;
+use poise::view;
 use pwr_plugin_protocol::API_VERSION;
 use pwr_plugin_protocol::CommandDef;
 use pwr_plugin_protocol::Manifest;

@@ -1,4 +1,4 @@
-# dev.sh module: plugin view preview (pwr-ext integration, ticket 05).
+# dev.sh module: plugin view preview (poise view macros).
 #
 # Builds the pwr-preview tool and the bundled plugin binaries (as cargo
 # needs), then runs the tool from the repo root so fixtures land in the

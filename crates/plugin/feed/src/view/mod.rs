@@ -1,6 +1,6 @@
-use pwr_ext::view_support::CreateComponent;
-use pwr_ext::view_support::CreateMessage;
-use pwr_ext::view_support::MessageFlags;
+use poise::view_support::CreateComponent;
+use poise::view_support::CreateMessage;
+use poise::view_support::MessageFlags;
 use serde_json::Value;
 
 pub mod feed_batch;

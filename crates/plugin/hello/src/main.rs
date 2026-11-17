@@ -38,8 +38,8 @@
 use std::io::BufRead;
 use std::process::ExitCode;
 
-use pwr_ext::view;
-use pwr_ext::view_support::ButtonStyle;
+use poise::view;
+use poise::view_support::ButtonStyle;
 use pwr_plugin_protocol::API_VERSION;
 use pwr_plugin_protocol::BUTTON_CUSTOM_ID;
 use pwr_plugin_protocol::CommandDef;
@@ -56,7 +56,7 @@ use serde_json::json;
 /// as a `view.interact` with this custom id.
 const MODAL_CUSTOM_ID: &str = "hello:modal";
 
-/// The view payload the fixture renders: authored with `pwr_ext::view!` as a
+/// The view payload the fixture renders: authored with `poise::view!` as a
 /// Components V2 `CreateMessage`, serialized to JSON — a text display with
 /// the given prose plus one action-row button carrying the
 /// [`BUTTON_CUSTOM_ID`] custom id. The `components_v2` root sets the

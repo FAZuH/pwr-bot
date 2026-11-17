@@ -12,18 +12,18 @@
 //! Discord rejects with error 50035 is unrepresentable through this seam —
 //! there is no builder that sets a message-level `content` at all.
 
-use pwr_ext::prelude::CreateButtonDe;
-use pwr_ext::prelude::CreateComponentDe;
-use pwr_ext::prelude::CreateSelectMenuDe;
-use pwr_ext::view;
-use pwr_ext::view_support::ButtonStyle;
-use pwr_ext::view_support::CreateActionRow;
-use pwr_ext::view_support::CreateComponent;
-use pwr_ext::view_support::CreateContainer;
-use pwr_ext::view_support::CreateContainerComponent;
-use pwr_ext::view_support::CreateSection;
-use pwr_ext::view_support::CreateSectionAccessory;
-use pwr_ext::view_support::CreateSectionComponent;
+use poise::ext::prelude::CreateButtonDe;
+use poise::ext::prelude::CreateComponentDe;
+use poise::ext::prelude::CreateSelectMenuDe;
+use poise::view;
+use poise::view_support::ButtonStyle;
+use poise::view_support::CreateActionRow;
+use poise::view_support::CreateComponent;
+use poise::view_support::CreateContainer;
+use poise::view_support::CreateContainerComponent;
+use poise::view_support::CreateSection;
+use poise::view_support::CreateSectionAccessory;
+use poise::view_support::CreateSectionComponent;
 use serde_json::Value;
 
 /// A button component: Discord type 2, style 1 (primary).
@@ -95,7 +95,7 @@ pub fn section(children: impl IntoIterator<Item = Value>, accessory: Value) -> V
         })
         .collect();
     let accessory = CreateSectionAccessory::Button(
-        serde_json::from_value::<pwr_ext::prelude::CreateButtonDe>(accessory)
+        serde_json::from_value::<poise::ext::prelude::CreateButtonDe>(accessory)
             .unwrap()
             .into(),
     );
@@ -184,10 +184,10 @@ fn remove_false_disabled(value: &mut Value) {
 ///
 /// # Panics
 ///
-/// Panics if a component cannot be deserialized by the typed pwr-ext wrappers
+/// Panics if a component cannot be deserialized by the typed poise wrappers
 /// or if Serenity cannot serialize the message.
 pub fn view_data_v2(components: impl IntoIterator<Item = Value>) -> Value {
-    let components: Vec<pwr_ext::view_support::CreateComponent<'static>> = components
+    let components: Vec<poise::view_support::CreateComponent<'static>> = components
         .into_iter()
         .map(|value| {
             serde_json::from_value::<CreateComponentDe>(value)
@@ -196,7 +196,7 @@ pub fn view_data_v2(components: impl IntoIterator<Item = Value>) -> Value {
         })
         .collect();
     let mut output = serde_json::to_value(
-        pwr_ext::view_support::CreateMessage::new()
+        poise::view_support::CreateMessage::new()
             .components(components)
             .flags(serenity_flags(IS_COMPONENTS_V2))
             .tts(false)
@@ -207,8 +207,8 @@ pub fn view_data_v2(components: impl IntoIterator<Item = Value>) -> Value {
     output
 }
 
-fn serenity_flags(value: u32) -> pwr_ext::view_support::MessageFlags {
-    pwr_ext::view_support::MessageFlags::from_bits_truncate(value as u16)
+fn serenity_flags(value: u32) -> poise::view_support::MessageFlags {
+    poise::view_support::MessageFlags::from_bits_truncate(value as u16)
 }
 
 /// The navigation operations supported by [`pagination`], including its
@@ -341,7 +341,7 @@ pub fn pagination(
 
 #[cfg(test)]
 mod tests {
-    use pwr_ext::prelude::CreateMessageDe;
+    use poise::ext::prelude::CreateMessageDe;
     use pwr_plugin_protocol::ViewSpec;
     use serde_json::json;
 
@@ -570,7 +570,7 @@ mod tests {
         let data = pagination(12, 2, 5, "feeds");
         let message: CreateMessageDe = serde_json::from_value(data).unwrap();
         let output =
-            serde_json::to_value(pwr_ext::view_support::CreateMessage::from(message)).unwrap();
+            serde_json::to_value(poise::view_support::CreateMessage::from(message)).unwrap();
         assert_eq!(output["flags"], json!(IS_COMPONENTS_V2));
         assert_eq!(output["components"][0]["type"], json!(17));
     }

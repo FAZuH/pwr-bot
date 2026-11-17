@@ -12,7 +12,7 @@ use chrono::Utc;
 use contribution_grid::ContributionGraph;
 use contribution_grid::builtins::Strategy;
 use contribution_grid::builtins::Theme;
-use pwr_ext::view_support::MessageFlags;
+use poise::view_support::MessageFlags;
 use serde_json::Value;
 use serde_json::json;
 

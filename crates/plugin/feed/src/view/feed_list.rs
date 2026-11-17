@@ -1,8 +1,8 @@
-use pwr_ext::component;
-use pwr_ext::view_support::ButtonStyle;
-use pwr_ext::view_support::CreateComponent;
-use pwr_ext::view_support::CreateContainer;
-use pwr_ext::view_support::CreateContainerComponent;
+use poise::component;
+use poise::view_support::ButtonStyle;
+use poise::view_support::CreateComponent;
+use poise::view_support::CreateContainer;
+use poise::view_support::CreateContainerComponent;
 
 use crate::service::feed_subscription::Subscription;
 use crate::update::feed_list::FeedListModel;

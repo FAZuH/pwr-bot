@@ -63,7 +63,7 @@ impl PaginationView {
         registry: &mut ActionRegistry<T>,
         wrap: fn(PaginationAction) -> T,
     ) -> CreateComponent<'b> {
-        use pwr_ext::component;
+        use poise::component;
 
         let first = registry.register(wrap(PaginationAction::First));
         let prev = registry.register(wrap(PaginationAction::Prev));

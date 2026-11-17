@@ -11,7 +11,7 @@
 
 use std::borrow::Cow;
 
-use pwr_ext::component;
+use poise::component;
 
 use crate::bot::command::prelude::*;
 use crate::bot::gui::feature::GuiFeature;

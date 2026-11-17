@@ -4,7 +4,7 @@
 //! and pagination from [`VoiceLeaderboardModel`]. Fetching entries and page
 //! images remain adapter effects.
 
-use pwr_ext::view_support::MessageFlags;
+use poise::view_support::MessageFlags;
 use pwr_plugin_support::pagination::PaginationAction;
 use serde_json::Value;
 use serde_json::json;
