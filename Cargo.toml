@@ -50,8 +50,10 @@ redundant_field_names = "allow"
 
 [dependencies]
 anyhow = "1.0.101"
+arc-swap = "1.9.2"
 async-trait = "0.1.89"
 chrono = "0.4.43"
+clap = { version = "4.6.7", features = ["derive"] }
 dotenv = "0.15.0"
 # Floating git branches: the resolved commit is pinned by the committed
 # Cargo.lock, NOT by a [patch] section. Cargo cannot express "branch X, rev Y"
@@ -59,7 +61,7 @@ dotenv = "0.15.0"
 # entry is rejected outright ("patches must point to different sources",
 # cargo#5478). To move the pin: `cargo update -p serenity` (or -p poise) and
 # commit the lock delta. Never run a bare `cargo update`.
-poise = { git = "https://github.com/serenity-rs/poise", rev = "a1d0e3ee23e0a95b1192378acad27fa51a2bb8f0" }
+poise = { git = "https://github.com/FAZuH/poise", rev = "8a5c3fce021a3e9a39f4dc7fe245cb4757a8708a" }
 pwr-ext.workspace = true
 pwr-plugin-protocol.workspace = true
 pwr-plugin-support.workspace = true
@@ -87,6 +89,7 @@ byteorder = "1.5.0"
 sha2 = "0.10.9"
 tempfile = "3.27.0"
 toml = "1.1.4"
+toml_edit = "0.22"
 mockall = "0.13.1"
 # serenity's rustls_backend pulls the aws-lc-rs provider via reqwest while
 # tokio-postgres-rustls is pinned to ring; both present means rustls 0.23

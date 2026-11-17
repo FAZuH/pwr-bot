@@ -22,7 +22,7 @@ pub async fn command(ctx: Context<'_>) -> Result<(), Error> {
     is_author_guild_admin(ctx).await?;
     let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?;
 
-    let create_commands = create_application_commands(&ctx.framework().options().commands);
+    let create_commands = create_application_commands(ctx.framework().commands);
     let num_commands = create_commands.len();
 
     let start_time = std::time::Instant::now();

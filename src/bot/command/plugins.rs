@@ -107,19 +107,20 @@ impl CommandHandler for PluginsListHandler {
         }
 
         let data = ctx.data();
+        let snapshot = data.snapshot();
         let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?;
         let model = guild_model(&data, guild_id).await?;
 
         let config = PluginsListConfig {
-            internal: internal_lines(&data.internal_manifests, &model.enabled),
-            catalog: list_lines(&data.plugin_catalog, &model.enabled),
+            internal: internal_lines(&snapshot.internal_manifests, &model.enabled),
+            catalog: list_lines(&snapshot.catalog, &model.enabled),
             show_internal: self.show_internal,
         };
         // An absent catalog is a normal state the view renders as
         // `none configured`; the load failure behind it belongs in the log,
         // where the operator reads it, not in the group's sentence.
         if config.catalog.is_empty()
-            && let Some(error) = data.plugin_catalog_error.as_ref()
+            && let Some(error) = snapshot.catalog_error.as_ref()
         {
             debug!("the plugin catalog did not load, so the list has no catalog plugins: {error}");
         }
@@ -198,7 +199,8 @@ pub async fn enable(
     is_author_guild_admin(ctx).await?;
     let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?;
     let data = ctx.data();
-    if manifest_for(&data.internal_manifests, &data.plugin_catalog, &plugin).is_none() {
+    let snapshot = data.snapshot();
+    if manifest_for(&snapshot.internal_manifests, &snapshot.catalog, &plugin).is_none() {
         return Err(unknown_plugin(&plugin).into());
     }
     let mut model = guild_model(&data, guild_id).await?;
@@ -206,8 +208,8 @@ pub async fn enable(
     match PluginsUpdate::update(PluginsMsg::Enable(plugin.clone()), &mut model) {
         PluginsCmd::Register(_) => {
             register_enabled_plugins(
-                &data.internal_manifests,
-                &data.plugin_catalog,
+                &snapshot.internal_manifests,
+                &snapshot.catalog,
                 &model.enabled,
                 |commands| {
                     let http = ctx.serenity_context().http.clone();
@@ -246,13 +248,14 @@ pub async fn disable(
     is_author_guild_admin(ctx).await?;
     let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?;
     let data = ctx.data();
+    let snapshot = data.snapshot();
     let mut model = guild_model(&data, guild_id).await?;
 
     match PluginsUpdate::update(PluginsMsg::Disable(plugin.clone()), &mut model) {
         PluginsCmd::Unregister(_) => {
             register_enabled_plugins(
-                &data.internal_manifests,
-                &data.plugin_catalog,
+                &snapshot.internal_manifests,
+                &snapshot.catalog,
                 &model.enabled,
                 |commands| {
                     let http = ctx.serenity_context().http.clone();
@@ -275,7 +278,7 @@ pub async fn disable(
             // unloaded. An internal plugin is one process shared by every guild:
             // disabling it here gates it at the host for this guild only, and
             // the process keeps serving the others.
-            if data.plugin_catalog.contains_key(&plugin)
+            if snapshot.catalog.contains_key(&plugin)
                 && let Err(e) = data.plugin_manager.unload(&plugin, &[guild_id]).await
                 && !matches!(e, PluginError::NotRunning { .. })
             {
@@ -304,7 +307,8 @@ pub async fn swap(
     is_author_guild_admin(ctx).await?;
     let guild_id = ctx.guild_id().ok_or(BotError::GuildOnlyCommand)?;
     let data = ctx.data();
-    let entry = swap_target(&data.internal_manifests, &data.plugin_catalog, &plugin)?;
+    let snapshot = data.snapshot();
+    let entry = swap_target(&snapshot.internal_manifests, &snapshot.catalog, &plugin)?;
     let mut model = guild_model(&data, guild_id).await?;
 
     match PluginsUpdate::update(PluginsMsg::Swap(plugin.clone()), &mut model) {
@@ -375,7 +379,8 @@ async fn choices_for<'a>(
     want_enabled: Option<bool>,
 ) -> CreateAutocompleteResponse<'a> {
     let data = ctx.data();
-    let names = known_plugin_names(&data.internal_manifests, &data.plugin_catalog);
+    let snapshot = data.snapshot();
+    let names = known_plugin_names(&snapshot.internal_manifests, &snapshot.catalog);
     let names = match (want_enabled, ctx.guild_id()) {
         (Some(want), Some(guild_id)) => match guild_model(&data, guild_id).await {
             Ok(model) => toggle_names(names, &model.enabled, want),
@@ -477,9 +482,10 @@ pub(crate) async fn guild_model(data: &Data, guild_id: GuildId) -> Result<Plugin
         .guild_plugins()
         .list_for_guild(guild_id.get())
         .await?;
+    let snapshot = data.snapshot();
     Ok(guild_plugins_model(
-        &data.internal_manifests,
-        &data.plugin_catalog,
+        &snapshot.internal_manifests,
+        &snapshot.catalog,
         &data.auto_enable_plugins(),
         &rows,
     ))

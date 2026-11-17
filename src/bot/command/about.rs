@@ -80,7 +80,7 @@ impl AboutStats {
         let _ = ctx.http().get_current_user().await?;
         let latency_ms = latency_start.elapsed().as_millis() as u64;
 
-        let command_count = Self::count_commands(&ctx.framework().options().commands);
+        let command_count = Self::count_commands(ctx.framework().commands);
 
         let memory_mb = crate::bot::utils::process_memory_mb();
 

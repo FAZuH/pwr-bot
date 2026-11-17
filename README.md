@@ -122,7 +122,7 @@ docker compose up -d    # Docker Compose install
 ```
 
 ```sh
-./pwr-bot               # binary install
+./pwr-bot               # binary install: ensure the service is up, then follow logs
 ```
 
 Check the log output (Docker Compose):
@@ -130,6 +130,28 @@ Check the log output (Docker Compose):
 ```sh
 docker compose logs -f
 ```
+
+### Command-line interface
+
+The `pwr-bot` binary is also a CLI. See the [CLI reference](docs/cli.md) for all commands and flags.
+
+```sh
+pwr-bot                                         # ensure service up, then follow logs
+pwr-bot serve                                   # run in the foreground
+pwr-bot serve --service                         # run detached
+pwr-bot service install --env-file <path>       # store the env file path
+pwr-bot service start                           # start the detached service
+pwr-bot service stop                            # stop it
+pwr-bot service restart                         # restart it
+pwr-bot service status                          # show its state
+pwr-bot plugin add --name <name> --url <url> --sha256 <digest> --manifest <file>   # install a plugin
+pwr-bot plugin list                             # print the catalog
+pwr-bot plugin remove --name <name>             # drop the entry, keep the binary
+pwr-bot version                                 # print the version
+pwr-bot debug paths                             # print resolved paths
+```
+
+### Discord commands
 
 Then try these commands in Discord (each command comes from the plugin or host part named beside it):
 
@@ -168,6 +190,7 @@ The bot reads a `.env` file next to the binary or mounted into the container. Th
 - [Plugin catalog](docs/plugins.md) — `plugins.toml` format and startup behavior
 - [Deployment](docs/deployment.md) — database migrations, logs, and Docker volumes
 - [Architecture](docs/architecture.md) — system layers and module boundaries
+- [CLI reference](docs/cli.md): commands, flags, and the detached service
 - [Changelog](CHANGELOG.md) — release history
 - [Issues](https://github.com/FAZuH/pwr-bot/issues) — bug reports and feature requests
 

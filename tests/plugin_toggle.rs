@@ -12,16 +12,20 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::OnceLock;
 use std::time::Instant;
 
+use arc_swap::ArcSwap;
 use poise::serenity_prelude::GuildId;
 use pwr_bot::bot::Data;
+use pwr_bot::bot::PluginSnapshot;
 use pwr_bot::bot::command::session_exit::section_plugin;
 use pwr_bot::bot::error::BotError;
 use pwr_bot::bot::translate::SettingsReturns;
 use pwr_bot::bot::translate::TranslateLayer;
 use pwr_bot::config::Config;
 use pwr_bot::config::InternalPluginSpec;
+use pwr_bot::plugin::AuthoritySnapshot;
 use pwr_bot::plugin::InteractionEngine;
 use pwr_bot::plugin::ModalRouteError;
 use pwr_bot::plugin::PluginManager;
@@ -59,11 +63,16 @@ async fn host(db: Arc<PgRepos>) -> Arc<Data> {
         service,
         repos,
         plugin_manager: Arc::new(PluginManager::new(None, RespawnPolicy::default())),
-        plugin_catalog: Arc::new(HashMap::new()),
-        plugin_catalog_error: None,
+        plugins: ArcSwap::from_pointee(PluginSnapshot {
+            catalog: HashMap::new(),
+            catalog_error: None,
+            internal_manifests: HashMap::new(),
+            routes: HashMap::new(),
+            grants: AuthoritySnapshot::none(),
+            commands: Vec::new(),
+        }),
         plugin_engine: Arc::new(InteractionEngine::<RunningPlugin>::new()),
-        plugin_routes: Arc::new(HashMap::new()),
-        internal_manifests: Arc::new(HashMap::new()),
+        framework: Arc::new(OnceLock::new()),
         translate_layer: Arc::new(TranslateLayer::new()),
         settings_returns: Arc::new(SettingsReturns::default()),
         start_time: Instant::now(),

@@ -25,6 +25,7 @@
 //! so unloading a plugin is drop-and-forget; graceful unload is
 //! [`RunningPlugin::stop`].
 
+pub mod catalog_writer;
 pub mod command;
 pub mod error;
 pub mod events;
@@ -36,6 +37,7 @@ pub mod modal;
 pub mod view;
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::path::Path;
 use std::process::ExitStatus;
 use std::process::Stdio;
@@ -163,10 +165,10 @@ impl Authority {
     }
 }
 
-/// The catalog's authority facts, snapshotted at startup so a spawn decision
-/// never depends on live state: every spawn — including a respawn after a
-/// crash — resolves against this, and authority never changes mid-flight
-/// (ADR-0016).
+/// The catalog's authority facts for one spawn decision. Every spawn and
+/// crash respawn resolves against the snapshot captured for it; an operator
+/// reload publishes a fresh snapshot (ADR-0017).
+#[derive(Clone)]
 pub struct AuthoritySnapshot {
     entries: HashMap<String, GrantFact>,
     token: String,
@@ -174,6 +176,7 @@ pub struct AuthoritySnapshot {
 
 /// One catalog entry's grant facts. Both halves of the grant are held, so
 /// the AND is decided from what the host knows before the child exists.
+#[derive(Clone)]
 struct GrantFact {
     /// The pinned sha256, normalised as [`Authority::pinned`] documents.
     pinned: String,
@@ -239,6 +242,57 @@ impl AuthoritySnapshot {
                 name: name.to_string(),
             }),
         }
+    }
+}
+
+/// The lifecycle changes a catalog reload must apply to running processes.
+/// Internal plugins never appear here: they are configured at boot, not by
+/// the watched catalog, so a catalog edit cannot add or remove them.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct ReloadPlan {
+    /// Names new to the catalog, spawned from a verified binary.
+    pub spawn: Vec<String>,
+    /// Names gone from the catalog, unloaded without deleting the binary.
+    pub unload: Vec<String>,
+    /// Names whose entry changed in place. A grant, pin, url, or manifest edit
+    /// is baked into the child environment and command list at spawn, so the
+    /// running process must be replaced for the new entry to take effect.
+    pub replace: Vec<String>,
+}
+
+/// Computes the process-level work between two catalog snapshots without
+/// touching the filesystem or any process, so the decision is testable on its
+/// own. Every list is sorted for a deterministic apply order.
+pub fn reload_plan(
+    old_catalog: &HashMap<String, CatalogEntry>,
+    new_catalog: &HashMap<String, CatalogEntry>,
+    internal_names: &HashSet<String>,
+) -> ReloadPlan {
+    let mut spawn: Vec<String> = new_catalog
+        .keys()
+        .filter(|name| !old_catalog.contains_key(*name) && !internal_names.contains(*name))
+        .cloned()
+        .collect();
+    let mut unload: Vec<String> = old_catalog
+        .keys()
+        .filter(|name| !new_catalog.contains_key(*name) && !internal_names.contains(*name))
+        .cloned()
+        .collect();
+    let mut replace: Vec<String> = new_catalog
+        .iter()
+        .filter(|(name, entry)| {
+            !internal_names.contains(*name)
+                && old_catalog.get(*name).is_some_and(|old| old != *entry)
+        })
+        .map(|(name, _)| name.clone())
+        .collect();
+    spawn.sort();
+    unload.sort();
+    replace.sort();
+    ReloadPlan {
+        spawn,
+        unload,
+        replace,
     }
 }
 
@@ -1106,6 +1160,115 @@ mod tests {
         let authority = snapshot(false, false).resolve("pro").expect("neither half");
         assert!(!authority.has_token());
         assert_eq!(authority.pinned(), Some("ab".repeat(32).as_str()));
+    }
+
+    fn catalog(names: &[&str]) -> HashMap<String, CatalogEntry> {
+        names
+            .iter()
+            .map(|name| ((*name).to_string(), entry_named(name)))
+            .collect()
+    }
+
+    #[test]
+    fn reload_plan_spawns_a_catalog_plugin_absent_from_the_old_snapshot() {
+        let plan = reload_plan(
+            &catalog(&["feed"]),
+            &catalog(&["feed", "voice"]),
+            &HashSet::new(),
+        );
+        assert_eq!(plan.spawn, vec!["voice".to_string()]);
+        assert!(plan.unload.is_empty());
+    }
+
+    #[test]
+    fn reload_plan_unloads_a_catalog_plugin_removed_from_the_new_snapshot() {
+        let plan = reload_plan(
+            &catalog(&["voice", "feed"]),
+            &catalog(&["feed"]),
+            &HashSet::new(),
+        );
+        assert_eq!(plan.unload, vec!["voice".to_string()]);
+        assert!(plan.spawn.is_empty());
+    }
+
+    #[test]
+    fn reload_plan_ignores_an_internal_plugin_new_to_the_catalog() {
+        let internal = HashSet::from(["feed".to_string()]);
+        let plan = reload_plan(&catalog(&[]), &catalog(&["feed", "voice"]), &internal);
+        assert_eq!(plan.spawn, vec!["voice".to_string()]);
+        assert!(plan.unload.is_empty());
+    }
+
+    #[test]
+    fn reload_plan_ignores_an_internal_plugin_missing_from_the_new_catalog() {
+        let internal = HashSet::from(["feed".to_string()]);
+        let plan = reload_plan(&catalog(&["feed"]), &catalog(&[]), &internal);
+        assert_eq!(plan, ReloadPlan::default());
+    }
+
+    #[test]
+    fn reload_plan_is_empty_when_the_catalog_is_unchanged() {
+        let plan = reload_plan(
+            &catalog(&["feed", "voice"]),
+            &catalog(&["voice", "feed"]),
+            &HashSet::new(),
+        );
+        assert_eq!(plan, ReloadPlan::default());
+    }
+
+    #[test]
+    fn reload_plan_replaces_an_entry_when_its_token_flag_changes() {
+        let old = catalog(&["voice"]);
+        let mut new = old.clone();
+        new.get_mut("voice").unwrap().discord_token = true;
+        let plan = reload_plan(&old, &new, &HashSet::new());
+        assert_eq!(plan.replace, vec!["voice".to_string()]);
+        assert!(plan.spawn.is_empty() && plan.unload.is_empty());
+    }
+
+    #[test]
+    fn reload_plan_replaces_an_entry_when_its_pin_changes() {
+        let old = catalog(&["voice"]);
+        let mut new = old.clone();
+        new.get_mut("voice").unwrap().sha256 = "b".repeat(64);
+        let plan = reload_plan(&old, &new, &HashSet::new());
+        assert_eq!(plan.replace, vec!["voice".to_string()]);
+    }
+
+    #[test]
+    fn reload_plan_replaces_an_entry_when_its_url_changes() {
+        let old = catalog(&["voice"]);
+        let mut new = old.clone();
+        new.get_mut("voice").unwrap().url = "https://example.com/voice-v2".into();
+        let plan = reload_plan(&old, &new, &HashSet::new());
+        assert_eq!(plan.replace, vec!["voice".to_string()]);
+    }
+
+    #[test]
+    fn reload_plan_replaces_an_entry_when_its_manifest_changes() {
+        let old = catalog(&["voice"]);
+        let mut new = old.clone();
+        new.get_mut("voice").unwrap().manifest.description = "a new description".into();
+        let plan = reload_plan(&old, &new, &HashSet::new());
+        assert_eq!(plan.replace, vec!["voice".to_string()]);
+    }
+
+    #[test]
+    fn reload_plan_replaces_an_entry_when_auto_enable_changes() {
+        let old = catalog(&["voice"]);
+        let mut new = old.clone();
+        new.get_mut("voice").unwrap().auto_enable = true;
+        let plan = reload_plan(&old, &new, &HashSet::new());
+        assert_eq!(plan.replace, vec!["voice".to_string()]);
+    }
+
+    #[test]
+    fn reload_plan_ignores_in_place_changes_to_internal_plugins() {
+        let old = catalog(&["voice"]);
+        let mut new = old.clone();
+        new.get_mut("voice").unwrap().discord_token = true;
+        let plan = reload_plan(&old, &new, &HashSet::from(["voice".to_string()]));
+        assert_eq!(plan, ReloadPlan::default());
     }
 
     // ── hello validation (the reject-before-work decision) ─────────────────
