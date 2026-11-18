@@ -27,7 +27,8 @@ one pinned commit, `c8d5fed`, with no tags. pwr-bot drops pwr-ext and enables
 
 - External `pwr-viewgen` still imports `pwr_ext::CreateMessageDe`. It needs a
   separate update, out of scope here.
-- The 46 upstream poise commits stay deferred. The fork remains on the
-  runtime-command-swap lineage with the ArcSwap patch.
+- Upstream poise 0.7.1 was later merged into the fork's pwr branch. The
+  46-commit drift no longer applies. The fork keeps the runtime-command-swap
+  lineage with the ArcSwap patch.
 - The trybuild UI suite was ported to the fork.
 - The serenity pin `f2b66488` is unchanged.
